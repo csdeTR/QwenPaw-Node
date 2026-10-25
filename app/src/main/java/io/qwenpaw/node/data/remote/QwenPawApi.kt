@@ -126,10 +126,6 @@ class QwenPawApi(
         return decode(request(conn, "PUT", "/api/chats/$chatId", body), ChatSpecDto.serializer())
     }
 
-    fun archiveChat(conn: Connection, chatId: String) {
-        request(conn, "POST", "/api/chats/$chatId/archive", buildJsonObject { })
-    }
-
     fun deleteChat(conn: Connection, chatId: String) {
         request(conn, "DELETE", "/api/chats/$chatId")
     }

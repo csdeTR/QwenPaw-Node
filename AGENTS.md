@@ -48,6 +48,11 @@
   应用侧已在 `normalizeBaseUrl` 做全角→半角折叠，脚本不必绕过。
 - 输入框获得焦点后键盘会挡住按钮，点击前先 `input keyevent 4` 收键盘。
 - 屏幕会自动息屏：`input keyevent KEYCODE_WAKEUP` 再上滑解锁（当前已关闭锁屏密码）。
+  实测偶发**唤醒无效**（`mWakefulness=Asleep` 持续，`input keyevent 26/82` 都没用），
+  此时不要当成应用问题——用 `pidof io.qwenpaw.node` + `logcat -b crash` 确认进程存活、无崩溃即可，
+  等一会儿屏幕恢复再继续。
+- `uiautomator dump` 若显示 `package="com.android.systemui"`、焦点是 `NotificationShade`，
+  说明状态栏被拉下来了，先 `input keyevent 4` 收起再做控件定位。
 
 ### 模拟器（备用）
 

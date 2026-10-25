@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">QwenPaw Node</string>
-    <string name="channel_watch_name">对话监听</string>
-    <string name="channel_watch_desc">回复完成或出现待审批时通知</string>
-</resources>

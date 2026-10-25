@@ -36,18 +36,6 @@ data class CachedMessageEntity(
     val position: Int,
 )
 
-/** 失败待重试的消息，仅在用户手动点击重试时发送。 */
-@Entity(tableName = "outbox")
-data class OutboxEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val instanceId: String,
-    val chatId: String,
-    val text: String,
-    val attachmentUrls: String,
-    val createdAt: Long,
-    val error: String?,
-)
-
 @Dao
 interface ChatDao {
     @Query("SELECT * FROM drafts WHERE chatId = :chatId AND instanceId = :instanceId LIMIT 1")
@@ -73,25 +61,10 @@ interface ChatDao {
 
     @Query("DELETE FROM cached_messages WHERE chatId = :chatId")
     suspend fun clearMessages(chatId: String)
-
-    @Insert
-    suspend fun enqueue(outbox: OutboxEntity): Long
-
-    @Query("SELECT * FROM outbox ORDER BY createdAt ASC")
-    fun outbox(): Flow<List<OutboxEntity>>
-
-    @Query("SELECT * FROM outbox WHERE instanceId = :instanceId ORDER BY createdAt ASC")
-    fun outbox(instanceId: String): Flow<List<OutboxEntity>>
-
-    @Query("DELETE FROM outbox WHERE id = :id")
-    suspend fun removeOutbox(id: Long)
-
-    @Query("UPDATE outbox SET error = :error WHERE id = :id")
-    suspend fun markOutboxError(id: Long, error: String?)
 }
 
 @Database(
-    entities = [DraftEntity::class, CachedMessageEntity::class, OutboxEntity::class],
+    entities = [DraftEntity::class, CachedMessageEntity::class],
     version = 1,
     exportSchema = false,
 )

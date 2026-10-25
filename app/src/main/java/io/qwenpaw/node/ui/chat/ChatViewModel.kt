@@ -3,7 +3,6 @@ package io.qwenpaw.node.ui.chat
 import io.qwenpaw.node.data.local.AppDatabase
 import io.qwenpaw.node.data.local.CachedMessageEntity
 import io.qwenpaw.node.data.local.DraftEntity
-import io.qwenpaw.node.data.local.OutboxEntity
 import io.qwenpaw.node.data.model.ApprovalDto
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.data.remote.ApiException
@@ -15,7 +14,7 @@ import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.HistoryMapper
 import io.qwenpaw.node.data.stream.Role
 import io.qwenpaw.node.data.stream.StreamAccumulator
-import io.qwenpaw.node.service.ChatWatchService
+import io.qwenpaw.node.notify.ChatNotifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -476,7 +475,7 @@ class ChatViewModel(
         val preview = reply?.text?.takeIf { it.isNotBlank() }?.let { body ->
             body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(80)
         } ?: "服务端回复已完成"
-        ChatWatchService.notifyDone(
+        ChatNotifier.notifyDone(
             appContext,
             appContext.getString(io.qwenpaw.node.R.string.notify_done_title, title),
             preview,
