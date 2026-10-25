@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+# 签名密钥与口令不进仓库
+*.jks
+*.keystore
+keystore.properties
