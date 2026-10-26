@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QwenPaw Node · UI 原型</title>
+<style>
+/* ============ Token：取自 QwenPaw Console 真实 CSS 变量 ============ */
+:root {
+  --accent: #FF7F16;
+  --accent-hover: #FF9D4D;
+  --accent-active: #D96806;
+  --accent-text: #BD5100;
+  --accent-soft: rgba(255, 127, 22, .10);
+  --accent-soft-hover: rgba(255, 127, 22, .16);
+  --accent-border: rgba(255, 127, 22, .42);
+  --accent-ring: rgba(255, 127, 22, .20);
+
+  --bg: #F9F8F4;
+  --surface: #FFFFFF;
+  --surface-subtle: #FAF9F7;
+  --surface-sunken: #F9F8F4;
+  --border: #EAE8E7;
+  --border-strong: #D8D4CF;
+  --border-subtle: #F0EEEB;
+
+  --text: rgba(20, 20, 19, .88);
+  --text-secondary: rgba(20, 20, 19, .58);
+  --text-tertiary: rgba(20, 20, 19, .45);
+  --text-quaternary: rgba(20, 20, 19, .25);
+
+  --success: #52C41A;
+  --warning: #FAAD14;
+  --error: #FF4D4F;
+  --error-bg: #FFF2F0;
+  --error-border: #FFCCC7;
+  --error-text: #CF1322;
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, .06);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, .08);
+
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+  --font: "MiSans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@font-face {
+  font-family: "MiSans";
+  src: url("assets/MiSans.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+[data-theme="dark"] {
+  --accent-text: #FF9A47;
+  --accent-soft: rgba(255, 127, 22, .16);
+  --accent-soft-hover: rgba(255, 127, 22, .22);
+  --bg: #141414;
+  --surface: #1F1F1F;
+  --surface-subtle: #1A1A1A;
+  --surface-sunken: #141414;
+  --border: rgba(255, 255, 255, .12);
+  --border-strong: rgba(255, 255, 255, .18);
+  --border-subtle: rgba(255, 255, 255, .07);
+  --text: rgba(255, 255, 255, .85);
+  --text-secondary: rgba(255, 255, 255, .65);
+  --text-tertiary: rgba(255, 255, 255, .45);
+  --text-quaternary: rgba(255, 255, 255, .30);
+  --error-bg: #2C1618;
+  --error-border: #58191C;
+  --error-text: #FF7875;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, .3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, .4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+body {
+  font-family: var(--font);
+  background: #EDEBE7;
+  color: var(--text);
+  min-height: 100vh;
+  padding: 28px 20px 56px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+[data-theme="dark"] body { background: #0B0B0B; }
+
+/* ============ 页面外壳 / 控制条 ============ */
+.stage { max-width: 1320px; margin: 0 auto; }
+
+.controls {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 24px; padding: 12px 16px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+}
+.controls .brand {
+  font-weight: 600; font-size: 15px; margin-right: 6px;
+  display: flex; align-items: center; gap: 8px;
+}
+.controls .brand::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+}
+.controls .spacer { flex: 1; }
+
+.seg {
+  display: flex; gap: 3px; padding: 3px;
+  background: var(--surface-subtle); border: 1px solid var(--border);
+  border-radius: var(--r-full);
+}
+.seg button {
+  border: 0; background: transparent; color: var(--text-secondary);
+  font: 500 13px/1 var(--font); padding: 7px 16px;
+  border-radius: var(--r-full); cursor: pointer; transition: .12s;
+}
+.seg button:hover { color: var(--text); }
+.seg button[aria-selected="true"] {
+  background: var(--surface); color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+.seg button[aria-selected="true"].is-accent { color: var(--accent-text); }
+
+/* ============ 手机框 ============ */
+.screens {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 28px; justify-items: center;
+}
+.slot { display: flex; flex-direction: column; gap: 12px; align-items: center; width: 100%; }
+.slot-title {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  letter-spacing: .04em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 8px;
+}
+.slot-title .badge {
+  font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: var(--r-full);
+  background: var(--accent-soft); color: var(--accent-text);
+  border: 1px solid var(--accent-border); text-transform: none; letter-spacing: 0;
+}
+
+.phone {
+  width: 390px; height: 780px; flex: none;
+  background: var(--bg); border-radius: 34px; overflow: hidden;
+  position: relative; display: flex; flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .14), 0 0 0 1px var(--border);
+  border: 8px solid #17171A;
+}
+[data-theme="dark"] .phone { border-color: #2A2A2E; }
+
+/* 状态栏 */
+.statusbar {
+  height: 34px; flex: none; display: flex; align-items: center;
+  padding: 0 20px; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--text);
+  background: var(--bg);
+}
+.statusbar .right { margin-left: auto; display: flex; gap: 5px; align-items: center; }
+.statusbar .ic { width: 14px; height: 10px; border: 1.5px solid currentColor; border-radius: 2px; opacity: .8; }
+
+/* ============ 顶栏（新版） ============ */
+.topbar {
+  flex: none; background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 16px 12px;
+  display: flex; align-items: center; gap: 12px;
+}
+.iconbtn {
+  width: 38px; height: 38px; flex: none; border: 0; background: transparent;
+  color: var(--text-secondary); border-radius: var(--r); cursor: pointer;
+  display: grid; place-items: center; transition: .12s;
+}
+.iconbtn:hover { background: var(--accent-soft); color: var(--accent-text); }
+.iconbtn svg { width: 20px; height: 20px; }
+
+.topbar-main { flex: 1; min-width: 0; }
+.topbar-title {
+  font-size: 16px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.topbar-meta {
+  display: flex; align-items: center; gap: 8px; margin-top: 3px;
+  font-size: 12px; color: var(--text-tertiary);
+}
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--warning);
+  flex: none; box-shadow: 0 0 0 3px rgba(250, 173, 20, .16);
+}
+.live-dot.pulse { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(250, 173, 20, .16); }
+  50% { box-shadow: 0 0 0 5px rgba(250, 173, 20, .05); }
+}
+
+/* 上下文用量胶囊 */
+.ctx {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums;
+  padding: 2px 8px 2px 6px; border-radius: var(--r-full);
+  background: var(--surface-subtle); border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.ctx .ring {
+  width: 11px; height: 11px; border-radius: 50%; flex: none;
+  background: conic-gradient(var(--accent) 0turn .20turn, var(--border) .20turn 1turn);
+  position: relative;
+}
+.ctx .ring::after {
+  content: ""; position: absolute; inset: 2.5px; border-radius: 50%;
+  background: var(--surface-subtle);
+}
+
+/* 旧顶栏（对照） */
+.topbar-old {
+  flex: none; background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 4px 8px; display: flex; align-items: center; gap: 4px;
+  min-height: 56px;
+}
+.topbar-old .t { font-size: 16px; font-weight: 500; color: var(--text); padding: 0 8px; }
+.topbar-old .m { font-size: 11px; color: var(--text-tertiary); padding: 0 8px; }
+
+/* ============ 消息区 ============ */
+.thread {
+  flex: 1; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+  scrollbar-width: thin;
+}
+.thread::-webkit-scrollbar { width: 4px; }
+.thread::-webkit-scrollbar-thumb { background: var(--text-quaternary); border-radius: 4px; }
+
+.msg-row { display: flex; }
+.msg-row.mine { justify-content: flex-end; }
+
+.bubble {
+  max-width: 84%; padding: 10px 14px; font-size: 14px; line-height: 1.55;
+  word-break: break-word;
+}
+.bubble.mine {
+  background: var(--accent); color: #fff;
+  border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg);
+}
+.bubble.theirs {
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); border-radius: var(--r-lg) var(--r-lg) var(--r-lg) 4px;
+}
+.bubble code {
+  font-family: var(--mono); font-size: 12.5px;
+  background: var(--accent-soft); color: var(--accent-text);
+  padding: 1px 5px; border-radius: 4px;
+}
+.bubble.mine code { background: rgba(255, 255, 255, .22); color: #fff; }
+.bubble strong { font-weight: 600; }
+.bubble ul { margin: 6px 0 0 16px; }
+.bubble li { margin-bottom: 3px; }
+
+/* 思考折叠 */
+.think {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: var(--r);
+  border: 1px dashed var(--border-strong);
+  font-size: 12.5px; color: var(--text-secondary);
+  cursor: pointer; transition: .12s;
+}
+.think:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.think .arrow { margin-left: auto; transition: transform .15s; font-size: 10px; }
+.think[aria-expanded="true"] .arrow { transform: rotate(180deg); }
+.think-body {
+  display: none; font-size: 12.5px; line-height: 1.6;
+  color: var(--text-secondary); padding: 8px 12px 0 12px;
+  border-left: 2px solid var(--border); margin-left: 6px;
+}
+.think[aria-expanded="true"] + .think-body { display: block; }
+
+/* 工具卡片 */
+.tool {
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); overflow: hidden;
+}
+.tool-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; cursor: pointer; transition: .12s;
+}
+.tool-head:hover { background: var(--accent-soft); }
+.tool-head .wrench { color: var(--accent); display: grid; place-items: center; }
+.tool-head .wrench svg { width: 14px; height: 14px; }
+.tool-name {
+  font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tool-state {
+  margin-left: auto; flex: none; font-size: 11px; font-weight: 500;
+  padding: 1px 7px; border-radius: var(--r-full);
+}
+.tool-state.ok { color: var(--success); background: rgba(82, 196, 26, .10); }
+.tool-state.run { color: var(--accent-text); background: var(--accent-soft); }
+.tool-args {
+  padding: 0 12px 9px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 错误气泡 */
+.bubble.error {
+  background: var(--error-bg); border: 1px solid var(--error-border);
+  color: var(--error-text); border-radius: var(--r-lg);
+}
+.bubble.error .retry {
+  display: inline-block; margin-top: 8px; padding: 4px 12px;
+  border: 1px solid var(--error-border); background: transparent;
+  color: var(--error-text); font: 500 12.5px var(--font);
+  border-radius: var(--r-full); cursor: pointer;
+}
+.bubble.error .retry:hover { background: var(--error-border); color: #fff; }
+
+/* 错误条（可关闭） */
+.errorbar {
+  flex: none; z-index: 3; position: relative;
+  margin: 0 16px 8px; padding: 8px 10px 8px 12px;
+  background: var(--error-bg); border: 1px solid var(--error-border);
+  border-radius: var(--r); color: var(--error-text); font-size: 12.5px;
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.errorbar .txt { flex: 1; }
+.errorbar .x {
+  border: 0; background: transparent; color: var(--error-text);
+  cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; opacity: .7;
+}
+.errorbar .x:hover { opacity: 1; }
+
+/* 跳到最新 */
+.jump {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 170px; z-index: 3;
+  display: none; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--r-full);
+  background: var(--surface); border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md); color: var(--accent-text);
+  font: 500 12.5px var(--font); cursor: pointer; white-space: nowrap;
+}
+.jump.show { display: inline-flex; }
+.jump .n {
+  background: var(--accent); color: #fff; font-size: 10px; font-weight: 600;
+  min-width: 16px; height: 16px; border-radius: var(--r-full);
+  display: grid; place-items: center; padding: 0 4px;
+}
+
+/* ============ 输入框（新版：全宽多行 + 独立操作行） ============ */
+.composer {
+  flex: none; background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 10px 12px 12px;
+}
+.composer-draft {
+  width: 100%; border: 1px solid var(--border);
+  background: var(--surface-subtle); border-radius: var(--r-lg);
+  padding: 10px 12px; font: 400 14px/1.5 var(--font);
+  color: var(--text); resize: none; outline: none;
+  min-height: 44px; max-height: 120px; display: block;
+  transition: border-color .12s, box-shadow .12s;
+}
+.composer-draft::placeholder { color: var(--text-quaternary); }
+.composer-draft:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  background: var(--surface);
+}
+.composer-actions {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+}
+.act {
+  height: 34px; min-width: 34px; padding: 0 10px;
+  border: 1px solid var(--border); background: var(--surface);
+  border-radius: var(--r); color: var(--text-secondary);
+  font: 500 12.5px var(--font); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; transition: .12s;
+}
+.act:hover { border-color: var(--accent-border); color: var(--accent-text); background: var(--accent-soft); }
+.act svg { width: 16px; height: 16px; }
+.act.icon { padding: 0; width: 34px; justify-content: center; }
+.composer-actions .grow { flex: 1; }
+
+.send-btn {
+  height: 34px; padding: 0 18px; border: 0; border-radius: var(--r);
+  background: var(--accent); color: #fff;
+  font: 600 13px var(--font); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: .12s;
+}
+.send-btn:hover { background: var(--accent-hover); }
+.send-btn:active { background: var(--accent-active); }
+.send-btn:disabled { opacity: .38; cursor: not-allowed; }
+.send-btn.stop { background: transparent; border: 1px solid var(--accent-border); color: var(--accent-text); }
+.send-btn.stop:hover { background: var(--accent-soft); }
+.send-btn svg { width: 15px; height: 15px; }
+
+/* 旧输入框（对照） */
+.composer-old {
+  flex: none; background: var(--surface); border-top: 1px solid var(--border);
+  padding: 8px 12px 12px; display: flex; align-items: center; gap: 8px;
+}
+.composer-old .field {
+  flex: 1; height: 42px; border-radius: var(--r-full);
+  border: 2px solid var(--accent); background: var(--surface-subtle);
+  display: flex; align-items: center; padding: 0 16px;
+  font-size: 14px; color: var(--text-quaternary);
+}
+.composer-old .circle {
+  width: 42px; height: 42px; border-radius: 50%; flex: none;
+  background: var(--accent); color: #fff; display: grid; place-items: center;
+}
+
+/* ============ 会话列表（新版） ============ */
+.list-head {
+  flex: none; background: var(--bg); padding: 8px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.list-title-row {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+}
+.list-title { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+.list-title-row .spacer { flex: 1; }
+.list-count {
+  font-size: 11.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+}
+
+.searchbox {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 0 12px; height: 38px;
+  transition: border-color .12s, box-shadow .12s;
+}
+.searchbox:focus-within {
+  border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.searchbox svg { width: 15px; height: 15px; color: var(--text-tertiary); flex: none; }
+.searchbox input {
+  flex: 1; border: 0; outline: 0; background: transparent;
+  font: 400 13.5px var(--font); color: var(--text); min-width: 0;
+}
+.searchbox input::placeholder { color: var(--text-quaternary); }
+.searchbox .clear {
+  border: 0; background: transparent; cursor: pointer;
+  color: var(--text-tertiary); font-size: 14px; padding: 2px 4px;
+  display: none;
+}
+.searchbox .clear.show { display: block; }
+
+.chat-list {
+  flex: 1; overflow-y: auto; background: var(--surface);
+}
+.chat-item {
+  display: flex; gap: 12px; padding: 13px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer; transition: background .12s; position: relative;
+}
+.chat-item:hover { background: var(--accent-soft); }
+.chat-item.active { background: var(--accent-soft); }
+.chat-item.active::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent);
+}
+.chat-avatar {
+  width: 34px; height: 34px; border-radius: var(--r); flex: none;
+  display: grid; place-items: center; font-size: 13px; font-weight: 600;
+  background: var(--surface-sunken); color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.chat-item.running .chat-avatar {
+  background: var(--accent-soft); color: var(--accent-text);
+  border-color: var(--accent-border);
+}
+.chat-body { flex: 1; min-width: 0; }
+.chat-row1 { display: flex; align-items: center; gap: 6px; }
+.chat-name {
+  font-size: 14px; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chat-time {
+  margin-left: auto; flex: none; font-size: 11.5px;
+  color: var(--text-tertiary); font-variant-numeric: tabular-nums;
+}
+.chat-preview {
+  font-size: 12.5px; color: var(--text-secondary); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chat-tags { display: flex; gap: 5px; margin-top: 5px; }
+.tag {
+  font-size: 10.5px; font-weight: 500; padding: 1px 7px;
+  border-radius: var(--r-full); display: inline-flex; align-items: center; gap: 4px;
+}
+.tag.run { color: var(--accent-text); background: var(--accent-soft); border: 1px solid var(--accent-border); }
+.tag.pin { color: #AD6800; background: rgba(250, 173, 20, .12); border: 1px solid rgba(250, 173, 20, .35); }
+.tag.pin svg { width: 9px; height: 9px; }
+.chat-more {
+  align-self: flex-start; border: 0; background: transparent;
+  color: var(--text-tertiary); cursor: pointer; padding: 2px 4px;
+  border-radius: var(--r-sm); font-size: 15px; line-height: 1;
+  opacity: 0; transition: .12s;
+}
+.chat-item:hover .chat-more { opacity: 1; }
+.chat-more:hover { background: var(--border); color: var(--text); }
+
+.empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 60px 24px; text-align: center;
+  color: var(--text-tertiary); font-size: 13px;
+}
+.empty .big { font-size: 15px; font-weight: 500; color: var(--text-secondary); }
+
+/* 旧列表（对照） */
+.list-old { flex: 1; overflow-y: auto; background: var(--bg); }
+.list-old .item {
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+}
+.list-old .n { font-size: 14px; font-weight: 500; }
+.list-old .t { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+.list-old .m { margin-left: auto; color: var(--text-tertiary); font-size: 15px; }
+
+/* 底部导航 */
+.fab-row {
+  flex: none; background: var(--surface); border-top: 1px solid var(--border);
+  padding: 10px 16px; display: flex; gap: 8px;
+}
+.btn-primary {
+  flex: 1; height: 40px; border: 0; border-radius: var(--r);
+  background: var(--accent); color: #fff; font: 600 13.5px var(--font);
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  transition: .12s;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary svg { width: 16px; height: 16px; }
+.btn-ghost {
+  height: 40px; padding: 0 16px; border: 1px solid var(--border);
+  border-radius: var(--r); background: var(--surface); color: var(--text-secondary);
+  font: 500 13.5px var(--font); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; transition: .12s;
+}
+.btn-ghost:hover { border-color: var(--accent-border); color: var(--accent-text); background: var(--accent-soft); }
+.btn-ghost svg { width: 16px; height: 16px; }
+
+/* ============ 首次连接页 ============ */
+.onboard {
+  flex: 1; overflow-y: auto; padding: 28px 24px 24px;
+  display: flex; flex-direction: column;
+}
+.onboard-hero { text-align: center; margin-bottom: 24px; }
+.logo-mark {
+  width: 88px; height: 88px; border-radius: 50%; margin: 0 auto 16px;
+  overflow: hidden; background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(255, 127, 22, .16);
+}
+.logo-mark img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.onboard-hero h1 {
+  font-size: 22px; font-weight: 600; letter-spacing: -.02em;
+  margin-bottom: 6px; color: var(--text);
+}
+.onboard-hero p { font-size: 13.5px; color: var(--text-secondary); line-height: 1.6; }
+
+.step-rail {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
+  font-size: 11.5px; color: var(--text-tertiary);
+}
+.step-rail .dotstep {
+  width: 20px; height: 20px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-size: 10.5px; font-weight: 600;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--text-tertiary);
+}
+.step-rail .dotstep.on {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.step-rail .line { flex: 1; height: 1px; background: var(--border); }
+.step-rail .line.on { background: var(--accent-border); }
+
+.field-group { margin-bottom: 14px; }
+.field-label {
+  display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px;
+  font-size: 12.5px; font-weight: 500; color: var(--text);
+}
+.field-label .opt { font-size: 11px; font-weight: 400; color: var(--text-tertiary); }
+.field-input {
+  width: 100%; height: 44px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); color: var(--text);
+  font: 400 14px var(--font); outline: none;
+  transition: border-color .12s, box-shadow .12s;
+}
+.field-input::placeholder { color: var(--text-quaternary); }
+.field-input:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.field-hint {
+  margin-top: 5px; font-size: 11.5px; line-height: 1.5; color: var(--text-tertiary);
+}
+.field-hint b { color: var(--accent-text); font-weight: 500; }
+.field-error {
+  margin-top: 5px; font-size: 11.5px; color: var(--error-text);
+  display: flex; align-items: center; gap: 4px;
+}
+.field-input.invalid { border-color: var(--error); }
+
+.advanced-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  border: 0; background: transparent; cursor: pointer; padding: 4px 0;
+  font: 500 12.5px var(--font); color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.advanced-toggle:hover { color: var(--accent-text); }
+.advanced-toggle .arrow { font-size: 9px; transition: transform .15s; }
+.advanced-toggle[aria-expanded="true"] .arrow { transform: rotate(180deg); }
+.advanced-body { display: none; }
+.advanced-body.open { display: block; }
+
+.saved-list { margin-top: 20px; }
+.saved-label {
+  font-size: 11.5px; font-weight: 600; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px;
+}
+.saved-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; margin-bottom: 8px;
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface); cursor: pointer; transition: .12s;
+}
+.saved-item:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.saved-item .ico {
+  width: 28px; height: 28px; border-radius: var(--r-sm); flex: none;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  display: grid; place-items: center; color: var(--text-secondary);
+}
+.saved-item .ico svg { width: 14px; height: 14px; }
+.saved-item .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.saved-item .nm { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.saved-item .url {
+  font-size: 11.5px; color: var(--text-tertiary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.saved-item .go { color: var(--accent-text); font-size: 12.5px; font-weight: 500; flex: none; }
+
+.onboard-actions { margin-top: auto; padding-top: 20px; }
+.btn-block {
+  width: 100%; height: 46px; border: 0; border-radius: var(--r);
+  background: var(--accent); color: #fff;
+  font: 600 14.5px var(--font); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: .12s;
+}
+.btn-block:hover { background: var(--accent-hover); }
+.btn-block:active { background: var(--accent-active); }
+.btn-block svg { width: 17px; height: 17px; }
+.spinner {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .4); border-top-color: #fff;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.onboard-foot {
+  margin-top: 12px; text-align: center;
+  font-size: 11.5px; color: var(--text-tertiary); line-height: 1.6;
+}
+
+/* ============ 设置页 ============ */
+.settings-scroll { flex: 1; overflow-y: auto; padding-bottom: 28px; }
+.set-section { padding: 14px 0 4px; }
+.set-section + .set-section { border-top: 8px solid var(--surface-sunken); }
+.set-head { padding: 0 16px 10px; display: flex; align-items: baseline; gap: 8px; }
+.set-head h2 {
+  font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.set-head .cnt { font-size: 11.5px; color: var(--text-quaternary); }
+
+.card {
+  margin: 0 16px; border: 1px solid var(--border);
+  border-radius: var(--r-lg); background: var(--surface); overflow: hidden;
+}
+.cell {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 14px; cursor: pointer; transition: background .12s;
+}
+.cell + .cell { border-top: 1px solid var(--border-subtle); }
+.cell:hover { background: var(--accent-soft); }
+.cell .lead {
+  width: 32px; height: 32px; border-radius: var(--r-sm); flex: none;
+  display: grid; place-items: center;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.cell .lead svg { width: 15px; height: 15px; }
+.cell.active .lead {
+  background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-text);
+}
+.cell .main { flex: 1; min-width: 0; }
+.cell .t1 {
+  font-size: 13.5px; font-weight: 500; color: var(--text);
+  display: flex; align-items: center; gap: 6px;
+}
+.cell .t2 {
+  font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cell .t3 {
+  display: block; margin-top: 1px;
+  font-size: 11.5px; color: var(--text-quaternary);
+}
+.cell .tail { flex: none; font-size: 12px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px; }
+.cur-badge {
+  font-size: 10.5px; font-weight: 600; padding: 1px 7px;
+  border-radius: var(--r-full); background: var(--accent-soft);
+  color: var(--accent-text); border: 1px solid var(--accent-border);
+}
+.mini-btn {
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-secondary); font: 500 11.5px var(--font);
+  padding: 4px 10px; border-radius: var(--r-sm); cursor: pointer; transition: .12s;
+}
+.mini-btn:hover { border-color: var(--accent-border); color: var(--accent-text); background: var(--accent-soft); }
+.mini-btn.danger:hover { border-color: var(--error-border); color: var(--error-text); background: var(--error-bg); }
+
+.chip-row { display: flex; gap: 6px; padding: 0 16px 12px; flex-wrap: wrap; }
+.chip {
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-secondary); font: 500 12.5px var(--font);
+  padding: 6px 14px; border-radius: var(--r-full); cursor: pointer; transition: .12s;
+}
+.chip:hover { border-color: var(--accent-border); }
+.chip[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--accent);
+  color: var(--accent-text); font-weight: 600;
+}
+.set-row {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 16px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.set-row .lab { font-size: 13px; color: var(--text); font-weight: 500; }
+.set-row .sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+.set-row .grow2 { flex: 1; }
+.about {
+  margin: 0 16px; padding: 14px;
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--surface-subtle);
+}
+.about .ver {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.about .ver .v {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  color: var(--accent-text); background: var(--accent-soft);
+  padding: 1px 7px; border-radius: var(--r-full);
+}
+.about p { font-size: 11.5px; line-height: 1.7; color: var(--text-tertiary); }
+
+/* 说明区 */
+.notes {
+  margin-top: 32px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 20px 24px; box-shadow: var(--shadow-sm);
+}
+.notes h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.notes h4 {
+  font-size: 13px; font-weight: 600; color: var(--accent-text);
+  margin: 18px 0 8px; display: flex; align-items: center; gap: 6px;
+}
+.notes h4:first-of-type { margin-top: 0; }
+.notes ul { margin-left: 18px; font-size: 13px; line-height: 1.85; color: var(--text-secondary); }
+.notes li b { color: var(--text); font-weight: 600; }
+.notes code {
+  font-family: var(--mono); font-size: 12px; background: var(--accent-soft);
+  color: var(--accent-text); padding: 1px 5px; border-radius: 4px;
+}
+</style>
+</head>
+<body data-theme="light">
+<div class="stage">
+
+  <div class="controls">
+    <span class="brand">QwenPaw Node · UI 原型</span>
+    <div class="seg" id="screenSeg">
+      <button data-screen="all" aria-selected="true">全部</button>
+      <button data-screen="chat" aria-selected="false">聊天页</button>
+      <button data-screen="list" aria-selected="false">列表页</button>
+      <button data-screen="onboard" aria-selected="false">首次连接</button>
+      <button data-screen="settings" aria-selected="false">设置页</button>
+      <button data-screen="compare" aria-selected="false">新旧对照</button>
+    </div>
+    <span class="spacer"></span>
+    <div class="seg" id="themeSeg">
+      <button data-theme-btn="light" aria-selected="true">浅色</button>
+      <button data-theme-btn="dark" aria-selected="false">深色</button>
+    </div>
+  </div>
+
+  <div class="screens" id="screens">
+
+    <!-- ================= 新版聊天页 ================= -->
+    <div class="slot" data-kind="chat">
+      <div class="slot-title">聊天页 <span class="badge">新版</span></div>
+      <div class="phone">
+        <div class="statusbar">
+          <span>9:41</span><span class="right"><span>5G</span><span class="ic"></span></span>
+        </div>
+
+        <!-- 顶栏：返回 + 标题/元信息 + 更多 -->
+        <div class="topbar">
+          <button class="iconbtn" title="返回">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="topbar-main">
+            <div class="topbar-title">offline test two</div>
+            <div class="topbar-meta">
+              <span class="live-dot pulse"></span><span>正在生成</span>
+              <span class="ctx"><span class="ring"></span>20%</span>
+            </div>
+          </div>
+          <button class="iconbtn" title="更多">
+            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+          </button>
+        </div>
+
+        <div class="thread" id="thread">
+          <div class="msg-row mine"><div class="bubble mine">帮我看看这段日志里的报错</div></div>
+
+          <div class="think" aria-expanded="false" onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded')!=='true')">
+            <span>思考过程</span><span class="arrow">▼</span>
+          </div>
+          <div class="think-body">先定位报错时间范围，再按 timeout 关键字聚合，最后确认是否同一批请求。</div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <span class="wrench"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9 9a2.1 2.1 0 0 1-3-3l9-9z"/></svg></span>
+              <span class="tool-name">execute_shell_command</span>
+              <span class="tool-state ok">完成</span>
+            </div>
+            <div class="tool-args">{"command": "grep -n timeout app.log | tail -20"}</div>
+          </div>
+
+          <div class="msg-row"><div class="bubble theirs">
+            日志里有 <code>3</code> 处 timeout，都集中在 <strong>19:42</strong> 之后，指向同一个上游：
+            <ul><li>19:42:11 api-gateway</li><li>19:42:47 api-gateway</li><li>19:43:02 api-gateway</li></ul>
+          </div></div>
+
+          <div class="tool">
+            <div class="tool-head">
+              <span class="wrench"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9 9a2.1 2.1 0 0 1-3-3l9-9z"/></svg></span>
+              <span class="tool-name">read_file</span>
+              <span class="tool-state run">运行中</span>
+            </div>
+            <div class="tool-args">{"file_path": "/var/log/api-gateway/error.log"}</div>
+          </div>
+
+          <div class="msg-row mine"><div class="bubble mine">那要不要重启一下网关？</div></div>
+
+          <div class="msg-row"><div class="bubble error">
+            无法连接服务器，请确认 QwenPaw 已启动且地址端口正确
+            <br><button class="retry">重试</button>
+          </div></div>
+        </div>
+
+        <button class="jump show" id="jump">跳到最新 <span class="n">2</span></button>
+
+        <div class="errorbar" id="errorbar">
+          <span class="txt">当前会话有回复正在生成，请稍候或先停止</span>
+          <button class="x" onclick="document.getElementById('errorbar').style.display='none'">×</button>
+        </div>
+
+        <!-- 输入框：全宽多行 + 独立操作行 -->
+        <div class="composer">
+          <textarea class="composer-draft" rows="1" placeholder="输入消息">那要不要重启一下网关？</textarea>
+          <div class="composer-actions">
+            <button class="act icon" title="添加附件">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <span class="act" style="cursor:default;color:var(--text-tertiary);border-style:dashed">qwen3.8-flash</span>
+            <span class="grow"></span>
+            <button class="act icon" title="语音输入">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg>
+            </button>
+            <button class="send-btn stop" id="sendBtn">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+              停止
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 新版列表页 ================= -->
+    <div class="slot" data-kind="list">
+      <div class="slot-title">列表页 <span class="badge">新版</span></div>
+      <div class="phone">
+        <div class="statusbar">
+          <span>9:41</span><span class="right"><span>5G</span><span class="ic"></span></span>
+        </div>
+
+        <div class="list-head">
+          <div class="list-title-row">
+            <span class="list-title">会话</span>
+            <span class="list-count">22 个</span>
+            <span class="spacer"></span>
+            <button class="iconbtn" title="设置" style="width:34px;height:34px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.65 1.03 1.26 1.03H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+          </div>
+          <div class="searchbox">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input id="search" placeholder="搜索会话名称或消息">
+            <button class="clear" id="clearSearch">×</button>
+          </div>
+        </div>
+
+        <div class="chat-list" id="chatList">
+          <div class="chat-item running" data-name="offline test two 离线测试 报错">
+            <div class="chat-avatar">离</div>
+            <div class="chat-body">
+              <div class="chat-row1"><span class="chat-name">offline test two</span><span class="chat-time">20:43</span></div>
+              <div class="chat-preview">日志里有 3 处 timeout，都集中在 19:42 之后</div>
+              <div class="chat-tags"><span class="tag run"><span class="live-dot" style="width:5px;height:5px;box-shadow:none"></span>运行中</span></div>
+            </div>
+            <button class="chat-more" title="更多">⋮</button>
+          </div>
+
+          <div class="chat-item" data-name="Friendly Check 网络 断网 验收">
+            <div class="chat-avatar">Fr</div>
+            <div class="chat-body">
+              <div class="chat-row1"><span class="chat-name">Friendly Check</span><span class="chat-time">19:44</span></div>
+              <div class="chat-preview">无法连接服务器，请确认 QwenPaw 已启动</div>
+              <div class="chat-tags"><span class="tag pin"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 6 .9-4.5 4.4 1 6.2L12 16.5 6.5 19.5l1-6.2L3 8.9 9 8z"/></svg>置顶</span></div>
+            </div>
+            <button class="chat-more" title="更多">⋮</button>
+          </div>
+
+          <div class="chat-item" data-name="Use execute_shell_command 工具 调用">
+            <div class="chat-avatar">Us</div>
+            <div class="chat-body">
+              <div class="chat-row1"><span class="chat-name">Use execute_shell_command</span><span class="chat-time">19:31</span></div>
+              <div class="chat-preview">PONG-RETRY</div>
+            </div>
+            <button class="chat-more" title="更多">⋮</button>
+          </div>
+
+          <div class="chat-item" data-name="询问图片颜色 附件 图片">
+            <div class="chat-avatar">询</div>
+            <div class="chat-body">
+              <div class="chat-row1"><span class="chat-name">询问图片颜色</span><span class="chat-time">18:47</span></div>
+              <div class="chat-preview">这是一张纯蓝色图片，RGB 约为 (74, 107, 181)</div>
+            </div>
+            <button class="chat-more" title="更多">⋮</button>
+          </div>
+
+          <div class="chat-item" data-name="新会话">
+            <div class="chat-avatar">新</div>
+            <div class="chat-body">
+              <div class="chat-row1"><span class="chat-name">新会话</span><span class="chat-time">18:44</span></div>
+              <div class="chat-preview">还没有消息</div>
+            </div>
+            <button class="chat-more" title="更多">⋮</button>
+          </div>
+
+          <div class="chat-item" data-name="File Systems Essay Request 文件 写作">
+            <div class="chat-avatar">Fi</div>
+            <div class="chat-body">
+              <div class="chat-row1"><span class="chat-name">File Systems Essay Request</span><span class="chat-time">18:33</span></div>
+              <div class="chat-preview">已按你的大纲扩展成 1200 字的文章</div>
+            </div>
+            <button class="chat-more" title="更多">⋮</button>
+          </div>
+
+          <div class="empty" id="listEmpty" style="display:none">
+            <span class="big">没有匹配的会话</span>
+            <span>试试其他关键词</span>
+          </div>
+        </div>
+
+        <div class="fab-row">
+          <button class="btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            新建会话
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 首次连接页 ================= -->
+    <div class="slot" data-kind="onboard">
+      <div class="slot-title">首次连接 <span class="badge">新版</span></div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="right"><span>5G</span><span class="ic"></span></span></div>
+
+        <div class="onboard">
+          <div class="onboard-hero">
+            <div class="logo-mark">
+              <img src="assets/qwenpaw.png" alt="QwenPaw">
+            </div>
+            <h1>连接到 QwenPaw</h1>
+            <p>填写你的 QwenPaw 服务地址<br>数据始终存放在你自己的机器上</p>
+          </div>
+
+          <div class="step-rail">
+            <span class="dotstep on">1</span><span class="line on"></span>
+            <span class="dotstep">2</span><span class="line"></span>
+            <span class="dotstep">3</span><span class="line"></span>
+            <span style="margin-left:4px">第 1 步，共 3 步</span>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">服务器地址 <span class="opt">必填</span></label>
+            <input class="field-input invalid" id="hostInput" value="192。168。10。204：8088">
+            <div class="field-error">
+              <span>⚠</span><span>检测到中文标点，已自动更正为 192.168.10.204:8088</span>
+            </div>
+            <div class="field-hint">真机填写局域网地址，例如 <b>192.168.1.10:8088</b>。模拟器填写 <b>10.0.2.2:8088</b></div>
+          </div>
+
+          <button class="advanced-toggle" aria-expanded="false" id="advToggle">
+            <span class="arrow">▼</span><span>高级选项</span>
+            <span style="margin-left:auto;font-weight:400;color:var(--text-tertiary)">需要登录或指定智能体时展开</span>
+          </button>
+          <div class="advanced-body" id="advBody">
+            <div class="field-group">
+              <label class="field-label">用户名 <span class="opt">可选</span></label>
+              <input class="field-input" placeholder="服务端开启鉴权时填写">
+            </div>
+            <div class="field-group">
+              <label class="field-label">密码 <span class="opt">可选</span></label>
+              <input class="field-input" type="password" placeholder="••••••••">
+            </div>
+            <div class="field-group">
+              <label class="field-label">智能体 <span class="opt">默认 default</span></label>
+              <input class="field-input" value="default">
+            </div>
+          </div>
+
+          <div class="saved-list">
+            <div class="saved-label">已保存的实例</div>
+            <div class="saved-item">
+              <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
+              <span class="meta"><span class="nm">家里的工作站</span><span class="url">192.168.10.204:8088 版本 v2.2.1</span></span>
+              <span class="go">连接</span>
+            </div>
+            <div class="saved-item">
+              <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
+              <span class="meta"><span class="nm">测试实例</span><span class="url">10.0.2.2:8099 版本 v2.2.1</span></span>
+              <span class="go">连接</span>
+            </div>
+          </div>
+
+          <div class="onboard-actions">
+            <button class="btn-block" id="connectBtn">
+              连接
+            </button>
+            <div class="onboard-foot">连接时会检查服务端版本和智能体是否可用</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 设置页 ================= -->
+    <div class="slot" data-kind="settings">
+      <div class="slot-title">设置页 <span class="badge">新版</span></div>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="right"><span>5G</span><span class="ic"></span></span></div>
+
+        <div class="topbar">
+          <button class="iconbtn" title="返回">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="topbar-main">
+            <div class="topbar-title">设置</div>
+            <div class="topbar-meta">QwenPaw Node 版本 v0.1.0</div>
+          </div>
+        </div>
+
+        <div class="settings-scroll">
+          <!-- 服务器实例 -->
+          <div class="set-section">
+            <div class="set-head"><h2>服务器实例</h2><span class="cnt">2 个</span></div>
+            <div class="card">
+              <div class="cell active">
+                <span class="lead"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
+                <span class="main">
+                  <span class="t1">家里的工作站 <span class="cur-badge">当前</span></span>
+                  <span class="t2">192.168.10.204:8088 智能体 default</span>
+                  <span class="t3">版本 v2.2.1</span>
+                </span>
+                <span class="tail"><button class="mini-btn">编辑</button></span>
+              </div>
+              <div class="cell">
+                <span class="lead"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
+                <span class="main">
+                  <span class="t1">测试实例</span>
+                  <span class="t2">10.0.2.2:8099 智能体 default</span>
+                  <span class="t3">版本 v2.2.1</span>
+                </span>
+                <span class="tail">
+                  <button class="mini-btn">切换</button>
+                  <button class="mini-btn danger">移除</button>
+                </span>
+              </div>
+              <div class="cell" style="justify-content:center;color:var(--accent-text)">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                <span style="font-size:13px;font-weight:500;margin-left:2px">添加实例</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 外观 -->
+          <div class="set-section">
+            <div class="set-head"><h2>外观</h2></div>
+            <div class="set-row" style="margin-bottom:12px">
+              <span class="grow2">
+                <span class="lab">主题</span>
+                <div class="sub">选择跟随系统时，随系统设置切换</div>
+              </span>
+            </div>
+            <div class="chip-row">
+              <button class="chip" aria-pressed="false">跟随系统</button>
+              <button class="chip" aria-pressed="true">浅色</button>
+              <button class="chip" aria-pressed="false">深色</button>
+            </div>
+            <div class="set-row" style="margin-bottom:12px">
+              <span class="grow2">
+                <span class="lab">字号</span>
+                <div class="sub">与系统字体缩放叠加生效</div>
+              </span>
+            </div>
+            <div class="chip-row">
+              <button class="chip" aria-pressed="false">小</button>
+              <button class="chip" aria-pressed="true">标准</button>
+              <button class="chip" aria-pressed="false">大</button>
+            </div>
+          </div>
+
+          <!-- 通知与行为 -->
+          <div class="set-section">
+            <div class="set-head"><h2>通知与行为</h2></div>
+            <div class="card">
+              <div class="cell">
+                <span class="lead"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V5h16v2M12 5v14M9 19h6"/></svg></span>
+                <span class="main">
+                  <span class="t1">使用 MiSans 字体</span>
+                  <span class="t2">开启时替换系统默认字体，关闭后跟随系统</span>
+                </span>
+                <span class="tail">
+                  <span style="width:38px;height:22px;border-radius:999px;background:var(--accent);position:relative;display:inline-block">
+                    <span style="position:absolute;right:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff"></span>
+                  </span>
+                </span>
+              </div>
+              <div class="cell">
+                <span class="lead"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg></span>
+                <span class="main">
+                  <span class="t1">回复完成提醒</span>
+                  <span class="t2">应用在后台时，回复结束后发送本地通知</span>
+                </span>
+                <span class="tail">
+                  <span style="width:38px;height:22px;border-radius:999px;background:var(--accent);position:relative;display:inline-block">
+                    <span style="position:absolute;right:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff"></span>
+                  </span>
+                </span>
+              </div>
+              <div class="cell">
+                <span class="lead"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg></span>
+                <span class="main">
+                  <span class="t1">生成中保持屏幕常亮</span>
+                  <span class="t2">长时间生成时避免息屏打断查看</span>
+                </span>
+                <span class="tail">
+                  <span style="width:38px;height:22px;border-radius:999px;background:var(--border-strong);position:relative;display:inline-block">
+                    <span style="position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff"></span>
+                  </span>
+                </span>
+              </div>
+              <div class="cell">
+                <span class="lead"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h12"/></svg></span>
+                <span class="main">
+                  <span class="t1">会话列表密度</span>
+                  <span class="t2">标准，显示名称、摘要和标签</span>
+                </span>
+                <span class="tail">标准</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 关于 -->
+          <div class="set-section">
+            <div class="set-head"><h2>关于</h2></div>
+            <div class="about">
+              <div class="ver">QwenPaw Node <span class="v">v0.1.0</span></div>
+              <p>基于 QwenPaw 接口构建的第三方 Android 客户端。<br>离线时只保留草稿和缓存历史，不会自动重新发送。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= 新旧对照 ================= -->
+    <div class="slot" data-kind="compare">
+      <div class="slot-title">对照 · 顶栏与输入框 <span class="badge">旧 vs 新</span></div>
+      <div class="phone" style="height:520px">
+        <div class="statusbar"><span>9:41</span><span class="right"><span>5G</span><span class="ic"></span></span></div>
+
+        <div class="topbar-old">
+          <button class="iconbtn" style="width:32px;height:32px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </button>
+          <div>
+            <div class="t">offline test two</div>
+            <div class="m">上下文 537%</div>
+          </div>
+        </div>
+
+        <div class="thread" style="gap:10px">
+          <div class="msg-row mine"><div class="bubble mine" style="border-radius:18px 18px 4px 18px">帮我看看这段日志里的报错</div></div>
+          <div class="msg-row"><div class="bubble theirs" style="border-radius:18px 18px 18px 4px;background:var(--surface-subtle)">日志里有 3 处 timeout。</div></div>
+          <div style="text-align:center;font-size:11px;color:var(--text-quaternary);margin:2px 0">旧版样式，紫色，圆角偏大，层次不清</div>
+        </div>
+
+        <div class="composer-old">
+          <div class="circle" style="background:transparent;color:var(--text-tertiary)">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </div>
+          <div class="field">输入消息</div>
+          <div class="circle">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M3 11.5L21 3l-8.5 18-2.2-7.3z"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="slot-title" style="color:var(--accent-text)">旧版输入框，胶囊形状和全圆按钮</div>
+    </div>
+
+  </div>
+
+  <!-- 说明 -->
+  <div class="notes">
+    <h3>本次改了什么</h3>
+
+    <h4>① 顶栏</h4>
+    <ul>
+      <li><b>标题下面是元信息</b>运行状态点、上下文用量胶囊带环形进度，不再是单行标题加右上角转圈</li>
+      <li><b>图标按钮统一 38dp</b>悬停时用橙色柔和底，不再是默认的水波纹</li>
+      <li><b>底部分割线</b>替代阴影，与下面的消息区形成清晰分界</li>
+    </ul>
+
+    <h4>顶栏</h4>
+    <ul>
+      <li><b>标题分开主次</b>会话名做主标题，下面一行放状态和进度，不再挤在同一行</li>
+      <li><b>会话名可点</b>点标题就地重命名，不用先展开菜单</li>
+      <li><b>进度胶囊</b>生成时显示上下文占用，转圈进度条，点开看明细</li>
+      <li><b>更多菜单</b>重命名、复制全部、导出、删除都收在右上角</li>
+    </ul>
+
+    <h4>② 输入框</h4>
+    <ul>
+      <li><b>全宽多行输入</b>改成矩形圆角框，支持多行自动增高，范围 44 到 120dp，长消息能看清自己在写什么</li>
+      <li><b>独立操作行</b>附件和语音在左，模型名居中，发送在右。模型名放在输入区，切模型不用进设置</li>
+      <li><b>聚焦态</b>橙色边框加 3dp 柔和光环，替代原来的粗紫边框</li>
+      <li><b>停止按钮</b>改为描边样式，和发送按钮区分主次</li>
+    </ul>
+
+    <h4>③ 列表</h4>
+    <ul>
+      <li><b>大标题和计数</b>标题旁边显示会话总数，替代原来只有一个小标题的顶栏</li>
+      <li><b>搜索框</b>本地过滤会话名与摘要，带清空按钮</li>
+      <li><b>列表项三段式</b>首字头像、名称与时间、摘要一行，比纯文字行更容易扫读</li>
+      <li><b>状态标签</b>运行中和置顶用胶囊标签，不再只是文字加后缀</li>
+      <li><b>选中态左侧橙色竖条</b>悬停时整行浅橙底</li>
+      <li><b>新建会话</b>固定到底部按钮，替代右上角的加号</li>
+    </ul>
+
+    <h4>④ 首次连接页</h4>
+    <ul>
+      <li><b>品牌区</b>官方 Logo 加一句话说明，数据留在你自己的机器上，替代原来的纯文字标题</li>
+      <li><b>步骤指示</b>显示第几步和总步数，让首次配置有心理预期</li>
+      <li><b>主次分明</b>地址是唯一必填项，用户名、密码和智能体收进高级选项折叠区，不再一屏四个输入框</li>
+      <li><b>全角自动纠正</b>输入中文标点会实时转成半角，并提示已经更正，就是真机上遇到的那个坑</li>
+      <li><b>已保存实例</b>带名称与版本号，点击直接连接，替代原来一排只显示地址的按钮</li>
+      <li><b>连接按钮</b>全宽加 loading 态，连接中显示转圈和正在连接</li>
+    </ul>
+
+    <h4>⑤ 设置页</h4>
+    <ul>
+      <li><b>分区卡片</b>服务器实例、外观、通知与行为、关于，用灰色间隔带分开，替代原来的一长条滚动</li>
+      <li><b>实例卡片</b>当前实例带橙色当前徽章，其它实例提供切换和移除，当前实例给编辑，这是本次新增的能力</li>
+      <li><b>主题与字号</b>从按钮改为标签单选，选中态橙底橙字</li>
+      <li><b>开关类设置</b>回复完成提醒和生成中保持屏幕常亮，用真实开关形态</li>
+      <li><b>会话列表密度</b>标准和紧凑两档，紧凑模式只显示名称和时间</li>
+      <li><b>关于</b>版本号用等宽字体徽章，说明文字降一级灰</li>
+      <li><b>字体开关</b>默认开启 MiSans，关掉后回到系统默认字体</li>
+    </ul>
+
+    <h4>⑥ 顺手做的细节</h4>
+    <ul>
+      <li>错误条加关闭按钮，错误气泡的重试从裸文字改成描边小按钮</li>
+      <li>新增跳到最新浮层，往上翻历史时出现并显示未读条数，不再强制把你拽回底部</li>
+      <li>思考折叠加了展开箭头与左侧细线，展开状态更明确</li>
+      <li>长按消息可复制，右侧用户消息和左侧回复都支持</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  var screenSeg = document.getElementById('screenSeg');
+  var themeSeg = document.getElementById('themeSeg');
+  var slots = document.querySelectorAll('.slot');
+
+  // 屏幕切换
+  function showScreen(want) {
+    screenSeg.querySelectorAll('button').forEach(function (b) {
+      b.setAttribute('aria-selected', String(b.getAttribute('data-screen') === want));
+    });
+    slots.forEach(function (slot) {
+      var kind = slot.getAttribute('data-kind');
+      slot.style.display = (want === 'all' || want === kind) ? 'flex' : 'none';
+    });
+  }
+
+  screenSeg.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-screen]');
+    if (!btn) return;
+    showScreen(btn.getAttribute('data-screen'));
+  });
+
+  // 支持 ?screen=list 直接打开某一屏，方便截图
+  var qs = new URLSearchParams(location.search).get('screen');
+  if (qs) showScreen(qs);
+
+  // 主题切换
+  themeSeg.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-theme-btn]');
+    if (!btn) return;
+    var mode = btn.getAttribute('data-theme-btn');
+    document.body.setAttribute('data-theme', mode);
+    themeSeg.querySelectorAll('button').forEach(function (b) {
+      b.setAttribute('aria-selected', String(b === btn));
+    });
+  });
+
+  // 搜索过滤
+  var search = document.getElementById('search');
+  var clearSearch = document.getElementById('clearSearch');
+  var chatList = document.getElementById('chatList');
+  var listEmpty = document.getElementById('listEmpty');
+  var items = chatList.querySelectorAll('.chat-item');
+
+  function applyFilter() {
+    var q = (search.value || '').trim().toLowerCase();
+    var visible = 0;
+    items.forEach(function (item) {
+      var hay = (item.getAttribute('data-name') || '') + ' ' + item.textContent;
+      var hit = !q || hay.toLowerCase().indexOf(q) >= 0;
+      item.style.display = hit ? 'flex' : 'none';
+      if (hit) visible++;
+    });
+    clearSearch.classList.toggle('show', !!q);
+    listEmpty.style.display = (visible === 0) ? 'flex' : 'none';
+  }
+  search.addEventListener('input', applyFilter);
+  clearSearch.addEventListener('click', function () {
+    search.value = '';
+    applyFilter();
+    search.focus();
+  });
+
+  // 输入框自动增高
+  var draft = document.querySelector('.composer-draft');
+  function autoGrow() {
+    draft.style.height = 'auto';
+    draft.style.height = Math.min(draft.scrollHeight, 120) + 'px';
+  }
+  if (draft) {
+    draft.addEventListener('input', autoGrow);
+    autoGrow();
+  }
+
+  // 发送 / 停止切换
+  var sendBtn = document.getElementById('sendBtn');
+  var running = true;
+  function renderSend() {
+    sendBtn.classList.toggle('stop', running);
+    sendBtn.innerHTML = running
+      ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg> 停止'
+      : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11.5L21 3l-8.5 18-2.2-7.3z"/></svg> 发送';
+  }
+  sendBtn.addEventListener('click', function () {
+    running = !running;
+    renderSend();
+  });
+  renderSend();
+
+  // 跳到最新：滚离底部时显示
+  var thread = document.getElementById('thread');
+  var jump = document.getElementById('jump');
+  thread.addEventListener('scroll', function () {
+    var dist = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    jump.classList.toggle('show', dist > 120);
+  });
+  jump.addEventListener('click', function () {
+    thread.scrollTo({ top: thread.scrollHeight, behavior: 'smooth' });
+  });
+
+  // 首次连接页：高级选项展开
+  var advToggle = document.getElementById('advToggle');
+  var advBody = document.getElementById('advBody');
+  if (advToggle && advBody) {
+    advToggle.addEventListener('click', function () {
+      var open = advToggle.getAttribute('aria-expanded') === 'true';
+      advToggle.setAttribute('aria-expanded', String(!open));
+      advBody.classList.toggle('open', !open);
+    });
+  }
+
+  // 首次连接页：地址全角标点自动纠正
+  var hostInput = document.getElementById('hostInput');
+  if (hostInput) {
+    hostInput.addEventListener('input', function () {
+      var raw = hostInput.value;
+      var fixed = raw.replace(/。/g, '.').replace(/：/g, ':').replace(/／/g, '/');
+      if (fixed !== raw) {
+        hostInput.value = fixed;
+        hostInput.classList.remove('invalid');
+      }
+      hostInput.classList.toggle('invalid', /[。：／]/.test(hostInput.value));
+    });
+  }
+
+  // 首次连接页：连接按钮 loading 演示
+  var connectBtn = document.getElementById('connectBtn');
+  if (connectBtn) {
+    connectBtn.addEventListener('click', function () {
+      if (connectBtn.dataset.busy === '1') return;
+      connectBtn.dataset.busy = '1';
+      connectBtn.innerHTML = '<span class="spinner"></span> 正在连接';
+      setTimeout(function () {
+        connectBtn.dataset.busy = '0';
+        connectBtn.innerHTML = '连接';
+      }, 1800);
+    });
+  }
+
+  // 设置页：chip 单选
+  document.querySelectorAll('.chip-row').forEach(function (row) {
+    row.addEventListener('click', function (e) {
+      var chip = e.target.closest('.chip');
+      if (!chip) return;
+      row.querySelectorAll('.chip').forEach(function (c) {
+        c.setAttribute('aria-pressed', String(c === chip));
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

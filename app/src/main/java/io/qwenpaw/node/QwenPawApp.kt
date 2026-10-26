@@ -6,6 +6,7 @@ import io.qwenpaw.node.data.local.AppDatabase
 import io.qwenpaw.node.data.local.InstanceStore
 import io.qwenpaw.node.data.remote.ChatStreamClient
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.font.FontManager
 
 /** 简单的手工依赖装配（项目规模不需要 DI 框架）。 */
 class QwenPawApp : Application() {
@@ -18,6 +19,8 @@ class QwenPawApp : Application() {
         private set
     lateinit var instanceRepository: InstanceRepository
         private set
+    lateinit var fontManager: FontManager
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -25,5 +28,6 @@ class QwenPawApp : Application() {
         streamClient = ChatStreamClient(api, QwenPawApi.defaultClient())
         database = AppDatabase.build(this)
         instanceRepository = InstanceRepository(InstanceStore(this), api)
+        fontManager = FontManager(this)
     }
 }

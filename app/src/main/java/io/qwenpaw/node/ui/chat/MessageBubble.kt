@@ -1,7 +1,9 @@
 package io.qwenpaw.node.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,9 +34,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.Role
 import io.qwenpaw.node.ui.theme.CodeTextStyle
@@ -45,15 +51,59 @@ import io.qwenpaw.node.ui.theme.MessageMaxWidth
 fun MessageBubble(
     message: ChatMessage,
     modifier: Modifier = Modifier,
+    imageLoader: ChatImageLoader? = null,
+    connection: io.qwenpaw.node.data.remote.Connection? = null,
+    onImageClick: (String) -> Unit = {},
     onRetry: (ChatMessage) -> Unit = {},
 ) {
     when (message.kind) {
         ChatMessage.Kind.REASONING -> ReasoningBlock(message)
         ChatMessage.Kind.TOOL -> ToolCardBlock(message)
+        ChatMessage.Kind.IMAGE -> ImageBubble(
+            message = message,
+            modifier = modifier,
+            imageLoader = imageLoader,
+            connection = connection,
+            onImageClick = onImageClick,
+        )
+
         ChatMessage.Kind.TEXT -> TextBubble(message, modifier, onRetry)
     }
 }
 
+/** 图片气泡：用户图靠右、助手图靠左，点击可全屏查看。 */
+@Composable
+private fun ImageBubble(
+    message: ChatMessage,
+    modifier: Modifier,
+    imageLoader: ChatImageLoader?,
+    connection: io.qwenpaw.node.data.remote.Connection?,
+    onImageClick: (String) -> Unit,
+) {
+    val isUser = message.role == Role.USER
+    val url = message.imageUrl.orEmpty()
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+    ) {
+        Box(
+            modifier = Modifier
+                .widthIn(max = MessageMaxWidth)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                .padding(3.dp),
+        ) {
+            RemoteImage(
+                loader = imageLoader,
+                conn = connection,
+                url = url,
+                onClick = { onImageClick(url) },
+            )
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun TextBubble(
     message: ChatMessage,
@@ -63,14 +113,16 @@ private fun TextBubble(
     val isUser = message.role == Role.USER
     val container = when {
         message.error != null -> MaterialTheme.colorScheme.errorContainer
-        isUser -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+        isUser -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.surface
     }
     val contentColor = when {
         message.error != null -> MaterialTheme.colorScheme.onErrorContainer
-        isUser -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        isUser -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
     }
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
@@ -80,14 +132,36 @@ private fun TextBubble(
                 .widthIn(max = MessageMaxWidth)
                 .clip(
                     RoundedCornerShape(
-                        topStart = 18.dp,
-                        topEnd = 18.dp,
-                        bottomStart = if (isUser) 18.dp else 4.dp,
-                        bottomEnd = if (isUser) 4.dp else 18.dp,
+                        topStart = 14.dp,
+                        topEnd = 14.dp,
+                        bottomStart = if (isUser) 14.dp else 4.dp,
+                        bottomEnd = if (isUser) 4.dp else 14.dp,
                     ),
                 )
                 .background(container)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .then(
+                    if (isUser) Modifier
+                    else Modifier.border(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(
+                            topStart = 14.dp,
+                            topEnd = 14.dp,
+                            bottomStart = 4.dp,
+                            bottomEnd = 14.dp,
+                        ),
+                    ),
+                )
+                .combinedClickable(
+                    onLongClick = {
+                        if (message.text.isNotBlank()) {
+                            clipboard.setText(AnnotatedString(message.text))
+                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onClick = {},
+                )
+                .padding(horizontal = 13.dp, vertical = 10.dp),
         ) {
             Column {
                 if (message.error != null) {

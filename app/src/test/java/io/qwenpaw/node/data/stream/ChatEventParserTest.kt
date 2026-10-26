@@ -74,7 +74,25 @@ class ChatEventParserTest {
         val event = ChatEventParser.parse(raw) as ChatEvent.TurnUsage
         assertEquals(959L, event.estimatedTokens)
         assertEquals(131073L, event.maxInputLength)
-        assertEquals(0.7316, event.ratio, 0.0001)
+        // 服务端的 ratio 是百分数（0.7316 表示 0.7316%），客户端统一折算成小数。
+        assertEquals(959.0 / 131073.0, event.ratio, 0.0001)
+    }
+
+    // 回归：真实服务端给的是**百分数**（0-100），必须折成小数，
+    // 否则 UI 乘 100 后会把占比放大 100 倍。
+    @Test
+    fun `turn usage percent ratio is normalized to fraction`() {
+        val raw = """{"type":"turn_usage","session_id":"s","context_usage":{"estimated_tokens":13815,"max_input_length":131072,"context_usage_ratio":10.540008544921875}}"""
+        val event = ChatEventParser.parse(raw) as ChatEvent.TurnUsage
+        assertEquals(0.1054, event.ratio, 0.0001)
+    }
+
+    // ratio 字段缺失时，退化为用百分数折算。
+    @Test
+    fun `turn usage falls back to percent field when tokens missing`() {
+        val raw = """{"type":"turn_usage","session_id":"s","context_usage":{"estimated_tokens":0,"max_input_length":0,"context_usage_ratio":42.0}}"""
+        val event = ChatEventParser.parse(raw) as ChatEvent.TurnUsage
+        assertEquals(0.42, event.ratio, 0.0001)
     }
 
     @Test

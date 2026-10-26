@@ -6,10 +6,15 @@ import io.qwenpaw.node.data.model.ApprovalDto
 import io.qwenpaw.node.data.model.ApprovalListDto
 import io.qwenpaw.node.data.model.AuthStatusDto
 import io.qwenpaw.node.data.model.AuthTokenDto
+import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.data.model.ChatStatusDto
+import io.qwenpaw.node.data.model.ModelPoolDto
+import io.qwenpaw.node.data.model.ProviderDto
 import io.qwenpaw.node.data.model.PushMessagesDto
+import io.qwenpaw.node.data.model.ThinkingViewDto
+import io.qwenpaw.node.data.model.TokenUsageDto
 import io.qwenpaw.node.data.model.UploadResultDto
 import io.qwenpaw.node.data.model.VersionDto
 import kotlinx.serialization.json.Json
@@ -18,7 +23,6 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -126,6 +130,86 @@ class QwenPawApi(
         return decode(request(conn, "PUT", "/api/chats/$chatId", body), ChatSpecDto.serializer())
     }
 
+    /** 置顶 / 取消置顶。服务端接受 `pinned` 与 `name` 同处一个 PATCH/PUT 语义。 */
+    fun setPinned(conn: Connection, chatId: String, pinned: Boolean): ChatSpecDto {
+        val body = buildJsonObject { put("pinned", pinned) }
+        return decode(request(conn, "PUT", "/api/chats/$chatId", body), ChatSpecDto.serializer())
+    }
+
+    /** 归档会话；运行中的会话服务端会拒绝（409）。 */
+    fun archiveChat(conn: Connection, chatId: String): ChatSpecDto =
+        decode(request(conn, "POST", "/api/chats/$chatId/archive"), ChatSpecDto.serializer())
+
+    /** 取消归档，幂等。 */
+    fun unarchiveChat(conn: Connection, chatId: String): ChatSpecDto =
+        decode(request(conn, "POST", "/api/chats/$chatId/unarchive"), ChatSpecDto.serializer())
+
+    /** 会话分组列表。 */
+    fun chatGroups(conn: Connection): List<ChatGroupDto> =
+        decode(
+            request(conn, "GET", "/api/chats/groups"),
+            kotlinx.serialization.builtins.ListSerializer(ChatGroupDto.serializer()),
+        )
+
+    /** 设置会话所属分组。 */
+    fun setChatGroup(conn: Connection, chatId: String, groupId: String?): ChatSpecDto {
+        val body = buildJsonObject {
+            if (groupId == null) put("group_id", kotlinx.serialization.json.JsonNull)
+            else put("group_id", groupId)
+        }
+        return decode(request(conn, "PUT", "/api/chats/$chatId", body), ChatSpecDto.serializer())
+    }
+
+    /** 读取会话思考模式。 */
+    fun chatThinking(conn: Connection, chatId: String): ThinkingViewDto =
+        decode(request(conn, "GET", "/api/chats/$chatId/thinking"), ThinkingViewDto.serializer())
+
+    /** 设置会话思考模式；失败（模型不支持）时服务端返回 422。 */
+    fun setChatThinking(conn: Connection, chatId: String, level: String, budgetTokens: Long? = null): ThinkingViewDto {
+        val body = buildJsonObject {
+            put("level", level)
+            if (budgetTokens != null) put("budget_tokens", budgetTokens)
+        }
+        return decode(request(conn, "PUT", "/api/chats/$chatId/thinking", body), ThinkingViewDto.serializer())
+    }
+
+    /** 为会话选择模型；传 null 表示恢复智能体默认。 */
+    fun setChatModel(conn: Connection, chatId: String, providerId: String?, model: String?): ThinkingViewDto {
+        val body = if (providerId.isNullOrBlank() || model.isNullOrBlank()) {
+            buildJsonObject { put("provider_id", kotlinx.serialization.json.JsonNull) }
+        } else {
+            buildJsonObject {
+                put("provider_id", providerId)
+                put("model", model)
+            }
+        }
+        return decode(request(conn, "PUT", "/api/chats/$chatId/model", body), ThinkingViewDto.serializer())
+    }
+
+    /** 供应商列表。 */
+    fun providers(conn: Connection): List<ProviderDto> =
+        decode(
+            request(conn, "GET", "/api/models"),
+            kotlinx.serialization.builtins.ListSerializer(ProviderDto.serializer()),
+        )
+
+    /** 某个供应商的模型池。 */
+    fun modelPool(conn: Connection, providerId: String, limit: Int = 200): ModelPoolDto =
+        decode(
+            request(conn, "GET", "/api/models/$providerId/pool?limit=$limit"),
+            ModelPoolDto.serializer(),
+        )
+
+    /** token 用量汇总。 */
+    fun tokenUsage(conn: Connection, startDate: String? = null, endDate: String? = null): TokenUsageDto {
+        val query = buildList {
+            if (startDate != null) add("start_date=$startDate")
+            if (endDate != null) add("end_date=$endDate")
+        }.joinToString("&")
+        val path = if (query.isBlank()) "/api/token-usage" else "/api/token-usage?$query"
+        return decode(request(conn, "GET", path), TokenUsageDto.serializer())
+    }
+
     fun deleteChat(conn: Connection, chatId: String) {
         request(conn, "DELETE", "/api/chats/$chatId")
     }
@@ -226,11 +310,22 @@ class QwenPawApi(
         put("text", text)
     }
 
-    fun mediaPart(kind: String, url: String): JsonObject = buildJsonObject {
+    /**
+     * 媒体内容块。
+     *
+     * 服务端的 `_request_input_to_msgs` 读的是扁平字段
+     * （`image_url` / `video_url` / `file_url`），不是老协议的 `source.url`。
+     * 早期版本发 `source.url` 会被静默丢弃，图片/文件根本进不了上下文。
+     */
+    fun mediaPart(kind: String, url: String, filename: String? = null): JsonObject = buildJsonObject {
         put("type", kind)
-        putJsonObject("source") {
-            put("type", "url")
-            put("url", url)
+        when (kind) {
+            "image" -> put("image_url", url)
+            "video" -> put("video_url", url)
+            else -> {
+                put("file_url", url)
+                if (!filename.isNullOrBlank()) put("filename", filename)
+            }
         }
     }
 

@@ -92,4 +92,54 @@ class HistoryMapperTest {
         assertEquals("想一想", messages[0].text)
         assertEquals("结论", messages[1].text)
     }
+
+    // 图片附件历史上会被内联成 data URI，映射后应成为 IMAGE 单元。
+    @Test
+    fun `maps inline base64 image block`() {
+        val raw = """
+            [
+              {"id":"m1","type":"message","role":"user","content":[
+                {"type":"text","text":"这张图什么颜色"},
+                {"type":"image","image_url":"data:image/png;base64,iVBORw0KGgo="}
+              ],"status":"completed"}
+            ]
+        """.trimIndent()
+        val messages = HistoryMapper.map(parse(raw))
+
+        assertEquals(2, messages.size)
+        assertEquals(ChatMessage.Kind.TEXT, messages[0].kind)
+        assertEquals(ChatMessage.Kind.IMAGE, messages[1].kind)
+        assertEquals("data:image/png;base64,iVBORw0KGgo=", messages[1].imageUrl)
+        assertEquals(Role.USER, messages[1].role)
+    }
+
+    // 老协议把本地路径放在 source.url，也要能取到。
+    @Test
+    fun `maps image url from legacy source field`() {
+        val raw = """
+            [{"id":"m2","type":"message","role":"assistant","content":[
+              {"type":"image","source":{"type":"url","url":"http://host/a.png"}}
+            ],"status":"completed"}]
+        """.trimIndent()
+        val messages = HistoryMapper.map(parse(raw))
+
+        assertEquals(1, messages.size)
+        assertEquals(ChatMessage.Kind.IMAGE, messages[0].kind)
+        assertEquals("http://host/a.png", messages[0].imageUrl)
+    }
+
+    // 文件附件降级成一行文字，避免正文被整块吞掉。
+    @Test
+    fun `renders file attachment as text hint`() {
+        val raw = """
+            [{"id":"m3","type":"message","role":"user","content":[
+              {"type":"file","file_url":"http://host/report.pdf","filename":"report.pdf"}
+            ],"status":"completed"}]
+        """.trimIndent()
+        val messages = HistoryMapper.map(parse(raw))
+
+        assertEquals(1, messages.size)
+        assertEquals(ChatMessage.Kind.TEXT, messages[0].kind)
+        assertTrue(messages[0].text.contains("report.pdf"))
+    }
 }

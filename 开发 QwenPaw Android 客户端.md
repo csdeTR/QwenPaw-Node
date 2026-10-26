@@ -193,7 +193,8 @@ Sources:
 ### 5.7 附件
 
 - `POST /api/console/upload`（multipart）返回 `{"url":"/home/<user>/.qwenpaw/workspaces/default/media/..."}`，是**服务器本地绝对路径**。
-- 把它作为 `content` 里的 `{"type":"image","source":{"url":"..."}}` 引用；服务端能识别 `image` / `file`。
+- 请求侧要放成扁平字段 `{"type":"image","image_url":"..."}`（详见 5.11）；
+  默认字段用 `source.url` 会被服务端静默丢弃。
 - 实测：上传 64x64 蓝色 PNG，模型调用 `view_image` 后正确答出 RGB(74,107,181)。
 
 ### 5.8 通知
@@ -206,5 +207,120 @@ QwenPaw 没有推送通道，所以客户端只做**本地**通知：进程里�
 - **不做**实时推送/常驻后台长连接：`ChatWatchService` 只是前台服务壳，不做真正的保活。
 - **不做** Mermaid 渲染：代码块降级为可复制源码。
 - **不做** L3 管理面（智能体配置、技能管理、日志查看），需要管理 API 稳定后再补。
+
+### 5.10 语音输入（离线）
+
+语音输入全程在手机本地完成，不依赖系统语音服务，也不上传音频。Android 自带的
+`SpeechRecognizer` 需要设备安装识别服务，实测这台真机没有，所以改为自带离线引擎。
+
+- 引擎：[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（k2-fsa，Apache-2.0）。
+  文档 <https://k2-fsa.github.io/sherpa/onnx/>，Android AAR 从
+  [Releases](https://github.com/k2-fsa/sherpa-onnx/releases) 取，仓库里放的是
+  `app/libs/sherpa-onnx-1.13.3.aar`。
+- 模型：[sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)，
+  中英流式 zipformer2，int8 量化，压缩包 126MB，解压后约 168MB。由用户
+  在设置里手动下载，下载地址写死在 `SpeechModelManager.MODEL_URL`。
+- 解压：`tar.bz2` 用 [commons-compress](https://commons.apache.org/proper/commons-compress/)
+  的 `BZip2CompressorInputStream` 边解边喂给 `TarArchiveInputStream`，不落中间文件。
+- 采集：`AudioRecord` 16kHz 单声道，每 0.1 秒送一块给识别器。sherpa 会根据每块
+  采样数反推采样率，块长不固定会报 `You changed the input sampling rate` 直接崩，
+  所以必须固定块长；设备实际采样率不同时先用 `LinearResampler` 折回 16kHz。
+- 收尾：点「说完了」只调 `AudioRecord.stop()` 并置停止标志，让采集协程自己走
+  `inputFinished()`，不要直接取消协程——取消会跳过收尾并把状态卡在录音中。
+- 入口开关：设置里的「显示语音按钮」。开关打开但模型没下载时会弹说明，
+  直接引导去下载；模型没就绪时输入框不显示麦克风。
+
+### 5.11 图片与文件附件（含字段坑）
+
+- **请求侧字段名**：服务端 `runtime/message_convert.py` 的 `_request_input_to_msgs`
+  读的是扁平字段 `image_url` / `video_url` / `file_url`（文件另带 `filename`），
+  **不是**老协议的 `{"type":"image","source":{"url":...}}`。
+  早期版本发 `source.url` 会被静默丢弃——图片进不了上下文，历史里也只剩文字。
+  正确形状：
+  ```json
+  {"type":"image","image_url":"/home/u/.qwenpaw/workspaces/default/media/xxx.png"}
+  ```
+  回归用例见 `QwenPawApiTest`。
+- **历史侧形状**：`GET /api/chats/{id}` 里 user 消息的图片块是
+  `{"type":"image","image_url":"data:image/png;base64,..."}`，
+  服务端把本地文件内联成 data URI（`_resolve_content_url` + base64 分支）。
+  外链则原样返回 `http(s)://`。
+- **渲染**：客户端不引入 Coil，`ChatImageLoader` 直接 OkHttp + BitmapFactory：
+  `data:` 本地解码、`http(s)://` 直接下载、其余当作服务端本地绝对路径走
+  `GET /api/files/preview/{绝对路径}`（实测 200，带 FileGuard 敏感路径检查，
+  只允许 WORKING_DIR 内的文件）。大图先读尺寸再 `inSampleSize` 采样，避免 OOM。
+- **图片缩放**：`ImageViewerDialog` 支持双指缩放与拖动，单击关闭。
+
+### 5.12 置顶 / 归档 / 分组
+
+- 置顶：`PUT /api/chats/{id}` body `{"pinned":true|false}`，与重命名共用端点。
+  客户端排序改为「置顶 → 运行中 → 最近活跃」。
+- 归档：`POST /api/chats/{id}/archive`，**运行中的会话会被拒绝**（需先停止）；
+  取消归档 `POST /api/chats/{id}/unarchive`（幂等）。
+  `GET /api/chats?archived=false|true`，不传参返回全部。
+- 分组：`GET /api/chats/groups` 返回 `default` / `cron` / `subagents`；
+  `PUT /api/chats/{id}` body `{"group_id":"..."}` 移动分组，传 null 清空。
+
+### 5.13 上下文用量与思考模式
+
+- 用量：SSE 的 `turn_usage` 帧给 `context_usage = {estimated_tokens,
+  max_input_length, context_usage_ratio}`，**只有整轮粒度**，没有按消息拆分。
+  客户端的「用量明细」面板展示总量 + 进度条，并按字符数估算各消息占比（标注为估算）。
+- 思考模式：`GET/PUT /api/chats/{id}/thinking`。响应里 `control.kind` 描述模型
+  是否可调（`effort` / `budget` / `unsupported` / `unknown`），`control.efforts`
+  列出可选项。`level=inherit` 表示跟随模型默认；模型不支持时 PUT 返回 422。
+  客户端只在 `efforts` 非空或 `supports_off` 时才显示入口。
+- 模型切换：`PUT /api/chats/{id}/model` body `{"provider_id":...,"model":...}`，
+  传 null 恢复智能体默认。`GET /api/models` 列供应商，
+  `GET /api/models/{provider_id}/pool` 列模型池。
+
+### 5.14 Token 用量统计
+
+`GET /api/token-usage`（**注意是连字符**，不是 `/api/token/usage`），
+查 `start_date` / `end_date` / `model` / `provider` 返回
+`{total_prompt_tokens, total_completion_tokens, total_cache_read_tokens,
+cache_hit_rate, total_calls, by_model{...}, by_date{...}}`。
+客户端的「用量统计」页做只读展示。
+
+### 5.15 会话摘要 / 预览
+
+服务端 `ChatSpec` **没有 summary 字段**。客户端在列表刷新时，对最近 20 个会话各拉
+一次 `GET /api/chats/{id}`，从映射后的消息里摘出最后一条有内容的消息前 60 字作预览，
+用内存 map 按 `updated_at` 变化刷新，避免每次刷新都打一堆详情请求。
+
+带附件的消息服务端会注入一行「用户上传文件，已经下载到 &lt;路径&gt;」，它既不是用户原话
+也不是助手回复，预览时按前缀跳过。
+
+### 5.16 包体体积与 ABI 取舍
+
+早期 debug APK 达到 **133MB**，构成如下：
+
+| 组成 | 体积 | 处理 |
+|---|---|---|
+| sherpa-onnx `.so` ×4 ABI | 约 98MB | **只保留 `arm64-v8a`**（`ndk.abiFilters`） |
+| dex（debug 未优化） | 44MB | release 开 R8 后大幅缩水 |
+| MiSans 字体 ×2 | 15.8MB | **改为运行时可选取下载**（见 5.17） |
+| 其它 | 约 10MB | — |
+
+只留 arm64-v8a 后，`.so` 从 98MB 降到 22MB，native 一项就砍掉约 76MB。
+代价是 x86/x86_64 模拟器装不上——需要时在本地临时放开对应 ABI，**不要提交**。
+
+改完 debug APK 为 **40.6MB**（原 133.65MB，降约 70%）。
+
+### 5.17 MiSans 字体改为可选下载
+
+字体体积 15.8MB 且只有部分用户需要，因此不再随 APK 打包：
+
+- 默认用系统字体；设置页「使用 MiSans 字体」开关**默认关闭**，且字体未下载时置灰不可点。
+- 点「下载」（约 16MB）后落到 `files/fonts/`，两个字重分别对应
+  `MiSans-Static.ttf`(usWeightClass=400) 与 `MiSans.ttf`(usWeightClass=500)。
+- 下载策略：先都下到 `.tmp`，**两个字重都成功后再原子改名**，避免半成品被误判为「已安装」；
+  任一失败则清空全部并回到未安装。
+- Theme 侧不再引用 `R.font.*`，改为把运行时 `File` 包成 Compose `Font(file, weight)`
+  （`AndroidFontKt.Font-Ej4NQ78`，即 `Font(File, …)` 重载）。
+- **来源与许可**：字体来自 GitHub 镜像仓库 `adivenxnataly/MiSans`，版权归小米科技有限责任公司。
+  MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**——所以本仓库不提交字体文件，
+  App 也不随包分发，只在用户主动点击时从其 GitHub 原址下载，并在设置页与关于页标注出处。
+  仓库内 `.gitignore` 已排除 `res/font/*.ttf`、避免误提交。
 
 

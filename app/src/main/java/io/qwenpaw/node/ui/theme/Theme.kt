@@ -7,7 +7,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -21,28 +22,67 @@ import androidx.core.view.WindowCompat
 /** 主题模式：跟随系统 / 强制浅色 / 强制深色。 */
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
+/** QwenPaw 品牌色，取自 Console 的真实设计变量。 */
+val Accent = Color(0xFFFF7F16)
+val AccentHover = Color(0xFFFF9D4D)
+val AccentActive = Color(0xFFD96806)
+val AccentTextLight = Color(0xFFBD5100)
+val AccentTextDark = Color(0xFFFF9A47)
+val AccentSoft = Color(0x1AFF7F16)
+val AccentBorder = Color(0x6BFF7F16)
+val Success = Color(0xFF52C41A)
+val Warning = Color(0xFFFAAD14)
+
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF6D3FA8),
+    primary = Accent,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFEADDFF),
-    onPrimaryContainer = Color(0xFF25005A),
-    secondary = Color(0xFF625B71),
-    surface = Color(0xFFFEF7FF),
-    surfaceVariant = Color(0xFFE7E0EC),
-    background = Color(0xFFFDF8FF),
-    error = Color(0xFFBA1A1A),
+    primaryContainer = Color(0xFFFFE7D3),
+    onPrimaryContainer = Color(0xFF7A3400),
+    secondary = AccentTextLight,
+    onSecondary = Color.White,
+    secondaryContainer = AccentSoft,
+    onSecondaryContainer = AccentTextLight,
+    tertiary = Warning,
+    background = Color(0xFFF9F8F4),
+    onBackground = Color(0xE1141413),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xE1141413),
+    surfaceVariant = Color(0xFFFAF9F7),
+    onSurfaceVariant = Color(0x94141413),
+    surfaceContainer = Color(0xFFFAF9F7),
+    surfaceContainerHigh = Color(0xFFF2F0EC),
+    surfaceContainerLow = Color(0xFFFCFBF9),
+    outline = Color(0xFFD8D4CF),
+    outlineVariant = Color(0xFFEAE8E7),
+    error = Color(0xFFCF1322),
+    errorContainer = Color(0xFFFFF2F0),
+    onErrorContainer = Color(0xFFCF1322),
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFFD0BCFF),
-    onPrimary = Color(0xFF381E72),
-    primaryContainer = Color(0xFF4F378B),
-    onPrimaryContainer = Color(0xFFEADDFF),
-    secondary = Color(0xFFCCC2DC),
-    surface = Color(0xFF141218),
-    surfaceVariant = Color(0xFF49454F),
-    background = Color(0xFF0F0D13),
-    error = Color(0xFFFFB4AB),
+    primary = Accent,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFF3A2410),
+    onPrimaryContainer = Color(0xFFFFD8B8),
+    secondary = AccentTextDark,
+    onSecondary = Color(0xFF3A1B00),
+    secondaryContainer = Color(0x29FF7F16),
+    onSecondaryContainer = AccentTextDark,
+    tertiary = Warning,
+    background = Color(0xFF141414),
+    onBackground = Color(0xD9FFFFFF),
+    surface = Color(0xFF1F1F1F),
+    onSurface = Color(0xD9FFFFFF),
+    surfaceVariant = Color(0xFF1A1A1A),
+    onSurfaceVariant = Color(0xA6FFFFFF),
+    surfaceContainer = Color(0xFF1A1A1A),
+    surfaceContainerHigh = Color(0xFF262626),
+    surfaceContainerLow = Color(0xFF191919),
+    outline = Color(0x2EFFFFFF),
+    outlineVariant = Color(0x1FFFFFFF),
+    error = Color(0xFFFF7875),
+    errorContainer = Color(0xFF2C1618),
+    onErrorContainer = Color(0xFFFF7875),
 )
 
 /** 可调字号：小 / 标准 / 大。 */
@@ -56,6 +96,11 @@ enum class FontScale(val multiplier: Float) {
 fun QwenPawTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
     fontScale: FontScale = FontScale.NORMAL,
+    /**
+     * MiSans 字体族。字体是运行时按需下载的，没下载时传 null，
+     * 交给系统默认字体——所以这里不再引用打包期资源。
+     */
+    misans: FontFamily? = null,
     content: @Composable () -> Unit,
 ) {
     val dark = when (mode) {
@@ -64,13 +109,16 @@ fun QwenPawTheme(
         ThemeMode.DARK -> true
     }
     val base = if (dark) DarkColors else LightColors
-    val typography = scaledTypography(fontScale)
+    // 字体族查表较贵，按字号和字体分别缓存，避免每次重组都重建整套排版。
+    val typography = remember(fontScale, misans) {
+        scaledTypography(fontScale).withFamily(misans)
+    }
 
     val view = LocalView.current
     if (!view.isInEditMode) {
         val context = LocalContext.current
-        SideEffect {
-            val window = (context as? Activity)?.window ?: return@SideEffect
+        LaunchedEffect(dark) {
+            val window = (context as? Activity)?.window ?: return@LaunchedEffect
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
         }
     }
@@ -97,6 +145,29 @@ private fun scaledTypography(scale: FontScale): Typography {
         titleMedium = base.titleMedium.scaled(),
         labelLarge = base.labelLarge.scaled(),
         labelSmall = base.labelSmall.scaled(),
+    )
+}
+
+/** 整体换字体。传 null 时保留系统默认字体。 */
+private fun Typography.withFamily(family: FontFamily?): Typography {
+    if (family == null) return this
+    fun TextStyle.f() = copy(fontFamily = family)
+    return copy(
+        displayLarge = displayLarge.f(),
+        displayMedium = displayMedium.f(),
+        displaySmall = displaySmall.f(),
+        headlineLarge = headlineLarge.f(),
+        headlineMedium = headlineMedium.f(),
+        headlineSmall = headlineSmall.f(),
+        titleLarge = titleLarge.f(),
+        titleMedium = titleMedium.f(),
+        titleSmall = titleSmall.f(),
+        bodyLarge = bodyLarge.f(),
+        bodyMedium = bodyMedium.f(),
+        bodySmall = bodySmall.f(),
+        labelLarge = labelLarge.f(),
+        labelMedium = labelMedium.f(),
+        labelSmall = labelSmall.f(),
     )
 }
 

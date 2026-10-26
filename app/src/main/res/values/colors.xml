@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FF6D3FA8</color>
+    <color name="ic_launcher_background">#FFFCFAF8</color>
+    <color name="qwenpaw_mark">#FF000000</color>
 </resources>

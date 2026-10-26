@@ -4,7 +4,9 @@ import io.qwenpaw.node.data.local.AppDatabase
 import io.qwenpaw.node.data.local.CachedMessageEntity
 import io.qwenpaw.node.data.local.DraftEntity
 import io.qwenpaw.node.data.model.ApprovalDto
+import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatSpecDto
+import io.qwenpaw.node.data.model.ThinkingViewDto
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.ChatStreamClient
 import io.qwenpaw.node.data.remote.Connection
@@ -41,10 +43,23 @@ data class ChatUiState(
     val draft: String = "",
     val attachments: List<String> = emptyList(),
     val contextUsage: Double = 0.0,
+    /** 本轮上下文的已用 token 估算值，来自 `turn_usage`。 */
+    val contextTokens: Long = 0,
+    /** 当前模型的最大输入长度，来自 `turn_usage` / thinking 视图。 */
+    val contextMax: Long = 0,
     val pendingApprovals: List<ApprovalDto> = emptyList(),
     val chats: List<ChatSpecDto> = emptyList(),
+    /** 已归档会话，单独一页展示。 */
+    val archivedChats: List<ChatSpecDto> = emptyList(),
+    val groups: List<ChatGroupDto> = emptyList(),
+    /** 每个会话的最新消息预览，key 为 chatId。 */
+    val previews: Map<String, String> = emptyMap(),
     val currentChatId: String? = null,
     val currentChatName: String = "",
+    val currentChatPinned: Boolean = false,
+    val currentChatGroupId: String? = null,
+    /** 当前会话的思考模式视图；null 表示尚未拉取。 */
+    val thinking: ThinkingViewDto? = null,
 )
 
 /**
@@ -75,6 +90,9 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
+    /** 预览缓存的刷新戳，key 为 chatId，值为生成预览时的 `updated_at`。 */
+    private val _previewStamps = mutableMapOf<String, String?>()
+
     private val _notifications = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val notifications: SharedFlow<String> = _notifications.asSharedFlow()
 
@@ -88,15 +106,12 @@ class ChatViewModel(
 
     fun refreshChats(selectChatId: String? = null) {
         val conn = currentConnection ?: return
+        refreshGroups()
+        refreshArchivedChats()
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.chats(conn) } }
                 .onSuccess { chats ->
-                    // 服务端不保证顺序：运行中的会话必须置顶，其余按最近活跃排序，
-                    // 否则正在生成的会话会沉到列表底部，用户很难找到。
-                    val ordered = chats.sortedWith(
-                        compareByDescending<ChatSpecDto> { it.status == "running" }
-                            .thenByDescending { it.updatedAt ?: "" },
-                    )
+                    val ordered = orderChats(chats)
                     val target = selectChatId ?: _state.value.currentChatId
                     _state.update { it.copy(chats = ordered, loading = false) }
                     when {
@@ -104,11 +119,282 @@ class ChatViewModel(
                         // 冷启动不自动跳转：先停在列表页，由「运行中」置顶提示用户去接。
                         else -> _state.update { it.copy(loading = false, messages = emptyList()) }
                     }
+                    loadPreviews(conn, ordered)
                 }
                 .onFailure { e ->
                     _state.update { it.copy(loading = false, error = friendly(e)) }
                 }
         }
+    }
+
+    /**
+     * 服务端不保证顺序，客户端自己排：
+     * 置顶优先 → 运行中 → 最近活跃。
+     */
+    private fun orderChats(chats: List<ChatSpecDto>): List<ChatSpecDto> =
+        chats.sortedWith(
+            compareByDescending<ChatSpecDto> { it.pinned }
+                .thenByDescending { it.status == "running" }
+                .thenByDescending { it.updatedAt ?: "" },
+        )
+
+    /**
+     * 为列表生成消息预览。
+     *
+     * 服务端没有 summary 字段，只能对最近的会话各取一次详情，摘出最后一条
+     * 有内容的消息。只做最近 [PREVIEW_LIMIT] 个，且已缓存且 `updated_at` 未变
+     * 的会话会跳过，避免每次刷新都打一堆请求。
+     */
+    private suspend fun loadPreviews(conn: Connection, chats: List<ChatSpecDto>) {
+        val previous = _state.value.previews
+        val stampKey = _previewStamps
+        val targets = chats.take(PREVIEW_LIMIT).filter { chat ->
+            stampKey[chat.id] != chat.updatedAt ||
+                (chat.id !in previous && chat.updatedAt != null) ||
+                (chat.id !in previous && stampKey[chat.id] == null)
+        }
+        if (targets.isEmpty()) return
+        val fresh = mutableMapOf<String, String>()
+        val freshStamps = mutableMapOf<String, String?>()
+        for (chat in targets) {
+            val text = runCatching {
+                withContext(Dispatchers.IO) { api.chat(conn, chat.id) }
+            }.getOrNull()?.let { previewOf(HistoryMapper.map(it.messages)) }
+            if (text != null) fresh[chat.id] = text
+            freshStamps[chat.id] = chat.updatedAt
+        }
+        if (fresh.isEmpty() && freshStamps.isEmpty()) return
+        _previewStamps.putAll(freshStamps)
+        // 清掉已被删除会话的缓存，避免 map 无限增长。
+        val liveIds = chats.map { it.id }.toSet()
+        _previewStamps.keys.retainAll(liveIds)
+        _state.update { s ->
+            val merged = (s.previews + fresh).filterKeys { it in liveIds }
+            // 内容没变就不要换引用，否则每次刷新都会让整个列表重组一次。
+            if (merged == s.previews) s else s.copy(previews = merged)
+        }
+    }
+
+    /** 从映射后的消息里摘出一句预览文案。 */
+    private fun previewOf(messages: List<ChatMessage>): String? {
+        for (message in messages.asReversed()) {
+            when (message.kind) {
+                ChatMessage.Kind.TEXT -> {
+                    val line = message.text.lineSequence()
+                        .firstOrNull { it.isNotBlank() }
+                        ?.trim()
+                    if (line.isNullOrBlank()) continue
+                    // 服务端会给带附件的消息注入「用户上传文件，已经下载到 <路径>」，
+                    // 这既不是用户原话也不是助手回复，出现在预览里只是一串路径噪声。
+                    if (line.startsWith(UPLOAD_NOTICE_PREFIX)) continue
+                    val prefix = if (message.role == Role.USER) "你：" else ""
+                    return (prefix + line).take(60)
+                }
+
+                ChatMessage.Kind.IMAGE -> return "[图片]"
+                ChatMessage.Kind.TOOL -> {
+                    val name = message.tool?.name
+                    if (!name.isNullOrBlank()) return "[工具] $name"
+                }
+
+                ChatMessage.Kind.REASONING -> Unit
+            }
+        }
+        return null
+    }
+
+    // ---------------- 归档 ----------------
+
+    fun refreshArchivedChats() {
+        val conn = currentConnection ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.chats(conn, archived = true) } }
+                .onSuccess { archived ->
+                    _state.update { it.copy(archivedChats = orderChats(archived)) }
+                }
+                .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
+        }
+    }
+
+    fun archiveChat(chatId: String) {
+        val conn = currentConnection ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.archiveChat(conn, chatId) } }
+                .onSuccess {
+                    _state.update { s ->
+                        val chat = s.chats.firstOrNull { it.id == chatId }
+                        s.copy(
+                            chats = s.chats.filterNot { it.id == chatId },
+                            archivedChats = orderChats(
+                                (listOfNotNull(chat?.copy(archived = true)) + s.archivedChats)
+                                    .distinctBy { it.id },
+                            ),
+                            currentChatId = if (s.currentChatId == chatId) null else s.currentChatId,
+                            messages = if (s.currentChatId == chatId) emptyList() else s.messages,
+                        )
+                    }
+                    _notifications.tryEmit("已归档「${_state.value.chats.firstOrNull { it.id == chatId }?.name ?: "会话"}」")
+                }
+                .onFailure { e ->
+                    // 运行中的会话服务端会拒绝归档（409），这里给一句更直白的提示。
+                    val msg = if (e is ApiException && e.code == 409) {
+                        "会话正在运行，无法归档，请先停止"
+                    } else {
+                        friendly(e)
+                    }
+                    _state.update { it.copy(error = msg) }
+                }
+        }
+    }
+
+    fun unarchiveChat(chatId: String) {
+        val conn = currentConnection ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.unarchiveChat(conn, chatId) } }
+                .onSuccess { restored ->
+                    _state.update { s ->
+                        s.copy(
+                            archivedChats = s.archivedChats.filterNot { it.id == chatId },
+                            chats = orderChats(
+                                (listOf(restored) + s.chats.filterNot { it.id == chatId })
+                                    .distinctBy { it.id },
+                            ),
+                        )
+                    }
+                }
+                .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
+        }
+    }
+
+    // ---------------- 置顶 ----------------
+
+    fun togglePin(chatId: String) {
+        val conn = currentConnection ?: return
+        val current = _state.value.chats.firstOrNull { it.id == chatId }
+            ?: _state.value.archivedChats.firstOrNull { it.id == chatId }
+            ?: return
+        val next = !current.pinned
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.setPinned(conn, chatId, next) } }
+                .onSuccess { updated ->
+                    _state.update { s ->
+                        s.copy(
+                            chats = orderChats(s.chats.map { if (it.id == updated.id) updated else it }),
+                            archivedChats = orderChats(
+                                s.archivedChats.map { if (it.id == updated.id) updated else it },
+                            ),
+                            currentChatPinned =
+                            if (s.currentChatId == updated.id) updated.pinned else s.currentChatPinned,
+                        )
+                    }
+                }
+                .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
+        }
+    }
+
+    // ---------------- 分组 ----------------
+
+    fun refreshGroups() {
+        val conn = currentConnection ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.chatGroups(conn) } }
+                .onSuccess { groups ->
+                    _state.update { it.copy(groups = groups) }
+                }
+        }
+    }
+
+    fun setChatGroup(chatId: String, groupId: String?) {
+        val conn = currentConnection ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.setChatGroup(conn, chatId, groupId) } }
+                .onSuccess { updated ->
+                    _state.update { s ->
+                        s.copy(
+                            chats = s.chats.map { if (it.id == updated.id) updated else it },
+                            currentChatGroupId =
+                            if (s.currentChatId == updated.id) updated.groupId else s.currentChatGroupId,
+                        )
+                    }
+                }
+                .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
+        }
+    }
+
+    // ---------------- 思考模式 / 模型 ----------------
+
+    fun refreshThinking() {
+        val conn = currentConnection ?: return
+        val chatId = _state.value.currentChatId ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.chatThinking(conn, chatId) } }
+                .onSuccess { view ->
+                    _state.update { s ->
+                        s.copy(
+                            thinking = view,
+                            contextMax = view.effectiveMaxInputLength ?: s.contextMax,
+                        )
+                    }
+                }
+        }
+    }
+
+    fun setThinking(level: String, budgetTokens: Long? = null) {
+        val conn = currentConnection ?: return
+        val chatId = _state.value.currentChatId ?: return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setChatThinking(conn, chatId, level, budgetTokens) }
+            }.onSuccess { view ->
+                _state.update { it.copy(thinking = view, error = null) }
+            }.onFailure { e ->
+                val msg = if (e is ApiException && e.code == 422) {
+                    "当前模型不支持这个思考档位"
+                } else {
+                    friendly(e)
+                }
+                _state.update { it.copy(error = msg) }
+            }
+        }
+    }
+
+    // ---------------- 导出 / 复制 ----------------
+
+    /** 把整段会话拼成 Markdown 文本，供复制或导出。 */
+    fun exportMarkdown(): String =
+        markdownOf(_state.value.currentChatName, _state.value.messages)
+
+    /** 把给定标题与消息列表拼成 Markdown（列表页复制全部也复用）。 */
+    fun markdownOf(title: String, messages: List<ChatMessage>): String = buildString {
+        append("# ").append(title.ifBlank { "会话" }).append("\n\n")
+        messages.forEach { message ->
+            when (message.kind) {
+                ChatMessage.Kind.TEXT -> {
+                    append(if (message.role == Role.USER) "**你**" else "**助手**")
+                    append("\n\n").append(message.text).append("\n\n")
+                }
+
+                ChatMessage.Kind.IMAGE -> append("![图片](")
+                    .append(message.imageUrl.orEmpty()).append(")\n\n")
+
+                ChatMessage.Kind.TOOL -> {
+                    append("> 工具 `").append(message.tool?.name.orEmpty()).append("`")
+                    append(if (message.tool?.done == true) "（完成）" else "（运行中）")
+                    append("\n\n")
+                }
+
+                ChatMessage.Kind.REASONING -> {
+                    append("<details><summary>思考过程</summary>\n\n")
+                    append(message.text).append("\n\n</details>\n\n")
+                }
+            }
+        }
+    }
+
+    // ---------------- 工具函数 ----------------
+
+    fun clearError() {
+        _state.update { it.copy(error = null) }
     }
 
     /**
@@ -121,15 +407,28 @@ class ChatViewModel(
         val conn = currentConnection ?: return
         if (!reloadHistory && chatId == _state.value.currentChatId) {
             _state.update {
+                val chat = it.chats.firstOrNull { c -> c.id == chatId }
                 it.copy(
-                    currentChatName = it.chats.firstOrNull { chat -> chat.id == chatId }?.name
-                        ?: it.currentChatName,
+                    currentChatName = chat?.name ?: it.currentChatName,
+                    currentChatPinned = chat?.pinned ?: it.currentChatPinned,
+                    currentChatGroupId = chat?.groupId ?: it.currentChatGroupId,
                 )
             }
             return
         }
         streamJob?.cancel()
-        _state.update { it.copy(currentChatId = chatId, loading = true, error = null) }
+        val known = _state.value.chats.firstOrNull { it.id == chatId }
+            ?: _state.value.archivedChats.firstOrNull { it.id == chatId }
+        _state.update {
+            it.copy(
+                currentChatId = chatId,
+                loading = true,
+                error = null,
+                currentChatPinned = known?.pinned ?: false,
+                currentChatGroupId = known?.groupId,
+                thinking = null,
+            )
+        }
 
         scope.launch {
             if (chatId.isEmpty()) {
@@ -151,7 +450,7 @@ class ChatViewModel(
             val history = runCatching { withContext(Dispatchers.IO) { api.chat(conn, chatId) } }
             val mapped = history.getOrNull()?.let { HistoryMapper.map(it.messages) }
             val status = history.getOrNull()?.status
-            val name = _state.value.chats.firstOrNull { it.id == chatId }?.name.orEmpty()
+            val name = known?.name.orEmpty()
 
             if (mapped != null) {
                 accumulator = StreamAccumulator()
@@ -180,6 +479,9 @@ class ChatViewModel(
                                 role = io.qwenpaw.node.data.stream.Role.valueOf(entity.role),
                                 kind = ChatMessage.Kind.valueOf(entity.kind),
                                 text = entity.text,
+                                imageUrl = entity.payload?.takeIf {
+                                    ChatMessage.Kind.valueOf(entity.kind) == ChatMessage.Kind.IMAGE
+                                },
                             )
                         },
                         currentChatName = name,
@@ -188,6 +490,7 @@ class ChatViewModel(
                 }
                 loadDraft(chatId)
             }
+            refreshThinking()
             startPolling()
         }
     }
@@ -336,14 +639,9 @@ class ChatViewModel(
         val parts = buildList {
             if (text.isNotBlank()) add(api.textPart(text))
             attachments.forEach { url ->
-                val kind = if (url.contains(".png") || url.contains(".jpg") || url.contains(".jpeg") ||
-                    url.contains(".webp") || url.contains(".gif")
-                ) {
-                    "image"
-                } else {
-                    "file"
-                }
-                add(api.mediaPart(kind, url))
+                val name = url.substringAfterLast('/')
+                val kind = if (isImageName(name)) "image" else "file"
+                add(api.mediaPart(kind, url, name))
             }
         }
         val body = api.buildChatBody(
@@ -352,7 +650,12 @@ class ChatViewModel(
             parts = parts,
         )
 
-        accumulator.appendUser(text.ifBlank { "[附件]" })
+        if (text.isNotBlank()) accumulator.appendUser(text)
+        // 图片附件发送后立即回显，服务端历史里也会带回来，但重连前用户能先看到。
+        attachments.filter { isImageName(it.substringAfterLast('/')) }.forEach { url ->
+            accumulator.appendUserImage(url, url.substringAfterLast('/'))
+        }
+        if (text.isBlank() && attachments.isEmpty()) accumulator.appendUser("[附件]")
         _state.update {
             it.copy(
                 messages = accumulator.snapshot(),
@@ -396,7 +699,13 @@ class ChatViewModel(
                         }
 
                         is ChatEvent.TurnUsage -> {
-                            _state.update { it.copy(contextUsage = event.ratio) }
+                            _state.update {
+                                it.copy(
+                                    contextUsage = event.ratio,
+                                    contextTokens = event.estimatedTokens,
+                                    contextMax = event.maxInputLength,
+                                )
+                            }
                         }
 
                         is ChatEvent.ResponseStatus -> {
@@ -515,7 +824,13 @@ class ChatViewModel(
                         is ChatEvent.MessageBlock -> accumulator.onMessageBlock(event)
                         is ChatEvent.ToolCall -> accumulator.onToolCall(event)
                         is ChatEvent.ToolOutput -> accumulator.onToolOutput(event)
-                        is ChatEvent.TurnUsage -> _state.update { it.copy(contextUsage = event.ratio) }
+                        is ChatEvent.TurnUsage -> _state.update {
+                            it.copy(
+                                contextUsage = event.ratio,
+                                contextTokens = event.estimatedTokens,
+                                contextMax = event.maxInputLength,
+                            )
+                        }
                         is ChatEvent.ResponseStatus -> if (event.status == "completed") accumulator.finish()
                         else -> Unit
                     }
@@ -571,8 +886,11 @@ class ChatViewModel(
                     runCatching {
                         withContext(Dispatchers.IO) { api.pendingApprovals(conn, _sessionIdOf(chatId)) }
                     }.onSuccess { approvals ->
-                        val previous = _state.value.pendingApprovals.map { it.requestId }.toSet()
-                        val fresh = approvals.filterNot { it.requestId in previous }
+                        val previous = _state.value.pendingApprovals
+                        // 审批列表通常没变化，避免每次轮询都产生新状态导致整页重组。
+                        if (approvals == previous) return@onSuccess
+                        val previousIds = previous.map { it.requestId }.toSet()
+                        val fresh = approvals.filterNot { it.requestId in previousIds }
                         if (fresh.isNotEmpty()) {
                             _notifications.tryEmit("有 ${fresh.size} 个操作等待审批")
                         }
@@ -616,10 +934,6 @@ class ChatViewModel(
 
     // ---------------- 工具 ----------------
 
-    fun clearError() {
-        _state.update { it.copy(error = null) }
-    }
-
     fun detach() {
         streamJob?.cancel()
         pollJob?.cancel()
@@ -644,7 +958,13 @@ class ChatViewModel(
                             role = message.role.name,
                             kind = message.kind.name,
                             text = message.text,
-                            payload = message.tool?.let { "${it.name}\u0000${it.arguments}\u0000${it.output.orEmpty()}" },
+                            // 图片消息的 url 存在 payload 里，工具卡片沿用旧格式。
+                            payload = when {
+                                message.kind == ChatMessage.Kind.IMAGE -> message.imageUrl
+                                else -> message.tool?.let {
+                                    "${it.name}\u0000${it.arguments}\u0000${it.output.orEmpty()}"
+                                }
+                            },
                             createdAt = System.currentTimeMillis(),
                             position = index,
                         )
@@ -652,6 +972,11 @@ class ChatViewModel(
                 )
             }
         }
+    }
+
+    private fun isImageName(name: String): Boolean {
+        val lower = name.lowercase()
+        return IMAGE_EXTENSIONS.any { lower.endsWith(it) }
     }
 
     private fun _sessionIdOf(chatId: String?): String {
@@ -701,5 +1026,13 @@ class ChatViewModel(
 
     companion object {
         private const val POLL_INTERVAL_MS = 2500L
+
+        /** 只为最近的这么多个会话生成列表预览，避免刷新时打太多详情请求。 */
+        private const val PREVIEW_LIMIT = 20
+
+        private val IMAGE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+
+        /** 服务端为附件消息注入的提示前缀，预览时要跳过。 */
+        private const val UPLOAD_NOTICE_PREFIX = "用户上传文件，已经下载到"
     }
 }

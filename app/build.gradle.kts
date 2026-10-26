@@ -34,6 +34,13 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // sherpa-onnx 的 .so 每个 ABI 20-30MB，四个全打进去光 native 就 98MB。
+        // 只保留 arm64-v8a：覆盖当前所有在用真机，包体直接砍掉近 60MB。
+        // 需要跑 x86 模拟器时，临时在本地放开对应 ABI 即可（不要提交）。
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -73,6 +80,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -107,6 +115,10 @@ dependencies {
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
+    // 离线语音模型是 tar.bz2 包，需要 bzip2 解压
+    implementation("org.apache.commons:commons-compress:1.26.2")
+    // 离线语音识别引擎，AAR 不在 Maven 中央仓库，放在 app/libs
+    implementation(files("libs/sherpa-onnx-1.13.3.aar"))
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

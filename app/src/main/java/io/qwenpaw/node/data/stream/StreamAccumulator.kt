@@ -127,6 +127,17 @@ class StreamAccumulator {
         return message
     }
 
+    /** 追加一条用户发出的图片，用于发送后立即在气泡里回显。 */
+    fun appendUserImage(localUri: String, name: String? = null) {
+        messages += ChatMessage(
+            id = "local-img-${seq.incrementAndGet()}",
+            role = Role.USER,
+            kind = ChatMessage.Kind.IMAGE,
+            imageUrl = localUri,
+            imageName = name,
+        )
+    }
+
     fun appendError(message: String, retryText: String? = null) {
         messages += ChatMessage(
             id = "error-${seq.incrementAndGet()}",

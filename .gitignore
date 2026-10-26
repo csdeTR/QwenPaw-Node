@@ -8,3 +8,8 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+# MiSans 字体不在仓库内分发（许可禁止再分发字体本体），运行时按需下载
+app/src/main/res/font/*.ttf
+app/src/main/res/font/*.otf
+prototype/assets/*.ttf
+prototype/assets/*.otf

@@ -165,10 +165,21 @@ object ChatEventParser {
         val obj = root["context_usage"]
             ?.let { runCatching { it.jsonObject }.getOrNull() }
             ?: return ChatEvent.Ignored
+        val tokens = obj.long("estimated_tokens") ?: 0
+        val maxInput = obj.long("max_input_length") ?: 0
+        // 服务端的 `context_usage_ratio` 是**百分数**（0-100）：
+        // 实测 13815/131072 时给 10.54，959/131073 时给 0.7316，129/131072 时给 0.098。
+        // 因此不能当作 0-1 小数用，否则 UI 乘 100 会放大 100 倍。
+        // 优先用 token 比值（最稳），ratio 缺失时退化为百分数折算。
+        val rawRatio = obj.double("context_usage_ratio") ?: 0.0
+        val ratio = when {
+            maxInput > 0 -> tokens.toDouble() / maxInput.toDouble()
+            else -> rawRatio / 100.0
+        }
         return ChatEvent.TurnUsage(
-            estimatedTokens = obj.long("estimated_tokens") ?: 0,
-            maxInputLength = obj.long("max_input_length") ?: 0,
-            ratio = obj.double("context_usage_ratio") ?: 0.0,
+            estimatedTokens = tokens,
+            maxInputLength = maxInput,
+            ratio = ratio,
         )
     }
 

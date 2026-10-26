@@ -28,8 +28,16 @@ data class ChatMessage(
     val error: String? = null,
     /** 发送失败时保留的原始输入，用于「重试」；非失败消息为 null。 */
     val retryText: String? = null,
+    /**
+     * 图片资源地址。可能是 `data:image/...;base64,...`（历史接口内联）、
+     * `http(s)://...` 外链，或服务端本地绝对路径（走 `/api/files/preview/`）。
+     * 仅在 [Kind.IMAGE] 时有值。
+     */
+    val imageUrl: String? = null,
+    /** 图片附件的原始文件名，仅用于展示。 */
+    val imageName: String? = null,
 ) {
-    enum class Kind { TEXT, REASONING, TOOL }
+    enum class Kind { TEXT, REASONING, TOOL, IMAGE }
 }
 
 /**
@@ -111,16 +119,74 @@ object HistoryMapper {
                 }
 
                 else -> {
-                    val text = dto.content.filter { it.type == "text" }
-                        .joinToString("") { it.text.orEmpty() }
-                    if (text.isNotBlank()) {
-                        out += ChatMessage(
-                            id = dto.id ?: "msg-$index",
-                            role = role,
-                            kind = ChatMessage.Kind.TEXT,
-                            text = text,
-                        )
+                    // 一条 message 里可能同时有文字和图片，按内容块顺序拆成多个渲染单元，
+                    // 这样用户发的「文字 + 图片」能保持原始顺序。
+                    var textBuffer = StringBuilder()
+                    var part = 0
+                    fun flushText() {
+                        val text = textBuffer.toString()
+                        textBuffer = StringBuilder()
+                        if (text.isNotBlank()) {
+                            out += ChatMessage(
+                                id = if (part == 0) dto.id ?: "msg-$index" else (dto.id ?: "msg-$index") + "-t$part",
+                                role = role,
+                                kind = ChatMessage.Kind.TEXT,
+                                text = text,
+                            )
+                        }
                     }
+                    dto.content.forEach { block ->
+                        when (block.type) {
+                            "text" -> {
+                                val text = block.text.orEmpty()
+                                if (text.isNotBlank()) {
+                                    if (textBuffer.isNotEmpty()) {
+                                        flushText()
+                                        part++
+                                    }
+                                    textBuffer.append(text)
+                                }
+                            }
+
+                            "image" -> {
+                                val url = mediaUrlOf(block)
+                                if (!url.isNullOrBlank()) {
+                                    flushText()
+                                    part++
+                                    out += ChatMessage(
+                                        id = (dto.id ?: "msg-$index") + "-img$part",
+                                        role = role,
+                                        kind = ChatMessage.Kind.IMAGE,
+                                        imageUrl = url,
+                                        imageName = block.filename,
+                                    )
+                                }
+                            }
+
+                            "video" -> {
+                                val url = mediaUrlOf(block)
+                                if (!url.isNullOrBlank()) {
+                                    if (textBuffer.isNotEmpty()) {
+                                        flushText()
+                                        part++
+                                    }
+                                    textBuffer.append("[视频] ").append(block.filename ?: url)
+                                }
+                            }
+
+                            "file" -> {
+                                val url = mediaUrlOf(block)
+                                if (!url.isNullOrBlank()) {
+                                    if (textBuffer.isNotEmpty()) {
+                                        flushText()
+                                        part++
+                                    }
+                                    textBuffer.append("[文件] ").append(block.filename ?: url)
+                                }
+                            }
+                        }
+                    }
+                    flushText()
                 }
             }
         }
@@ -146,6 +212,18 @@ object HistoryMapper {
         val element: JsonElement = block.data ?: return null
         return runCatching { element.jsonObject }.getOrNull()
     }
+
+    /**
+     * 取媒体块的可渲染 URL。
+     *
+     * 历史接口把本地图片内联成 data URI（放在 `image_url`）；新协议用扁平字段，
+     * 老协议用 `source.url`。三者都兜住。
+     */
+    private fun mediaUrlOf(block: ContentBlockDto): String? =
+        block.imageUrl
+            ?: block.videoUrl
+            ?: block.fileUrl
+            ?: block.source?.url
 
     private fun kotlinx.serialization.json.JsonObject.string(key: String): String? =
         this[key]?.let { runCatching { it.toString().trim('"') }.getOrNull() }

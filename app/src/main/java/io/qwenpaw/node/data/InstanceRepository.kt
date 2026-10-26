@@ -2,6 +2,7 @@ package io.qwenpaw.node.data
 
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceStore
+import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -30,6 +31,24 @@ class InstanceRepository(
 
     fun connection(instance: InstanceConfig? = active()): Connection? =
         instance?.let { Connection(it.baseUrl, it.token, it.agentId) }
+
+    /** 只探测地址是否可用并列出智能体，不写盘。连接页选智能体时用。 */
+    suspend fun probeAgents(
+        baseUrl: String,
+        username: String?,
+        password: String?,
+    ): List<AgentDto> {
+        val normalized = normalizeBaseUrl(baseUrl)
+        val status = api.authStatus(normalized)
+        var token: String? = null
+        if (status.enabled && status.hasUsers) {
+            if (username.isNullOrBlank() || password.isNullOrBlank()) {
+                throw ApiException(401, "该实例已开启登录鉴权，需要用户名和密码")
+            }
+            token = api.login(normalized, username, password, permanent = true).token
+        }
+        return api.agents(Connection(normalized, token, "default"))
+    }
 
     /**
      * 新增或更新一个实例。
@@ -103,6 +122,12 @@ class InstanceRepository(
         val list = _instances.value.map {
             if (it.id == instanceId) it.copy(agentId = agentId) else it
         }
+        persist(list)
+    }
+
+    /** 就地修改一条实例配置，改完如果是当前实例需要重新连接。 */
+    fun update(instance: InstanceConfig) {
+        val list = _instances.value.map { if (it.id == instance.id) instance else it }
         persist(list)
     }
 
