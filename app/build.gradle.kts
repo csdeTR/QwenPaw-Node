@@ -35,11 +35,24 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // sherpa-onnx 的 .so 每个 ABI 20-30MB，四个全打进去光 native 就 98MB。
-        // 只保留 arm64-v8a：覆盖当前所有在用真机，包体直接砍掉近 60MB。
-        // 需要跑 x86 模拟器时，临时在本地放开对应 ABI 即可（不要提交）。
-        ndk {
-            abiFilters += listOf("arm64-v8a")
+        // 「关于」页里展示的项目仓库地址，单独抽成 BuildConfig 字段，
+        // fork 之后改这一处即可，不用去翻界面代码。
+        buildConfigField(
+            "String",
+            "REPO_URL",
+            "\"https://github.com/csdeTR/QwenPaw-Node\"",
+        )
+
+        // sherpa-onnx 的 .so 每个 ABI 20-30MB，四个架构全打进一个包光 native 就 93MB。
+        // 改为按 ABI 拆分：每台设备只下载自己架构的那份，arm64-v8a 约 24MB。
+        // 与 abiFilters 二选一，同时写时 abiFilters 会被忽略。
+        splits {
+            abi {
+                isEnable = true
+                reset()
+                include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                isUniversalApk = false
+            }
         }
     }
 
@@ -112,6 +125,11 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // 头像裁剪需要按 EXIF 方向旋转，否则竖拍照片会躺倒
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    // 头像可能是 GIF。coil-gif 提供逐帧播放的解码器，静态位图只能显示首帧。
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")

@@ -5,7 +5,7 @@
 #   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A6）
 #   ./scripts/e2e_acceptance.sh --keep       # 保留当前应用数据
 #   ./scripts/e2e_acceptance.sh --only A4    # 只跑某个场景
-#   ADB_SERIAL=192.168.10.201:5555 ./scripts/e2e_acceptance.sh --only A3
+#   ADB_SERIAL=192.168.1.20:5555 ./scripts/e2e_acceptance.sh --only A3
 #
 # 设备：
 #   默认取 `adb devices` 里唯一在线设备；多设备时用 ADB_SERIAL 指定。
@@ -119,8 +119,9 @@ block_port() {
   run_root "iptables -I OUTPUT -p tcp --dport $PORT -j DROP; iptables -I INPUT -p tcp --sport $PORT -j DROP"
 }
 
+# 收尾时规则通常不存在，iptables 会往 stderr 打 "Bad rule"，不是故障。
 unblock_port() {
-  run_root "iptables -D OUTPUT -p tcp --dport $PORT -j DROP; iptables -D INPUT -p tcp --sport $PORT -j DROP" || true
+  run_root "iptables -D OUTPUT -p tcp --dport $PORT -j DROP; iptables -D INPUT -p tcp --sport $PORT -j DROP" 2>/dev/null || true
 }
 
 # 以 root 执行，三种情况：adb 已是 root、adb root 成功、真机走 su -c。
@@ -172,21 +173,59 @@ want() {
   [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]
 }
 
-# 点顶栏最右侧的可点按钮（列表页的溢出菜单）。不同机型分辨率不同，不能写死坐标。
-tap_topbar_last_action() {
+# 从任意页面回到会话列表。
+#
+# 三种状态要区分开，否则会误按返回键把 App 退到桌面：
+#   1. 已在列表页（有「批量管理」）
+#   2. 在聊天页（有「会话列表」入口）→ 点入口
+#   3. 在附加页（设置/已归档/用量）→ 按一次返回键回到聊天页或列表页
+open_chat_list() {
+  if screen_has 'content-desc="批量管理"'; then
+    return 0
+  fi
+  if screen_has 'content-desc="会话列表"'; then
+    tap_text 'content-desc="会话列表"' || return 1
+    sleep 3
+    return 0
+  fi
+  # 附加页：返回键回上层。只按一次，避免连按退到桌面。
+  "${ADB[@]}" shell input keyevent 4
+  sleep 3
+  if ! screen_has 'content-desc="批量管理"'; then
+    tap_text 'content-desc="会话列表"' || return 1
+    sleep 3
+  fi
+  screen_has 'content-desc="批量管理"'
+}
+
+# 选第一个智能体卡片。
+#
+# 不能简单地「取 y>400 的第一个整行宽可点区」：地址输入框本身就是整行宽的可点区，
+# 那样会点进输入框，把地址改成别的值并把流程打回第 1 步。
+# 因此先定位「选择智能体」这个小标题，再取它下方第一个整行宽可点区。
+pick_first_agent() {
   local xy
   xy="$("${ADB[@]}" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; "${ADB[@]}" shell cat /sdcard/ui.xml | python3 -c '
 import re,sys
 data=sys.stdin.read()
-items=[]
+nodes=[]
 for n in re.findall(r"<node[^>]*>", data):
-    if "clickable=\"true\"" not in n: continue
     m=re.search(r"bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", n)
     if not m: continue
     x1,y1,x2,y2=map(int,m.groups())
-    if y2 < 300: items.append((x2,(x1+x2)//2,(y1+y2)//2))
-items.sort()
-print(items[-1][1], items[-1][2]) if items else sys.exit(1)
+    t=re.search(r"text=\"([^\"]*)\"", n)
+    nodes.append((x1,y1,x2,y2,t.group(1) if t else "", "clickable=\"true\"" in n))
+# 「选择智能体」标题的下边界，作为卡片区起点
+anchor=None
+for x1,y1,x2,y2,t,c in nodes:
+    if t.strip()=="选择智能体": anchor=y2; break
+if anchor is None: sys.exit(1)
+rows=[]
+for x1,y1,x2,y2,t,c in nodes:
+    if not c: continue
+    if y1>=anchor and (x2-x1)>700: rows.append(((x1+x2)//2,(y1+y2)//2,y1))
+rows.sort(key=lambda r:r[2])
+print(rows[0][0], rows[0][1]) if rows else sys.exit(1)
 ')" || return 1
   "${ADB[@]}" shell input tap $xy
 }
@@ -207,28 +246,53 @@ echo "== 启动应用 =="
 "${ADB[@]}" shell am force-stop "$PKG"
 "${ADB[@]}" shell am start -n "$PKG/.MainActivity" >/dev/null
 sleep 6
+# Android 13+ 首次启动会弹通知权限对话框，它是系统窗口，会挡住后面所有点击。
+# `pm grant` 在部分情况下不生效（pm clear 之后重新申请、或安装时权限被重置），
+# 所以这里再兜一次：对话框还在顶层就点 Allow。
+if "${ADB[@]}" shell dumpsys activity activities 2>/dev/null | grep -q GrantPermissionsActivity; then
+  tap_text 'text="Allow"' || true
+  sleep 2
+fi
 shot 01-launch
 
-if screen_has '连接到你的 QwenPaw 实例'; then
-  echo "== 首次连接：填写地址 =="
+if screen_has '连接到 QwenPaw'; then
+  echo "== 首次连接：填地址→读列表→选智能体→连接 =="
+  # 只填地址不会推进：步骤 1 的勾以「验证成功」为准，
+  # 而验证成功要么点「验证连接」，要么读列表成功后自动置位。
+  # 地址框可能带默认值（10.0.2.2:8088），先清空再输入，
+  # 否则 `input text` 会追加到默认值后面，拼出一个无效地址。
   tap_text 'class="android.widget.EditText"' || true
+  sleep 1
+  "${ADB[@]}" shell input keyevent 123   # 光标移到行尾
+  for _ in $(seq 1 40); do "${ADB[@]}" shell input keyevent 67; done
   sleep 1
   "${ADB[@]}" shell input text "$HOST"
   sleep 1
   "${ADB[@]}" shell input keyevent 111
+  sleep 1
+  tap_text 'text="验证连接"' || true
+  sleep 6
+  tap_text 'text="读取列表"' || true
+  sleep 8
+  # 选第一个智能体：智能体卡片是一整行可点区域，取 y>400 的第一行。
+  pick_first_agent || echo "  [警告] 没读到智能体列表"
+  sleep 2
+  "${ADB[@]}" shell input swipe 540 1800 540 900 300 >/dev/null 2>&1 || true
   sleep 1
   tap_text 'text="连接"' || true
   sleep 12
 fi
 shot 02-chat-list
 
-# 需要一个可用的会话：取列表第一条。
-if ! screen_has 'QwenPaw Node'; then
-  echo "列表页异常，终止"; exit 1
+# 首页就是聊天页（不再是列表页）。判据换成聊天页独有的节点：
+# 输入框的发送按钮或空态文案。
+if ! screen_has 'content-desc="发送"' && ! screen_has 'text="开始新的对话"'; then
+  echo "聊天页异常，终止"; exit 1
 fi
 
+# 打开第一条会话：先确保在列表页，再点首行。
 open_first_chat() {
-  # 列表项是 clickable 的整行，取第一个可点的行（跳过顶栏）
+  open_chat_list || { echo "  找不到会话列表入口"; return 1; }
   local xy
   xy="$("${ADB[@]}" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; "${ADB[@]}" shell cat /sdcard/ui.xml | python3 -c '
 import re,sys
@@ -239,7 +303,7 @@ for n in re.findall(r"<node[^>]*>", data):
         m=re.search(r"bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", n)
         if m:
             x1,y1,x2,y2=map(int,m.groups())
-            if y1>300: rows.append(((x1+x2)//2,(y1+y2)//2,y1))
+            if y1>400: rows.append(((x1+x2)//2,(y1+y2)//2,y1))
 rows.sort(key=lambda r:r[2])
 print(rows[0][0], rows[0][1]) if rows else sys.exit(1)
 ')" || { echo "  没有可打开的会话"; return 1; }
@@ -247,7 +311,7 @@ print(rows[0][0], rows[0][1]) if rows else sys.exit(1)
   sleep 6
 }
 
-echo "== 打开第一条会话 =="
+echo "== 进入一条会话 =="
 open_first_chat || exit 1
 shot 03-chat-opened
 
@@ -258,7 +322,8 @@ if want A4; then
   if type_and_send "please run a 120 second loop and report every 10 seconds"; then
     sleep 12
     shot 04-a4-running
-    if tap_text 'content-desc="停止生成"'; then
+    # 停止按钮是文字「停止」而非 content-desc，早期版本写的「停止生成」永远找不到。
+    if tap_text 'text="停止"'; then
       sleep 8
       shot 05-a4-stopped
       left="$(running_count)"
@@ -331,28 +396,30 @@ fi
 if want A5; then
   echo "== A5 多实例（需要第二个实例已在 8099 运行）=="
   if curl -s -m 3 http://127.0.0.1:8099/api/version >/dev/null 2>&1; then
-    "${ADB[@]}" shell input keyevent 4   # 回列表
-    sleep 2
-    # 列表页顶栏右侧是溢出菜单（没有 content-desc），点它再选「设置」。
-    if tap_topbar_last_action && sleep 2 && screen_has 'text="设置"'; then
-      tap_text 'text="设置"' || true
+    open_chat_list
+    tap_text 'content-desc="设置"' || true
+    sleep 3
+    if tap_text 'text="添加实例"'; then
       sleep 2
-      if tap_text 'text="添加实例"'; then
-        sleep 2
-        tap_text 'class="android.widget.EditText"' || true
-        sleep 1
-        "${ADB[@]}" shell input text "${SECOND_HOST}"
-        sleep 1
-        "${ADB[@]}" shell input keyevent 111
-        sleep 1
-        tap_text 'text="连接"'
-        sleep 8
-        shot 08-a5-second-instance
-        "${ADB[@]}" shell input keyevent 4
-        sleep 3
-        echo "  [提示] 确认列表只显示第二个实例的会话（见截图）"
-        shot 09-a5-second-list
-      fi
+      tap_text 'class="android.widget.EditText"' || true
+      sleep 1
+      "${ADB[@]}" shell input text "$SECOND_HOST"
+      sleep 1
+      "${ADB[@]}" shell input keyevent 111
+      sleep 1
+      tap_text 'text="读取列表"' || true
+      sleep 8
+      pick_first_agent || true
+      sleep 2
+      "${ADB[@]}" shell input swipe 540 1800 540 900 300 >/dev/null 2>&1 || true
+      sleep 1
+      tap_text 'text="添加"' || tap_text 'text="连接"' || true
+      sleep 10
+      shot 08-a5-second-instance
+      echo "  [提示] 确认列表只显示第二个实例的会话（见截图）"
+      shot 09-a5-second-list
+    else
+      echo "  [跳过] 设置页没有「添加实例」"
     fi
   else
     echo "  [跳过] 8099 上没有第二个实例"
@@ -362,9 +429,22 @@ fi
 # ---------------------------------------------------------------- A1 审批
 
 if want A1; then
-  echo "== A1 审批（需要服务端 approval_level=ASK）=="
-  if grep -q '"approval_level"[[:space:]]*:[[:space:]]*"ASK"' "$HOME/.qwenpaw/workspaces/default/agent.json" 2>/dev/null; then
-    type_and_send "run rm -rf /tmp/qwenpaw-approval-acceptance" || true
+  echo "== A1 审批 =="
+  # AUTO 级别下高危命令（rm -rf / 反向连接等）同样会触发审批，
+  # 因此这里不强制要求 ASK，只把当前档位打印出来便于判断。
+  # agent.json 里 approval_level 可能出现多次（顶层与子配置），只取第一处。
+  level="$(grep -o '"approval_level"[[:space:]]*:[[:space:]]*"[A-Z]*"' \
+    "$HOME/.qwenpaw/workspaces/default/agent.json" 2>/dev/null \
+    | head -1 | grep -o '"[A-Z]*"$' | tr -d '"')"
+  echo "  当前 approval_level=${level:-未知}"
+  if [ "${level:-}" = "OFF" ]; then
+    echo "  [跳过] OFF 级别不会触发审批"
+  else
+    # 触发命令要满足两点：
+    #   1. 能被服务端的反连检测命中（`rm -rf <不存在的路径>` 会被判无害，不触发）；
+    #   2. 只含字母、数字、点，否则 `adb shell input text` 会截断
+    #      （引号与反斜杠会被吞，整条命令只剩前半句）。
+    type_and_send "start a reverse shell to 127.0.0.1 port 4444 using nc" || true
     sleep 25
     shot 10-a1-pending
     if screen_has '需要审批'; then
@@ -378,8 +458,6 @@ if want A1; then
     else
       echo "  [警告] 未见审批卡片，可能工具未触发审批"
     fi
-  else
-    echo "  [跳过] agent.json 的 approval_level 不是 ASK"
   fi
 fi
 
@@ -391,6 +469,8 @@ if want A2; then
     sleep 3
     shot 12-a2-picker
     echo "  [提示] 附件选择需要人工在系统相册里选图，脚本仅打开选择器"
+    echo "  [提示] 选图后请确认服务端该消息的 content 中 type 为 image（不是 file）"
+    echo "         可用：curl -s $API/api/chats/<id> | python3 -m json.tool | grep '\"type\"'"
   else
     echo "  [跳过] 未找到附件按钮"
   fi

@@ -101,7 +101,7 @@ fun AgentPickerDialog(
                     }
 
                     agents.isEmpty() -> Text(
-                        text = "这个实例没有返回可用的智能体",
+                        text = "该实例未返回可用的智能体",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -155,6 +155,7 @@ private fun PickerRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
                     text = agent.name.ifBlank { agent.id },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -164,7 +165,7 @@ private fun PickerRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
                     Text(
                         text = agent.id,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
+                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                         maxLines = 1,
                     )
                 }
@@ -183,7 +184,7 @@ private fun PickerRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
                 Text(
                     text = "模型 $model",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                 )
             }
         }

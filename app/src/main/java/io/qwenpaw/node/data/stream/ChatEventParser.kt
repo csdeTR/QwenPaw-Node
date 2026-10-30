@@ -62,6 +62,8 @@ sealed interface ChatEvent {
         val estimatedTokens: Long,
         val maxInputLength: Long,
         val ratio: Double,
+        /** 本轮 token 账目与模型名；服务端未提供时为 null。 */
+        val stats: TurnStats? = null,
     ) : ChatEvent
 
     data class RateLimited(val message: String, val alternatives: List<String>) : ChatEvent
@@ -180,6 +182,32 @@ object ChatEventParser {
             estimatedTokens = tokens,
             maxInputLength = maxInput,
             ratio = ratio,
+            stats = parseStats(root),
+        )
+    }
+
+    /**
+     * 解析本轮的 token 账目。
+     *
+     * 流式帧里 `usage` 与 `context_usage` 平级，都是 `turn_usage` 的子键。
+     * 缺 `usage` 是正常的（例如被打断的运行），此时只丢统计、不影响上下文比例。
+     */
+    private fun parseStats(root: JsonObject): TurnStats? {
+        val usage = root["usage"]
+            ?.let { runCatching { it.jsonObject }.getOrNull() }
+            ?: return null
+        val prompt = usage.long("prompt_tokens") ?: 0
+        val completion = usage.long("completion_tokens") ?: 0
+        val model = usage.string("model_name")
+        if (prompt <= 0 && completion <= 0 && model.isNullOrBlank()) return null
+        return TurnStats(
+            promptTokens = prompt,
+            completionTokens = completion,
+            cacheReadTokens = usage.long("cache_read_tokens") ?: 0,
+            // 服务端给百分数（74.99 表示 75%），折成 0..1 小数后再交给界面。
+            cacheHitRate = (usage.double("cache_hit_rate") ?: 0.0) / 100.0,
+            model = model,
+            providerId = usage.string("provider_id"),
         )
     }
 

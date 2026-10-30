@@ -10,11 +10,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -49,7 +54,15 @@ fun ChatInputBar(
     attachments: List<String>,
     running: Boolean,
     modelName: String?,
-    voiceAvailable: Boolean,
+    /**
+     * 是否显示麦克风。**只由设置里的开关决定，与模型是否下载无关。**
+     *
+     * 模型未下载时按钮依然显示，点击后由外部弹提示引导下载——若此时也隐藏，
+     * 用户将无从发现该功能缺少什么。这个参数此前叫 voiceAvailable，
+     * 混淆了「可用」与「可见」两种含义，导致开关关闭后按钮仍然露出。
+     */
+    voiceVisible: Boolean,
+    voiceReady: Boolean,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -57,6 +70,20 @@ fun ChatInputBar(
     onVoice: () -> Unit,
     onVoiceStart: () -> Unit = {},
     onVoiceStop: () -> Unit = {},
+    /**
+     * true 时麦克风是「按住说话」：按下开始、松手结束。
+     * false（默认）时是「点一下」：点一次开始，再点一次结束。
+     */
+    voiceHoldMode: Boolean = false,
+    /** 「点一下」模式下当前是否正在录音，用来切换麦克风的高亮与图标含义。 */
+    voiceListening: Boolean = false,
+    /**
+     * 点击模型胶囊。打开模型切换对话框。
+     *
+     * 胶囊既是「当前模型」的显示，也是最顺手的切换入口：用户看到模型名
+     * 想换一个时，第一反应就是点它，而不是去右上角的菜单里找。
+     */
+    onModelClick: () -> Unit = {},
     onRemoveAttachment: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -65,7 +92,13 @@ fun ChatInputBar(
         color = MaterialTheme.colorScheme.surface,
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+        // 让开手势条 / 键盘的高度加在 Surface **内部**：底色能一直铺到屏幕底边，
+        // 系统栏处不会露出一条页面底色。取并集而非相加——键盘高度本身已含手势条。
+        Column(
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
             if (attachments.isNotEmpty()) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -135,6 +168,10 @@ fun ChatInputBar(
                                 MaterialTheme.colorScheme.outlineVariant,
                                 RoundedCornerShape(999.dp),
                             )
+                            .clickable(
+                                role = androidx.compose.ui.semantics.Role.Button,
+                                onClick = onModelClick,
+                            )
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
                         Text(
@@ -147,14 +184,30 @@ fun ChatInputBar(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton42(
-                    icon = Icons.Default.Mic,
-                    description = "语音输入",
-                    enabled = voiceAvailable,
-                    // 按住说话，松手结束
-                    onPress = { pressing -> if (pressing) onVoiceStart() else onVoiceStop() },
-                )
-                Spacer(Modifier.width(6.dp))
+                // 开关关闭时整个按钮不渲染（不是置灰、不占位）。
+                if (voiceVisible) {
+                    IconButton42(
+                        icon = Icons.Default.Mic,
+                        description = if (voiceHoldMode) "按住说话" else "点击开始录音",
+                        // 模型未就绪也可点：由外部弹提示引导下载，而不是把入口藏起来。
+                        enabled = true,
+                        dimmed = !voiceReady,
+                        highlighted = voiceListening,
+                        // 按住说话：按下开始、松手结束。
+                        // 点一下：在 start 与 stop 之间切换（由外部状态决定哪一次）。
+                        onPress = if (voiceHoldMode) {
+                            { pressing ->
+                                if (pressing) onVoiceStart() else onVoiceStop()
+                            }
+                        } else {
+                            null
+                        },
+                        onClick = {
+                            if (voiceListening) onVoiceStop() else onVoiceStart()
+                        },
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
                 SendButton(
                     running = running,
                     enabled = draft.isNotBlank() || attachments.isNotEmpty(),
@@ -171,19 +224,38 @@ private fun IconButton42(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     description: String,
     enabled: Boolean = true,
+    /**
+     * 视觉上弱化，但**仍然可点**。
+     *
+     * 用于「功能存在但前置条件未满足」的情形：例如麦克风在模型未下载时依旧显示，
+     * 点击会弹提示。不能用 [enabled] = false 表达这种状态，那会连点击都没了。
+     */
+    dimmed: Boolean = false,
+    /** 高亮态：用于「点一下」模式正在录音时的麦克风。 */
+    highlighted: Boolean = false,
     /** 按下回调 true，松手回调 false。null 时退化为普通点击。 */
     onPress: ((Boolean) -> Unit)? = null,
     onClick: () -> Unit = {},
 ) {
+    val borderColor = when {
+        highlighted -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.outlineVariant
+    }
+    val iconTint = when {
+        highlighted -> MaterialTheme.colorScheme.primary
+        dimmed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+        !enabled -> MaterialTheme.colorScheme.outline
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Box(
         modifier = Modifier
             .size(34.dp)
             .clip(RoundedCornerShape(10.dp))
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.outlineVariant,
-                RoundedCornerShape(10.dp),
+            .background(
+                if (highlighted) MaterialTheme.colorScheme.secondaryContainer
+                else androidx.compose.ui.graphics.Color.Transparent,
             )
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
             .then(
                 if (onPress != null) {
                     Modifier.pointerInput(enabled) {
@@ -212,11 +284,7 @@ private fun IconButton42(
             imageVector = icon,
             contentDescription = description,
             modifier = Modifier.size(17.dp),
-            tint = if (enabled) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.outline
-            },
+            tint = iconTint,
         )
     }
 }

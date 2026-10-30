@@ -34,8 +34,8 @@ class InstanceRepositoryTest {
     @Test
     fun `folds full width punctuation`() {
         assertEquals(
-            "http://192.168.10.204:8088",
-            InstanceRepository.normalizeBaseUrl("192。168。10。204：8088"),
+            "http://192.168.1.10:8088",
+            InstanceRepository.normalizeBaseUrl("192。168。1。10：8088"),
         )
     }
 }

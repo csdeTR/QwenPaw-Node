@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -55,7 +56,9 @@ fun ArchivedScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background),
+                    .background(MaterialTheme.colorScheme.background)
+                    // 自定义顶栏自行让开状态栏，否则会被通知栏压住。
+                    .statusBarsPadding(),
             ) {
                 Row(
                     modifier = Modifier
@@ -118,7 +121,7 @@ fun ArchivedScreen(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "在会话列表长按即可归档",
+                        text = "在会话列表中长按会话即可归档",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -141,7 +144,7 @@ fun ArchivedScreen(
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("删除会话") },
-            text = { Text("删除后无法恢复，确定要删除「${chat.name}」吗") },
+            text = { Text("删除后无法恢复，确定要删除「${chat.name}」吗？") },
             confirmButton = {
                 TextButton(onClick = {
                     onDelete(chat.id)

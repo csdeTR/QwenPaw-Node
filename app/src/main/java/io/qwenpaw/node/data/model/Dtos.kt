@@ -54,6 +54,44 @@ data class MessageMetadataDto(
     val timestamp: String? = null,
     @SerialName("finished_at") val finishedAt: String? = null,
     @SerialName("original_id") val originalId: String? = null,
+    /** 发送者名称。助手侧是智能体显示名（如 `Default Agent`），用户侧通常是 `user`。 */
+    @SerialName("original_name") val originalName: String? = null,
+    /** 用量与上下文信息。服务端把整轮数据挂在这一层，键名为 `qwenpaw_turn_usage`。 */
+    val metadata: TurnUsageMetaDto? = null,
+)
+
+/** `metadata` 里的一层包装。目前只有 `qwenpaw_turn_usage` 一个键。 */
+@Serializable
+data class TurnUsageMetaDto(
+    @SerialName("qwenpaw_turn_usage") val turnUsage: TurnUsageWrapperDto? = null,
+)
+
+/**
+ * 一轮的用量包装。
+ *
+ * 只取 `usage`。`context_usage` 不在这里建模：窗口占用是流式帧里单独推送的
+ * 实时值，历史接口里的快照对界面没有用处，建模只会多一层不读的字段。
+ */
+@Serializable
+data class TurnUsageWrapperDto(
+    val usage: TurnUsageStatsDto? = null,
+)
+
+/**
+ * 单轮用量。
+ *
+ * 与聚合统计的 [TokenUsageDto] 是两回事：那个是 `GET /api/token-usage` 的累计值，
+ * 字段名都带 `total_` 前缀。这里只描述一轮。
+ */
+@Serializable
+data class TurnUsageStatsDto(
+    @SerialName("provider_id") val providerId: String? = null,
+    @SerialName("model_name") val modelName: String? = null,
+    @SerialName("prompt_tokens") val promptTokens: Long = 0,
+    @SerialName("completion_tokens") val completionTokens: Long = 0,
+    @SerialName("cache_read_tokens") val cacheReadTokens: Long = 0,
+    @SerialName("cache_hit_rate") val cacheHitRate: Double = 0.0,
+    @SerialName("context_size") val contextSize: Long = 0,
 )
 
 /**
@@ -136,6 +174,18 @@ data class ActiveModelDto(
     val model: String? = null,
 )
 
+/**
+ * 全局默认模型，对应 `GET /api/models/active`。
+ *
+ * 实测服务端**拒绝**用 `null` 恢复会话的默认模型（`{"detail":"Model provider is unavailable"}`），
+ * 客户端不能靠传空值回退：必须先取此端点里的 provider 与 model，再显式写到会话上。
+ */
+@Serializable
+data class ModelsActiveDto(
+    @SerialName("active_llm") val activeLlm: ActiveModelDto? = null,
+    @SerialName("effective_max_input_length") val effectiveMaxInputLength: Long? = null,
+)
+
 @Serializable
 data class AgentListDto(
     val agents: List<AgentDto> = emptyList(),
@@ -184,6 +234,24 @@ data class ChatGroupDto(
     val kind: String? = null,
     val source: String? = null,
     val pinned: Boolean = false,
+)
+
+/**
+ * 批量归档 / 取消归档的结果，对应 `/api/chats/actions/batch-*`。
+ *
+ * 运行中的会话会被服务端跳过并记进 [failed]。
+ */
+@Serializable
+data class BatchChatResultDto(
+    val succeeded: List<String> = emptyList(),
+    val failed: List<BatchFailureDto> = emptyList(),
+)
+
+/** 批量操作里单条失败的原因。 */
+@Serializable
+data class BatchFailureDto(
+    @SerialName("chat_id") val chatId: String = "",
+    val reason: String = "",
 )
 
 /**
@@ -241,12 +309,56 @@ data class ModelSlotDto(
     @SerialName("max_input_length") val maxInputLength: Long? = null,
 )
 
-/** 供应商，对应 `GET /api/models` 的元素（只取客户端需要的字段）。 */
+/**
+ * 供应商，对应 `GET /api/models` 的元素。
+ *
+ * 可选模型分散在三个数组里：`models`（配置里写明的）、`extra_models`（额外添加的）、
+ * `discovered_models`（探测到的）。**不要用 `/api/models/{id}/pool` 取模型列表**——
+ * 本地部署下该端点返回空数组，客户端若依赖它会显示「没有可用模型」。
+ */
 @Serializable
 data class ProviderDto(
     val id: String,
     val name: String = "",
     val enabled: Boolean = true,
+    val models: List<ModelSlotDto> = emptyList(),
+    @SerialName("extra_models") val extraModels: List<ModelSlotDto> = emptyList(),
+    @SerialName("discovered_models") val discoveredModels: List<ModelSlotDto> = emptyList(),
+    /** 该供应商当前的默认对话模型，用于在菜单里标出「默认」。 */
+    @SerialName("chat_model") val chatModel: String? = null,
+) {
+    /** 三个数组按 id 去重合并，顺序为 配置 → 额外 → 探测。 */
+    val allModels: List<ModelSlotDto>
+        get() {
+            val seen = LinkedHashMap<String, ModelSlotDto>()
+            (models + extraModels + discoveredModels).forEach { m ->
+                if (m.id.isNotBlank()) seen.putIfAbsent(m.id, m)
+            }
+            return seen.values.toList()
+        }
+}
+
+/** 智能体配置，对应 `GET /api/agents/{id}`。只取客户端需要的字段。 */
+@Serializable
+data class AgentProfileDto(
+    val id: String,
+    val name: String = "",
+    /** 审批模式：STRICT / SMART / AUTO / OFF。 */
+    @SerialName("approval_level") val approvalLevel: String = "AUTO",
+)
+
+/**
+ * 工作区目录，对应 `GET /api/workspace/project-directory`。
+ *
+ * `path` 是服务端上的绝对路径，与手机本地路径无关。
+ */
+@Serializable
+data class ProjectDirDto(
+    val path: String = "",
+    val name: String = "",
+    @SerialName("is_workspace_default") val isWorkspaceDefault: Boolean = false,
+    @SerialName("workspace_dir") val workspaceDir: String? = null,
+    val exists: Boolean = true,
 )
 
 /** token 用量汇总，对应 `GET /api/token-usage`。 */

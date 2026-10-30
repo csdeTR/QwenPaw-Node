@@ -54,20 +54,30 @@ fun MarkdownText(
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     val blocks = remember(markdown) { MarkdownParser.parse(markdown) }
+    // 标题/代码块这类固定尺寸也要跟着聊天字号缩放，否则调大后它们相对偏小。
+    val scale = io.qwenpaw.node.ui.theme.LocalChatFontScale.current
+    // 行内样式（**粗体**、`代码`、*斜体*）的解析结果按块缓存。滚动时进入视口的条目
+    // 会反复重组，不缓存就要每次重跑一遍逐字符解析、重建 AnnotatedString。
+    val inlines = remember(blocks, scale) {
+        blocks.map { block -> block.inlineText?.let { inline(it, scale) } }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        blocks.forEach { block ->
+        blocks.forEachIndexed { index, block ->
+            val styled = inlines[index]
             when (block) {
-                is MdBlock.Paragraph -> SelectableParagraph(block.text, color)
+                // 段落不再各自套 SelectionContainer：整条气泡由外层统一提供选区。
+                // 每段落套一层会让命中路径上的指针节点翻倍，逐事件的命中测试开销随之上涨。
+                is MdBlock.Paragraph -> Text(text = styled!!, color = color)
                 is MdBlock.Heading -> Text(
-                    text = inline(block.text),
-                    fontSize = (22 - block.level * 2).coerceAtLeast(13).sp,
+                    text = styled!!,
+                    fontSize = ((22 - block.level * 2).coerceAtLeast(13) * scale).sp,
                     fontWeight = FontWeight.Bold,
                     color = color,
                 )
 
                 is MdBlock.Bullet -> Row {
                     Text("•", color = color, modifier = Modifier.padding(end = 6.dp))
-                    Text(text = inline(block.text), color = color)
+                    Text(text = styled!!, color = color)
                 }
 
                 is MdBlock.Code -> CodeBlock(block.code, block.language)
@@ -81,7 +91,7 @@ fun MarkdownText(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = inline(block.text),
+                        text = styled!!,
                         color = color.copy(alpha = 0.8f),
                         fontStyle = FontStyle.Italic,
                     )
@@ -91,15 +101,8 @@ fun MarkdownText(
     }
 }
 
-@Composable
-private fun SelectableParagraph(text: String, color: Color) {
-    SelectionContainer {
-        Text(text = inline(text), color = color)
-    }
-}
-
 /** 行内样式：**粗体**、`代码`、*斜体*。 */
-private fun inline(text: String): AnnotatedString = buildAnnotatedString {
+private fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
         when {
@@ -122,7 +125,7 @@ private fun inline(text: String): AnnotatedString = buildAnnotatedString {
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
                             background = Color(0x33808080),
-                            fontSize = 13.sp,
+                            fontSize = (13 * scale).sp,
                         ),
                     ) {
                         append(text.substring(i + 1, end))
@@ -158,6 +161,8 @@ private fun CodeBlock(code: String, language: String?) {
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val isMermaid = language.equals("mermaid", ignoreCase = true)
+    // 代码块用固定字号，也要跟着聊天字号缩放，否则正文调大后代码块明显偏小。
+    val scale = io.qwenpaw.node.ui.theme.LocalChatFontScale.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -197,8 +202,8 @@ private fun CodeBlock(code: String, language: String?) {
             Text(
                 text = code,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
+                fontSize = (13 * scale).sp,
+                lineHeight = (19 * scale).sp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
@@ -222,6 +227,11 @@ private fun CodeBlock(code: String, language: String?) {
 private fun MarkdownTable(rows: List<List<String>>, color: Color) {
     if (rows.isEmpty()) return
     val columns = rows.maxOf { it.size }
+    // 单元格的行内样式按内容缓存：一张十几行的表格有几十个单元格，
+    // 若每次重组都逐字符重解析，可见表格在滚动期间会持续产生额外的主线程开销。
+    val cells = remember(rows, columns) {
+        rows.map { row -> (0 until columns).map { col -> inline(row.getOrElse(col) { "" }) } }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -234,7 +244,7 @@ private fun MarkdownTable(rows: List<List<String>>, color: Color) {
             Row {
                 repeat(columns) { col ->
                     Text(
-                        text = inline(row.getOrElse(col) { "" }),
+                        text = cells[index][col],
                         color = color,
                         fontWeight = if (index == 0) FontWeight.Bold else FontWeight.Normal,
                         style = MaterialTheme.typography.bodySmall,
@@ -253,13 +263,44 @@ private fun MarkdownTable(rows: List<List<String>>, color: Color) {
 
 /** Markdown 块模型。 */
 sealed interface MdBlock {
-    data class Paragraph(val text: String) : MdBlock
-    data class Heading(val level: Int, val text: String) : MdBlock
-    data class Bullet(val text: String) : MdBlock
-    data class Code(val code: String, val language: String?) : MdBlock
-    data class Table(val rows: List<List<String>>) : MdBlock
-    data class Quote(val text: String) : MdBlock
+    /** 需要做行内样式解析的原文；代码块/表格为 null，不走行内缓存。 */
+    val inlineText: String?
+
+    data class Paragraph(val text: String) : MdBlock {
+        override val inlineText: String get() = text
+    }
+
+    data class Heading(val level: Int, val text: String) : MdBlock {
+        override val inlineText: String get() = text
+    }
+
+    data class Bullet(val text: String) : MdBlock {
+        override val inlineText: String get() = text
+    }
+
+    data class Code(val code: String, val language: String?) : MdBlock {
+        override val inlineText: String? get() = null
+    }
+
+    data class Table(val rows: List<List<String>>) : MdBlock {
+        override val inlineText: String? get() = null
+    }
+
+    data class Quote(val text: String) : MdBlock {
+        override val inlineText: String get() = text
+    }
 }
+
+/**
+ * 解析期用到的正则。
+ *
+ * 必须是文件级常量：写在循环里会让**每一行、每一个表格单元格**都重新编译一次
+ * `java.util.regex.Pattern`。解析本身已按内容缓存，但列表项滚出视口后会被销毁、
+ * 再滚回来时要重解析一遍，这些重复编译就压在滚动的每一帧上。
+ */
+private val ORDERED_LIST_RE = Regex("^\\d+[.)]\\s+.*")
+private val ORDERED_LIST_PREFIX_RE = Regex("^\\d+[.)]\\s+")
+private val TABLE_SEPARATOR_RE = Regex("^:?-{2,}:?$")
 
 /** 逐行解析 Markdown。保持无状态，便于单元测试。 */
 object MarkdownParser {
@@ -307,9 +348,9 @@ object MarkdownParser {
                     blocks += MdBlock.Bullet(trimmed.drop(2).trim())
                 }
 
-                trimmed.matches(Regex("^\\d+[.)]\\s+.*")) -> {
+                trimmed.matches(ORDERED_LIST_RE) -> {
                     flushParagraph()
-                    blocks += MdBlock.Bullet(trimmed.replaceFirst(Regex("^\\d+[.)]\\s+"), ""))
+                    blocks += MdBlock.Bullet(trimmed.replaceFirst(ORDERED_LIST_PREFIX_RE, ""))
                 }
 
                 trimmed.startsWith(">") -> {
@@ -325,7 +366,7 @@ object MarkdownParser {
                         if (!candidate.startsWith("|") || !candidate.endsWith("|")) break
                         val cells = candidate.trim('|').split('|').map { it.trim() }
                         // 跳过 Markdown 表格的分隔行 |---|---|
-                        if (!cells.all { it.matches(Regex("^:?-{2,}:?$")) }) {
+                        if (!cells.all { it.matches(TABLE_SEPARATOR_RE) }) {
                             rows += cells
                         }
                         i++

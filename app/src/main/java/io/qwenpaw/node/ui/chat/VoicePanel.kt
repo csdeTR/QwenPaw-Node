@@ -45,6 +45,8 @@ fun VoiceIntroDialog(
     modelReady: Boolean,
     onDismiss: () -> Unit,
     onDownload: () -> Unit,
+    /** 当前触发方式，用来给出对应的操作提示。 */
+    holdMode: Boolean = false,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -52,22 +54,18 @@ fun VoiceIntroDialog(
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    text = "语音输入在手机本地完成，不走云端。第一次用要先下载识别模型，之后断网也能用。",
+                    text = "语音输入必须使用本地识别模型，模型约 150MB；下载后音频只在本机处理，不再需要联网。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.size(10.dp))
-                Bullet("按住输入框旁的麦克风开始说话，松开即结束。")
-                Bullet("音频只在本机处理，不会上传到任何服务器。")
-                Bullet("识别结果显示在输入框上方，松手后填进输入框。")
-                if (modelReady) {
-                    Spacer(Modifier.size(8.dp))
-                    Text(
-                        text = "模型已经下载好了，直接说话就行。",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
+                if (holdMode) {
+                    Bullet("按住输入框旁的麦克风开始说话，松开即结束。")
+                } else {
+                    Bullet("点击麦克风开始录音，再次点击结束。")
                 }
+                Bullet("识别结果显示在输入框上方，结束后填入输入框。")
+                Bullet("触发方式与自动停止均可在设置中修改。")
             }
         },
         confirmButton = {
@@ -76,7 +74,7 @@ fun VoiceIntroDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("以后再说") }
+            TextButton(onClick = onDismiss) { Text("暂不设置") }
         },
     )
 }
@@ -104,6 +102,10 @@ fun VoiceSheet(
     state: VoiceState,
     partial: String,
     onCancel: () -> Unit,
+    /** 按住说话模式：提示「松开结束」；点一下模式：提示「说完了」。 */
+    holdMode: Boolean = true,
+    /** 点一下模式且开启了自动停止时，提示会在停顿后自动结束。 */
+    autoStop: Boolean = false,
 ) {
     val pulse = rememberInfiniteTransition(label = "mic").animateFloat(
         initialValue = 0.85f,
@@ -149,7 +151,11 @@ fun VoiceSheet(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = when (state) {
-                        VoiceState.Listening -> "正在听，松开麦克风结束"
+                        VoiceState.Listening -> when {
+                            holdMode -> "正在听，松开麦克风结束"
+                            autoStop -> "正在听，停顿后会自己结束"
+                            else -> "正在听，点麦克风结束"
+                        }
                         is VoiceState.Error -> state.message
                         VoiceState.Idle -> "准备中"
                     },
@@ -165,7 +171,7 @@ fun VoiceSheet(
                     text = partial.ifBlank { "说话的內容会实时出现在这里" },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (partial.isBlank()) {
-                        MaterialTheme.colorScheme.outline
+                        io.qwenpaw.node.ui.theme.LocalCaptionColor.current
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     },

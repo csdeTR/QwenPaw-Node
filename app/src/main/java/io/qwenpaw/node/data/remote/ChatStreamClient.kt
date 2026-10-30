@@ -27,23 +27,42 @@ class ChatStreamClient(
 
     fun open(conn: Connection, body: String): Flow<ChatEvent> = callbackFlow {
         val call = client.newCall(api.chatRequest(conn, body))
+        // 重连与首次发送走同一个入口，靠 body 里是否带 reconnect 区分。
+        val reconnecting = body.contains("\"reconnect\":true")
+        io.qwenpaw.node.log.RunLog.d(
+            io.qwenpaw.node.log.LogKind.STREAM,
+            "SSE",
+            if (reconnecting) "挂回既有流" else "建立新流",
+        )
 
         val reader = try {
             val response = call.execute()
             if (!response.isSuccessful) {
                 val text = response.body?.string().orEmpty()
-                close(ApiException(response.code, extractDetail(text, response.code)))
+                val detail = extractDetail(text, response.code)
+                io.qwenpaw.node.log.RunLog.d(
+                    io.qwenpaw.node.log.LogKind.STREAM,
+                    "SSE",
+                    "建流被拒：${response.code} $detail",
+                )
+                close(ApiException(response.code, detail))
                 awaitClose { }
                 return@callbackFlow
             }
             val stream = response.body?.charStream()
             if (stream == null) {
+                io.qwenpaw.node.log.RunLog.d(
+                    io.qwenpaw.node.log.LogKind.STREAM,
+                    "SSE",
+                    "响应体为空",
+                )
                 close(IOException("响应体为空"))
                 awaitClose { }
                 return@callbackFlow
             }
             stream.buffered()
         } catch (e: IOException) {
+            io.qwenpaw.node.log.RunLog.e(io.qwenpaw.node.log.LogKind.STREAM, "SSE", e, "建流失败")
             close(e)
             awaitClose { }
             return@callbackFlow
@@ -51,17 +70,31 @@ class ChatStreamClient(
 
         val sse = SseReader(reader)
         val worker = launch(Dispatchers.IO) {
+            var frames = 0
             try {
                 while (true) {
                     val frame = sse.nextFrame() ?: break
                     if (frame.isBlank()) continue
+                    frames++
                     val event = ChatEventParser.parse(frame)
                     if (event !is ChatEvent.Ignored) {
                         trySend(event)
                     }
                 }
+                io.qwenpaw.node.log.RunLog.d(
+                    io.qwenpaw.node.log.LogKind.STREAM,
+                    "SSE",
+                    "流正常结束，共 $frames 帧",
+                )
                 close()
             } catch (e: IOException) {
+                // 断网时最常见的现场：流在读帧途中被中断，这里必须留下帧数与异常。
+                io.qwenpaw.node.log.RunLog.e(
+                    io.qwenpaw.node.log.LogKind.STREAM,
+                    "SSE",
+                    e,
+                    "读流中断，已收到 $frames 帧",
+                )
                 close(e)
             } finally {
                 runCatching { reader.close() }

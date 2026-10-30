@@ -191,7 +191,7 @@ fun ContextDetailSheet(
                         text = if (state.contextMax > 0) {
                             "剩余约 ${((1 - ratio) * 100).toInt()}%"
                         } else {
-                            "发送一条消息后可见"
+                            "发送消息后显示"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -50,6 +50,9 @@ class ChatImageLoader {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        // 图片下载失败往往只表现为「一直转圈」，挂日志才能在排查时看到状态码。
+        // 挂在 network 层：图片也可能被反代跳转，跳转那一跳只有这一层看得到。
+        .addNetworkInterceptor(io.qwenpaw.node.log.LoggingInterceptor())
         .build()
 
     private val cache = object : LruCache<String, Bitmap>(24) {

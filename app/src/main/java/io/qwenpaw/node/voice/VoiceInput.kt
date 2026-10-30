@@ -55,6 +55,8 @@ class VoiceInput(private val context: Context) {
         onPartial: (String) -> Unit,
         onFinal: (String) -> Unit,
         onError: (String) -> Unit,
+        /** 识别到说话停顿后自动结束，只在「点一下」模式有意义。 */
+        autoStop: Boolean = false,
     ) {
         if (!hasPermission()) {
             _state.value = VoiceState.Error("没有麦克风权限")
@@ -74,7 +76,8 @@ class VoiceInput(private val context: Context) {
         ).coerceAtLeast(sampleRate / 4)
 
         job = scope.launch {
-            val engine = StreamingRecognizer.create(model, sampleRate)
+            // 开了「说完自动停止」才启用 sherpa 的端点检测。
+            val engine = StreamingRecognizer.create(model, sampleRate, endpointing = autoStop)
             if (engine == null) {
                 _state.value = VoiceState.Error("模型文件不完整，重新下载一次")
                 return@launch
@@ -128,7 +131,13 @@ class VoiceInput(private val context: Context) {
                             _partial.value = text
                             onPartial(text)
                         }
+                        // 「说完自动停止」：识别到停顿就收尾，把整段结果交出去。
+                        if (engine.consumeEndpoint()) {
+                            stopping = true
+                            break
+                        }
                     }
+                    if (stopping) break
                 }
             } catch (e: Exception) {
                 onError(e.message ?: "录音中断")

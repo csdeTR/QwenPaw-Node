@@ -2,13 +2,18 @@ package io.qwenpaw.node.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -16,6 +21,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
@@ -85,17 +91,58 @@ private val DarkColors = darkColorScheme(
     onErrorContainer = Color(0xFFFF7875),
 )
 
-/** 可调字号：小 / 标准 / 大。 */
-enum class FontScale(val multiplier: Float) {
-    SMALL(0.9f),
-    NORMAL(1.0f),
-    LARGE(1.15f),
+/**
+ * 字号缩放。
+ *
+ * UI 与聊天正文分开调节：整体 UI 缩放影响标题、标签、按钮等；
+ * 聊天缩放只叠加在消息正文上，方便用户把对话文字调得特别大而界面不变。
+ * 两段都用连续值而不是三档枚举，范围也给得宽，能明显调出「很小」和「很大」。
+ */
+object FontScaling {
+    const val UI_MIN = 0.75f
+    const val UI_MAX = 1.6f
+    const val CHAT_MIN = 0.6f
+    const val CHAT_MAX = 2.2f
+    const val DEFAULT = 1f
+
+    fun ui(value: Float): Float = value.coerceIn(UI_MIN, UI_MAX)
+    fun chat(value: Float): Float = value.coerceIn(CHAT_MIN, CHAT_MAX)
+}
+
+/** 聊天正文的额外缩放系数，由 [QwenPawTheme] 提供。 */
+val LocalChatFontScale = staticCompositionLocalOf { FontScaling.DEFAULT }
+
+/**
+ * 注释级小字的颜色。
+ *
+ * `colorScheme.outline` 的用途是描边，浅色下是 `#D8D4CF`、深色下只有 18% 白，
+ * 拿来写正文小字对比度严重不足（深色下尤其明显）。这里单独给一个语义色：
+ * 浅色为 54% 黑、深色为 60% 白，都能达到 4.5:1 的可读下限，同时仍明显弱于正文。
+ */
+val LocalCaptionColor = staticCompositionLocalOf { Color(0x8A141413) }
+
+/**
+ * 选中文字的底色与把手色。
+ *
+ * 不能取 `colorScheme.primary`：那是品牌橙，而用户气泡的底色本身就是橙色，
+ * 半透明橙叠在橙底上几乎看不出来，等于在用户消息里选不中文字。
+ * 这里固定用蓝系，与橙色在色相上明显分开；两套主题的亮度不同，分别取值。
+ */
+private fun selectionColors(dark: Boolean): TextSelectionColors {
+    val handle = if (dark) Color(0xFF7AA7FF) else Color(0xFF1F6FEB)
+    return TextSelectionColors(
+        handleColor = handle,
+        backgroundColor = handle.copy(alpha = 0.32f),
+    )
 }
 
 @Composable
 fun QwenPawTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
-    fontScale: FontScale = FontScale.NORMAL,
+    /** 整体界面缩放，作用于整套排版。 */
+    uiScale: Float = FontScaling.DEFAULT,
+    /** 聊天正文的额外缩放，只影响消息气泡里的文字。 */
+    chatScale: Float = FontScaling.DEFAULT,
     /**
      * MiSans 字体族。字体是运行时按需下载的，没下载时传 null，
      * 交给系统默认字体——所以这里不再引用打包期资源。
@@ -109,9 +156,11 @@ fun QwenPawTheme(
         ThemeMode.DARK -> true
     }
     val base = if (dark) DarkColors else LightColors
+    val sel = remember(dark) { selectionColors(dark) }
     // 字体族查表较贵，按字号和字体分别缓存，避免每次重组都重建整套排版。
-    val typography = remember(fontScale, misans) {
-        scaledTypography(fontScale).withFamily(misans)
+    val ui = FontScaling.ui(uiScale)
+    val typography = remember(ui, misans) {
+        scaledTypography(ui).withFamily(misans)
     }
 
     val view = LocalView.current
@@ -123,19 +172,96 @@ fun QwenPawTheme(
         }
     }
 
+    CompositionLocalProvider(
+        LocalChatFontScale provides FontScaling.chat(chatScale),
+        // 注释色跟着明暗走：深色主题下用 60% 白，否则用 54% 黑。
+        LocalCaptionColor provides if (dark) Color(0x99FFFFFF) else Color(0x8A141413),
+        LocalTextSelectionColors provides sel,
+    ) {
+        MaterialTheme(
+            colorScheme = base,
+            typography = typography,
+            content = content,
+        )
+    }
+}
+
+/**
+ * 聊天正文的缩放作用域。
+ *
+ * 在整体排版（已按 UI 字号缩放）之上再叠一层聊天缩放，所以对话文字可以单独
+ * 调得特别大或特别小，而不影响标题栏、按钮这些界面元素。包裹的范围是消息列表，
+ * 顶栏与输入框保持 UI 字号。
+ */
+@Composable
+fun ChatFontScale(content: @Composable () -> Unit) {
+    val scale = LocalChatFontScale.current
+    if (scale == FontScaling.DEFAULT) {
+        content()
+        return
+    }
+    val base = MaterialTheme.typography
+    // Typography 构造不便宜，按缩放系数和基础排版缓存一份。
+    val scaled = remember(scale, base) {
+        fun TextStyle.s() = copy(
+            fontSize = if (fontSize.isSpecified) fontSize * scale else fontSize,
+            lineHeight = if (lineHeight.isSpecified) lineHeight * scale else lineHeight,
+        )
+        Typography(
+            displayLarge = base.displayLarge.s(),
+            displayMedium = base.displayMedium.s(),
+            displaySmall = base.displaySmall.s(),
+            headlineLarge = base.headlineLarge.s(),
+            headlineMedium = base.headlineMedium.s(),
+            headlineSmall = base.headlineSmall.s(),
+            titleLarge = base.titleLarge.s(),
+            titleMedium = base.titleMedium.s(),
+            titleSmall = base.titleSmall.s(),
+            bodyLarge = base.bodyLarge.s(),
+            bodyMedium = base.bodyMedium.s(),
+            bodySmall = base.bodySmall.s(),
+            labelLarge = base.labelLarge.s(),
+            labelMedium = base.labelMedium.s(),
+            labelSmall = base.labelSmall.s(),
+        )
+    }
     MaterialTheme(
-        colorScheme = base,
-        typography = typography,
+        colorScheme = MaterialTheme.colorScheme,
+        typography = scaled,
         content = content,
     )
 }
 
-private fun scaledTypography(scale: FontScale): Typography {
-    val m = scale.multiplier
+/**
+ * 开关配色。
+ *
+ * 关闭态不能只是灰掉——那和「不可用」长得一样。这里让关闭态有一个明显更深的
+ * 轨道和一圈清晰描边，读起来是「关着的开关」；同时把禁用态的灰色压得更淡更虚，
+ * 让两者一眼可分。
+ */
+@Composable
+fun qwenSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+    checkedTrackColor = MaterialTheme.colorScheme.primary,
+    checkedBorderColor = MaterialTheme.colorScheme.primary,
+    // 开启态：轨道用中等灰度的前景色半透明合成，明暗主题下都能看清。
+    uncheckedThumbColor = MaterialTheme.colorScheme.surface,
+    uncheckedTrackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.26f),
+    uncheckedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+    // 禁用态：明显更淡、更虚，不会和「关着的开关」混淆。
+    disabledUncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.24f),
+    disabledUncheckedTrackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f),
+    disabledUncheckedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.16f),
+    disabledCheckedThumbColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
+    disabledCheckedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+    disabledCheckedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+)
+
+private fun scaledTypography(scale: Float): Typography {
     val base = Typography()
     fun TextStyle.scaled() = copy(
-        fontSize = fontSize * m,
-        lineHeight = lineHeight * m,
+        fontSize = fontSize * scale,
+        lineHeight = lineHeight * scale,
     )
     return Typography(
         bodyLarge = base.bodyLarge.scaled(),

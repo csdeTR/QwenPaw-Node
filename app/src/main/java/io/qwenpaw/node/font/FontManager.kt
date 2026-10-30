@@ -43,6 +43,7 @@ class FontManager(private val context: Context) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.MINUTES)
+        .addInterceptor(io.qwenpaw.node.log.LoggingInterceptor(io.qwenpaw.node.log.LogKind.STORAGE))
         .build()
 
     private fun root(): File = File(context.filesDir, "fonts").apply { mkdirs() }

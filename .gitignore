@@ -1,15 +1,41 @@
+# 构建产物与工具缓存
 .gradle/
 build/
+.kotlin/
+.cxx/
+.externalNativeBuild/
 local.properties
 *.iml
 .idea/
-.kotlin/
+out/
+# Android Studio 旧版把打包输出放在模块下的 release/ 与 debug/
+app/release/
+app/debug/
+# 打包产物：签名包走 Releases，不进仓库
+*.apk
+*.aab
+# 测试截图与系统垃圾文件
+captures/
+.DS_Store
+Thumbs.db
 # 签名密钥与口令不进仓库
 *.jks
 *.keystore
 keystore.properties
+# 注意：不要加 *.aar 或 *.jar——app/libs 下的 sherpa-onnx AAR 与
+# gradle/wrapper 下的 gradle-wrapper.jar 是构建必需，必须入库。
 # MiSans 字体不在仓库内分发（许可禁止再分发字体本体），运行时按需下载
 app/src/main/res/font/*.ttf
 app/src/main/res/font/*.otf
 prototype/assets/*.ttf
 prototype/assets/*.otf
+# 每轮改动的草稿，正式文档写完后删除，不纳入版本管理
+draft/
+# AI 助手的计划文档与过程记录，不是项目文档；其中含本机绝对路径
+.trae/
+# 实机截图暂不入库
+.screenshots/
+# 调试产物
+*.log
+*.hprof
+hs_err_pid*.log

@@ -139,4 +139,28 @@ class StreamAccumulatorTest {
         acc.removeError(error.id)
         assertTrue(acc.snapshot().none { it.id == error.id })
     }
+
+    /** 建会话失败时要把刚回显的用户气泡撤掉，否则重试会画出两条相同的消息。 */
+    @Test
+    fun `rollback removes echoed user messages`() {
+        val acc = StreamAccumulator()
+        val first = acc.appendUser("第一条")
+        val second = acc.appendUser("第二条")
+
+        acc.rollback(listOf(second.id))
+
+        assertEquals(listOf(first.id), acc.snapshot().map { it.id })
+    }
+
+    /** 撤掉不存在的 id 不应改变列表，也不应抛异常。 */
+    @Test
+    fun `rollback with unknown id is a no-op`() {
+        val acc = StreamAccumulator()
+        val kept = acc.appendUser("保留")
+
+        acc.rollback(listOf("local-user-999"))
+
+        assertEquals(1, acc.snapshot().size)
+        assertEquals(kept.id, acc.snapshot()[0].id)
+    }
 }
