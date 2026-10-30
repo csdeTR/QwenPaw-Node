@@ -23,18 +23,25 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装编译所需的 SDK 组件
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
       - name: 启用 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4
 
       - name: 运行 JVM 单测
-        run: ./gradlew :app:testDebugUnitTest
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: app/build/reports/tests/testDebugUnitTest
+          path: app/build/test-results/testDebugUnitTest
+          if-no-files-found: warn
 
   assemble-debug:
     runs-on: ubuntu-latest
@@ -47,8 +54,14 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装编译所需的 SDK 组件
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
       - name: 启用 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4
 
       - name: 编译 debug 包
-        run: ./gradlew :app:assembleDebug
+        run: ./gradlew :app:assembleDebug --stacktrace
