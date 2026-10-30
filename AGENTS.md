@@ -101,6 +101,15 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
   `.gitignore` 已排除 `*.jks` / `*.keystore` / `keystore.properties`。
 - release 开启了 R8 与资源压缩。改动依赖后必须重新验证一次 `assembleRelease`，
   不能只验 debug，因为部分问题只在 R8 处理后暴露。
+- **镜像仓库按环境切换。** `settings.gradle.kts` 在 `CI=true` 时跳过阿里云镜像，
+  只使用 `google()` / `mavenCentral()` / `gradlePluginPortal()`，因为镜像在
+  GitHub Actions 的 runner 上不可达。Trae 的 shell 也带 `CI=true`，
+  在其中构建走的是官方仓库，与用户自己的终端不同。
+- **CI 签名密钥来自四个 Repository secrets**：`ANDROID_KEYSTORE_BASE64`、
+  `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。
+  推 `v*` tag 触发 `.github/workflows/release.yml`，细节见 `docs/release.md` 5.3。
+- **在这台机器上执行 `git push` 时加 `GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0`。**
+  Trae 注入的 askpass 脚本在没有交互终端时会永久等待，表现为命令超时而非报错。
 - 相关文档：协议细节与已知坑见 `docs/protocol.md`；UI、边到边与性能测量口径见
   `docs/ui-guidelines.md`；目录与数据流见 `docs/architecture.md`；
   发版流程见 `docs/release.md`。

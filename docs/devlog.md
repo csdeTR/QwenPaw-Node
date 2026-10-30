@@ -41,6 +41,7 @@
 | [二十七](#二十七公开仓库前的收尾2026-10-30) | 许可、忽略规则、示例地址、CI、非官方声明 | 340 个单测；9 项公开前检查 | [LICENSE](../LICENSE)、[README](../README.md) |
 | [二十八](#二十八官方移动端线索与-eol-声明2026-10-30) | 官方客户端 v2.3.0、Platform 不可直连的理由 | 未改代码；README 补两节 | [README](../README.md) |
 | [二十九](#二十九多架构构建与公开仓库2026-10-30) | 四架构拆包、实测边界、推送公开 | 四个包 16.5–36.7MB；x86_64 实测通过 | [release.md](release.md) 7.1、7.2 |
+| [三十](#三十ci-首次跑通与自动发布2026-10-31) | CI 连续失败的四次定位、自动发布落地 | tag `v0.1.0-b2`，四个包自动上传 | [release.md](release.md) 5.3 |
 
 ---
 
@@ -2316,6 +2317,86 @@ release.md 7.1 用表格逐条标状态，CHANGELOG 也重复一次——
 - 四个包的准确体积：[release.md](release.md) 7.2
 - 面向用户的下载指引：[README](../README.md)「下载与安装」
 - 体积演进的历史：[protocol.md](protocol.md) 十五节
+
+---
+
+## 三十、CI 首次跑通与自动发布（2026-10-31）
+
+### 30.1 目标
+
+推 `v*` tag 即自动产出四个架构的签名包并挂到对应的 GitHub Release。
+第二十九节的做法是本地构建、手工上传，这一节把流程交给 GitHub Actions。
+
+### 30.2 第一层障碍：runner 上的 SDK 安装步骤直接失败
+
+前两次失败发生在 `android-actions/setup-android@v3`，该步骤 failure 之后其余步骤全部
+skipped，注解里只有一句「Process completed with exit code 1」。为排除「Actions 未启用」
+与「仓库私有」两种猜测，临时加了一个只执行 `echo` 的 `Smoke` workflow，它 success，
+说明 runner 本身可启动，问题出在 SDK 步骤。
+
+改为直接调用 runner 自带的 `$ANDROID_HOME/cmdline-tools/*/bin/sdkmanager`：
+先 `yes | sdkmanager --licenses`，再装 `platform-tools`、`platforms;android-35`、
+`build-tools;35.0.0`。`ci.yml` 与 `release.yml` 共用同一段，此后该步骤通过。
+
+### 30.3 第二层障碍：诊断信息本身把原因挡住了
+
+最初把失败的 `tail -n 20` 写进注解，拿到的是 `DaemonCommandExecution` 的堆栈尾部，
+真实原因在更靠前的位置，等于什么也没诊断出来。
+
+改为用 `awk` 截取 Gradle 输出里「What went wrong」到「Get more help」之间的一段，
+取不到再退回 `tail -n 40`，才看到真正的原因：
+`Plugin [id: 'com.google.devtools.ksp', version: '2.1.0-1.0.29'] was not found`。
+
+单测失败时同理。新增一步解析 `app/build/test-results/testDebugUnitTest/*.xml`，
+按 `类名#方法名: 消息` 逐条输出，才定位到唯一失败的用例。
+
+### 30.4 原因一：阿里云镜像在 runner 上不可达
+
+`settings.gradle.kts` 把 `maven.aliyun.com` 排在所有仓库之前。本机可达，
+runner 上不可达，KSP 的插件标记因此在所有仓库解析失败。
+
+改为按环境切换：`CI=true`（GitHub Actions 默认注入）时只保留 `google()`、
+`mavenCentral()`、`gradlePluginPortal()`；本地仍优先镜像。验证时注意，
+本机 Trae 的 shell 也带 `CI=true`，在这个 shell 里跑构建走的同样是官方仓库。
+
+### 30.5 原因二：TimeLabelsTest 依赖本机时区
+
+```
+io.qwenpaw.node.ui.TimeLabelsTest#parses timestamp with local offset:
+java.lang.AssertionError: expected:<26> but was:<25>
+```
+
+`TimeLabels.parse` 按 `ZoneId.systemDefault()` 换算，runner 是 UTC，
+`2026-10-26T00:15:42+08:00` 落到 10-25，断言里的 26 日与 `2026.10.26` 前缀都失败。
+
+测试类的文档注释本来就写着「本地时区固定为东八区来断言，避免测试机在别的时区时结论漂移」，
+但实现取的是 `ZoneId.systemDefault()`，注释与代码不符。这是测试的缺陷，不是产品缺陷。
+改为 `@BeforeClass` 里 `TimeZone.setDefault(Asia/Shanghai)`、`@AfterClass` 还原，
+`zone` 直接取 `ZoneId.of("Asia/Shanghai")`。
+
+本地以 `TZ=UTC` 复跑全量单测：340 个用例、0 失败。
+
+### 30.6 结果
+
+tag `v0.1.0-b2` 指向 `1f5764a`，Release workflow 的十一步全部 success，
+Release 页面出现四个包，字节数与本地构建逐一相同：
+
+| 包名 | 字节数 |
+| --- | --- |
+| `QwenPaw-Node-v0.1.0-b2-arm64-v8a.apk` | 24,497,163 |
+| `QwenPaw-Node-v0.1.0-b2-armeabi-v7a.apk` | 17,267,983 |
+| `QwenPaw-Node-v0.1.0-b2-x86_64.apk` | 27,443,453 |
+| `QwenPaw-Node-v0.1.0-b2-x86.apk` | 38,448,662 |
+
+签名密钥不在仓库里。workflow 从四个 secrets 解码 `release.jks` 与 `keystore.properties`
+到 `$RUNNER_TEMP`，随 runner 销毁；`apksigner verify` 不通过就中止发布，
+不会产出未签名的包。secrets 缺失时在解码步骤直接报错退出。
+
+### 30.7 结论落点
+
+- 自动发布的操作方式与 secrets 清单：[release.md](release.md) 5.3
+- 四架构的实测状态与体积：[release.md](release.md) 7.1、7.2
+- 面向用户的下载指引：[README](../README.md)「下载与安装」
 
 ---
 

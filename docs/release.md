@@ -176,9 +176,33 @@ git tag -a v0.1.0 -m "QwenPaw Node v0.1.0 — 首个最小可用版本"
 | tag | 指向 | 说明 |
 | --- | --- | --- |
 | `v0.1.0` | `18f3df1` | 首个最小可用版本（附注 tag） |
+| `v0.1.0-b2` | `1f5764a` | 四架构包，由 workflow 自动构建并上传（附注 tag） |
 
 使用附注 tag 而非轻量 tag，是为了让 `git show v0.1.0` 能直接看到当时的版本说明，
 不必去翻提交历史。
+
+### 5.3 自动发布
+
+推送 `v*` tag 即触发 `.github/workflows/release.yml`，流程为：运行 JVM 单测 →
+`assembleRelease` → `apksigner verify` 校验签名 → 重命名产物 →
+创建 Release 并上传四个包。需要补发时用 `workflow_dispatch`，输入已存在的 tag，
+版本名取自该输入，而不是触发时的分支名。
+
+签名密钥不进仓库，由四个 Repository secrets 在构建时还原：
+
+| secret | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 ~/.qwenpaw-node-keys/release.jks` 的单行输出 |
+| `ANDROID_KEYSTORE_PASSWORD` | `keystore.properties` 的 `storePassword` |
+| `ANDROID_KEY_ALIAS` | 同一文件的 `keyAlias`（当前为 `qwenpaw-node`） |
+| `ANDROID_KEY_PASSWORD` | 同一文件的 `keyPassword` |
+
+secrets 缺失时 workflow 在「解码签名密钥」一步报错退出，不会产出未签名的包；
+`apksigner verify` 不通过同样中止发布。产物命名为 `QwenPaw-Node-<tag>-<abi>.apk`。
+
+workflow 运行时带 `CI=true`，`settings.gradle.kts` 据此跳过阿里云镜像，
+只使用 `google()`、`mavenCentral()` 与 `gradlePluginPortal()`。
+镜像在本机可达、在 runner 上不可达，这一分支不能删。
 
 ---
 
