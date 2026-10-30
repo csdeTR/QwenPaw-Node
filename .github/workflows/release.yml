@@ -1,0 +1,110 @@
+name: Release
+
+# 推一个 v* 的 tag 就会编译四个架构的 release 包，并挂到对应的 GitHub Release。
+# 需要在仓库 Settings → Secrets and variables → Actions 里配置四项：
+#   ANDROID_KEYSTORE_BASE64   release.jks 的 base64（单行，不含换行）
+#   ANDROID_KEYSTORE_PASSWORD  storePassword
+#   ANDROID_KEY_ALIAS          keyAlias
+#   ANDROID_KEY_PASSWORD       keyPassword
+# 签名密钥不进仓库，这里只做一次性解码，随 runner 一起销毁。
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（需已存在于仓库）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 启用 Gradle 缓存
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 解码签名密钥
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::缺少 ANDROID_KEYSTORE_BASE64，无法签名。请在仓库 Settings → Secrets 中配置四项签名密钥。"
+            exit 1
+          fi
+          KEYDIR="$RUNNER_TEMP/keys"
+          mkdir -p "$KEYDIR"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYDIR/release.jks"
+          {
+            echo "storeFile=$KEYDIR/release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > "$KEYDIR/keystore.properties"
+          echo "QWENPAW_KEYSTORE_PROPERTIES=$KEYDIR/keystore.properties" >> "$GITHUB_ENV"
+
+      - name: 运行 JVM 单测
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: 编译四个架构的 release 包
+        run: ./gradlew :app:assembleRelease
+
+      - name: 校验签名有效
+        run: |
+          TOOL=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | tail -1)
+          if [ -z "$TOOL" ]; then
+            echo "::error::找不到 apksigner，无法确认签名"
+            exit 1
+          fi
+          for f in app/build/outputs/apk/release/*.apk; do
+            "$TOOL" verify --print-certs "$f" > /dev/null || {
+              echo "::error::$f 签名校验失败，不发布未签名的包"
+              exit 1
+            }
+          done
+
+      - name: 按版本重命名产物
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          for f in app/build/outputs/apk/release/*.apk; do
+            ABI=$(basename "$f" | sed -E 's/^app-(.+)\.apk$/\1/')
+            cp "$f" "dist/QwenPaw-Node-${TAG}-${ABI}.apk"
+          done
+          ls -l dist
+
+      - name: 创建 Release 并上传
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          append_body: true
+          body: |
+            ## 安装包
+
+            | 架构 | 说明 |
+            | --- | --- |
+            | `arm64-v8a` | 已实测。2019 年之后发布的绝大多数手机 |
+            | `x86_64` | 已实测。用于模拟器 |
+            | `armeabi-v7a` | **未实测**，仅为兼容 32 位旧设备而构建 |
+            | `x86` | **未实测**，仅为兼容 32 位模拟器而构建 |
+
+            未实测的两个包只确认可以编译产出，不保证安装或运行。遇到问题请改用 `arm64-v8a`。
+            每个包都已校验签名有效。
+          files: dist/*.apk
