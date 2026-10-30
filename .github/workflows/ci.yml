@@ -4,6 +4,8 @@ on:
   push:
     branches: [ master ]
   pull_request:
+  # 手动触发：改完可见性、或想在不提交的情况下重跑时用
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
