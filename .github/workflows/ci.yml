@@ -49,6 +49,23 @@ jobs:
           fi
           exit "$code"
 
+      - name: 汇总失败用例
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          total = 0
+          for f in sorted(glob.glob('app/build/test-results/testDebugUnitTest/*.xml')):
+              for tc in ET.parse(f).getroot().iter('testcase'):
+                  for fail in tc.findall('failure'):
+                      total += 1
+                      msg = (fail.get('message') or '').strip().splitlines()
+                      line = '%s#%s: %s' % (
+                          tc.get('classname'), tc.get('name'), msg[0] if msg else '')
+                      print('::error title=测试失败::' + line[:900])
+          print('失败用例数：%d' % total)
+          PY
+
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@v4
