@@ -42,7 +42,10 @@ jobs:
           ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee /tmp/build.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            echo "::error title=Gradle 失败::$(tail -n 20 /tmp/build.log | tr '\n' ' ' | cut -c1-1200)"
+            # 只截尾部 20 行会被堆栈淹掉，先取 Gradle 的「What went wrong」段
+            MSG=$(awk '/What went wrong/{f=1} f{print} /Get more help/{f=0}' /tmp/build.log | tr '\n' ' ')
+            [ -z "$MSG" ] && MSG=$(tail -n 40 /tmp/build.log | tr '\n' ' ')
+            echo "::error title=Gradle 失败::$(printf '%s' "$MSG" | cut -c1-1200)"
           fi
           exit "$code"
 
@@ -84,6 +87,9 @@ jobs:
           ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            echo "::error title=Gradle 失败::$(tail -n 20 /tmp/build.log | tr '\n' ' ' | cut -c1-1200)"
+            # 只截尾部 20 行会被堆栈淹掉，先取 Gradle 的「What went wrong」段
+            MSG=$(awk '/What went wrong/{f=1} f{print} /Get more help/{f=0}' /tmp/build.log | tr '\n' ' ')
+            [ -z "$MSG" ] && MSG=$(tail -n 40 /tmp/build.log | tr '\n' ' ')
+            echo "::error title=Gradle 失败::$(printf '%s' "$MSG" | cut -c1-1200)"
           fi
           exit "$code"

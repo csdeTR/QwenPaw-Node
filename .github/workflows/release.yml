@@ -73,10 +73,28 @@ jobs:
           echo "QWENPAW_KEYSTORE_PROPERTIES=$KEYDIR/keystore.properties" >> "$GITHUB_ENV"
 
       - name: 运行 JVM 单测
-        run: ./gradlew :app:testDebugUnitTest
+        run: |
+          set +e
+          ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee /tmp/build.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            MSG=$(awk '/What went wrong/{f=1} f{print} /Get more help/{f=0}' /tmp/build.log | tr '\n' ' ')
+            [ -z "$MSG" ] && MSG=$(tail -n 40 /tmp/build.log | tr '\n' ' ')
+            echo "::error title=Gradle 失败::$(printf '%s' "$MSG" | cut -c1-1200)"
+          fi
+          exit "$code"
 
       - name: 编译四个架构的 release 包
-        run: ./gradlew :app:assembleRelease
+        run: |
+          set +e
+          ./gradlew :app:assembleRelease --stacktrace 2>&1 | tee /tmp/build.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            MSG=$(awk '/What went wrong/{f=1} f{print} /Get more help/{f=0}' /tmp/build.log | tr '\n' ' ')
+            [ -z "$MSG" ] && MSG=$(tail -n 40 /tmp/build.log | tr '\n' ' ')
+            echo "::error title=Gradle 失败::$(printf '%s' "$MSG" | cut -c1-1200)"
+          fi
+          exit "$code"
 
       - name: 校验签名有效
         run: |
@@ -96,7 +114,7 @@ jobs:
         run: |
           mkdir -p dist
           for f in app/build/outputs/apk/release/*.apk; do
-            ABI=$(basename "$f" | sed -E 's/^app-(.+)\.apk$/\1/')
+            ABI=$(basename "$f" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             cp "$f" "dist/QwenPaw-Node-${TAG}-${ABI}.apk"
           done
           ls -l dist
