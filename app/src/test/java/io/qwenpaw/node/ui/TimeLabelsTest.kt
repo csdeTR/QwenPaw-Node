@@ -1,10 +1,13 @@
 package io.qwenpaw.node.ui
 
+import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.BeforeClass
 import org.junit.Test
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.TimeZone
 
 /**
  * 服务端时间的解析与展示。
@@ -12,11 +15,31 @@ import java.time.ZoneId
  * 旧实现在会话列表里直接截 UTC 字符串的前 10 位当日期，等于按 UTC 日界
  * 划分「今天／昨天」。东八区早于 08:00 的消息会被算到前一天，这是实际的偏差。
  * 这里统一解析到本地时区再格式化。
+ *
+ * 断言依赖本地日历，CI runner 的默认时区是 UTC，因此整个类固定按东八区跑。
+ * 带 `+08:00` 偏移的输入在 UTC 机器上会落到前一天，不固定时区断言就会失败。
  */
 class TimeLabelsTest {
 
+    companion object {
+        private var original: TimeZone? = null
+
+        @BeforeClass
+        @JvmStatic
+        fun pinZone() {
+            original = TimeZone.getDefault()
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+        }
+
+        @AfterClass
+        @JvmStatic
+        fun restoreZone() {
+            original?.let { TimeZone.setDefault(it) }
+        }
+    }
+
     /** 本地时区固定为东八区来断言，避免测试机在别的时区时结论漂移。 */
-    private val zone: ZoneId = ZoneId.systemDefault()
+    private val zone: ZoneId = ZoneId.of("Asia/Shanghai")
 
     @Test
     fun `parses utc iso into local time`() {
