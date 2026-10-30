@@ -33,7 +33,14 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: 运行 JVM 单测
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: |
+          set +e
+          ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee /tmp/build.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=Gradle 失败::$(tail -n 20 /tmp/build.log | tr '\n' ' ' | cut -c1-1200)"
+          fi
+          exit "$code"
 
       - name: 上传测试报告
         if: always()
@@ -64,4 +71,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: 编译 debug 包
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: |
+          set +e
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=Gradle 失败::$(tail -n 20 /tmp/build.log | tr '\n' ' ' | cut -c1-1200)"
+          fi
+          exit "$code"
