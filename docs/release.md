@@ -6,7 +6,7 @@
 
 ---
 
-## 一、构建
+## 1、构建
 
 ### 1.1 常用命令
 
@@ -32,7 +32,7 @@ free -h
 
 `assembleRelease` 包含 R8 混淆与优化，以及资源压缩，属于重活。
 本项目历史上曾因同时运行「Gradle daemon + Kotlin daemon + 模拟器」把 swap 打满，
-导致整个桌面环境失去响应。具体记录见 [devlog.md](devlog.md) 第三节。
+导致整个桌面环境失去响应。具体记录见 [devlog.md](devlog.md) 第 3 节。
 
 ### 1.3 技术栈
 
@@ -49,7 +49,7 @@ OkHttp 的可选依赖以及 Tink 的相关注解。
 
 ---
 
-## 二、签名
+## 2、签名
 
 ### 2.1 密钥位置
 
@@ -70,12 +70,16 @@ keystore.properties    # storeFile / storePassword / keyAlias / keyPassword
 ### 2.3 密钥缺失时的行为
 
 密钥文件缺失时，构建**不会失败**，但 release 会退化为**未签名**状态，
-产物无法安装或发布。识别方法很直接：出现 `app-release-unsigned.apk` 就说明密钥没有被找到。
-正常的产物名是 `app-release.apk`。
+产物无法安装或发布。识别方法很直接：产物名里带 `-unsigned` 就说明密钥没有被找到。
+`build.gradle.kts` 只在 `keystore.properties` 里能读到 `storeFile` 时才创建 `release`
+签名配置，因此「找不到密钥」与「`signingConfig` 为 null」是同一件事。
+
+`splits.abi` 之后产物按架构拆分，签好名的文件名形如 `app-arm64-v8a-release.apk`，
+未签名则是 `app-arm64-v8a-release-unsigned.apk`。
 
 ---
 
-## 三、关于 baseline profile
+## 3、关于 baseline profile
 
 release 包的 `assets/dexopt/` 目录里目前有 `baseline.prof` 与 `baseline.profm`，
 它们来自 Compose 等依赖库自带的 profile，**不是本项目采样生成的**。
@@ -88,7 +92,7 @@ release 包的 `assets/dexopt/` 目录里目前有 `baseline.prof` 与 `baseline
 
 ---
 
-## 四、验收
+## 4、验收
 
 ### 4.1 安装 release 包前必须先卸载
 
@@ -98,15 +102,17 @@ debug 与 release 使用不同签名，直接覆盖安装会失败：
 INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package ... signatures do not match
 ```
 
-正确顺序：
+正确顺序（`splits.abi` 之后产物按架构拆分，装设备对应那一份）：
 
 ```bash
 adb uninstall io.qwenpaw.node
-adb install app/build/outputs/apk/release/app-release.apk
+adb install app/build/outputs/apk/release/app-arm64-v8a-release.apk   # 手机
+adb install app/build/outputs/apk/release/app-x86_64-release.apk      # x86_64 模拟器
 ```
 
 若省掉卸载这一步，安装会直接失败，而报错文案不会明示「是因为签名不同」，
-容易误判为 APK 损坏。
+容易误判为 APK 损坏。装错架构则报 `INSTALL_FAILED_NO_MATCHING_ABIS`，
+可用 `adb shell getprop ro.product.cpu.abi` 确认设备架构。
 
 ### 4.2 流畅度必须用 release 包验证
 
@@ -114,10 +120,9 @@ debug 变体 `isMinifyEnabled = false`：没有 R8 内联与优化，没有 AOT�
 Compose 内部还会走 debug 断言路径。实测对话页滚动的主线程帧耗时，
 **release 约为 debug 的 43%**，长帧从 43ms 压到 12ms。
 
-完整数据与测量方法见 [ui-guidelines.md](ui-guidelines.md) 第五节。
+完整数据与测量方法见 [ui-guidelines.md](ui-guidelines.md) 第 5 节。
 
-> `scripts/e2e_acceptance.sh` 中硬编码安装的是 **debug** 包
-> （`APK=.../apk/debug/app-debug.apk`）。
+> `scripts/e2e_acceptance.sh` 安装的是 **debug** 包。
 > **脚本通过不等于用户手上流畅。** 流畅度这类主观指标必须另外用 release 包实测。
 
 ### 4.3 端到端验收脚本
@@ -125,15 +130,17 @@ Compose 内部还会走 debug 断言路径。实测对话页滚动的主线程�
 ```bash
 ./scripts/e2e_acceptance.sh               # 全部场景 A1–A6
 ./scripts/e2e_acceptance.sh --only A4     # 只跑单个场景，推荐
-ADB_SERIAL=192.168.1.20:5555 ./scripts/e2e_acceptance.sh --only A3
 ```
 
 运行前提：设备已连接、宿主机上运行着 `qwenpaw app --host 0.0.0.0`、
 且已执行过 `./gradlew :app:assembleDebug`。
 
+宿主机上的 `qwenpaw` 只在交互式 shell 的 PATH 中（见 [AGENTS.md](../AGENTS.md) 第 2 节），
+脚本外的命令一律写全路径 `/home/csdetr/.qwenpaw/bin/qwenpaw`。
+
 | 场景 | 内容 | 额外要求与常见失败原因 |
 | --- | --- | --- |
-| A1 | 审批：触发后点允许 | 需要服务端 `approval_level=ASK`。若仍是 `AUTO`，工具会直接执行、不产生审批项，脚本会一直等待而超时 |
+| A1 | 审批：触发后点允许 | 需要服务端 `approval_level=STRICT`。若为 `AUTO`，只有 `guarded_tools` 名单内的工具才触发审批，脚本未必能命中；若为 `OFF`，脚本直接跳过。**`ASK` 不是合法档位**，写成它会被 `ToolExecutionLevel.from_config` 静默回退为 `AUTO` |
 | A2 | 附件：上传相册图片并确认服务端接收 | 设备相册为空时脚本找不到可上传的图片 |
 | A3 | 重连：长任务中杀掉 App，重开后接回输出 | 若任务在杀进程前已经结束，就测不到重连路径 |
 | A4 | 停止：生成中停止，服务端回 idle | 生成过快时可能来不及点停止 |
@@ -143,21 +150,21 @@ ADB_SERIAL=192.168.1.20:5555 ./scripts/e2e_acceptance.sh --only A3
 **一次只跑一个场景**（例如 `--only A4`），跑完检查 `free -h`。
 不要整轮跑完再一起收尾：模拟器与构建同时运行极易拖垮桌面环境。
 
-A6 的实现细节需要注意：脚本会自动探测三种提权方式（已 adb root、`adb root` 成功、su 免密），
+A6 的实现细节需要注意：脚本通过 `adb root` 提权（模拟器可用，本项目已不再支持真机），
 并依据 `HOST` 中的端口来封闭网络，不再写死 8088。
 封闭的目标端口是服务端端口，**不是 adb 使用的 5555**；误封 5555 会直接断开 adb 连接。
 
 ---
 
-## 五、发版
+## 5、发版
 
 ### 5.1 版本号
 
 版本号在 `app/build.gradle.kts` 的 `defaultConfig` 中：
 
 ```kotlin
-versionCode = 1          // 每次发版必须 +1，Android 依靠它判断升级
-versionName = "0.1.0"    // 展示用，应与 git tag 保持一致
+versionCode = 2          // 每次发版必须 +1，Android 依靠它判断升级
+versionName = "0.1.1"    // 展示用，应与 git tag 保持一致
 ```
 
 `versionCode` 遗漏递增会导致新包无法覆盖安装；`versionName` 与 tag 不一致，
@@ -177,6 +184,7 @@ git tag -a v0.1.0 -m "QwenPaw Node v0.1.0 — 首个最小可用版本"
 | --- | --- | --- |
 | `v0.1.0` | `18f3df1` | 首个最小可用版本（附注 tag） |
 | `v0.1.0-b2` | `1f5764a` | 四架构包，由 workflow 自动构建并上传（附注 tag） |
+| `v0.1.1` | 见 `git rev-list -n1 v0.1.1` | 图标集换 lucide、LaTeX 排版、空对话首页、设置页两级（附注 tag） |
 
 使用附注 tag 而非轻量 tag，是为了让 `git show v0.1.0` 能直接看到当时的版本说明，
 不必去翻提交历史。
@@ -206,7 +214,7 @@ workflow 运行时带 `CI=true`，`settings.gradle.kts` 据此跳过阿里云镜
 
 ---
 
-## 六、发版后收尾
+## 6、发版后收尾
 
 按 [AGENTS.md](../AGENTS.md) 的资源约束，构建与测试结束后**不要保留常驻进程**：
 
@@ -223,7 +231,7 @@ adb emu kill                  # 关闭模拟器（使用模拟器时）
 
 ---
 
-## 七、发布形态的限制
+## 7、发布形态的限制
 
 ### 7.1 按 ABI 拆分，不打单一全量包
 

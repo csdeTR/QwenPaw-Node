@@ -8,7 +8,7 @@
 
 ---
 
-## 一、整体分层
+## 1、整体分层
 
 ```
 MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceStore + QwenPawApi
@@ -30,16 +30,16 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 
 ---
 
-## 二、目录职责
+## 2、目录职责
 
 | 路径 | 职责 | 什么时候该改这里 |
 | --- | --- | --- |
 | `data/local/` | Room 数据库（草稿、离线消息缓存）与 `InstanceStore`（实例配置与 token 的加密存储） | 需要新增本地持久化字段，或改动凭据存储方式时 |
 | `data/model/` | 服务端 DTO，使用 `kotlinx.serialization` | 服务端字段增删，或新增接口需要新模型时 |
-| `data/remote/` | `QwenPawApi`（全部 HTTP 端点）、`ChatStreamClient`（SSE 连接） | 接入新端点，或调整请求头、超时、重试策略时 |
+| `data/remote/` | `QwenPawApi`（全部 HTTP 端点）、`ChatStreamClient`（SSE 连接）、`ServerAvatarClient`（服务端头像缓存） | 接入新端点，或调整请求头、超时、重试策略时 |
 | `data/stream/` | SSE 解析链路：`SseReader` → `ChatEventParser` → `StreamAccumulator`；`HistoryMapper` 负责把历史接口的返回映射为渲染单元 | 服务端帧格式变化，或发现某类内容没有被正确归类时 |
 | `data/`（根） | `NetworkMonitor`（网络类型与连通性）、`InstanceRepository`（多实例与地址解析）、`AddressFallback`（多地址回退判定） | 改动地址优先级、回退策略或网络感知时 |
-| `avatar/` | `AvatarStore`（头像文件）、`AvatarIntake`（GIF 判定与 EXIF 纠正）、`CropGeometry`（裁剪换算）、`AvatarCropScreen`（裁剪页） | 调整头像规格、裁剪交互或图片处理方式时 |
+| `avatar/` | `AvatarStore`（头像文件）、`AvatarIntake`（GIF 判定与 EXIF 纠正）、`CropGeometry`（裁剪换算）、`AvatarCropScreen`（裁剪页）、`ChatIconStore`（会话图标） | 调整头像规格、裁剪交互或图片处理方式时 |
 | `log/` | `RunLog`（进程内环形缓冲）、`LoggingInterceptor`、`LogImporter` | 新增日志类别、改动导出格式或脱敏规则时 |
 | `ui/chat/` | 对话页、会话列表与分组、输入条、Markdown 渲染、工具卡片、消息气泡与头像、语音浮层 | 绝大多数界面改动的落点 |
 | `ui/settings/` | 实例连接表单、地址管理、设置页、智能体选择 | 设置项增删，或连接流程变化时 |
@@ -51,7 +51,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 
 ---
 
-## 三、状态如何流动
+## 3、状态如何流动
 
 ### 3.1 发送一条消息
 
@@ -153,7 +153,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 
 ---
 
-## 四、本地持久化
+## 4、本地持久化
 
 本地只有两张表，结构都很轻：
 
@@ -167,7 +167,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 
 ---
 
-## 五、若干不直观的工程决定
+## 5、若干不直观的工程决定
 
 | 决定 | 原因与不这么做时的代价 |
 | --- | --- |
@@ -182,7 +182,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 
 ---
 
-## 六、地址解析与网络感知
+## 6、地址解析与网络感知
 
 同一台服务端常有多个入口。局域网地址在家快、出门不通；EasyTier 之类的隧道地址相反。
 用户不应为此手动切换实例，因此地址列表带优先级，请求时按顺序回退。
@@ -295,7 +295,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 
 ---
 
-## 七、测试
+## 7、测试
 
 `app/src/test/` 下是纯 JVM 单测，覆盖解析、映射、累积与折叠这类纯逻辑。
 这些测试不依赖设备，可以反复快速执行：
@@ -304,16 +304,25 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 ./gradlew :app:testDebugUnitTest
 ```
 
-`app/src/androidTest/` 只有一条启动冒烟测试。
+`app/src/androidTest/` 有一条启动冒烟测试，另有一组界面回归测试 `UiRegressionTest`。
+后者只断言「用户能看见的差异」：操作行的文字/图标切换、设置分组的默认收起、
+会话图标在紧凑排版下的取舍、折叠分组只留表头。两项合计 6 条。
 
 设备端测试的取舍有明确理由：启动成本高，一次运行要经历安装、启动、等待界面稳定；
 失败信息也差，报错往往只给出 instrumentation 层面的笼统结论。
 因此能覆盖的逻辑一律写成 JVM 单测，设备端只保留最小集的冒烟验证。
 这条约定在本仓库是硬性的，详见 [AGENTS.md](../AGENTS.md)。
 
+界面测试有两条实测得到的写法约束：
+
+- **设置页是 `verticalScroll` 的 `Column`，目标控件常在首屏之外。** 直接 `performClick()`
+  会让命中点落在屏幕外，表现为「点了没反应」。点与断言之前都要先 `performScrollTo()`。
+- **折叠状态由调用方持有。** 测试里必须传一份可变的 `collapsedSettings` 并在回调里更新它；
+  只断言「回调被调用」而不更新状态，界面不会变化，这条用例等于没测。
+
 ---
 
-## 八、UI 层约定
+## 8、UI 层约定
 
 以下三条是跨页面通用的约束，详细说明与反例见 [ui-guidelines.md](ui-guidelines.md)。
 

@@ -1,15 +1,16 @@
 # 服务端协议与已知坑
 
 本文记录 QwenPaw Android 客户端与服务端之间所有已实测的接口形状、字段语义与失败模式。
-记录基准为 QwenPaw **2.2.1**，本机实例以 `--host 0.0.0.0` 启动，监听 `:8088`。
-文中每一条都来自实际抓包、源码阅读或设备联调，不存在仅凭官方文档推断的内容。
+记录基准为 **2.2.2.post1** 与 **2.3.0b2** 两个版本（LXC 容器 `qp-test` / `qp-test-prerelease`），
+两版差异单独列在第 17 节。文中每一条都来自实际抓包、源码阅读或设备联调，
+不存在仅凭官方文档推断的内容。
 
 阅读约定：客户端实现**以本文为准**；服务端升级后应逐条回归本文，再决定是否需要改代码。
 分层结构与状态流转见 [architecture.md](architecture.md)。
 
 ---
 
-## 一、鉴权
+## 1、鉴权
 
 服务端的鉴权是可选的，由环境变量 `QWENPAW_AUTH_ENABLED` 控制。
 
@@ -49,19 +50,19 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 
 ---
 
-## 二、会话
+## 2、会话
 
 ### 端点一览
 
 | 方法与路径 | 作用 | 返回或参数要点 |
 | --- | --- | --- |
-| `GET /api/version` | 探测服务端版本 | `{"version":"2.2.1"}` |
+| `GET /api/version` | 探测服务端版本 | `{"version":"2.2.2.post1"}`；2.3.0 起为 `{"version":"2.3.0b2"}` |
 | `GET /api/agents` | 列出智能体 | 连接时用来校验 `agent_id` 是否存在 |
 | `GET /api/chats` | 列出会话 | 每项含 `status`（`idle` / `running`）与 `updated_at` |
 | `POST /api/chats` | 新建会话 | 需 `name`、`session_id`、`user_id` |
 | `GET /api/chats/{id}` | 拉取完整历史 | `{"messages":[...],"status":"..."}` |
 | `GET /api/chats/{id}/status` | 只查运行状态 | `{"status":"idle"}`，比拉整个历史轻得多 |
-| `PATCH /api/chats/{id}` | 重命名 | 与置顶共用同一路径，见第七节 |
+| `PATCH /api/chats/{id}` | 重命名 | 与置顶共用同一路径，见第 7 节 |
 | `DELETE /api/chats/{id}` | 删除会话 | — |
 
 > 同一路径 `/api/chats/{id}` 上，重命名记录为 `PATCH`，置顶与分组记录为 `PUT`。
@@ -81,7 +82,7 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 
 ---
 
-## 三、SSE 流
+## 3、SSE 流
 
 ### 请求
 
@@ -96,8 +97,8 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 }
 ```
 
-`reconnect` 的用法见第四节。`input` 为数组，可以同时携带文本与附件块，
-附件的字段形状见第八节。
+`reconnect` 的用法见第 4 节。`input` 为数组，可以同时携带文本与附件块，
+附件的字段形状见第 8 节。
 
 ### 帧类型
 
@@ -144,7 +145,7 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 
 ---
 
-## 四、断线与停止
+## 4、断线与停止
 
 ### 客户端断开不影响服务端
 
@@ -172,7 +173,7 @@ SSE 连接断开后，服务端仍会继续把这一轮跑完。这一点决定�
 
 ---
 
-## 五、并发与错误
+## 5、并发与错误
 
 ### 并发发送
 
@@ -198,7 +199,7 @@ OkHttp 在连接失败时抛出的异常与文案并不一致，实测至少两�
 
 ---
 
-## 六、审批
+## 6、审批
 
 ### 端点
 
@@ -219,12 +220,18 @@ QwenPaw 不提供推送能力，官方 Console 自身也是每 2.5 秒轮询一�
 ### 联调时的注意事项
 
 审批级别写在 `~/.qwenpaw/workspaces/default/agent.json` 的 `approval_level` 字段。
-默认值是 `AUTO`，只有改成 `ASK` 才会对高危命令弹出审批。
-修改前应先备份该文件，测完立刻还原为 `AUTO`；忘记还原会让后续所有真实使用都带审批弹窗。
+合法取值只有 `STRICT`、`SMART`、`AUTO`、`OFF`，服务端默认 `AUTO`，
+其中 `AUTO` 下只有 `guarded_tools` 名单里的工具才触发审批。
+
+**不存在 `ASK` 这个档位。** `qwenpaw/security/tool_guard/execution_level.py` 的
+`ToolExecutionLevel.from_config` 对无法解析的值一律回退成 `AUTO`，既不报错也不打日志，
+因此写错档位只能靠现场表现察觉。需要每条工具调用都审批时改 `STRICT`。
+
+修改前应先备份该文件，测完用 `diff` 核对后还原；忘记还原会让后续所有真实使用都带审批弹窗。
 
 ---
 
-## 七、置顶、归档与分组
+## 7、置顶、归档与分组
 
 ### 置顶
 
@@ -277,7 +284,7 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 
 ---
 
-## 八、附件与图片
+## 8、附件与图片
 
 ### 上传
 
@@ -378,7 +385,7 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 
 ---
 
-## 九、上下文用量、思考模式与模型切换
+## 9、上下文用量、思考模式与模型切换
 
 ### 上下文用量与单轮 token 账目
 
@@ -492,7 +499,7 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
 
 ---
 
-## 十、Token 用量统计
+## 10、Token 用量统计
 
 路径是 `GET /api/token-usage`——**中间是连字符**，不是 `/api/token/usage`。
 
@@ -512,7 +519,7 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
 
 ---
 
-## 十一、会话摘要与预览
+## 11、会话摘要与预览
 
 服务端的 `ChatSpec` **没有 summary 字段**，也不存在现成的预览文本接口。
 因此列表页的摘要完全是客户端行为：
@@ -528,9 +535,41 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
 「用户上传文件，已经下载到 &lt;路径&gt;」，这一行既不是用户原话也不是助手回复。
 预览时按该前缀跳过，否则列表里每条带附件的会话都显示同一句模板文字。
 
+### 会话标题的自动生成
+
+服务端会在首轮对话结束后向模型要一个 ≤ 6 个词的标题，但触发条件很窄。
+`console.py` 的两处判断缺一不可：
+
+```python
+# 1) 把占位名换成首条消息
+if first_text and not chat.last_finished_at and chat.meta.get("console_placeholder_name") == chat.name:
+    chat = await patch_chat_if_name_matches(chat.id, chat.name, ChatUpdate(name=name))
+# 2) 只有名字等于首条消息时才派发标题生成
+if first_text and chat.name == name:
+    asyncio.create_task(generate_and_update_title(..., placeholder_name=name))
+```
+
+`name` 来自 `_extract_placeholder_name(content_parts)`：首块文本非空时返回
+`(first_text, first_text)`，否则返回 `("Media Message", "")`。
+
+**结论：客户端新建会话时必须写 `meta.console_placeholder_name`，且值与 `name` 相同。**
+否则两处判断同时落空，标题永远不会生成，会话长期停在截断后的名称上
+（客户端此前传的是 `trimmed.take(20)`）。
+
+实测（2026-11-01，`10.10.0.211:8088`）：带该字段建会话、跑完一轮对话后，
+`GET /api/chats` 里的名字从「帮我检查网络是否通」变成「一句话说明助手能力」。
+不带该字段时名字不变。
+
+生成是 `asyncio.create_task` 起的后台任务，不走推送、没有回调，
+因此客户端只能刷新列表来发现。它还要先做一次模型调用，
+超时由 `auto_title_config.timeout_seconds` 控制（默认 30 秒），
+`finishRun` 里那一次立即刷新通常赶不上，需要按
+「列表里的名字是否仍等于占位名」再补一次。这个判据由
+`needsTitleRefresh` 实现，只补一轮，不轮询。
+
 ---
 
-## 十二、通知
+## 12、通知
 
 QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
@@ -544,7 +583,7 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ---
 
-## 十二之二、服务端不提供的两类数据
+## 12.2、服务端不提供的两类数据
 
 有两类数据看起来应当由服务端提供，实际没有接口，客户端已按本地实现处理。
 
@@ -570,7 +609,7 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ---
 
-## 十三、已知取舍
+## 13、已知取舍
 
 以下四项在项目范围内明确不做，且不是待办：
 
@@ -583,7 +622,7 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ---
 
-## 十四、语音输入（离线）
+## 14、语音输入（离线）
 
 语音输入全程在手机本地完成，不依赖系统语音服务，也不会上传音频。
 
@@ -627,7 +666,7 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ---
 
-## 十五、包体体积与 ABI 取舍
+## 15、包体体积与 ABI 取舍
 
 早期的 debug APK 达到 **133MB**。构成如下：
 
@@ -653,7 +692,7 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ---
 
-## 十六、MiSans 字体改为可选下载
+## 16、MiSans 字体改为可选下载
 
 字体本体 15.8MB，且只有部分用户需要，因此不再随 APK 打包。
 
@@ -679,3 +718,172 @@ Theme 侧不再引用 `R.font.*`，而是把运行时的 `File` 包成 Compose �
 MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**。
 因此本仓库不提交字体文件，应用也不随包分发，只在用户主动点击时从其 GitHub 原址下载，
 并在设置页与关于页标注出处。仓库的 `.gitignore` 已排除 `res/font/*.ttf`，避免误提交。
+
+---
+
+## 17、跨版本适配：2.2.2.post1 与 2.3.0b2
+
+服务端没有能力发现端口。`/api/capabilities`、`/api/features`、`/healthz` 一类路径
+在两个版本上都不存在，`/api/status` 与 `/api/health` 返回 404。
+唯一的版本信息来自 `GET /api/version`：
+
+```json
+{"version": "2.2.2.post1"}
+{"version": "2.3.0b2"}
+```
+
+因此适配只有两条可用路径：**按版本号分支**，或**按状态码兜底**。
+本节记录两个版本的实际差异，以及客户端据此定下的规则。
+
+### 版本差了多少
+
+以 `QWENPAW_OPENAPI_DOCS=1` 在临时 HOME 下起独立进程导出 `app.openapi()` 得到两份完整规格：
+
+| 项目 | 2.2.2.post1 | 2.3.0b2 |
+| --- | --- | --- |
+| 路径数 | 517 | 545 |
+| 新增路径 | — | 33 |
+| 移除路径 | — | 5 |
+
+客户端实际使用 **33 条路径**，逐条比对两份规格：
+
+- 33 条的路径与 HTTP 方法在两版**完全一致**；
+- 8 个关键端点的 `200` 响应 schema 完全相同；
+- 只有两条端点的**参数**有差异，且都是新增可选参数，不影响既有调用：
+  `POST /api/console/chat/stop` 多出 `initiator`（默认空串），
+  `GET /api/models/{provider_id}/pool` 多出 `model_type`（可空）。
+- 移除的 5 条里没有一条被客户端调用。
+
+新增的 33 条集中在四块：插件管理（`config` / `enabled` / `unload` /
+`repair-dependencies` / `dependency-upgrades`）、技能池下载任务、
+ChatGPT 提供商 OAuth、`/api/runtime/*`，另有 `/api/advisor-mode`、
+`/api/chats/resolve`、`/api/chats/{id}/decision-settings`。
+这些都属于尚未接入的新能力，不需要为旧版本做降级——功能本身在 2.2.2 上不存在，
+说明「当前服务端不支持」即可。
+
+### 被移除的 5 条
+
+| 路径 | 2.2.2.post1 | 2.3.0b2 |
+| --- | --- | --- |
+| `GET /api/workspace/download` | 200，流式 zip | 404 `Not Found` |
+| `POST /api/workspace/upload` | 422（缺 `file` 字段） | 405 `Method Not Allowed` |
+| `GET /api/agents/{agentId}/workspace/download` | 200 | 404 |
+| `POST /api/agents/{agentId}/workspace/upload` | 422 | 405 |
+| `POST /api/desktop/shutdown` | 404 | 404 |
+
+注意后两条的**表现不同**：删掉的路由在 2.3.0b2 上返回 404，而方法不匹配返回 405。
+`POST /api/workspace/upload` 之所以是 405 而不是 404，是因为同一路径下
+`file-upload` 系的路由仍以其它方法存在，FastAPI 的路由表对这种情况回 405。
+由此得出第一条判据：**405 不能当作「端点不存在」**，
+而 404 也不能反推「端点被删」——路径拼错同样返回 404。
+
+### 客户端据此定的规则
+
+**不依赖任何可被移除的整包端点。** 需要整包能力时改走逐文件路径：
+
+- 目录下载：`GET /api/workspace/tree` 按游标翻完，再对每个文件调
+  `GET /api/workspace/file-download?path=&root=`。两个版本都支持，
+  代价是多几次请求。`tree` 要翻到 `has_more` 为假为止，
+  否则大目录会被静默截断（实测 `digest` 目录返回 `entries` 为空而 `has_more` 为假）。
+- 整包上传：改用 `POST /api/workspace/file-upload`（多文件表单）或
+  `POST /api/workspace/project-directory/upload-zip`（整目录 zip）。
+  两者在两版都存在，字段形状也一致。
+
+**不做运行时版本分支。** 理由有三条：
+
+1. 客户端当前**没有**任何调用落在被删的 5 条上，分支没有作用对象。
+2. 版本号不是稳定的能力标识：`2.3.0b2` 是预发布版的写法，正式版会是 `2.3.0`，
+   靠字符串前缀比较迟早出错；而服务端不提供「这个版本有哪些端点」的接口。
+3. 分支一旦引入就必须为每条分支维护一条回归路径，而两版共用的 33 条路径
+   目前完全一致，分支只会增加未被覆盖的代码。
+
+**遇到 404 时按上下文给出说明，而不是按版本猜测。** 现有做法已经符合这一条：
+登录接口的 404 单独映射成「请求未落到登录端点」（见第 1 节），
+其余 404 统一为「会话不存在或已被删除」。若将来接入某个只在 2.3.0b2 存在的能力，
+调用方应就近给出「当前服务端版本不支持该功能」的文案，而不是让用户看到 404 原文。
+
+### 字段层面的两处实际差异
+
+路径一致不等于报文一致。实测两份容器返回的 JSON 有两处差别，都已按可空处理：
+
+| 位置 | 2.2.2.post1 | 2.3.0b2 | 处理 |
+| --- | --- | --- | --- |
+| `GET /api/token-usage` 的 `cache_hit_rate` | 有调用时为数字 | 无调用时为 `null` | 声明为 `Double?`，界面显示「暂无数据」 |
+| `GET /api/models/active` | 只有 `active_llm` | 多出 `default_models` | 忽略未知字段即可，无需建模 |
+
+`cache_hit_rate` 一项要紧：OpenAPI 把它声明为 `number | null`，两版一致，
+但 2.2.2 在有调用时恰好总是有值，此前把 DTO 写成非空 `Double` 一直没暴露。
+在干净实例（2.3.0b2 容器首次启动）上拿到 `null` 后，整个响应解析失败，
+界面报「加载用量失败」。这类「同一字段在空数据时才为 null」的形状
+只能靠干净实例覆盖，用有数据的实例回归是测不出来的。
+
+同理，`GET /api/agents/{agentId}` 的响应在 2.3.0b2 上多出 `advisor_mode` 整块、
+少了 `tools.builtin_tools.ast_search` 条目；客户端只读 `approval_level`，
+多余字段由 `ignoreUnknownKeys` 吸收，不需要处理。
+
+---
+
+## 18、服务端头像
+
+四条路径在两个版本上都存在，形状一致，实测自 2.2.2.post1 与 2.3.0b2 两个容器：
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `GET /api/profile/avatars` | 清单：`{"selected": id \| null, "history": [{id, mime, created_at}]}` |
+| `GET /api/profile/avatars/{identifier}` | 图片字节，响应头 `Cache-Control: private, no-store` |
+| `PUT /api/profile/avatars/selection` | 切换当前头像 |
+| `POST /api/profile/avatars` | 上传新头像（multipart） |
+
+**只有一个 owner，固定为 `"console"`。** `qwenpaw/user_assets/avatar_routes.py` 里
+`avatar_owner()` 不读取任何请求参数，一律返回 `"console"`；服务端也没有按智能体
+或按渠道区分的头像端点。因此客户端只能把这张图用于用户侧，智能体头像继续走本地存储。
+
+服务端上限（`qwenpaw/user_assets/avatars.py`）：单张 2 MB，支持 PNG / JPEG / WEBP / GIF，
+最长边 16384，历史保留 12 张。客户端不展示历史，只在 `selected` 变化时重新取图。
+
+两个容器初次查询都返回 `{"selected":null,"history":[]}`，即默认未设置头像。
+这条空数据形状是必须覆盖的：功能在「服务端没有头像」时不能改变任何现有表现。
+
+**图片端点不能走字符串通道。** `QwenPawApi` 的常规请求把响应体读成 `String`，
+二进制图会按字符集转换而损坏；为此单独开了 `requestBytes`，与 `execute` 同构，
+只把 `body.string()` 换成 `body.bytes()`。
+
+**不判定 `Cache-Control`，自己按 id 缓存。** 服务端对图片响应写了
+`private, no-store`，意味着每次请求都会真的走网络；而客户端要在冷启动与断网时都能
+显示上次的头像，因此把图片落到 `filesDir/server-avatar/{selectedId}.img`，
+用 id 做文件名，`index.txt` 记当前选中项。id 未变时不重复下载（单张上限 2 MB）。
+
+### 回归方法
+
+```bash
+# 清单：未设置头像时应为 {"selected":null,"history":[]}
+curl -s http://10.10.0.211:8088/api/profile/avatars
+curl -s http://10.10.0.220:8088/api/profile/avatars
+
+# 稳定版
+curl -s http://10.10.0.211:8088/api/version
+# 预发布版
+curl -s http://10.10.0.220:8088/api/version
+```
+
+动手改头像缓存逻辑时，注意「换 id 后旧文件必须被清掉」这条——服务端单张上限 2 MB，
+攒几张就很可观，而旧 id 的图片在客户端没有任何用处。
+
+### 通用回归方法
+
+改协议相关代码后，对两个容器各跑一遍版本探测，再按需切设备侧场景：
+
+设备侧用 `QWENPAW_HOST=10.10.0.220:8088 ./scripts/e2e_acceptance.sh --only A4`
+切到预发布版跑单个场景。**不要在干净实例上跳过用量、列表这类「空数据」页面**，
+上面那处 `null` 就只在干净实例上出现。
+
+### 若将来必须放弃某项功能
+
+判断标准是「在最新版本上是否仍有等价路径」：
+
+1. 有等价端点（如整包下载 → 逐文件下载）：**改造，不放弃**。
+2. 只有旧版本有、且无等价路径：**放弃该功能**，在本文与
+   [待办清单.md](../待办清单.md) 对应条目里写明「2.3.0 起服务端已移除」，
+   并注明最后一次可用版本，避免下一轮重新设计。
+3. 只有新版本有、旧版本没有（如插件管理）：**接入，旧版本上按 404 说明不支持**，
+   不做功能降级。
