@@ -5,20 +5,20 @@
 #   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A6）
 #   ./scripts/e2e_acceptance.sh --keep       # 保留当前应用数据
 #   ./scripts/e2e_acceptance.sh --only A4    # 只跑某个场景
-#   ADB_SERIAL=192.168.1.20:5555 ./scripts/e2e_acceptance.sh --only A3
 #
 # 设备：
 #   默认取 `adb devices` 里唯一在线设备；多设备时用 ADB_SERIAL 指定。
-#   真机（ARM/Android 12）与模拟器（x86/Android 15）都适用，坐标一律动态获取。
+#   只支持模拟器（x86_64 / Android 15），真机分支已移除。
 #
 # 前提：
-#   1. 设备已连接（真机：adb connect <ip>:5555；模拟器：emulator -avd qp35）；
-#     断网场景需要 `adb root` 才能用 iptables，真机通常拿不到 root，会自动跳过；
-#   2. 宿主机已运行 `qwenpaw app --host 0.0.0.0`；
+#   1. 模拟器已启动（emulator -avd qp35），参数见 AGENTS.md 3.1；
+#      A6 需要 `adb root` 才能用 iptables，模拟器可 root；
+#   2. LXC 测试容器已启动 QwenPaw（默认 qp-test / 10.10.0.211:8088），
+#      启动方式见 AGENTS.md 2.1。本机 :8088 实例承载真实数据，不参与验收；
 #   3. 已执行 `./gradlew :app:assembleDebug`。
 #
 # 覆盖场景：
-#   A1 审批       —— 需要服务端 approval_level=ASK，触发审批后点允许
+#   A1 审批       —— 服务端 approval_level=STRICT 时触发审批后点允许
 #   A2 附件       —— 上传相册图片并确认被服务端接收
 #   A3 重连       —— 长任务中杀 App，重开后接回运行中的输出
 #   A4 停止       —— 生成中停止，服务端回 idle
@@ -30,27 +30,35 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="${ANDROID_HOME:-$HOME/Android/Sdk}"
 ADB_BIN="$SDK/platform-tools/adb"
 PKG="io.qwenpaw.node"
-APK="$ROOT/app/build/outputs/apk/debug/app-debug.apk"
+DEBUG_DIR="$ROOT/app/build/outputs/apk/debug"
 OUT="$ROOT/build/e2e"
-HOST="${QWENPAW_HOST:-10.0.2.2:8088}"
-API="${QWENPAW_API:-http://127.0.0.1:8088}"
+# 默认服务端指向 LXC 测试容器 qp-test（稳定版 2.2.2.post1）。
+# 测预发布版时用 QWENPAW_HOST=10.10.0.220:8088 覆盖。
+# 宿主机 10.0.2.2 不再使用：本机实例承载真实数据，不参与测试。
+HOST="${QWENPAW_HOST:-10.10.0.211:8088}"
+# API 用于脚本自身直接调服务端接口（不经设备），与设备访问的 HOST 同一个服务端。
+API="${QWENPAW_API:-http://10.10.0.211:8088}"
 
 # 选设备：ADB_SERIAL 优先，否则取唯一在线设备。
 SERIAL="${ADB_SERIAL:-}"
 if [ -z "$SERIAL" ]; then
   SERIAL="$("$ADB_BIN" devices | awk 'NR>1 && $2=="device" {print $1}' | head -1)"
 fi
-[ -n "$SERIAL" ] || { echo "没有在线设备，先 adb connect / 启动模拟器"; exit 1; }
+[ -n "$SERIAL" ] || { echo "没有在线设备，先启动模拟器"; exit 1; }
 ADB=("$ADB_BIN" -s "$SERIAL")
 echo "设备：$SERIAL"
 
-# 真机访问宿主要用局域网 IP，模拟器用 10.0.2.2。
-if [ -z "${QWENPAW_HOST:-}" ]; then
-  case "$SERIAL" in
-    emulator-*) HOST="10.0.2.2:8088" ;;
-    *) HOST="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}'):8088" ;;
-  esac
-fi
+# splits.abi 对 debug 变体同样生效，产物是 app-<abi>-debug.apk；
+# 早期未拆分时是 app-debug.apk。按设备实际 ABI 选包，两者都能命中。
+DEVICE_ABI="$("${ADB[@]}" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r')"
+PICKED=""
+for candidate in "$DEBUG_DIR/app-$DEVICE_ABI-debug.apk" "$DEBUG_DIR/app-debug.apk"; do
+  [ -f "$candidate" ] && { PICKED="$candidate"; break; }
+done
+[ -n "$PICKED" ] || { echo "找不到 debug 包（设备 ABI=$DEVICE_ABI）：$DEBUG_DIR"; exit 1; }
+APK="$PICKED"
+echo "安装包：$(basename "$APK")"
+
 echo "服务器地址：$HOST"
 # 第二实例（A5 用）：同一台宿主的 8099 端口。
 SECOND_HOST="${QWENPAW_HOST2:-${HOST%:*}:8099}"
@@ -124,35 +132,19 @@ unblock_port() {
   run_root "iptables -D OUTPUT -p tcp --dport $PORT -j DROP; iptables -D INPUT -p tcp --sport $PORT -j DROP" 2>/dev/null || true
 }
 
-# 以 root 执行，三种情况：adb 已是 root、adb root 成功、真机走 su -c。
-# 注意 su -c 的命令要整体加引号，否则 -I 之类会被 su 当成自己的参数。
+# 以 root 执行。模拟器支持 `adb root`，因此只有这一条提权路径。
 run_root() {
-  local cmd="$1"
-  if [ "$("${ADB[@]}" shell id -u 2>/dev/null | tr -d '\r')" = "0" ]; then
-    "${ADB[@]}" shell "$cmd"
-  elif [ "${USE_SU:-0}" = "1" ]; then
-    "${ADB[@]}" shell "su -c \"$cmd\""
-  else
-    "${ADB[@]}" shell "$cmd"
-  fi
+  "${ADB[@]}" shell "$1"
 }
 
-# 断网需要 root，并且要知道走 adb root 还是 su。
-# 只封 HOST 的端口（不是 5555），所以不会切断 adb 自身。
+# 断网需要 root。只封 HOST 的端口（不是 5555），所以不会切断 adb 自身。
 can_block() {
-  local uid
-  uid="$("${ADB[@]}" shell id -u 2>/dev/null | tr -d '\r')"
-  if [ "$uid" = "0" ]; then
-    USE_SU=0
+  if [ "$("${ADB[@]}" shell id -u 2>/dev/null | tr -d '\r')" = "0" ]; then
     return 0
   fi
-  if "${ADB[@]}" shell su -c id 2>/dev/null | grep -q 'uid=0'; then
-    USE_SU=1
-    return 0
-  fi
-  if "${ADB[@]}" root >/dev/null 2>&1 && sleep 2 && \
-     [ "$("${ADB[@]}" shell id -u 2>/dev/null | tr -d '\r')" = "0" ]; then
-    USE_SU=0
+  "${ADB[@]}" root >/dev/null 2>&1 || true
+  sleep 2
+  if [ "$("${ADB[@]}" shell id -u 2>/dev/null | tr -d '\r')" = "0" ]; then
     return 0
   fi
   return 1
@@ -259,7 +251,7 @@ if screen_has '连接到 QwenPaw'; then
   echo "== 首次连接：填地址→读列表→选智能体→连接 =="
   # 只填地址不会推进：步骤 1 的勾以「验证成功」为准，
   # 而验证成功要么点「验证连接」，要么读列表成功后自动置位。
-  # 地址框可能带默认值（10.0.2.2:8088），先清空再输入，
+  # 地址框可能带默认值，先清空再输入，
   # 否则 `input text` 会追加到默认值后面，拼出一个无效地址。
   tap_text 'class="android.widget.EditText"' || true
   sleep 1
@@ -343,7 +335,7 @@ fi
 if want A6; then
   echo "== A6 断网 =="
   if ! can_block; then
-    echo "  [跳过] 设备拿不到 root（adb root / su 都不行），无法断网"
+    echo "  [跳过] 模拟器没拿到 root（adb root 失败），无法断网"
   else
   block_port
   if type_and_send "offline acceptance probe"; then
@@ -395,7 +387,7 @@ fi
 
 if want A5; then
   echo "== A5 多实例（需要第二个实例已在 8099 运行）=="
-  if curl -s -m 3 http://127.0.0.1:8099/api/version >/dev/null 2>&1; then
+  if curl -s -m 3 "http://$SECOND_HOST/api/version" >/dev/null 2>&1; then
     open_chat_list
     tap_text 'content-desc="设置"' || true
     sleep 3
@@ -430,13 +422,22 @@ fi
 
 if want A1; then
   echo "== A1 审批 =="
-  # AUTO 级别下高危命令（rm -rf / 反向连接等）同样会触发审批，
-  # 因此这里不强制要求 ASK，只把当前档位打印出来便于判断。
-  # agent.json 里 approval_level 可能出现多次（顶层与子配置），只取第一处。
-  level="$(grep -o '"approval_level"[[:space:]]*:[[:space:]]*"[A-Z]*"' \
-    "$HOME/.qwenpaw/workspaces/default/agent.json" 2>/dev/null \
-    | head -1 | grep -o '"[A-Z]*"$' | tr -d '"')"
-  echo "  当前 approval_level=${level:-未知}"
+  # 审批是否触发取决于服务端档位，合法取值只有 STRICT / SMART / AUTO / OFF。
+  # STRICT 下全部工具都要审批，最稳；SMART 与 AUTO 只命中部分工具；
+  # OFF 完全不拦。写 ASK 之类的非法值会被静默回退成 AUTO，所以这里只做记录。
+  #
+  # 档位从服务端接口读，不读宿主机上的 agent.json：默认服务端是 LXC 容器，
+  # 它的 agent.json 在容器自己的 HOME 里，宿主机那份与它无关。
+  # 智能体用 QWENPAW_AGENT 覆盖，默认取列表里的第一个。
+  AGENT="${QWENPAW_AGENT:-$(api_get /api/agents | python3 -c '
+import json,sys
+try: print(json.load(sys.stdin)["agents"][0]["id"])
+except Exception: pass')}"
+  level="$(api_get "/api/agents/$AGENT" | python3 -c '
+import json,sys
+try: print(json.load(sys.stdin).get("approval_level",""))
+except Exception: pass')"
+  echo "  当前智能体=${AGENT:-未知} approval_level=${level:-未知}"
   if [ "${level:-}" = "OFF" ]; then
     echo "  [跳过] OFF 级别不会触发审批"
   else
