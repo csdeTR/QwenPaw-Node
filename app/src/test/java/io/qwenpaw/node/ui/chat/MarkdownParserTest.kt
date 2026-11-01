@@ -109,4 +109,46 @@ class MarkdownParserTest {
         val code = MarkdownParser.parse(md).single() as MdBlock.Code
         assertTrue(code.code.contains("# 这不是标题"))
     }
+
+    /**
+     * 块级公式必须识别成独立块。
+     *
+     * 注意 `$` 在 Kotlin 字符串里是模板前缀，测试里统一用 `\$` 转义。
+     */
+    @Test
+    fun `single line display math becomes math block`() {
+        val blocks = MarkdownParser.parse("\$\$x^2 + y^2 = z^2\$\$")
+        assertEquals(1, blocks.size)
+        assertEquals("x^2 + y^2 = z^2", (blocks.single() as MdBlock.Math).source)
+    }
+
+    @Test
+    fun `multi line display math keeps newlines`() {
+        val md = "\$\$\n\\frac{a}{b}\n+ c\n\$\$"
+        val math = MarkdownParser.parse(md).single() as MdBlock.Math
+        assertTrue(math.source.contains("\\frac{a}{b}"))
+        assertTrue(math.source.contains("+ c"))
+    }
+
+    /**
+     * 流式输出时 `$$` 先于公式内容到达，此刻不能渲染。
+     * 未闭合时必须退回普通段落，让用户看到原文而不是半个公式。
+     */
+    @Test
+    fun `unclosed display math stays a paragraph`() {
+        val blocks = MarkdownParser.parse("\$\$\n\\frac{a}{b}")
+        assertTrue(blocks.single() is MdBlock.Paragraph)
+    }
+
+    @Test
+    fun `bracket display math is also recognized`() {
+        val math = MarkdownParser.parse("\\[ E = mc^2 \\]").single() as MdBlock.Math
+        assertEquals("E = mc^2", math.source)
+    }
+
+    @Test
+    fun `dollar inside code fence is untouched`() {
+        val code = MarkdownParser.parse("```bash\necho \$HOME\n```").single() as MdBlock.Code
+        assertEquals("echo \$HOME", code.code)
+    }
 }

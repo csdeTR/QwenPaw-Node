@@ -52,6 +52,29 @@ class QwenPawApiTest {
         assertTrue(content[1].jsonObject.containsKey("image_url"))
     }
 
+    /**
+     * 新建会话时必须带上 `meta.console_placeholder_name`。
+     *
+     * 服务端 `console.py` 用 `chat.meta["console_placeholder_name"] == chat.name`
+     * 判断「这个名字只是占位」，再把会话名换成首条消息，随后派发标题生成任务。
+     * 缺这一层，自动命名永远不会发生，会话会一直停在截断后的前 20 个字。
+     */
+    @Test
+    fun `create chat body carries placeholder meta when requested`() {
+        val body = api.createChatBody("帮我看下报错", "s-1", "u-1", placeholder = true)
+        assertEquals("帮我看下报错", body["name"]?.jsonPrimitive?.content)
+        assertEquals("console", body["channel"]?.jsonPrimitive?.content)
+        val meta = body["meta"]?.jsonObject
+        assertEquals("帮我看下报错", meta?.get("console_placeholder_name")?.jsonPrimitive?.content)
+    }
+
+    /** 不带占位标记时不写 meta：用户手改过名字的会话不该被再当成占位。 */
+    @Test
+    fun `create chat body omits meta by default`() {
+        val body = api.createChatBody("名字", "s-1", "u-1", placeholder = false)
+        assertFalse(body.containsKey("meta"))
+    }
+
     // resolve 把服务端本地绝对路径拼到预览端点，外链与 data URI 原样保留。
     @Test
     fun `image loader resolve handles all url shapes`() {

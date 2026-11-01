@@ -218,10 +218,11 @@ class ChatGroupingTest {
             listOf(chat("a", groupId = "default")),
             groups,
         )
-        assertEquals(listOf("g:default", "g:fresh"), sections.map { it.key })
-        assertEquals(listOf("a"), sections[0].chats.map { it.id })
-        assertTrue(sections[1].chats.isEmpty())
-        assertEquals("测试", sections[1].title)
+        // 自建分组权重低于默认分组，因此排在前面；空的自建分组仍然要出现。
+        assertEquals(listOf("g:fresh", "g:default"), sections.map { it.key })
+        assertTrue(sections[0].chats.isEmpty())
+        assertEquals("测试", sections[0].title)
+        assertEquals(listOf("a"), sections[1].chats.map { it.id })
     }
 
     /** 折叠与来源分组配合：key 形如 `g:<id>`，与未分组 / 置顶区互不冲突。 */
@@ -239,5 +240,117 @@ class ChatGroupingTest {
         assertEquals(listOf("g:default", "g:custom"), out.map { it.key })
         assertTrue(out[0].chats.isEmpty())
         assertEquals(listOf("b"), out[1].chats.map { it.id })
+    }
+
+    /**
+     * 定时任务与子智能体置底。
+     *
+     * 依据是服务端把这两类当作后台自动产生的会话。服务端返回的 `order`
+     * 在两台测试实例上并不一致，因此顺序不能只按 order 排——
+     * 这里故意把 cron/subagents 的 order 给成最小，仍要求它们排在最后。
+     */
+    @Test
+    fun `cron and subagents go last regardless of server order`() {
+        val groups = listOf(
+            ChatGroupDto(id = "cron", name = "定时任务", order = 0, kind = "cron"),
+            ChatGroupDto(id = "subagents", name = "子智能体", order = 0, kind = "subagents"),
+            ChatGroupDto(id = "default", name = "未分类", order = 9, kind = "default"),
+            ChatGroupDto(id = "mine", name = "我的", order = 5, kind = CUSTOM_KIND),
+        )
+        val chats = listOf(
+            chat("a", groupId = "cron"),
+            chat("b", groupId = "subagents"),
+            chat("c", groupId = "default"),
+            chat("d", groupId = "mine"),
+        )
+        val sections = ChatGrouping.bySource(chats, groups)
+        assertEquals(
+            listOf("g:mine", "g:default", "g:cron", "g:subagents"),
+            sections.map { it.key },
+        )
+    }
+
+    /** 未分组排在「其他内置分组」之后、定时任务之前。 */
+    @Test
+    fun `ungrouped sits between builtin groups and cron`() {
+        val groups = listOf(
+            ChatGroupDto(id = "cron", name = "定时任务", order = 1, kind = "cron"),
+            ChatGroupDto(id = "default", name = "未分类", order = 2, kind = "default"),
+        )
+        val sections = ChatGrouping.bySource(
+            listOf(
+                chat("a", groupId = "cron"),
+                chat("b", groupId = "default"),
+                chat("c"),
+            ),
+            groups,
+        )
+        assertEquals(listOf("g:default", "ungrouped", "g:cron"), sections.map { it.key })
+    }
+
+    /** 没有内置分组时，未分组仍然出现在末尾。 */
+    @Test
+    fun `ungrouped still appears when no group list`() {
+        val sections = ChatGrouping.bySource(listOf(chat("a")), emptyList())
+        assertEquals(listOf("ungrouped"), sections.map { it.key })
+    }
+
+    /** 同一权重内仍按服务端 order 排，自建分组之间不能被搅乱。 */
+    @Test
+    fun `same rank keeps server order`() {
+        val groups = listOf(
+            ChatGroupDto(id = "b", name = "B", order = 2, kind = CUSTOM_KIND),
+            ChatGroupDto(id = "a", name = "A", order = 1, kind = CUSTOM_KIND),
+        )
+        val sections = ChatGrouping.bySource(
+            listOf(chat("x", groupId = "a"), chat("y", groupId = "b")),
+            groups,
+        )
+        assertEquals(listOf("A", "B"), sections.map { it.title })
+    }
+
+    /** 权重映射本身。order 与 kind 的关系写死在这里，避免后续改动悄悄改序。 */
+    @Test
+    fun `source rank order`() {
+        assertEquals(0, ChatGrouping.rankOf(CUSTOM_KIND))
+        assertEquals(1, ChatGrouping.rankOf("default"))
+        assertEquals(2, ChatGrouping.rankOf(null))
+        assertEquals(2, ChatGrouping.rankOf("whatever"))
+        assertEquals(3, ChatGrouping.rankOf("cron"))
+        assertEquals(4, ChatGrouping.rankOf("subagents"))
+    }
+
+    /**
+     * 内置分组的表头用中文，而不是服务端返回的英文 name。
+     *
+     * 按 kind 映射而不是按 name：name 可被修改，kind 是服务端固定的枚举值。
+     */
+    @Test
+    fun `builtin groups use localized titles`() {
+        assertEquals(
+            "未分组",
+            groupTitle(ChatGroupDto(id = "g1", name = "Uncategorized", kind = "default")),
+        )
+        assertEquals(
+            "定时任务对话",
+            groupTitle(ChatGroupDto(id = "g2", name = "Scheduled tasks", kind = "cron")),
+        )
+        assertEquals(
+            "子智能体对话",
+            groupTitle(ChatGroupDto(id = "g3", name = "Subagents", kind = "subagents")),
+        )
+    }
+
+    /** 自建分组保留用户起的名字；名字为空时退回 id，不留空表头。 */
+    @Test
+    fun `custom group keeps its own name`() {
+        assertEquals(
+            "我的分组",
+            groupTitle(ChatGroupDto(id = "g4", name = "我的分组", kind = CUSTOM_KIND)),
+        )
+        assertEquals(
+            "g5",
+            groupTitle(ChatGroupDto(id = "g5", name = "", kind = CUSTOM_KIND)),
+        )
     }
 }

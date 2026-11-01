@@ -36,4 +36,29 @@ class ChatViewModelBindTest {
         assertFalse(shouldClearOnBind("inst-1", ""))
         assertFalse(shouldClearOnBind("", ""))
     }
+
+    /**
+     * 同一实例内换智能体必须清空。
+     *
+     * 各智能体的会话互不可见：`GET /api/chats` 按 `X-Agent-Id` 过滤。
+     * 不清空的话，界面上留着上一个智能体的会话，而后续请求全部按新智能体发出。
+     */
+    @Test
+    fun `different agent clears current chat`() {
+        assertTrue(shouldClearOnAgentChange("agent-a", "agent-b"))
+    }
+
+    /** 同一智能体重连不清空：顶栏重连、网络恢复都会走这条路径。 */
+    @Test
+    fun `same agent keeps current chat`() {
+        assertFalse(shouldClearOnAgentChange("agent-a", "agent-a"))
+    }
+
+    /** 智能体 id 未知时维持原会话，判据与实例切换一致。 */
+    @Test
+    fun `agent change with blank id does not clear`() {
+        assertFalse(shouldClearOnAgentChange("", "agent-b"))
+        assertFalse(shouldClearOnAgentChange("agent-a", ""))
+        assertFalse(shouldClearOnAgentChange("", ""))
+    }
 }

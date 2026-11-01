@@ -22,9 +22,9 @@ class ErrorTextTest {
     fun `business errors win over network heuristics`() {
         // ApiException 继承自 IOException，若不先判会落进「网络中断」分支。
         assertEquals("登录已失效，请重新登录", ErrorText.of(ApiException(401, "unauthorized")))
-        assertEquals("会话不存在或已被删除", ErrorText.of(ApiException(404, "not found")))
+        assertEquals("对话不存在或已被删除", ErrorText.of(ApiException(404, "not found")))
         assertEquals(
-            "该会话已有任务在运行，请先停止或等待完成",
+            "该对话已有任务在运行，请先停止或等待完成",
             ErrorText.of(ApiException(409, "conflict")),
         )
         assertEquals("Console 频道未启用，请在服务端开启", ErrorText.of(ApiException(503, "x")))
@@ -74,10 +74,10 @@ class ErrorTextTest {
     }
 
     /**
-     * 登录接口的 404 不能复用「会话不存在或已被删除」。
+     * 登录接口的 404 不能复用「对话不存在或已被删除」。
      *
      * 真正的原因通常是地址写成了 http，被反代 301 到 https 后 POST 被改写成 GET。
-     * 文案必须把用户指向地址，而不是会话数据。
+     * 文案必须把用户指向地址，而不是对话数据。
      */
     @Test
     fun `login 404 points at the address instead of the chat`() {
@@ -85,7 +85,7 @@ class ErrorTextTest {
         val text = ErrorText.of(e)
 
         assertTrue(text.contains("https://"))
-        assertFalse(text.contains("会话不存在"))
+        assertFalse(text.contains("对话不存在"))
         assertEquals(text, ErrorText.ofWithHint(e, usedHttps = false))
     }
 
