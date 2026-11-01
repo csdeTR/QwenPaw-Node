@@ -10,7 +10,7 @@ import java.time.temporal.ChronoUnit
  * 服务端时间字符串的解析与展示。
  *
  * 服务端给的是 UTC ISO 8601（`2026-10-29T02:13:41.029Z` 这种）。
- * 旧实现在会话列表里直接截字符串前 10 位当日期，等于按 UTC 日界划分「今天」，
+ * 旧实现在对话列表里直接截字符串前 10 位当日期，等于按 UTC 日界划分「今天」，
  * 在东八区会比用户直觉晚 8 小时——早上 7 点发的消息会被算成「昨天」。
  * 这里统一解析到本地时区后再格式化。
  */
@@ -78,7 +78,7 @@ object TimeLabels {
         }
     }
 
-    /** 会话列表用的短日期：今天显示时间，更早显示日期。 */
+    /** 对话列表用的短日期：今天显示时间，更早显示日期。 */
     fun listStamp(raw: String?): String {
         val time = parse(raw) ?: return ""
         val today = LocalDate.now()

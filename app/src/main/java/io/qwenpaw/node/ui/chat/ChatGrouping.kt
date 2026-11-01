@@ -8,7 +8,7 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 /**
- * 会话列表的分组方式。
+ * 对话列表的分组方式。
  *
  * 三档与 QwenPaw 网页版一致：按时间、按来源、不分组。
  * 默认按时间，与网页版默认相同。
@@ -47,7 +47,22 @@ private const val UNGROUPED_TITLE = "未分组"
 internal const val CUSTOM_KIND = "custom"
 
 /**
- * 把会话列表切成若干分区。
+ * 分组表头文字。
+ *
+ * 服务端内置分组的 `name` 是英文（Uncategorized / Scheduled tasks / Subagents），
+ * 直接显示会让中文界面里夹三段英文。按 `kind` 映射而不是按 name：
+ * name 可被修改，kind 是服务端固定的枚举值。
+ * 自建分组没有 kind，继续用用户起的名字，为空时退回 id。
+ */
+internal fun groupTitle(group: ChatGroupDto): String = when (group.kind) {
+    "default" -> "未分组"
+    "cron" -> "定时任务对话"
+    "subagents" -> "子智能体对话"
+    else -> group.name.ifBlank { group.id }
+}
+
+/**
+ * 把对话列表切成若干分区。
  *
  * 两条规则贯穿两种模式：
  *
@@ -79,7 +94,7 @@ object ChatGrouping {
             when {
                 days == 0L -> today += chat
                 days in 1..6 -> recent += chat
-                // 时间缺失或解析失败的会话归入「更早」：总比凭空消失好。
+                // 时间缺失或解析失败的对话归入「更早」：总比凭空消失好。
                 else -> earlier += chat
             }
         }
@@ -92,10 +107,27 @@ object ChatGrouping {
     }
 
     /**
-     * 按来源（会话分组）分桶。
+     * 分组在「按来源」模式下的排序权重，数值越小越靠前。
      *
-     * 分区顺序取自服务端 `/api/chats/groups` 的 `order`，置顶分组优先；
-     * 找不到分组的会话归入「未分组」并排在最后。
+     * 网页版把定时任务与子智能体放在列表最底：它们由后台自动产生，
+     * 不是用户当下要处理的对话。自建分组与默认分组属于用户自己的东西，排在前面。
+     * `cron` 与 `subagents` 再细分为两档，保证两者的先后固定，
+     * 不依赖服务端 `order` 字段的取值——实测该字段在不同服务器上并不一致。
+     */
+    internal fun rankOf(kind: String?): Int = when (kind) {
+        CUSTOM_KIND -> 0
+        "default" -> 1
+        "cron" -> 3
+        "subagents" -> 4
+        // 其他内置分组排在未分组之前，与网页版的相对位置一致。
+        else -> 2
+    }
+
+    /**
+     * 按来源（对话分组）分桶。
+     *
+     * 分区顺序：置顶分组 → 自建分组 → 默认分组 → 其他内置 → 未分组 → 定时任务 → 子智能体。
+     * `order` 只在同一权重内生效，因此服务端调整 order 不会把定时任务顶到前面。
      *
      * 分组名称为空时用 id 兜底：服务端内置组都有名字，自建组偶尔只回 id，
      * 显示空白表头会让用户以为是渲染错误。
@@ -105,10 +137,7 @@ object ChatGrouping {
         groups: List<ChatGroupDto>,
     ): List<ChatSection> {
         val (pinned, rest) = chats.partition { it.pinned }
-        val ordered = groups.sortedWith(
-            compareByDescending<ChatGroupDto> { it.pinned }.thenBy { it.order },
-        )
-        val byId = ordered.associateBy { it.id }
+        val byId = groups.associateBy { it.id }
         val buckets = linkedMapOf<String, MutableList<ChatSpecDto>>()
         val unknown = mutableListOf<ChatSpecDto>()
         rest.forEach { chat ->
@@ -119,21 +148,38 @@ object ChatGrouping {
                 buckets.getOrPut(groupId) { mutableListOf() } += chat
             }
         }
+
+        // 同一权重内按服务端 order 排；order 相同时保持列表原顺序，
+        // 否则同一份数据两次渲染的顺序可能不同，用户会觉得列表在跳。
+        val ordered = groups.withIndex().sortedWith(
+            compareByDescending<IndexedValue<ChatGroupDto>> { it.value.pinned }
+                .thenBy { rankOf(it.value.kind) }
+                .thenBy { it.value.order }
+                .thenBy { it.index },
+        ).map { it.value }
+
         return buildList {
             if (pinned.isNotEmpty()) add(ChatSection(PINNED_KEY, PINNED_TITLE, pinned))
+            var ungroupedPlaced = false
             ordered.forEach { group ->
-                // 没有会话的组在 buckets 里根本没有键，这里补成空表而不是跳过：
+                // 未分组紧跟在「其他内置分组」之后、定时任务之前：
+                // 它属于用户自己产生的对话，不该被自动任务的表头压在下面。
+                if (!ungroupedPlaced && unknown.isNotEmpty() && rankOf(group.kind) > 2) {
+                    add(ChatSection(UNGROUPED_KEY, UNGROUPED_TITLE, unknown))
+                    ungroupedPlaced = true
+                }
+                // 没有对话的组在 buckets 里根本没有键，这里补成空表而不是跳过：
                 // 自建空分组要显示出来（用户刚建完，藏起来像失败），
                 // 内置空分组由下面一行过滤掉。
                 val items = buckets[group.id].orEmpty()
                 // 内置分组（default / cron / subagents）为空时会造成一排空表头；
-                // 但自建分组例外——用户刚新建的分组里必然还没有会话，
+                // 但自建分组例外——用户刚新建的分组里必然还没有对话，
                 // 把它藏起来会让人以为「建失败了」，也找不到该往哪个组里放。
                 if (items.isEmpty() && group.kind != CUSTOM_KIND) return@forEach
-                val title = group.name.ifBlank { group.id }
+                val title = groupTitle(group)
                 add(ChatSection("g:${group.id}", title, items))
             }
-            if (unknown.isNotEmpty()) {
+            if (unknown.isNotEmpty() && !ungroupedPlaced) {
                 add(ChatSection(UNGROUPED_KEY, UNGROUPED_TITLE, unknown))
             }
         }
@@ -176,7 +222,7 @@ object ChatGrouping {
     }
 
     /**
-     * 取会话的活跃日期（本地时区）。
+     * 取对话的活跃日期（本地时区）。
      *
      * 优先用 `updated_at`，缺失时退到 `last_finished_at`、`created_at`。
      * 解析失败返回 null，由调用方归入「更早」。

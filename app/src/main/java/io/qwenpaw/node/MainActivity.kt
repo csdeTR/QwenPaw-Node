@@ -18,6 +18,9 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -27,7 +30,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -117,7 +122,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE }
 
 @Composable
 private fun QwenPawNav(
@@ -134,9 +139,12 @@ private fun QwenPawNav(
     val scope = rememberCoroutineScope()
     val chatVmState = chatState
     var pickingAgent by remember { mutableStateOf<io.qwenpaw.node.data.local.InstanceConfig?>(null) }
+    // 原文页要显示的那条消息。与 Screen 一起构成页面状态，
+    // 单独存一份而不是塞进 Screen 枚举的参数里，是为了让枚举本身保持无载荷。
+    var sourceText by remember { mutableStateOf<String?>(null) }
     val lastChatId by viewModel.lastChatId.collectAsState()
 
-    // 会话切换后记下来，下次启动恢复到这个会话。
+    // 对话切换后记下来，下次启动恢复到这个对话。
     LaunchedEffect(chatVmState.currentChatId) {
         viewModel.rememberLastChat(chatVmState.currentChatId)
     }
@@ -144,10 +152,17 @@ private fun QwenPawNav(
     // ChatViewModel 的轻量提示（归档 / 删除 / 批量操作 / 新审批）。
     //
     // 这里必须有人订阅：notifications 是带缓冲的 SharedFlow，没有收集方时
-    // tryEmit 的返回值被丢弃，用户点完归档只会看到会话消失、没有任何反馈。
+    // tryEmit 的返回值被丢弃，用户点完归档只会看到对话消失、没有任何反馈。
     // 放在 Nav 层而不是某个页面里，是因为这些操作在列表、聊天页、已归档页都可能触发。
     LaunchedEffect(chatVm) {
         chatVm.notifications.collect { message -> toast(context, message) }
+    }
+
+    // 可撤销操作的提示条状态。放在 Nav 层与 notifications 同理：
+    // 归档可能从列表页、聊天页、已归档页触发，三个页面都要能看到撤销入口。
+    val undoController = remember { io.qwenpaw.node.ui.common.UndoController() }
+    LaunchedEffect(chatVm) {
+        chatVm.undoOffers.collect { offer -> undoController.offer(offer.message, offer.onUndo) }
     }
 
     // 当前实例对应的连接，图片加载与导出都要用。
@@ -173,6 +188,10 @@ private fun QwenPawNav(
     val netSnapshot by app.networkMonitor.current.collectAsState()
     // 头像文件版本：设置里换完头像返回聊天页，靠它触发重读。
     val avatarVersion by app.avatarStore.version.collectAsState()
+    // 对话图标版本：换完图标返回列表，行据此重新读图。
+    val iconVersion by app.chatIconStore.version.collectAsState()
+    // 服务端头像的本地缓存文件，冷启动直接读盘，联网后再刷新。
+    val serverAvatarFile by viewModel.serverAvatarFile.collectAsState()
 
     val messageAppearance = io.qwenpaw.node.ui.chat.MessageAppearance(
         avatarStore = app.avatarStore,
@@ -180,70 +199,19 @@ private fun QwenPawNav(
         userName = appState.userName,
         agentName = connection?.agentId ?: "智能体",
         showStats = appState.showMessageStats,
+        serverUserAvatar = serverAvatarFile,
+        useServerAvatar = appState.useServerAvatar,
+        actionStyle = appState.actionStyle,
     )
 
-    // 导出 Markdown：先让系统选择落盘位置，拿到 uri 后再写内容。
-    //
-    // 文本必须放进 rememberSaveable：选文件时系统会短暂把 Activity 推到后台，
-    // 低内存下可能被杀掉重建，普通 remember 的文本会变成 null，
-    // 回调里就会静默早退——用户看到的表现正是「点了导出什么都没发生」。
-    var pendingExportText by rememberSaveable { mutableStateOf<String?>(null) }
-    var pendingExportName by rememberSaveable { mutableStateOf<String?>(null) }
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/markdown"),
-    ) { uri ->
-        val text = pendingExportText
-        pendingExportText = null
-        val name = pendingExportName.orEmpty()
-        pendingExportName = null
-        if (uri == null) {
-            toast(context, "已取消导出")
-            return@rememberLauncherForActivityResult
-        }
-        if (text == null) {
-            toast(context, "导出内容已丢失，请重新执行导出")
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            val error = writeTextToUri(context, uri, text)
-            toast(
-                context,
-                if (error == null) {
-                    "已导出 $name"
-                } else {
-                    "导出失败：$error"
-                },
-            )
-        }
-    }
+    // 导出统一走系统分享：用户自己决定交给哪个应用处理，
+// 客户端不在用户存储里留副本，也就不需要 FileProvider 与存储权限。
+    // 文本在内存里直接交给 ACTION_SEND，没有「选位置」这一步，自然没有
+    // 「Activity 被重建后文本丢失」的问题。
 
     val speech = remember(context) { io.qwenpaw.node.voice.VoiceInput(context) }
     val modelManager = remember(context) { io.qwenpaw.node.voice.SpeechModelManager(context) }
     val modelState by modelManager.state.collectAsState()
-
-    // 日志导出：与 Markdown 导出同一套「先选位置再写」的流程，
-    // 文本同样必须放 rememberSaveable，否则 Activity 被重建后会静默丢失。
-    var pendingLogText by rememberSaveable { mutableStateOf<String?>(null) }
-    val logExportLauncher = rememberLauncherForActivityResult(
-        // 用 text/plain：日志是纯文本，标成 markdown 会让部分文件管理器
-        // 把它当文档类文件处理，用户不容易在「下载」里找到。
-        ActivityResultContracts.CreateDocument("text/plain"),
-    ) { uri ->
-        val text = pendingLogText
-        pendingLogText = null
-        if (uri == null) {
-            toast(context, "已取消导出")
-            return@rememberLauncherForActivityResult
-        }
-        if (text == null) {
-            toast(context, "导出内容已丢失，请重新执行导出")
-            return@rememberLauncherForActivityResult
-        }
-        scope.launch {
-            val error = writeTextToUri(context, uri, text)
-            toast(context, if (error == null) "已导出运行日志" else "导出失败：$error")
-        }
-    }
 
     // 日志导入：读外部文本后替换日志页内容，用于查看别人分享的日志。
     val logImportLauncher = rememberLauncherForActivityResult(
@@ -281,6 +249,44 @@ private fun QwenPawNav(
     // 裁剪用的位图没法 Saveable，重建时退回未选状态即可（用户再选一次）。
     var cropping by remember { mutableStateOf<io.qwenpaw.node.avatar.AvatarSource?>(null) }
     var croppingKind by remember { mutableStateOf<String?>(null) }
+    // 为某个对话选图标时记下 chatId；非空表示这次裁剪的产物属于对话图标，
+    // 而不是头像。两者共用裁剪页，靠这个字段决定存到哪个 store。
+    var croppingChatId by remember { mutableStateOf<String?>(null) }
+    var pendingIconChatId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // 对话图标只接受静态图：列表行是 34dp 的小方块，动图在那里看不出动画，
+    // 只会让滚动时每一行都在解码。因此这条链路不走 GIF 分支。
+    val pickChatIcon = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        val chatId = pendingIconChatId
+        pendingIconChatId = null
+        if (uri == null || chatId == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val bytes = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                }.getOrNull()
+            }
+            if (bytes == null) {
+                toast(context, "无法读取该图片")
+                return@launch
+            }
+            val decoded = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                io.qwenpaw.node.avatar.AvatarIntake.decode(bytes)
+            }
+            if (decoded == null) {
+                toast(context, "该图片无法解析")
+                return@launch
+            }
+            croppingChatId = chatId
+            cropping = io.qwenpaw.node.avatar.AvatarSource(
+                animated = false,
+                bitmap = decoded,
+                bytes = bytes,
+            )
+        }
+    }
 
     val pickAvatar = rememberLauncherForActivityResult(
         // 头像只要静态图或 GIF，不要视频，所以是 ImageOnly。
@@ -390,25 +396,27 @@ private fun QwenPawNav(
     }
 
     // 屏幕是 Compose 内部状态，系统返回键默认会直接退出 Activity。
-    // 聊天页是主页面：从附加页返回聊天页，在聊天页再按一次才退出。
+    // 按层级后退而不是一律回聊天页：从列表进设置再返回时应当回到列表，
+    // 否则「设置盖住列表」的层级关系在返回时被跳过，滑向也就无从推导。
     BackHandler(enabled = appState.connected && screen != Screen.CHAT) {
-        screen = Screen.CHAT
+        parentOf(screen)?.let { screen = it }
     }
 
-    // 日志页是设置的子页面，返回应先回设置而不是直接跳聊天页。
-    // 这个 BackHandler 声明在后，Compose 会优先分发给最后注册的那个。
-    BackHandler(enabled = screen == Screen.RUN_LOG) {
-        screen = Screen.SETTINGS
-    }
-
-    val pickImage = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
+    // 附件同时支持图片与文档。用 ACTION_GET_CONTENT 而不是 OpenDocument：
+    // 后者由系统文档提供器接管，小米上固定进自家文件管理器、选不到第三方来源；
+    // 前者会先让用户挑应用，能选 CX / NP 文件管理器、WPS、相册等。
+    // 单个文件失败只跳过它，不打断其余附件。
+    val pickFiles = rememberLauncherForActivityResult(
+        io.qwenpaw.node.ui.common.GetMultipleContent(),
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            var failed = 0
+            uris.forEach { uri ->
                 val url = uploadAttachment(context, app, uri)
-                if (url != null) chatVm.addAttachment(url)
+                if (url != null) chatVm.addAttachment(url) else failed++
             }
+            if (failed > 0) toast(context, "$failed 个附件上传失败，请重试")
         }
     }
 
@@ -434,36 +442,75 @@ private fun QwenPawNav(
     val pendingCrop = cropping
     if (pendingCrop?.bitmap != null) {
         val kind = croppingKind
+        val chatId = croppingChatId
         io.qwenpaw.node.avatar.AvatarCropScreen(
             bitmap = pendingCrop.bitmap!!,
             onCancel = {
                 cropping = null
                 croppingKind = null
+                croppingChatId = null
             },
             onSave = { bitmap ->
-                val saved = app.avatarStore.saveStatic(kind.orEmpty(), bitmap)
+                // 两种用途共用同一个裁剪页，落盘目标由进入时选的入口决定。
+                val saved = if (chatId != null) {
+                    app.chatIconStore.saveImage(chatId, bitmap)
+                } else {
+                    app.avatarStore.saveStatic(kind.orEmpty(), bitmap)
+                }
                 cropping = null
                 croppingKind = null
-                toast(context, if (saved) "头像已保存" else "保存失败，请重试")
+                croppingChatId = null
+                toast(
+                    context,
+                    if (!saved) "保存失败，请重试" else if (chatId != null) "图标已保存" else "头像已保存",
+                )
             },
         )
         return
     }
 
-    // 页面切换：淡入 + 从右侧轻推进入，返回时从左侧轻推，
-    // 比纯 Crossfade 的平面淡入淡出更有「层级方向」感。
-    AnimatedContent(
-        targetState = screen,
-        transitionSpec = {
-            val forward = targetState.ordinal >= initialState.ordinal
-            val enter = fadeIn(tween(200)) +
-                slideInHorizontally(tween(240)) { it / (if (forward) 6 else -6) }
-            val exit = fadeOut(tween(160)) +
-                slideOutHorizontally(tween(240)) { it / (if (forward) -6 else 6) }
-            enter togetherWith exit
-        },
-        label = "screen",
-    ) { current ->
+    // 页面切换：淡入 + 轻推。方向分三种情况：
+    //
+    // 1. 进出对话列表（LIST）：它是「抽屉」，从左侧滑入、向左侧退出。
+    //    早先统一按「深入从右」处理，点左上角时列表从右边弹出，与按钮在左边的
+    //    视觉暗示相反，看起来像是打开了另一个更深的页面。
+    // 2. 其余前向：从右侧轻推。
+    // 3. 其余返回：从左侧轻推。
+    //
+    // 抽屉位移取半屏，子页取三分之一屏：位移太小在快速动画里会被看成单纯的淡入，
+    // 看不出滑动方向。
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = {
+                // 方向由「入口按钮在哪条边缘」决定，返回是进入的反向。
+                // 对话列表由聊天页左上角的按钮打开，按抽屉处理：从左侧滑入、
+                // 退出时向左滑走，被盖住的聊天页只淡入淡出，不跟着平移。
+                val drawer = targetState == Screen.LIST || initialState == Screen.LIST
+                if (drawer) {
+                    val entering = targetState == Screen.LIST
+                    val enter = fadeIn(tween(200)) +
+                        slideInHorizontally(tween(240)) { if (entering) -it / 2 else 0 }
+                    val exit = fadeOut(tween(160)) +
+                        slideOutHorizontally(tween(240)) { if (entering) 0 else -it }
+                    enter togetherWith exit
+                } else {
+                    // 其余入口都在屏幕右侧（设置、已归档、用量的右上角或行尾箭头，
+                    // 日志是设置里的行），因此深入从右滑入、返回向右退出。
+                    val forward = parentOf(targetState) == initialState
+                    (fadeIn(tween(200)) +
+                        slideInHorizontally(tween(240)) { if (forward) it / 3 else -it / 3 })
+                        .togetherWith(
+                            fadeOut(tween(160)) +
+                                slideOutHorizontally(tween(240)) {
+                                    if (forward) -it / 3 else it / 3
+                                },
+                        )
+                }
+            },
+            label = "screen",
+            modifier = Modifier.fillMaxSize(),
+        ) { current ->
         when (current) {
             Screen.LIST -> {
                 ChatListScreen(
@@ -502,7 +549,7 @@ private fun QwenPawNav(
                         archiveTipVisible = false
                     },
                     onRefresh = {
-                        // 列表页要的是列表本身，不是当前会话：这里直接刷新会话列表。
+                        // 列表页要的是列表本身，不是当前对话：这里直接刷新对话列表。
                         chatVm.refreshChats()
                     },
                     groupMode = appState.groupMode,
@@ -519,6 +566,14 @@ private fun QwenPawNav(
                     },
                     onRenameGroup = chatVm::renameGroup,
                     onDeleteGroup = chatVm::deleteGroup,
+                    iconStore = app.chatIconStore,
+                    iconVersion = iconVersion,
+                    onPickIconImage = { chatId ->
+                        pendingIconChatId = chatId
+                        pickChatIcon.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
                 )
             }
 
@@ -532,7 +587,7 @@ private fun QwenPawNav(
                     voiceReady = modelState is io.qwenpaw.node.voice.ModelState.Ready,
                     imageLoader = imageLoader,
                     connection = connection,
-                    // 左上角按钮打开会话列表（附加页），不是在页面栈里返回。
+                    // 左上角按钮打开对话列表（附加页），不是在页面栈里返回。
                     onBack = { screen = Screen.LIST },
                     voiceHoldMode = appState.voiceTrigger == io.qwenpaw.node.ui.VoiceTrigger.HOLD,
                     voiceAutoStop = appState.voiceAutoStop,
@@ -540,11 +595,7 @@ private fun QwenPawNav(
                     onDraftChange = chatVm::updateDraft,
                     onSend = { chatVm.send() },
                     onStop = chatVm::stop,
-                    onAttach = {
-                        pickImage.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
-                        )
-                    },
+                    onAttach = { pickFiles.launch(Unit) },
                     onVoiceStart = { startVoice() },
                     onVoiceStop = { speech.stop() },
                     onVoiceCancel = { speech.stop() },
@@ -557,7 +608,7 @@ private fun QwenPawNav(
                     },
                     onDelete = {
                         chatVmState.currentChatId?.let { chatVm.deleteChat(it) }
-                        // 删掉后回到聊天页，ViewModel 会自动接上一个会话。
+                        // 删掉后回到聊天页，ViewModel 会自动接上一个对话。
                         screen = Screen.CHAT
                     },
                     onTogglePin = {
@@ -568,10 +619,8 @@ private fun QwenPawNav(
                         screen = Screen.CHAT
                     },
                     onExport = {
-                        pendingExportText = chatVm.exportMarkdown()
-                        pendingExportName =
-                            "${chatVmState.currentChatName.ifBlank { "会话" }.take(40)}.md"
-                        exportLauncher.launch(pendingExportName.orEmpty())
+                        val name = chatVmState.currentChatName.ifBlank { "对话" }.take(40)
+                        shareText(context, "$name.md", chatVm.exportMarkdown())
                     },
                     onSetThinking = { level -> chatVm.setThinking(level) },
                     onSetGroup = { groupId ->
@@ -579,18 +628,28 @@ private fun QwenPawNav(
                     },
                     onPickModel = { providerId, model -> chatVm.setModel(providerId, model) },
                     onPickApproval = { level ->
-                        // 审批模式是智能体级配置，改动会影响该智能体的全部会话。
+                        // 审批模式是智能体级配置，改动会影响该智能体的全部对话。
                         (connection?.agentId ?: "default").let { agentId ->
                             chatVm.setApprovalLevel(agentId, level)
                         }
                     },
                     onSetProjectDir = { path -> chatVm.setProjectDir(path) },
                     onDismissError = chatVm::clearError,
-                    // 顶栏「连接中断，点击重连」走这条：重绑地址 + 重载当前会话。
+                    // 顶栏「连接中断，点击重连」走这条：重绑地址 + 重载当前对话。
                     onRefresh = { viewModel.refreshAll() },
                     appearance = messageAppearance,
+                    onOpenSource = { text ->
+                        sourceText = text
+                        screen = Screen.MESSAGE_SOURCE
+                    },
                 )
             }
+
+            // 一条消息的原始 Markdown，从「选择文本」的询问里进入。
+            Screen.MESSAGE_SOURCE -> io.qwenpaw.node.ui.chat.MessageSourceScreen(
+                text = sourceText.orEmpty(),
+                onBack = { screen = Screen.CHAT },
+            )
 
             Screen.ARCHIVED -> {
                 io.qwenpaw.node.ui.chat.ArchivedScreen(
@@ -626,7 +685,7 @@ private fun QwenPawNav(
                     compactList = appState.compactList,
                     keepScreenOn = appState.keepScreenOn,
                     appVersion = BuildConfig.VERSION_NAME,
-                    onBack = { screen = Screen.CHAT },
+                    onBack = { screen = Screen.LIST },
                     onSwitch = { id ->
                         viewModel.switchTo(id)
                         screen = Screen.CHAT
@@ -705,8 +764,7 @@ private fun QwenPawNav(
                     onToggleLogKind = viewModel::toggleLogKind,
                     onOpenLogs = { screen = Screen.RUN_LOG },
                     onExportLogs = {
-                        pendingLogText = viewModel.exportLog()
-                        logExportLauncher.launch("qwenpaw-node-log.txt")
+                        shareText(context, "QwenPaw 运行日志.txt", viewModel.exportLog())
                     },
                     showMessageStats = appState.showMessageStats,
                     onShowMessageStats = viewModel::setShowMessageStats,
@@ -724,6 +782,12 @@ private fun QwenPawNav(
                         app.avatarStore.clear(kind)
                         toast(context, "已移除头像")
                     },
+                    useServerAvatar = appState.useServerAvatar,
+                    onUseServerAvatar = viewModel::setUseServerAvatar,
+                    serverAvatarFile = serverAvatarFile,
+                    onRefreshServerAvatar = viewModel::refreshServerAvatar,
+                    actionStyle = appState.actionStyle,
+                    onActionStyle = viewModel::setActionStyle,
                 )
             }
 
@@ -736,8 +800,7 @@ private fun QwenPawNav(
                     onToggleKind = viewModel::toggleLogKind,
                     onClear = viewModel::clearLog,
                     onExport = {
-                        pendingLogText = viewModel.exportLog()
-                        logExportLauncher.launch("qwenpaw-node-log.txt")
+                        shareText(context, "QwenPaw 运行日志.txt", viewModel.exportLog())
                     },
                     onImport = { logImportLauncher.launch(arrayOf("text/plain", "*/*")) },
                     // 日志页从设置进入，返回也回设置，比直接跳聊天页更符合层级。
@@ -745,6 +808,16 @@ private fun QwenPawNav(
                 )
             }
         }
+        }
+
+        // 撤销条浮在所有页面之上，且避开手势条。
+        io.qwenpaw.node.ui.common.UndoBarHost(
+            controller = undoController,
+            modifier = Modifier
+                .align(androidx.compose.ui.Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 12.dp),
+        )
     }
 
     pickingAgent?.let { instance ->
@@ -853,23 +926,27 @@ private fun toast(context: android.content.Context, text: String) {
 }
 
 /**
- * 导出 Markdown 到用户选择的位置（由 CreateDocument launcher 真正落盘）。
+ * 通过系统分享发送纯文本。
  *
- * 成功返回 null，失败返回可读的原因。**不能只返回 Boolean**——用户之前报的
- * 「无论如何都弹失败」需要看到具体原因，否则无从判断是权限、空间还是 uri 问题。
+ * 分享的是内容而不是文件：不需要 FileProvider，也不会在用户存储里留下副本。
+ * `EXTRA_SUBJECT` 给接收方一个可用的标题（如「某某对话.md」），
+ * 用户仍能在分享面板里自行选择目标应用。
  */
-private suspend fun writeTextToUri(
-    context: android.content.Context,
-    uri: Uri,
-    text: String,
-): String? = withContext(Dispatchers.IO) {
-    runCatching {
-        val stream = context.contentResolver.openOutputStream(uri)
-            ?: return@runCatching "无法打开所选位置"
-        stream.use { output ->
-            output.write(text.toByteArray())
-            output.flush()
-        }
-        null
-    }.getOrElse { e -> e.message ?: e::class.java.simpleName }
+private fun shareText(context: android.content.Context, subject: String, text: String) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(android.content.Intent.createChooser(send, "分享到"))
+}
+
+/** 页面的上一层。null 表示已在主页面，再按返回应退出应用。 */
+private fun parentOf(screen: Screen): Screen? = when (screen) {
+    Screen.CHAT -> null
+    Screen.LIST -> Screen.CHAT
+    Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE -> Screen.LIST
+    Screen.RUN_LOG -> Screen.SETTINGS
+    // 原文页从聊天页的气泡进入，返回也回聊天页。
+    Screen.MESSAGE_SOURCE -> Screen.CHAT
 }

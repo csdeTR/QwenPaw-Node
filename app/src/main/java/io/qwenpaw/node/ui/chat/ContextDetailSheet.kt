@@ -19,8 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +47,7 @@ import androidx.compose.ui.window.DialogProperties
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.Role
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 全屏图片查看：双指缩放、拖动，单击关闭。 */
 @Composable
@@ -129,7 +128,7 @@ fun ImageViewerDialog(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.Default.Close,
+                    imageVector = QwenIcons.close,
                     contentDescription = "关闭",
                     tint = Color.White,
                     modifier = Modifier.size(20.dp),
@@ -227,7 +226,7 @@ fun ContextDetailSheet(
 
             if (state.messages.isEmpty()) {
                 Text(
-                    text = "当前会话还没有消息",
+                    text = "当前对话还没有消息",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

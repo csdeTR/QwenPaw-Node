@@ -86,6 +86,21 @@ data class AppState(
      */
     val userName: String = DEFAULT_USER_NAME,
     /**
+     * 是否使用 QwenPaw 服务端（网页端）设置的头像。
+     *
+     * 默认开启：用户在网页端设过头像后，手机上应该直接看到同一张图。
+     * 本机头像优先于它，关掉这个开关不会影响本机头像。
+     */
+    val useServerAvatar: Boolean = true,
+    /**
+     * 消息下方操作行的呈现方式。
+     *
+     * 默认文字。「复制」与「复制为 Markdown」两项靠图形几乎无法区分，
+     * 图标档是给「不想在消息下面看到文字」的用户准备的，不是更好的默认。
+     */
+    val actionStyle: io.qwenpaw.node.ui.chat.ActionStyle =
+        io.qwenpaw.node.ui.chat.ActionStyle.TEXT,
+    /**
      * 会话列表的分组方式。
      *
      * 默认按时间，与 QwenPaw 网页版一致；选择会记住，下次进入沿用。
@@ -114,6 +129,8 @@ class AppViewModel(
     private val api: io.qwenpaw.node.data.remote.QwenPawApi,
     private val fontManager: io.qwenpaw.node.font.FontManager,
     private val network: io.qwenpaw.node.data.NetworkMonitor? = null,
+    /** 服务端头像缓存。为 null 时（测试、预览）不显示服务端头像。 */
+    private val serverAvatarClient: io.qwenpaw.node.data.remote.ServerAvatarClient? = null,
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -147,6 +164,16 @@ class AppViewModel(
             showMessageStats = prefs.getBoolean(KEY_SHOW_STATS, false),
             userName = prefs.getString(KEY_USER_NAME, DEFAULT_USER_NAME)?.takeIf { it.isNotBlank() }
                 ?: DEFAULT_USER_NAME,
+            // 默认开启：网页端设过头像后手机上应直接看到同一张图。
+            useServerAvatar = prefs.getBoolean(KEY_SERVER_AVATAR, true),
+            actionStyle = runCatching {
+                io.qwenpaw.node.ui.chat.ActionStyle.valueOf(
+                    prefs.getString(
+                        KEY_ACTION_STYLE,
+                        io.qwenpaw.node.ui.chat.ActionStyle.TEXT.name,
+                    )!!,
+                )
+            }.getOrDefault(io.qwenpaw.node.ui.chat.ActionStyle.TEXT),
             groupMode = runCatching {
                 io.qwenpaw.node.ui.chat.GroupMode.valueOf(
                     prefs.getString(KEY_GROUP_MODE, io.qwenpaw.node.ui.chat.GroupMode.TIME.name)!!,
@@ -206,6 +233,46 @@ class AppViewModel(
      */
     private val _lastChatId = MutableStateFlow(prefs.getString(KEY_LAST_CHAT, null))
     val lastChatId: StateFlow<String?> = _lastChatId.asStateFlow()
+
+    private val _serverAvatarFile =
+        MutableStateFlow(runCatching { serverAvatarClient?.cached() }.getOrNull())
+
+    /**
+     * 服务端头像的本地缓存文件。
+     *
+     * 初值是磁盘上的缓存，因此冷启动与断网时都能显示上一次的头像；
+     * [refreshServerAvatar] 联网核对后再更新。为 null 表示服务端没有设置头像。
+     */
+    val serverAvatarFile: kotlinx.coroutines.flow.StateFlow<java.io.File?> =
+        _serverAvatarFile.asStateFlow()
+
+    /**
+     * 联网核对服务端头像。
+     *
+     * 开关关着时直接返回：下载一张永远不会显示的图没有意义。
+     * 打开开关时再补一次，见 [setUseServerAvatar]。
+     *
+     * 失败时保留现有文件而不清空：网络抖动不该让头像忽然消失。
+     * 只有服务端明确返回「没有头像」时才清空。
+     */
+    fun refreshServerAvatar() {
+        val client = serverAvatarClient ?: return
+        if (!_state.value.useServerAvatar) return
+        val instance = repository.active() ?: return
+        val conn = io.qwenpaw.node.data.remote.Connection(
+            repository.resolvedBaseUrl(instance),
+            instance.token,
+            instance.agentId,
+        )
+        scope.launch {
+            val file = withContext(Dispatchers.IO) {
+                runCatching { client.refresh(conn) }.getOrNull()
+            }
+            // 请求失败与「服务端确实没设头像」在这里都是 null，无法区分；
+            // 因此仅在磁盘缓存也消失（refresh 内部已 clear）时才把界面置空。
+            _serverAvatarFile.value = file ?: runCatching { client.cached() }.getOrNull()
+        }
+    }
 
     fun rememberLastChat(chatId: String?) {
         prefs.edit().apply {
@@ -602,6 +669,20 @@ class AppViewModel(
         _state.update { it.copy(userName = value) }
     }
 
+    /** 开关服务端头像。关掉只是不显示，不删本地缓存——再打开时不必重新下载。 */
+    fun setUseServerAvatar(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SERVER_AVATAR, enabled).apply()
+        _state.update { it.copy(useServerAvatar = enabled) }
+        // 之前关着时跳过了下载，打开后要补一次；没有缓存的话界面会一直是首字。
+        if (enabled) refreshServerAvatar()
+    }
+
+    /** 切换消息底部操作行样式。 */
+    fun setActionStyle(style: io.qwenpaw.node.ui.chat.ActionStyle) {
+        prefs.edit().putString(KEY_ACTION_STYLE, style.name).apply()
+        _state.update { it.copy(actionStyle = style) }
+    }
+
     /** 切换会话列表分组方式。单击循环切换，与网页版一致。 */
     fun setGroupMode(mode: io.qwenpaw.node.ui.chat.GroupMode) {
         prefs.edit().putString(KEY_GROUP_MODE, mode.name).apply()
@@ -676,6 +757,9 @@ class AppViewModel(
             instanceLabel = instance.labelOf(url),
             instanceName = instance.serverDisplayName,
         )
+        // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
+        // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。
+        refreshServerAvatar()
     }
 
     override fun onCleared() {
@@ -704,6 +788,10 @@ class AppViewModel(
         private const val KEY_SHOW_STATS = "show_message_stats"
         /** 用户昵称。 */
         private const val KEY_USER_NAME = "user_name"
+        /** 是否使用服务端（网页端）头像。 */
+        private const val KEY_SERVER_AVATAR = "use_server_avatar"
+        /** 消息底部操作行样式。 */
+        private const val KEY_ACTION_STYLE = "message_action_style"
         /** 会话列表分组方式。 */
         private const val KEY_GROUP_MODE = "group_mode"
         /** 已折叠的分区 key 集合。 */
@@ -720,6 +808,7 @@ class AppViewModel(
                         db = app.database,
                         appContext = appContext,
                         isAppVisible = { AppVisibility.visibleCount > 0 },
+                        chatIconStore = app.chatIconStore,
                     )
                     return AppViewModel(
                         repository = app.instanceRepository,
@@ -728,6 +817,7 @@ class AppViewModel(
                         api = app.api,
                         fontManager = app.fontManager,
                         network = app.networkMonitor,
+                        serverAvatarClient = app.serverAvatar,
                     ) as T
                 }
             }

@@ -361,13 +361,20 @@ data class ProjectDirDto(
     val exists: Boolean = true,
 )
 
-/** token 用量汇总，对应 `GET /api/token-usage`。 */
+/**
+ * token 用量汇总，对应 `GET /api/token-usage`。
+ *
+ * `cache_hit_rate` 必须可空：服务端在没有任何调用时返回 `null`
+ * （实测 2.3.0b2 空库返回 `"cache_hit_rate":null`，2.2.2 在同样情况下同样如此，
+ * OpenAPI 里该字段也声明为 `number | null`）。声明成非空 `Double` 会让整个
+ * 响应解析失败，用户看到的是「加载用量失败」而不是一组零值。
+ */
 @Serializable
 data class TokenUsageDto(
     @SerialName("total_prompt_tokens") val totalPromptTokens: Long = 0,
     @SerialName("total_completion_tokens") val totalCompletionTokens: Long = 0,
     @SerialName("total_cache_read_tokens") val totalCacheReadTokens: Long = 0,
-    @SerialName("cache_hit_rate") val cacheHitRate: Double = 0.0,
+    @SerialName("cache_hit_rate") val cacheHitRate: Double? = null,
     @SerialName("total_calls") val totalCalls: Int = 0,
     @SerialName("by_model") val byModel: Map<String, TokenUsageBucketDto> = emptyMap(),
     @SerialName("by_date") val byDate: Map<String, TokenUsageBucketDto> = emptyMap(),

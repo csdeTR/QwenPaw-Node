@@ -156,14 +156,48 @@ class QwenPawApi(
     fun chatStatus(conn: Connection, chatId: String): ChatStatusDto =
         decode(request(conn, "GET", "/api/chats/$chatId/status"), ChatStatusDto.serializer())
 
-    fun createChat(conn: Connection, name: String, sessionId: String, userId: String): ChatSpecDto {
-        val body = buildJsonObject {
-            put("name", name)
-            put("session_id", sessionId)
-            put("user_id", userId)
-            put("channel", "console")
+    /**
+     * 新建会话。
+     *
+     * [placeholder] 为 true 时在 `meta` 里写入 `console_placeholder_name`，
+     * 与服务端 Web 端先分配会话再接消息的做法对齐。
+     *
+     * 这一步决定首轮是否会自动生成标题。服务端 `console.py` 的处理是：
+     * 只有当 `chat.meta["console_placeholder_name"] == chat.name` 时才把会话名
+     * 改成首条消息的文本，之后才满足 `chat.name == name` 从而派发
+     * `generate_and_update_title`。客户端此前只传 `name` 不传 `meta`，
+     * 于是两处判断都落空——标题从来没生成过，会话一直停在前 20 个字的截断名。
+     */
+    fun createChat(
+        conn: Connection,
+        name: String,
+        sessionId: String,
+        userId: String,
+        placeholder: Boolean = false,
+    ): ChatSpecDto = decode(
+        request(conn, "POST", "/api/chats", createChatBody(name, sessionId, userId, placeholder)),
+        ChatSpecDto.serializer(),
+    )
+
+    /**
+     * 新建会话的请求体。
+     *
+     * 抽成独立函数只为可测：`meta` 里那一层是否带上 `console_placeholder_name`，
+     * 决定了首轮结束后服务端会不会自动生成标题，而这一点只能靠报文断言。
+     */
+    fun createChatBody(
+        name: String,
+        sessionId: String,
+        userId: String,
+        placeholder: Boolean,
+    ): JsonObject = buildJsonObject {
+        put("name", name)
+        put("session_id", sessionId)
+        put("user_id", userId)
+        put("channel", "console")
+        if (placeholder) {
+            put("meta", buildJsonObject { put("console_placeholder_name", name) })
         }
-        return decode(request(conn, "POST", "/api/chats", body), ChatSpecDto.serializer())
     }
 
     fun renameChat(conn: Connection, chatId: String, name: String): ChatSpecDto {
@@ -282,6 +316,22 @@ class QwenPawApi(
             request(conn, "GET", "/api/models/$providerId/pool?limit=$limit"),
             ModelPoolDto.serializer(),
         )
+
+    // ---------- 头像 ----------
+
+    /**
+     * 服务端头像清单。
+     *
+     * 服务端 `avatar_owner()` 固定返回 `"console"`，只有用户侧一份头像，
+     * 没有按智能体区分。实测两个版本均可用，未设置时返回
+     * `{"selected":null,"history":[]}`。
+     */
+    fun avatarProfile(conn: Connection): AvatarProfileDto =
+        decode(request(conn, "GET", "/api/profile/avatars"), AvatarProfileDto.serializer())
+
+    /** 某张头像的图片字节。服务端对该响应设了 `private, no-store`，不做协商缓存。 */
+    fun avatarImage(conn: Connection, id: String): ByteArray =
+        requestBytes(conn, "GET", "/api/profile/avatars/$id")
 
     // ---------- 智能体与工作区 ----------
 
@@ -547,6 +597,31 @@ class QwenPawApi(
                 throw ApiException(response.code, detail)
             }
             text
+        }
+    }
+
+    /**
+     * 与 [execute] 同构，但返回原始字节。
+     *
+     * 图片端点不能走字符串通道：`String` 解码会按字符集转换，二进制图会被破坏。
+     */
+    private fun requestBytes(conn: Connection, method: String, path: String): ByteArray {
+        val builder = baseBuilder(conn, resolve(conn.baseUrl, path))
+        when (method) {
+            "GET" -> builder.get()
+            else -> error("不支持的方法 $method")
+        }
+        return client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                val detail = extractDetail(response.body?.string().orEmpty(), response.code)
+                io.qwenpaw.node.log.RunLog.d(
+                    io.qwenpaw.node.log.LogKind.NETWORK,
+                    "API",
+                    "${method} ${response.request.url.encodedPath} → ${response.code} $detail",
+                )
+                throw ApiException(response.code, detail)
+            }
+            response.body?.bytes() ?: ByteArray(0)
         }
     }
 

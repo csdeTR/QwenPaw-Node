@@ -51,18 +51,18 @@ data class ChatUiState(
     val contextMax: Long = 0,
     val pendingApprovals: List<ApprovalDto> = emptyList(),
     val chats: List<ChatSpecDto> = emptyList(),
-    /** 已归档会话，单独一页展示。 */
+    /** 已归档对话，单独一页展示。 */
     val archivedChats: List<ChatSpecDto> = emptyList(),
     val groups: List<ChatGroupDto> = emptyList(),
-    /** 每个会话的最新消息预览，key 为 chatId。 */
+    /** 每个对话的最新消息预览，key 为 chatId。 */
     val previews: Map<String, String> = emptyMap(),
     val currentChatId: String? = null,
     val currentChatName: String = "",
     val currentChatPinned: Boolean = false,
     val currentChatGroupId: String? = null,
-    /** 当前会话的思考模式视图；null 表示尚未拉取。 */
+    /** 当前对话的思考模式视图；null 表示尚未拉取。 */
     val thinking: ThinkingViewDto? = null,
-    /** 可供当前会话切换的模型；已合并三个数组并过滤掉未启用的供应商。 */
+    /** 可供当前对话切换的模型；已合并三个数组并过滤掉未启用的供应商。 */
     val modelChoices: List<ModelChoice> = emptyList(),
     /** 输入框上方胶囊显示的模型名，取自 thinking 视图。 */
     val currentModelLabel: String? = null,
@@ -104,16 +104,43 @@ data class ChatUiState(
 enum class LinkState { UNKNOWN, ONLINE, OFFLINE }
 
 /**
- * 绑定新连接时是否要清空当前会话。
+ * 绑定新连接时是否要清空当前对话。
  *
- * 只有「从一台服务器换到另一台」才清空：旧会话 id 在新服务器上不存在。
+ * 只有「从一台服务器换到另一台」才清空：旧对话 id 在新服务器上不存在。
  * 同一实例重连（顶栏重连、网络恢复、改地址）必须保留，否则下一次发送
- * 会因为 `currentChatId` 为空而新建会话——这正是「在所选会话里发消息，
- * 它却新建了一个会话」的根因。冷启动首次绑定（[current] 为空串）也不清空，
- * 那时本来就没有会话。
+ * 会因为 `currentChatId` 为空而新建对话——这正是「在所选对话里发消息，
+ * 它却新建了一个对话」的根因。冷启动首次绑定（[current] 为空串）也不清空，
+ * 那时本来就没有对话。
  */
 internal fun shouldClearOnBind(current: String, next: String): Boolean =
     current.isNotBlank() && next.isNotBlank() && current != next
+
+/**
+ * 同一实例内换了智能体，是否要清空当前对话。
+ *
+ * 多智能体实例下，每个智能体有各自的对话空间，`GET /api/chats` 只返回
+ * 当前 `X-Agent-Id` 名下那个智能体的对话。若只按实例判断，
+ * 在设置页把智能体从 A 改到 B 后，界面仍留着 A 的对话与历史消息，
+ * 而新请求全部带 B 的 `X-Agent-Id`——用户看到的是一个已经不存在的对话。
+ *
+ * 判据与 [shouldClearOnBind] 一致：任一方为空表示「还不知道」，
+ * 这种情况下不清空，免得把正在看的对话误抹掉。
+ */
+internal fun shouldClearOnAgentChange(current: String, next: String): Boolean =
+    current.isNotBlank() && next.isNotBlank() && current != next
+
+/**
+ * 对话名还是占位名时，说明服务端尚未把自动生成的标题写回来。
+ *
+ * 服务端在首轮结束后用 `asyncio.create_task` 起一个后台任务向模型要标题，
+ * 30 秒超时；`finishRun` 里那一次刷新往往早于它完成。因此需要按这个判据
+ * 决定要不要再刷一次，而不是无条件轮询。
+ *
+ * [placeholder] 为空表示这个对话不是客户端建的（例如别的端建好后同步过来），
+ * 此时不重试：客户端不知道它的占位名是什么，继续刷只会白跑请求。
+ */
+internal fun needsTitleRefresh(currentName: String, placeholder: String): Boolean =
+    placeholder.isNotBlank() && currentName == placeholder
 
 /**
  * 把「本轮之前的历史」与「本轮流式内容」拼成界面上的消息列表。
@@ -152,7 +179,7 @@ data class ModelChoice(
 }
 
 /**
- * 会话与聊天状态管理。
+ * 对话与聊天状态管理。
  *
  * 关键约束（服务端行为）：
  * - 同一 chat 并发发送返回 409，因此发送前必须串行化；
@@ -166,29 +193,48 @@ class ChatViewModel(
     private val appContext: android.content.Context,
     /** 由 Activity 维护的「是否在前台」判断，用于决定要不要发本地通知。 */
     private val isAppVisible: () -> Boolean = { false },
+    /**
+     * 对话图标存储。为 null 时删除对话不清理图标（测试环境）。
+     *
+     * 对话删掉后图标文件与预设 key 都没有归属了，留着只会在
+     * 「新建了同 id 的对话」时显示上一次的图标。
+     */
+    private val chatIconStore: io.qwenpaw.node.avatar.ChatIconStore? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var streamJob: Job? = null
     private var pollJob: Job? = null
     private var currentConnection: Connection? = null
     private var instanceId: String = ""
+    /** 当前绑定的智能体 id，用于判断同一实例内是否换了智能体。 */
+    private var agentId: String = ""
     private var userId: String = ""
     private var accumulator = StreamAccumulator()
 
     /**
      * 本轮之前的历史。
      *
-     * [accumulator] 只承载「从打开会话那一刻起新增的内容」，历史**不进** accumulator：
+     * [accumulator] 只承载「从打开对话那一刻起新增的内容」，历史**不进** accumulator：
      * 它的 id 来自服务端或者上一轮的本地拼接，把两者混在一个可变的折叠器里，
      * 每来一个 token 都要整体重排一遍。
      *
      * 界面上的消息永远是「历史 + 本轮增量」。此前两处直接写
      * `messages = accumulator.snapshot()`，而 accumulator 在 `openChat` 时刚被清空，
      * 于是每发一条消息，之前的所有消息都被整屏冲掉；要等流式内容陆续到达才重新有东西，
-     * 并且看起来像「新建了一个会话」。这就是「发送后页面空荡荡」「回复完毕才看到历史」的同
+     * 并且看起来像「新建了一个对话」。这就是「发送后页面空荡荡」「回复完毕才看到历史」的同
      * 一个根因。
      */
     private var historyPrefix: List<ChatMessage> = emptyList()
+
+    /**
+     * 客户端创建对话时用的占位名，key 为 chatId。
+     *
+     * 只用于判断「服务端是否已经生成标题」，不参与显示。写入时机是
+     * `createChat` 成功之后，读出时机是 `finishRun`。不落盘：
+     * 进程重启后这个值丢失，代价只是那次对话不再补刷新，
+     * 而不同步落盘换来的是不必为一个纯展示细节引入新的表。
+     */
+    private val placeholderNames = mutableMapOf<String, String>()
 
     private var saveDebounce: Job? = null
 
@@ -203,6 +249,17 @@ class ChatViewModel(
 
     private val _notifications = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val notifications: SharedFlow<String> = _notifications.asSharedFlow()
+
+    /**
+     * 可撤销操作的提示。
+     *
+     * 只在服务端确实提供撤销端点时发出——当前仅归档（`POST /chats/{id}/unarchive`）。
+     * 删除是 `DELETE` 立即生效，服务端没有回收站，因此不得走这条通道。
+     */
+    private val _undoOffers = MutableSharedFlow<io.qwenpaw.node.ui.common.UndoOffer>(
+        extraBufferCapacity = 8,
+    )
+    val undoOffers: SharedFlow<io.qwenpaw.node.ui.common.UndoOffer> = _undoOffers.asSharedFlow()
 
     /**
      * 更新链路状态。
@@ -235,21 +292,21 @@ class ChatViewModel(
     }
 
     /**
-     * 只替换连接地址，不动会话状态。
+     * 只替换连接地址，不动对话状态。
      *
-     * 与 [bind] 的区别：换实例要清空当前会话（旧 id 属于另一台服务器），
-     * 而同一个实例换地址只是换了条路到同一台服务器，会话应当保留。
+     * 与 [bind] 的区别：换实例要清空当前对话（旧 id 属于另一台服务器），
+     * 而同一个实例换地址只是换了条路到同一台服务器，对话应当保留。
      */
     fun rebindConnection(conn: Connection) {
         this.currentConnection = conn
     }
 
     /**
-     * 重新载入当前会话。
+     * 重新载入当前对话。
      *
      * 这是断网恢复后的主要入口：`openChat` 会重拉历史、用服务端的 status
      * 校对 running、必要时重挂 SSE，并刷新 thinking / 模型与轮询。
-     * 若当前没有会话，则退化为刷新会话列表。
+     * 若当前没有对话，则退化为刷新对话列表。
      */
     fun refreshCurrent() {
         val chatId = _state.value.currentChatId
@@ -263,14 +320,14 @@ class ChatViewModel(
     /**
      * 绑定连接。
      *
-     * **只有真正换到另一台服务器时才清空当前会话。**
+     * **只有真正换到另一台服务器时才清空当前对话。**
      *
      * 此前是无条件清空（只判 `currentChatId != null`），而 [AppViewModel.refreshAll]
      * 也用这个方法做「重连 / 网络恢复 / 改地址」，于是同一实例重连一次就把
-     * `currentChatId` 置成 null，用户接着发消息时 `send()` 看到会话为空便新建一个，
-     * 表现为「我明明在这个会话里发消息，它却新建了会话」。
+     * `currentChatId` 置成 null，用户接着发消息时 `send()` 看到对话为空便新建一个，
+     * 表现为「我明明在这个对话里发消息，它却新建了对话」。
      *
-     * 冷启动首次绑定（[instanceId] 为空串）同样不清空：那时本来就没有会话可清。
+     * 冷启动首次绑定（[instanceId] 为空串）同样不清空：那时本来就没有对话可清。
      */
     fun bind(
         instanceId: String,
@@ -281,8 +338,10 @@ class ChatViewModel(
         /** 服务器名称，用于顶栏末尾的归属名；为空时仍写 QwenPaw。 */
         instanceName: String = "",
     ) {
-        val switching = shouldClearOnBind(this.instanceId, instanceId)
+        val switching = shouldClearOnBind(this.instanceId, instanceId) ||
+            shouldClearOnAgentChange(this.agentId, conn.agentId)
         this.instanceId = instanceId
+        this.agentId = conn.agentId
         this.currentConnection = conn
         this.userId = userId
         _state.update {
@@ -293,8 +352,8 @@ class ChatViewModel(
             )
         }
         if (switching) {
-            // 换实例：旧会话 id 在新服务器上不存在，历史前缀必须一起清掉，
-            // 否则发第一条消息时会看到上一条服务器的残留。
+            // 换实例或换智能体：旧对话 id 在新区名下不存在，历史前缀必须一起清掉，
+            // 否则发第一条消息时会看到上一个服务器或上一个智能体的残留。
             accumulator = StreamAccumulator()
             historyPrefix = emptyList()
             _state.update {
@@ -317,10 +376,10 @@ class ChatViewModel(
     // ---------------- 列表 ----------------
 
     /**
-     * 拉取会话列表。
+     * 拉取对话列表。
      *
-     * [selectChatId] 是明确的跳转目标（用户点了某个会话）；
-     * [restoreChatId] 是冷启动时想恢复的会话，找不到就退回最近活跃的那个。
+     * [selectChatId] 是明确的跳转目标（用户点了某个对话）；
+     * [restoreChatId] 是冷启动时想恢复的对话，找不到就退回最近活跃的那个。
      * 两者都没有时自动打开列表里的第一个——主页面是聊天页，不能停在空列表上。
      */
     fun refreshChats(selectChatId: String? = null, restoreChatId: String? = null) {
@@ -343,7 +402,7 @@ class ChatViewModel(
                     if (target != null) {
                         openChat(target, reloadHistory = false)
                     } else {
-                        // 一个会话都没有：留在聊天页的空态，发消息时会自动建新会话。
+                        // 一个对话都没有：留在聊天页的空态，发消息时会自动建新对话。
                         _state.update {
                             it.copy(loading = false, messages = emptyList(), currentChatId = null)
                         }
@@ -370,9 +429,9 @@ class ChatViewModel(
     /**
      * 为列表生成消息预览。
      *
-     * 服务端没有 summary 字段，只能对最近的会话各取一次详情，摘出最后一条
+     * 服务端没有 summary 字段，只能对最近的对话各取一次详情，摘出最后一条
      * 有内容的消息。只做最近 [PREVIEW_LIMIT] 个，且已缓存且 `updated_at` 未变
-     * 的会话会跳过，避免每次刷新都打一堆请求。
+     * 的对话会跳过，避免每次刷新都打一堆请求。
      */
     private suspend fun loadPreviews(conn: Connection, chats: List<ChatSpecDto>) {
         val previous = _state.value.previews
@@ -394,7 +453,7 @@ class ChatViewModel(
         }
         if (fresh.isEmpty() && freshStamps.isEmpty()) return
         _previewStamps.putAll(freshStamps)
-        // 清掉已被删除会话的缓存，避免 map 无限增长。
+        // 清掉已被删除对话的缓存，避免 map 无限增长。
         val liveIds = chats.map { it.id }.toSet()
         _previewStamps.keys.retainAll(liveIds)
         _state.update { s ->
@@ -448,17 +507,17 @@ class ChatViewModel(
     fun archiveChat(chatId: String) {
         val conn = currentConnection ?: return
         // 名字必须在过滤之前取：onSuccess 里先把这条从 chats 移除，
-        // 之后再按 id 去 chats 里查就永远查不到，提示会固定退化成「会话」。
+        // 之后再按 id 去 chats 里查就永远查不到，提示会固定退化成「对话」。
         val name = _state.value.chats.firstOrNull { it.id == chatId }?.name
             ?: _state.value.archivedChats.firstOrNull { it.id == chatId }?.name
-            ?: "会话"
+            ?: "对话"
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.archiveChat(conn, chatId) } }
                 .onSuccess {
                     val wasCurrent = _state.value.currentChatId == chatId
                     if (wasCurrent) {
-                        // 当前会话被归档：界面消息清空，历史前缀也得一起清，
-                        // 否则之后在这个空会话里发消息，会先把已归档的内容重新拼回来。
+                        // 当前对话被归档：界面消息清空，历史前缀也得一起清，
+                        // 否则之后在这个空对话里发消息，会先把已归档的内容重新拼回来。
                         accumulator = StreamAccumulator()
                         historyPrefix = emptyList()
                     }
@@ -475,11 +534,18 @@ class ChatViewModel(
                         )
                     }
                     _notifications.tryEmit("已归档「$name」")
+                    // 归档是少数几个服务端提供撤销的动作，给出一次撤销机会。
+                    // unarchiveChat 幂等，重复点不会出错。
+                    _undoOffers.tryEmit(
+                        io.qwenpaw.node.ui.common.UndoOffer("已归档「$name」") {
+                            unarchiveChat(chatId)
+                        },
+                    )
                 }
                 .onFailure { e ->
-                    // 运行中的会话服务端会拒绝归档（409），这里给一句更直白的提示。
+                    // 运行中的对话服务端会拒绝归档（409），这里给一句更直白的提示。
                     val msg = if (e is ApiException && e.code == 409) {
-                        "会话正在运行，无法归档，请先停止"
+                        "对话正在运行，无法归档，请先停止"
                     } else {
                         friendly(e)
                     }
@@ -509,7 +575,7 @@ class ChatViewModel(
 
     // ---------------- 批量操作 ----------------
 
-    /** 批量归档。运行中的会话会被服务端跳过，结果里体现为 failed。 */
+    /** 批量归档。运行中的对话会被服务端跳过，结果里体现为 failed。 */
     fun batchArchive(chatIds: List<String>) {
         val conn = currentConnection ?: return
         if (chatIds.isEmpty()) return
@@ -533,14 +599,14 @@ class ChatViewModel(
                     }
                     val skipped = result.failed.size
                     val msg = buildString {
-                        append("已归档 ${okIds.size} 个会话")
+                        append("已归档 ${okIds.size} 个对话")
                         if (skipped > 0) append("，$skipped 个正在运行已跳过")
                     }
                     _notifications.tryEmit(msg)
                 }
                 .onFailure { e ->
                     val msg = if (e is ApiException && e.code == 409) {
-                        "部分会话正在运行，无法归档"
+                        "部分对话正在运行，无法归档"
                     } else {
                         friendly(e)
                     }
@@ -564,7 +630,7 @@ class ChatViewModel(
                     _state.update { s ->
                         s.copy(
                             chats = s.chats.filterNot { it.id in removed },
-                            // 当前会话在被删之列就一起清空。
+                            // 当前对话在被删之列就一起清空。
                             currentChatId = s.currentChatId?.takeUnless { it in removed },
                             messages = if (s.currentChatId in removed) emptyList() else s.messages,
                         )
@@ -572,7 +638,9 @@ class ChatViewModel(
                     withContext(Dispatchers.IO) {
                         chatIds.forEach { db.chatDao().clearMessages(it) }
                     }
-                    _notifications.tryEmit("已删除 ${chatIds.size} 个会话")
+                    // 图标属于本机数据，服务端不知道它的存在，必须在这里清。
+                    runCatching { chatIds.forEach { chatIconStore?.clear(it) } }
+                    _notifications.tryEmit("已删除 ${chatIds.size} 个对话")
                 }
                 .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
         }
@@ -696,7 +764,7 @@ class ChatViewModel(
     }
 
     /**
-     * 删除分组。组内会话由服务端重新归位到默认分组，因此删除后要重拉会话列表。
+     * 删除分组。组内对话由服务端重新归位到默认分组，因此删除后要重拉对话列表。
      */
     fun deleteGroup(groupId: String) {
         if (!isCustomGroup(groupId)) {
@@ -774,7 +842,7 @@ class ChatViewModel(
     }
 
     /**
-     * 为当前会话切换模型。
+     * 为当前对话切换模型。
      *
      * 传 null 表示「跟随智能体默认」。**实测服务端不接受 null**：
      * `PUT /model` 带 `provider_id: null` 会返回 400（`Input should be a valid string`），
@@ -831,7 +899,7 @@ class ChatViewModel(
     /**
      * 修改智能体审批模式。
      *
-     * 影响**该智能体的全部会话**，不只是当前会话，因此界面上的说明要讲清楚范围。
+     * 影响**该智能体的全部对话**，不只是当前对话，因此界面上的说明要讲清楚范围。
      */
     fun setApprovalLevel(agentId: String, level: String) {
         val conn = currentConnection ?: return
@@ -896,13 +964,13 @@ class ChatViewModel(
 
     // ---------------- 导出 / 复制 ----------------
 
-    /** 把整段会话拼成 Markdown 文本，供复制或导出。 */
+    /** 把整段对话拼成 Markdown 文本，供复制或导出。 */
     fun exportMarkdown(): String =
         markdownOf(_state.value.currentChatName, _state.value.messages)
 
     /** 把给定标题与消息列表拼成 Markdown（列表页复制全部也复用）。 */
     fun markdownOf(title: String, messages: List<ChatMessage>): String = buildString {
-        append("# ").append(title.ifBlank { "会话" }).append("\n\n")
+        append("# ").append(title.ifBlank { "对话" }).append("\n\n")
         messages.forEach { message ->
             when (message.kind) {
                 ChatMessage.Kind.TEXT -> {
@@ -934,7 +1002,7 @@ class ChatViewModel(
     }
 
     /**
-     * 打开会话。
+     * 打开对话。
      *
      * [reloadHistory] 为 false 时只同步标题与运行状态，不再重复拉历史，
      * 避免刷新列表时把消息列表清空重建。
@@ -968,7 +1036,7 @@ class ChatViewModel(
 
         scope.launch {
             if (chatId.isEmpty()) {
-                // 新会话：不请求历史，直接进入可输入状态。
+                // 新对话：不请求历史，直接进入可输入状态。
                 accumulator = StreamAccumulator()
                 historyPrefix = emptyList()
                 _state.update {
@@ -1052,8 +1120,15 @@ class ChatViewModel(
         val conn = currentConnection ?: return
         scope.launch {
             val sessionId = "mobile-" + UUID.randomUUID().toString().take(8)
-            runCatching { withContext(Dispatchers.IO) { api.createChat(conn, "新会话", sessionId, userId) } }
+            // 手动新建同样写入占位名：首条消息发出后服务端才会生成标题，
+            // 而它的判断起点正是这个占位名。
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.createChat(conn, NEW_CHAT_NAME, sessionId, userId, placeholder = true)
+                }
+            }
                 .onSuccess { chat ->
+                    placeholderNames[chat.id] = NEW_CHAT_NAME
                     _state.update { it.copy(chats = listOf(chat) + it.chats, currentChatId = chat.id) }
                     openChat(chat.id)
                 }
@@ -1087,6 +1162,7 @@ class ChatViewModel(
                         s.copy(chats = remaining)
                     }
                     withContext(Dispatchers.IO) { db.chatDao().clearMessages(chatId) }
+                    runCatching { chatIconStore?.clear(chatId) }
                     val next = _state.value.chats.firstOrNull()
                     if (next != null) openChat(next.id) else {
                         accumulator = StreamAccumulator()
@@ -1150,7 +1226,7 @@ class ChatViewModel(
         val attachments = _state.value.attachments
         if (trimmed.isEmpty() && attachments.isEmpty()) return
         if (_state.value.running) {
-            _state.update { it.copy(error = "当前会话有回复正在生成，请稍候或先停止") }
+            _state.update { it.copy(error = "当前对话有回复正在生成，请稍候或先停止") }
             return
         }
         val conn = currentConnection ?: return
@@ -1159,17 +1235,22 @@ class ChatViewModel(
         // 先把用户自己要发的内容画到界面上，再去请求网络。
         //
         // 此前这一步发生在 `startRun` 内部，而 `startRun` 之前还要先等 `createChat`
-        // 往返一次；没有当前会话时，这段时间界面完全不响应，看起来像发送失败。
+        // 往返一次；没有当前对话时，这段时间界面完全不响应，看起来像发送失败。
         // 回显放在这里，点下「发送」的同一帧就能看到自己的消息。
         val echoed = echoUser(text = trimmed, attachments = attachments)
 
         scope.launch {
             if (chatId.isNullOrBlank()) {
                 val sessionId = "mobile-" + UUID.randomUUID().toString().take(8)
+                val placeholder = trimmed.take(20)
                 val created = runCatching {
-                    withContext(Dispatchers.IO) { api.createChat(conn, trimmed.take(20), sessionId, userId) }
+                    // placeholder = true 才会让服务端在首轮结束后生成标题，
+                    // 详见 QwenPawApi.createChat 的注释。
+                    withContext(Dispatchers.IO) {
+                        api.createChat(conn, placeholder, sessionId, userId, placeholder = true)
+                    }
                 }.getOrElse { e ->
-                    // 建会话失败：请求从未离开设备，撤回刚才的回显，改用错误气泡承载原文，
+                    // 建对话失败：请求从未离开设备，撤回刚才的回显，改用错误气泡承载原文，
                     // 由它提供「重试」。留着回显会让用户以为消息已送达。
                     accumulator.rollback(echoed)
                     accumulator.appendError(friendly(e), retryText = trimmed)
@@ -1179,18 +1260,19 @@ class ChatViewModel(
                     return@launch
                 }
                 chatId = created.id
+                placeholderNames[created.id] = placeholder
                 _state.update { it.copy(chats = listOf(created) + it.chats, currentChatId = created.id) }
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "ChatVM",
-                    "本次没有当前会话，已新建 ${created.id}",
+                    "本次没有当前对话，已新建 ${created.id}",
                 )
             } else {
-                // 复用路径也记一条：这条日志是判断「发消息为何新建会话」现场的直接依据。
+                // 复用路径也记一条：这条日志是判断「发消息为何新建对话」现场的直接依据。
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "ChatVM",
-                    "复用当前会话 $chatId",
+                    "复用当前对话 $chatId",
                 )
             }
             startRun(conn, chatId, trimmed, attachments)
@@ -1207,7 +1289,7 @@ class ChatViewModel(
     fun retry(message: ChatMessage) {
         val text = message.retryText ?: return
         if (_state.value.running) {
-            _state.update { it.copy(error = "当前会话有回复正在生成，请稍候或先停止") }
+            _state.update { it.copy(error = "当前对话有回复正在生成，请稍候或先停止") }
             return
         }
         accumulator.removeError(message.id)
@@ -1218,11 +1300,11 @@ class ChatViewModel(
     /**
      * 把用户刚发出的内容画到界面上，并立刻清空输入框。
      *
-     * 与 `startRun` 分开的原因是时序：`send()` 可能要先建会话，那是一次网络往返。
+     * 与 `startRun` 分开的原因是时序：`send()` 可能要先建对话，那是一次网络往返。
      * 回显若留到 `startRun` 里，这段往返期间界面不会有任何变化，
      * 用户看到的是「点了发送没反应」。
      *
-     * 返回这次回显产生的 id，建会话失败时按它们撤回。
+     * 返回这次回显产生的 id，建对话失败时按它们撤回。
      */
     private fun echoUser(text: String, attachments: List<String>): List<String> {
         val ids = mutableListOf<String>()
@@ -1280,7 +1362,7 @@ class ChatViewModel(
             )
         }
         // 立即清掉持久化草稿：updateDraft 带 400ms 防抖，
-        // 若只靠它更新状态，发送成功后再次进入会话会看到过期草稿。
+        // 若只靠它更新状态，发送成功后再次进入对话会看到过期草稿。
         saveDebounce?.cancel()
         scope.launch {
             withContext(Dispatchers.IO) { db.chatDao().deleteDraft(instanceId, chatId) }
@@ -1394,19 +1476,44 @@ class ChatViewModel(
     private fun finishRun(conn: Connection, chatId: String, notify: Boolean = true) {
         cacheMessages(chatId, _state.value.messages)
         if (notify) notifyIfBackground()
-        // 服务端会在首轮自动生成会话标题，结束后刷新一次列表。
+        // 服务端会在首轮结束后自动生成对话标题，结束后刷新一次列表。
+        //
+        // 但它的标题生成是 `asyncio.create_task` 起的后台任务，向模型要标题
+        // 需要一次额外的模型调用（30 秒超时），这一次刷新通常赶不上。
+        // 因此按「名字是否仍等于占位名」决定要不要再补一次；
+        // 补刷新只做一轮，不做轮询，避免为一个展示细节持续打请求。
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { api.chats(conn) } }
-                .onSuccess { chats ->
-                    _state.update { s ->
-                        s.copy(
-                            chats = chats,
-                            currentChatName = chats.firstOrNull { it.id == chatId }?.name ?: s.currentChatName,
-                        )
-                    }
-                }
+            val placeholder = placeholderNames[chatId].orEmpty()
+            // 列表里查不到这个名字就不作判断：请求失败时「名字没变」是假象，
+            // 据此补刷只会白跑一次请求。用户下次打开对话时列表本身还是会刷新。
+            var name = chatNameInList(conn, chatId) ?: return@launch
+            if (needsTitleRefresh(name, placeholder)) {
+                delay(TITLE_RETRY_DELAY_MS)
+                name = chatNameInList(conn, chatId) ?: return@launch
+            }
+            if (!needsTitleRefresh(name, placeholder)) placeholderNames.remove(chatId)
         }
     }
+
+    /**
+     * 刷新对话列表，并返回 [chatId] 在列表里的名称。
+     *
+     * 返回 null 表示这次没拿到结果（请求失败或列表里没有该对话），
+     * 与「名字为空」是两件事，调用方据此决定是否继续判断。
+     */
+    private suspend fun chatNameInList(conn: Connection, chatId: String): String? =
+        runCatching { withContext(Dispatchers.IO) { api.chats(conn) } }
+            .onSuccess { chats ->
+                _state.update { s ->
+                    s.copy(
+                        chats = chats,
+                        currentChatName = chats.firstOrNull { it.id == chatId }?.name ?: s.currentChatName,
+                    )
+                }
+            }
+            .getOrNull()
+            ?.firstOrNull { it.id == chatId }
+            ?.name
 
     /**
      * 回复结束时如果 App 不在前台，发一条本地通知。
@@ -1416,7 +1523,7 @@ class ChatViewModel(
      */
     private fun notifyIfBackground() {
         if (isAppVisible()) return
-        val title = _state.value.currentChatName.ifBlank { "会话" }
+        val title = _state.value.currentChatName.ifBlank { "对话" }
         val reply = _state.value.messages.lastOrNull { it.role == Role.ASSISTANT && it.kind == ChatMessage.Kind.TEXT }
         val preview = reply?.text?.takeIf { it.isNotBlank() }?.let { body ->
             body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(80)
@@ -1695,7 +1802,19 @@ class ChatViewModel(
     companion object {
         private const val POLL_INTERVAL_MS = 2500L
 
-        /** 只为最近的这么多个会话生成列表预览，避免刷新时打太多详情请求。 */
+        /**
+         * 手动新建对话时的占位名。
+         *
+         * 与服务端 `console.py::_extract_placeholder_name` 的默认值不同：
+         * 服务端在媒体消息时用 `Media Message`，这里统一用中文，
+         * 因为它会短暂显示在顶栏与列表里。
+         */
+        internal const val NEW_CHAT_NAME = "新对话"
+
+        /** 标题生成是后台任务，30 秒超时；这里只补一次，避免持续轮询。 */
+        private const val TITLE_RETRY_DELAY_MS = 4000L
+
+        /** 只为最近的这么多个对话生成列表预览，避免刷新时打太多详情请求。 */
         private const val PREVIEW_LIMIT = 20
 
         private val IMAGE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")

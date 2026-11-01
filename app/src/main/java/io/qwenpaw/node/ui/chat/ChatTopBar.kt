@@ -16,9 +16,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -39,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 聊天页顶栏：标题、状态行、上下文胶囊、更多菜单。 */
 @Composable
@@ -71,7 +69,7 @@ fun ChatTopBar(
     boundLabel: String = "",
     /** 实例显示名。为空时状态行末尾仍写 QwenPaw。 */
     serverName: String = "",
-    /** 返回主页面：聊天页是主页面，这里的按钮改成打开会话列表。 */
+    /** 返回主页面：聊天页是主页面，这里的按钮改成打开对话列表。 */
     onBack: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -122,8 +120,8 @@ fun ChatTopBar(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.List,
-                    contentDescription = "会话列表",
+                    imageVector = QwenIcons.listBullet,
+                    contentDescription = "对话列表",
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(20.dp),
                 )
@@ -134,7 +132,7 @@ fun ChatTopBar(
                     .padding(horizontal = 4.dp),
             ) {
                 Text(
-                    text = title.ifBlank { "新会话" },
+                    text = title.ifBlank { "新对话" },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
@@ -216,7 +214,7 @@ fun ChatTopBar(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.Default.MoreVert,
+                    imageVector = QwenIcons.moreVertical,
                     contentDescription = "更多",
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(20.dp),
@@ -225,21 +223,26 @@ fun ChatTopBar(
                     // 刷新放在最前：断网恢复后最常见的动作就是它，
                     // 而这一项不改变任何数据，误点的代价只是多一次请求。
                     DropdownMenuItem(
-                        text = { Text("刷新会话") },
+                        text = { Text("刷新对话") },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.REFRESH) },
                         onClick = {
                             menu = false
                             onRefresh()
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("重命名会话") },
+                        text = { Text("重命名对话") },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.RENAME) },
                         onClick = {
                             menu = false
                             onRename()
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(if (pinned) "取消置顶" else "置顶会话") },
+                        text = { Text(if (pinned) "取消置顶" else "置顶对话") },
+                        leadingIcon = {
+                            MenuIcons.Leading(if (pinned) MenuAction.UNPIN else MenuAction.PIN)
+                        },
                         onClick = {
                             menu = false
                             onTogglePin()
@@ -247,11 +250,12 @@ fun ChatTopBar(
                     )
 
                     // 模型 / 审批 / 工作区三项都作用于「接下来这一轮怎么跑」，
-                    // 与上面的会话操作分开一组。
+                    // 与上面的对话操作分开一组。
                     DropdownMenuItem(
                         text = {
                             Text("切换模型：${currentModelLabel ?: "跟随智能体默认"}")
                         },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.MODEL) },
                         enabled = modelChoices.isNotEmpty(),
                         onClick = {
                             menu = false
@@ -260,6 +264,7 @@ fun ChatTopBar(
                     )
                     DropdownMenuItem(
                         text = { Text("审批模式：${approvalLabel(approvalLevel)}") },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.APPROVAL) },
                         enabled = approvalLevel != null,
                         onClick = {
                             menu = false
@@ -268,6 +273,7 @@ fun ChatTopBar(
                     )
                     DropdownMenuItem(
                         text = { Text("工作区目录：${projectDirName ?: "未读取"}") },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.PROJECT_DIR) },
                         onClick = {
                             menu = false
                             onOpenProjectDir()
@@ -280,6 +286,7 @@ fun ChatTopBar(
                             text = {
                                 Text("思考模式：${thinkingLevelLabel(thinking?.value?.level)}")
                             },
+                            leadingIcon = { MenuIcons.Leading(MenuAction.THINKING) },
                             onClick = {
                                 menu = false
                                 thinkingMenu = true
@@ -291,6 +298,7 @@ fun ChatTopBar(
                             text = {
                                 Text("移动到分组：${groupLabel(groups, currentGroupId)}")
                             },
+                            leadingIcon = { MenuIcons.Leading(MenuAction.GROUP) },
                             onClick = {
                                 menu = false
                                 onOpenGroupDialog()
@@ -298,21 +306,24 @@ fun ChatTopBar(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text("导出 Markdown") },
+                        text = { Text("分享 Markdown") },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.EXPORT) },
                         onClick = {
                             menu = false
                             onExport()
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("归档会话") },
+                        text = { Text("归档对话") },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.ARCHIVE) },
                         onClick = {
                             menu = false
                             onArchive()
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("删除会话") },
+                        text = { Text("删除对话") },
+                        leadingIcon = { MenuIcons.Leading(MenuAction.DELETE) },
                         onClick = {
                             menu = false
                             onDelete()
@@ -460,7 +471,7 @@ internal fun thinkingLevelLabel(level: String?): String = when (level) {
  * 审批模式的四个档位。
  *
  * 取值与 qwenpaw web 页一致（`approval_level`），这是**智能体级**配置，
- * 改动会影响该智能体的全部会话。
+ * 改动会影响该智能体的全部对话。
  */
 internal data class ApprovalOption(val code: String, val label: String, val hint: String)
 
@@ -481,5 +492,7 @@ private fun groupLabel(
     currentGroupId: String?,
 ): String {
     val id = currentGroupId ?: return "未分组"
-    return groups.firstOrNull { it.id == id }?.name?.ifBlank { id } ?: id
+    val group = groups.firstOrNull { it.id == id } ?: return id
+    // 内置分组的服务端名称是英文，这里与列表表头用同一套中文名。
+    return groupTitle(group)
 }

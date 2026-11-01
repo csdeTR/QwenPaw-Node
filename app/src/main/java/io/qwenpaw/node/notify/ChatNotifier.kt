@@ -22,7 +22,7 @@ object ChatNotifier {
     private const val DONE_CHANNEL_ID = "qwenpaw_chat_done"
     private const val DONE_NOTIFICATION_ID = 1002
 
-    /** 提示「回复已完成」。点击通知回到会话列表。 */
+    /** 提示「回复已完成」。点击通知回到对话列表。 */
     fun notifyDone(context: Context, title: String, text: String) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&

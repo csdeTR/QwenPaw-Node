@@ -23,10 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +51,7 @@ import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceDraft
 import io.qwenpaw.node.data.model.AgentDto
 import kotlinx.coroutines.launch
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 验证过程中的进度：第几次尝试、共几次、正在试哪条地址。 */
 data class VerifyAttempt(val index: Int, val total: Int, val url: String)
@@ -414,7 +411,7 @@ fun InstanceForm(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = if (advanced) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                imageVector = if (advanced) QwenIcons.chevronUp else QwenIcons.chevronDown,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -834,7 +831,7 @@ private fun StepDot(index: Int, done: Boolean, active: Boolean) {
     ) {
         if (done) {
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = QwenIcons.check,
                 contentDescription = null,
                 modifier = Modifier.size(12.dp),
                 tint = MaterialTheme.colorScheme.onPrimary,
@@ -926,7 +923,7 @@ private fun AgentRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
         if (selected) {
             Spacer(Modifier.width(8.dp))
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = QwenIcons.check,
                 contentDescription = "已选择",
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.secondary,

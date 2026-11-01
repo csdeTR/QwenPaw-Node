@@ -15,9 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 对话框里的一项。[key] 由调用方解释，选中态与点击回调都按它派发。 */
 data class OptionItem(
@@ -87,7 +85,7 @@ fun OptionDialog(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Close,
+                        imageVector = QwenIcons.close,
                         contentDescription = "关闭",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -153,7 +151,7 @@ private fun OptionRow(item: OptionItem, onClick: () -> Unit) {
         if (item.selected) {
             Spacer(Modifier.width(8.dp))
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = QwenIcons.check,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.primary,

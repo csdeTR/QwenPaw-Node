@@ -19,10 +19,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -47,6 +43,7 @@ import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.Role
 import io.qwenpaw.node.ui.theme.CodeTextStyle
 import io.qwenpaw.node.ui.theme.MessageMaxWidth
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
  * 一个回合折叠起来的「N 步」：中间正文、思考与工具调用并成一组。
@@ -158,7 +155,7 @@ private fun StepsHeader(
         )
         Spacer(Modifier.width(4.dp))
         Icon(
-            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            imageVector = if (expanded) QwenIcons.chevronUp else QwenIcons.chevronDown,
             contentDescription = if (expanded) "收起步骤" else "展开步骤",
             modifier = Modifier.size(15.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -239,7 +236,7 @@ private fun ProcessToolRow(step: ChatMessage, defaultOpen: Boolean = false) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = Icons.Default.Build,
+                imageVector = QwenIcons.wrench,
                 contentDescription = null,
                 modifier = Modifier.size(13.dp),
                 // 运行中的工具用主色，结束后同样退成中性色。
@@ -280,7 +277,7 @@ private fun ProcessToolRow(step: ChatMessage, defaultOpen: Boolean = false) {
             }
             Spacer(Modifier.width(4.dp))
             Icon(
-                imageVector = if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                imageVector = if (open) QwenIcons.chevronUp else QwenIcons.chevronDown,
                 contentDescription = if (open) "收起" else "展开",
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -322,6 +319,8 @@ fun MessageBubble(
     onRetry: (ChatMessage) -> Unit = {},
     /** 消息外观参数：头像、显示名、时间与统计开关。 */
     appearance: MessageAppearance = MessageAppearance(),
+    /** 点「选择文本」对话框里选「显示」时，把这条消息的原始 Markdown 交给上层打开原文页。 */
+    onOpenSource: (String) -> Unit = {},
 ) {
     when (message.kind) {
         // 正常路径下这几种已在 ChatTimeline 里并成 StepsGroup；
@@ -339,8 +338,19 @@ fun MessageBubble(
             appearance = appearance,
         )
 
-        ChatMessage.Kind.TEXT -> TextBubble(message, modifier, onRetry, appearance)
+        ChatMessage.Kind.TEXT -> TextBubble(message, modifier, onRetry, appearance, onOpenSource)
     }
+}
+
+/**
+ * 消息下方操作行的呈现方式。
+ *
+ * 默认文字：三项操作里有两项（复制、复制为 Markdown）只有文字才说得清，
+ * 换成图标后「复制」与「复制为 Markdown」的图形几乎无法区分。
+ */
+enum class ActionStyle {
+    TEXT,
+    ICON,
 }
 
 /**
@@ -360,6 +370,17 @@ data class MessageAppearance(
     val agentName: String = "智能体",
     /** 是否在回复末尾显示用量。 */
     val showStats: Boolean = false,
+    /**
+     * 服务端头像的本地缓存文件，只作用于用户侧。
+     *
+     * 服务端的 `avatar_owner()` 固定 `"console"`，没有按智能体区分的头像端点，
+     * 因此智能体侧恒为 null。
+     */
+    val serverUserAvatar: java.io.File? = null,
+    /** 服务端头像开关。关掉后回落到本机头像或首字。 */
+    val useServerAvatar: Boolean = true,
+    /** 底部操作行用文字还是图标。 */
+    val actionStyle: ActionStyle = ActionStyle.TEXT,
 )
 
 /** 图片气泡：用户图靠右、助手图靠左，点击可全屏查看。 */
@@ -406,6 +427,7 @@ private fun TextBubble(
     modifier: Modifier,
     onRetry: (ChatMessage) -> Unit,
     appearance: MessageAppearance,
+    onOpenSource: (String) -> Unit = {},
 ) {
     val isUser = message.role == Role.USER
     val container = when {
@@ -428,6 +450,9 @@ private fun TextBubble(
     // 两者不能同时生效：`SelectionContainer` 也要用长按手势，叠在一起就互相抢。
     var menuOpen by remember(message.id) { mutableStateOf(false) }
     var selectionMode by remember(message.id) { mutableStateOf(false) }
+    // 「选择文本」前先问是否改看原文。三个答案：
+    // 显示 → 交给上层打开原文页；不显示 → 进原有的选择态；取消 → 什么都不做。
+    var askSource by remember(message.id) { mutableStateOf(false) }
     val shownText = if (collapsible && !expanded) {
         collapsedUserPreview(message.text)
     } else {
@@ -437,6 +462,30 @@ private fun TextBubble(
     fun copy(text: String) {
         if (text.isBlank()) return
         clipboard.setText(AnnotatedString(text))
+    }
+
+    if (askSource) {
+        io.qwenpaw.node.ui.common.ChoiceDialog(
+            title = "是否显示 Markdown/LaTeX 原文？",
+            message = "页面上看到的是排版后的结果，公式与表格已重排。" +
+                "看原文可以完整选中并复制其中的标记。",
+            choices = listOf("显示", "不显示"),
+            dismissLabel = "取消",
+            onPick = { index ->
+                askSource = false
+                if (index == 0) {
+                    onOpenSource(message.text)
+                } else {
+                    selectionMode = true
+                    Toast.makeText(
+                        context,
+                        "已进入选择态；「完成选择」在这条消息下方",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+            onDismiss = { askSource = false },
+        )
     }
 
     MessageFrame(
@@ -452,6 +501,10 @@ private fun TextBubble(
         onToggleSelection = {
             selectionMode = !selectionMode
             menuOpen = false
+        },
+        onRequestSelect = {
+            menuOpen = false
+            askSource = true
         },
     ) {
         Box(
@@ -548,6 +601,7 @@ private fun TextBubble(
             ) {
                 androidx.compose.material3.DropdownMenuItem(
                     text = { Text("复制") },
+                    leadingIcon = { MenuIcons.Leading(MenuAction.COPY) },
                     onClick = {
                         menuOpen = false
                         copy(MarkdownPlainText.strip(message.text))
@@ -556,6 +610,7 @@ private fun TextBubble(
                 )
                 androidx.compose.material3.DropdownMenuItem(
                     text = { Text("复制为 Markdown") },
+                    leadingIcon = { MenuIcons.Leading(MenuAction.COPY_MARKDOWN) },
                     onClick = {
                         menuOpen = false
                         copy(message.text)
@@ -564,15 +619,10 @@ private fun TextBubble(
                 )
                 androidx.compose.material3.DropdownMenuItem(
                     text = { Text("选择文本") },
+                    leadingIcon = { MenuIcons.Leading(MenuAction.SELECT_TEXT) },
                     onClick = {
                         menuOpen = false
-                        selectionMode = true
-                        // 与底部按钮进入选择态时同一条提示：用户需要知道「完成选择」在哪。
-                        Toast.makeText(
-                            context,
-                            "已进入选择态；「完成选择」在这条消息下方",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        askSource = true
                     },
                 )
             }
@@ -598,6 +648,14 @@ private fun MessageFrame(
     /** 是否处于「选文本」态。为真时底部操作行换成「完成选择」。 */
     selectionMode: Boolean = false,
     onToggleSelection: () -> Unit = {},
+    /**
+     * 请求进入选择态前的询问。
+     *
+     * 触摸选中的只是屏幕上渲染出来的文字：公式被排版成二维结构、图片与表格也各有排版，
+     * 拖动选到的字符与原文未必一一对应。因此先问一次「要不要看原文」，
+     * 由调用方弹对话框决定，气泡本身不持有这份状态。
+     */
+    onRequestSelect: () -> Unit = onToggleSelection,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -668,6 +726,8 @@ private fun MessageFrame(
                     kind = avatarKind,
                     name = displayName,
                     version = appearance.avatarVersion,
+                    serverImage = appearance.serverUserAvatar,
+                    useServerAvatar = appearance.useServerAvatar,
                 )
             }
         }
@@ -690,7 +750,7 @@ private fun MessageFrame(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
                 ) {
-                    MessageAction("完成选择", onToggleSelection)
+                    MessageAction("完成选择", MenuAction.DONE_SELECTING, appearance.actionStyle, onToggleSelection)
                 }
             } else if (copyable) {
                 Spacer(Modifier.height(2.dp))
@@ -698,24 +758,19 @@ private fun MessageFrame(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
                 ) {
-                    MessageAction("复制") {
+                    MessageAction("复制", MenuAction.COPY, appearance.actionStyle) {
                         onCopy()
                         Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
                     }
-                    MessageAction("复制为 Markdown") {
+                    MessageAction("复制为 Markdown", MenuAction.COPY_MARKDOWN, appearance.actionStyle) {
                         onCopyMarkdown()
                         Toast.makeText(context, "已复制 Markdown", Toast.LENGTH_SHORT).show()
                     }
-                    // 与长按菜单里的「选择文本」是同一个入口，两处都要能进选择态。
-                    // 进入后这条消息下方的按钮会换成「完成选择」，用户未必知道往哪找，
-                    // 所以进态时就近提示一次。
-                    MessageAction("选择文本") {
-                        onToggleSelection()
-                        Toast.makeText(
-                            context,
-                            "已进入选择态；「完成选择」在这条消息下方",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                    // 与长按菜单里的「选择文本」是同一个入口，两处都要先询问一次。
+                    // 进入选择态后这条消息下方的按钮会换成「完成选择」，
+                    // 用户未必知道往哪找，所以进态的就近提示由调用方在确认之后给出。
+                    MessageAction("选择文本", MenuAction.SELECT_TEXT, appearance.actionStyle) {
+                        onRequestSelect()
                     }
                 }
             }
@@ -730,18 +785,39 @@ private fun MessageFrame(
     }
 }
 
-/** 气泡下方的文字按钮。用 labelSmall 压小字号，避免操作行比正文更抢眼。 */
+/**
+ * 气泡下方的操作项。
+ *
+ * 文字档用 labelSmall 压小字号，避免操作行比正文更抢眼；
+ * 图标档只画图标，`contentDescription` 仍取同一段文字——
+ * 无障碍朗读与自动化测试都靠它，不能因为换成图标就把文字丢掉。
+ */
 @Composable
-private fun MessageAction(text: String, onClick: () -> Unit) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 3.dp),
-    )
+private fun MessageAction(
+    text: String,
+    action: MenuAction,
+    style: ActionStyle,
+    onClick: () -> Unit,
+) {
+    val modifier = Modifier
+        .clip(RoundedCornerShape(6.dp))
+        .clickable(onClick = onClick)
+        .padding(horizontal = 6.dp, vertical = 3.dp)
+    if (style == ActionStyle.ICON) {
+        Icon(
+            imageVector = MenuIcons.of(action) ?: QwenIcons.moreVertical,
+            contentDescription = text,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier.size(18.dp),
+        )
+    } else {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier,
+        )
+    }
 }
 
 /**

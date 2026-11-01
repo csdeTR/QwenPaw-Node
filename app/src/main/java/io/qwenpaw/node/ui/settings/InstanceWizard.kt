@@ -20,8 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +46,7 @@ import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceDraft
 import io.qwenpaw.node.data.model.AgentDto
 import kotlinx.coroutines.launch
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
  * 引导式创建实例：一步一屏，每屏只处理一件事。
@@ -335,24 +334,8 @@ private fun StepServer(
     verifyFailed: Boolean,
     onVerify: () -> Unit,
 ) {
-    FieldLabel("服务器地址", "必填")
-    OutlinedTextField(
-        value = url,
-        onValueChange = { onUrl(foldFullWidth(it)) },
-        placeholder = { Text("例如 chat.example.com 或 192.168.1.10:8088") },
-        singleLine = true,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(4.dp))
-    Text(
-        text = "未写 http:// 或 https:// 时，内网地址按 http 尝试，公网域名按 https 尝试。" +
-            "若服务端只能通过 http 访问，请写明 http://。",
-        style = MaterialTheme.typography.labelSmall,
-        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-    )
-    Spacer(Modifier.height(12.dp))
-
+    // 名称在上、地址与别名收在同一个灰框里：与填表添加的步骤 1 同构，
+    // 两处填的是同一批字段，排版不同会让人以为其中一个少填了什么。
     FieldLabel("服务器名称", "可选")
     OutlinedTextField(
         value = instanceName,
@@ -368,23 +351,49 @@ private fun StepServer(
         style = MaterialTheme.typography.labelSmall,
         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
     )
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(14.dp))
 
-    FieldLabel("此地址的别名", "可选")
-    OutlinedTextField(
-        value = alias,
-        onValueChange = onAlias,
-        placeholder = { Text("例如「局域网」「EasyTier」") },
-        singleLine = true,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(4.dp))
-    Text(
-        text = "将在实例列表显示，可随时修改，留空则显示地址",
-        style = MaterialTheme.typography.labelSmall,
-        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .padding(12.dp),
+    ) {
+        FieldLabel("服务器地址", "必填")
+        OutlinedTextField(
+            value = url,
+            onValueChange = { onUrl(foldFullWidth(it)) },
+            placeholder = { Text("例如 chat.example.com 或 192.168.1.10:8088") },
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "未写 http:// 或 https:// 时，内网地址按 http 尝试，公网域名按 https 尝试。" +
+                "若服务端只能通过 http 访问，请写明 http://。",
+            style = MaterialTheme.typography.labelSmall,
+            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        FieldLabel("此地址的别名", "可选")
+        OutlinedTextField(
+            value = alias,
+            onValueChange = onAlias,
+            placeholder = { Text("例如「局域网」「EasyTier」") },
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "只改这条地址在实例卡片上的显示名，留空则显示地址本身",
+            style = MaterialTheme.typography.labelSmall,
+            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+        )
+    }
 
     Spacer(Modifier.height(16.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -419,7 +428,7 @@ private fun StepServer(
         if (verified) {
             Spacer(Modifier.width(6.dp))
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = QwenIcons.check,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.secondary,
@@ -630,7 +639,7 @@ private fun WizardAgentRow(agent: AgentDto, selected: Boolean, onClick: () -> Un
         if (selected) {
             Spacer(Modifier.width(8.dp))
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = QwenIcons.check,
                 contentDescription = "已选择",
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.secondary,

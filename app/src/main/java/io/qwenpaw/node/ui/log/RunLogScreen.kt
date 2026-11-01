@@ -20,8 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +41,7 @@ import io.qwenpaw.node.log.LogEntry
 import io.qwenpaw.node.log.LogKind
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
 import kotlinx.coroutines.flow.StateFlow
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
  * 运行日志页。
@@ -87,7 +86,7 @@ fun RunLogScreen(
         ) {
             IconButton(onClick = onBack) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    imageVector = QwenIcons.arrowLeft,
                     contentDescription = "返回",
                     tint = MaterialTheme.colorScheme.onSurface,
                 )

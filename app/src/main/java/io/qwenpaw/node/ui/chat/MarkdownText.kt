@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,10 +34,12 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
  * 轻量 Markdown 渲染。
@@ -82,6 +82,7 @@ fun MarkdownText(
 
                 is MdBlock.Code -> CodeBlock(block.code, block.language)
                 is MdBlock.Table -> MarkdownTable(block.rows, color)
+                is MdBlock.Math -> LatexView(block.source, color)
                 is MdBlock.Quote -> Row {
                     Box(
                         Modifier
@@ -101,8 +102,13 @@ fun MarkdownText(
     }
 }
 
-/** 行内样式：**粗体**、`代码`、*斜体*。 */
-private fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnnotatedString {
+/**
+ * 行内样式：**粗体**、`代码`、*斜体*，以及正文里直接写的上下标。
+ *
+ * `internal` 而非 `private`：上下标的 span 只能在纯 JVM 单测里断言，
+ * 组合函数的渲染结果需要设备测试才能验证，成本高得多。
+ */
+internal fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
         when {
@@ -110,6 +116,8 @@ private fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnno
                 val end = text.indexOf("**", i + 2)
                 if (end > i) {
                     withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        // 粗体内部不递归解析：上下标在强调里会挤压行高，
+                        // 且 `**a_i**` 的写法本身少见，保持原样更稳定。
                         append(text.substring(i + 2, end))
                     }
                     i = end + 2
@@ -136,6 +144,47 @@ private fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnno
                 }
             }
 
+            // `\(…\)` 与 `\[…\]`：模型常把行内公式写成这两种定界符形式。
+            // 只要闭合就走内联公式，与 `$…$` 共用同一套单行降级。
+            text.startsWith("\\(", i) || text.startsWith("\\[", i) -> {
+                val close = if (text[i + 1] == '(') "\\)" else "\\]"
+                val end = text.indexOf(close, i + 2)
+                if (end > i && appendInlineMath(text.substring(i + 2, end))) {
+                    i = end + close.length
+                } else {
+                    append(text[i]); i++
+                }
+            }
+
+            // 行内公式 `$…$`。判定要避开货币符号：`$` 后不能是空白，
+            // 闭合的 `$` 前也不能是空白，且中间不含换行（本函数只处理单行文本）。
+            text[i] == '$' && isInlineMathStart(text, i) -> {
+                val end = closingInlineMath(text, i)
+                if (end > 0 && appendInlineMath(text.substring(i + 1, end))) {
+                    i = end + 1
+                } else {
+                    // 解析失败保留原文，用户至少能看到自己写了什么。
+                    append(text[i]); i++
+                }
+            }
+
+            // 段落里直接写的上下标（`x^2`、`H_2O`）。不经 LaTeX 也要能读，
+            // 因为模型在解释里常常只用纯文本写一个指数或下标。
+            text[i] == '^' || (text[i] == '_' && isWordInternalUnderscore(text, i)) -> {
+                val script = readBareScript(text, i + 1)
+                if (script == null) {
+                    append(text[i]); i++
+                } else {
+                    val shift = if (text[i] == '^') {
+                        BaselineShift.Superscript
+                    } else {
+                        BaselineShift.Subscript
+                    }
+                    withStyle(SpanStyle(baselineShift = shift)) { append(script.first) }
+                    i = script.second
+                }
+            }
+
             text.startsWith("*", i) || text.startsWith("_", i) -> {
                 val marker = text[i]
                 val end = text.indexOf(marker, i + 1)
@@ -154,6 +203,82 @@ private fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnno
             }
         }
     }
+}
+
+/**
+ * 追加一段行内公式；解析失败返回 false，由调用方把定界符按字面留下。
+ *
+ * 行内不排二维结构：分式、根式压成单行文本，否则段落里嵌套公式会撑高行距并破坏换行。
+ */
+private fun AnnotatedString.Builder.appendInlineMath(source: String): Boolean {
+    val node = LatexParser.parse(source) ?: return false
+    withStyle(
+        SpanStyle(
+            fontFamily = FontFamily.Serif,
+            fontStyle = FontStyle.Italic,
+        ),
+    ) {
+        append(LatexInline.toPlainText(node))
+    }
+    return true
+}
+
+/**
+ * 读裸上下标的内容，返回「内容 to 结束下标」。
+ *
+ * 只取花括号里的整段或紧跟的一个字符：`x^{n+1}` 与 `x^2` 都常见；
+ * `x^ 2` 里 `^` 后面是空白，多半是字面量，因此不吞掉后面的内容。
+ */
+private fun readBareScript(text: String, start: Int): Pair<String, Int>? {
+    if (start >= text.length) return null
+    if (text[start] == '{') {
+        val close = text.indexOf('}', start + 1)
+        if (close <= start + 1) return null
+        return text.substring(start + 1, close) to close + 1
+    }
+    val c = text[start]
+    if (c.isWhitespace() || c == '{') return null
+    return c.toString() to start + 1
+}
+
+/**
+ * 词内下划线。
+ *
+ * CommonMark 规定 `_` 两侧都是字母数字时不成对构成强调（`H_2O`、`a_i`），
+ * 这里反过来把这种位置当成裸下标；行首或空白后的 `_` 仍是斜体标记，
+ * `_斜体_`、`_ text _` 的原有行为不受影响。
+ */
+private fun isWordInternalUnderscore(text: String, index: Int): Boolean {
+    val prev = text.getOrNull(index - 1) ?: return false
+    val next = text.getOrNull(index + 1) ?: return false
+    return prev.isLetterOrDigit() && (next.isLetterOrDigit() || next == '{')
+}
+
+/** 行内公式的起始判据：`$` 后紧跟非空白，且不是 `$$`（那是块级定界符）。 */
+private fun isInlineMathStart(text: String, index: Int): Boolean {
+    if (text.getOrElse(index + 1) { ' ' }.isWhitespace()) return false
+    var next = index + 1
+    while (next < text.length && text[next] == '$') next++
+    return next == index + 1
+}
+
+/**
+ * 找行内公式的闭合 `$`，返回其下标；找不到返回 -1。
+ *
+ * 要求闭合的 `$` 前不是空白，避免把 `$5 and $10` 里的第一个美元符号
+ * 当成公式起点。中间出现的 `$$` 直接判为非公式，交给块级逻辑处理。
+ */
+private fun closingInlineMath(text: String, start: Int): Int {
+    var i = start + 1
+    while (i < text.length) {
+        if (text[i] == '$') {
+            if (text.getOrElse(i - 1) { ' ' }.isWhitespace()) return -1
+            if (text.getOrElse(i + 1) { ' ' } == '$') return -1
+            return i
+        }
+        i++
+    }
+    return -1
 }
 
 @Composable
@@ -190,7 +315,7 @@ private fun CodeBlock(code: String, language: String?) {
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
-                    imageVector = Icons.Default.ContentCopy,
+                    imageVector = QwenIcons.copy,
                     contentDescription = "复制代码",
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -289,6 +414,64 @@ sealed interface MdBlock {
     data class Quote(val text: String) : MdBlock {
         override val inlineText: String get() = text
     }
+
+    /**
+     * 独占一行的公式，`$$…$$` 或 `\[…\]`。
+     *
+     * 只有闭合后才成为本类型；未闭合时按普通段落原样显示，
+     * 这是流式输出必须的处理：`$$` 先于公式内容到达，此刻渲染会解析失败。
+     */
+    data class Math(val source: String) : MdBlock {
+        override val inlineText: String? get() = null
+    }
+}
+
+/** 一行被块级公式定界符切开后的片段。 */
+private sealed interface LineSegment {
+    data class Text(val text: String) : LineSegment
+
+    data class Math(val source: String) : LineSegment
+}
+
+/**
+ * 把一行按成对的 `$$…$$` 或 `\[…\]` 切开；没有闭合的定界符时返回 null。
+ *
+ * 定界符常出现在模型写的「前文 + 公式 + 后文」里，只在行首识别会整行漏掉。
+ * 只认同行内闭合：跨行的公式由行首分支处理，半截公式不能交给渲染层。
+ */
+private fun splitDisplayMath(line: String): List<LineSegment>? {
+    val segments = mutableListOf<LineSegment>()
+    var textStart = 0
+    var i = 0
+    var found = false
+    while (i < line.length) {
+        val close = when {
+            line.startsWith("$$", i) -> "$$"
+            line.startsWith("\\[", i) -> "\\]"
+            else -> {
+                i++
+                continue
+            }
+        }
+        // 被反斜杠转义的定界符是字面量，例如价格写法 `\$5`。
+        if (i > 0 && line[i - 1] == '\\') {
+            i += 2
+            continue
+        }
+        val end = line.indexOf(close, i + 2)
+        if (end < 0) {
+            i += 2
+            continue
+        }
+        if (i > textStart) segments += LineSegment.Text(line.substring(textStart, i))
+        segments += LineSegment.Math(line.substring(i + 2, end))
+        i = end + close.length
+        textStart = i
+        found = true
+    }
+    if (!found) return null
+    if (textStart < line.length) segments += LineSegment.Text(line.substring(textStart))
+    return segments
 }
 
 /**
@@ -335,6 +518,32 @@ object MarkdownParser {
                     blocks += MdBlock.Code(code.toString().trimEnd('\n'), language)
                 }
 
+                // 独占一行的公式。`$$` 可以单行闭合，也可以跨行；
+                // 未闭合时落到 else 分支按普通段落显示，避免流式输出中途渲染半个公式。
+                trimmed.startsWith("$$") -> {
+                    val closed = collectDollarMath(lines, i)
+                    if (closed != null) {
+                        flushParagraph()
+                        blocks += MdBlock.Math(closed.first)
+                        i = closed.second
+                    } else {
+                        if (paragraph.isNotEmpty()) paragraph.append('\n')
+                        paragraph.append(line)
+                    }
+                }
+
+                trimmed.startsWith("\\[") -> {
+                    val closed = collectBracketMath(lines, i)
+                    if (closed != null) {
+                        flushParagraph()
+                        blocks += MdBlock.Math(closed.first)
+                        i = closed.second
+                    } else {
+                        if (paragraph.isNotEmpty()) paragraph.append('\n')
+                        paragraph.append(line)
+                    }
+                }
+
                 trimmed.isEmpty() -> flushParagraph()
 
                 trimmed.startsWith("#") -> {
@@ -376,13 +585,93 @@ object MarkdownParser {
                 }
 
                 else -> {
-                    if (paragraph.isNotEmpty()) paragraph.append('\n')
-                    paragraph.append(line)
+                    // 段落里可能夹着已经闭合的块级公式（`前文 $$x^2$$ 后文`）。
+                    // 未闭合时不拆：流式输出会先到达半个定界符，此时必须按文本显示。
+                    val segments = splitDisplayMath(line)
+                    if (segments == null) {
+                        if (paragraph.isNotEmpty()) paragraph.append('\n')
+                        paragraph.append(line)
+                    } else {
+                        flushParagraph()
+                        segments.forEach { segment ->
+                            when (segment) {
+                                is LineSegment.Text ->
+                                    if (segment.text.isNotBlank()) {
+                                        blocks += MdBlock.Paragraph(segment.text.trim())
+                                    }
+
+                                is LineSegment.Math -> blocks += MdBlock.Math(segment.source.trim())
+                            }
+                        }
+                    }
                 }
             }
             i++
         }
         flushParagraph()
         return blocks
+    }
+
+    /**
+     * 收集 `$$…$$` 包裹的块级公式，返回「公式源 to 下一行下标」。
+     *
+     * 从 [start] 行开始找闭合的 `$$`。同一行内闭合（`$$x^2$$`）与跨行闭合都支持；
+     * 找不到闭合定界符时返回 null，由调用方按普通段落处理——
+     * 流式输出时 `$$` 会先到达，此刻若强行渲染会得到半条公式。
+     */
+    private fun collectDollarMath(lines: List<String>, start: Int): Pair<String, Int>? {
+        val body = StringBuilder()
+        var i = start
+        while (i < lines.size) {
+            val text = lines[i].trim()
+            if (i == start) {
+                // 首行：去掉前导 `$$`，看行内是否同时有结尾的 `$$`。
+                val rest = text.removePrefix("$$")
+                val end = rest.indexOf("$$")
+                if (end >= 0) {
+                    // 单行闭合时两侧空格会在渲染里变成多余缩进，统一去掉。
+                    body.append(rest.substring(0, end))
+                    return body.toString().trim() to i + 1
+                }
+                body.append(rest)
+            } else {
+                val end = text.indexOf("$$")
+                if (end >= 0) {
+                    body.append('\n').append(text.substring(0, end))
+                    return body.toString().trim() to i + 1
+                }
+                body.append('\n').append(text)
+            }
+            i++
+        }
+        return null
+    }
+
+    /** `\[…\]` 形式的块级公式，语义与 `$$…$$` 相同，只是定界符不同。 */
+    private fun collectBracketMath(lines: List<String>, start: Int): Pair<String, Int>? {
+        val body = StringBuilder()
+        var i = start
+        while (i < lines.size) {
+            val text = lines[i].trim()
+            if (i == start) {
+                val rest = text.removePrefix("\\[")
+                val end = rest.indexOf("\\]")
+                if (end >= 0) {
+                    // 同一行闭合（`\[ E = mc^2 \]`）时定界符两侧常带空格，去掉再交给解析器。
+                    body.append(rest.substring(0, end))
+                    return body.toString().trim() to i + 1
+                }
+                body.append(rest)
+            } else {
+                val end = text.indexOf("\\]")
+                if (end >= 0) {
+                    body.append('\n').append(text.substring(0, end))
+                    return body.toString().trim() to i + 1
+                }
+                body.append('\n').append(text)
+            }
+            i++
+        }
+        return null
     }
 }

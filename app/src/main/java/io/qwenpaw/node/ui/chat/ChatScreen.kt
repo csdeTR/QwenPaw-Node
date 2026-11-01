@@ -27,8 +27,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -57,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.voice.VoiceState
 import kotlinx.coroutines.launch
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 聊天页。 */
 @Composable
@@ -88,7 +87,7 @@ fun ChatScreen(
     onTogglePin: () -> Unit = {},
     onArchive: () -> Unit = {},
     onExport: () -> Unit = {},
-    /** 重新载入当前会话：断网恢复后的主要入口。 */
+    /** 重新载入当前对话：断网恢复后的主要入口。 */
     onRefresh: () -> Unit = {},
     onSetThinking: (String) -> Unit = {},
     onSetGroup: (String?) -> Unit = {},
@@ -104,6 +103,8 @@ fun ChatScreen(
     assistantCollapse: AssistantCollapse = AssistantCollapse.RESULT_COLLAPSED,
     /** 消息外观：头像、显示名与用量开关。 */
     appearance: MessageAppearance = MessageAppearance(),
+    /** 「选择文本」里选「显示」时，把这条消息的原始 Markdown 交给上层打开原文页。 */
+    onOpenSource: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -162,7 +163,10 @@ fun ChatScreen(
     // 用 `DragInteraction` 而不是 `isScrollInProgress` 来识别「用户」：
     // 后者对 `scrollToItem` / `animateScrollToItem` 同样为 true，
     // 而本文件里几乎每一帧都在程序化贴底，那样会把跟随标记反复误判成 false。
-    var followTail by remember(state.currentChatId) { mutableStateOf(true) }
+    //
+    // 状态机抽成 [FollowTail]，是普通对象而不是 `mutableStateOf`：
+    // 它的取值只在副作用里读写，不参与组合，因此不需要触发重组。
+    val followTail = remember(state.currentChatId) { FollowTail() }
     /** 用户刚拖完，等惯性滑动停下来再采样「停在哪」。 */
     var pendingSample by remember(state.currentChatId) { mutableStateOf(false) }
 
@@ -190,16 +194,33 @@ fun ChatScreen(
     }
 
     LaunchedEffect(listState, state.currentChatId) {
-        snapshotFlow { listState.interactionSource.interactions }
+        // `interactions` 本身已经是 `Flow<Interaction>`，直接收集。
+        //
+        // 此前它被套在 `snapshotFlow { ... }` 里，collect 拿到的是那个 Flow 对象本身，
+        // 于是下面三个 `is DragInteraction.*` 分支全是 `is` 检查必然为 false 的死代码
+        // （编译期会给出 "Check for instance is always 'false'" 警告）。
+        // 表现是按下、松开、打断一个都不会被响应：跟随列表末尾的意图完全失效，
+        // 只能靠别处的 `awaitingReply` 副作用偶然恢复。
+        listState.interactionSource.interactions
             .collect { interaction ->
                 // 只处理拖动：Fling 与程序化滚动都不是「用户在读别处」。
                 // 拖完不立刻采样——松手之后还有惯性滑动，那时读到的位置还没定。
                 when (interaction) {
                     is androidx.compose.foundation.interaction.DragInteraction.Start -> {
                         userScrolled = true
+                        // 手指一按下就停跟随。此前只在松手后采样，
+                        // 按住往上滑的这几秒里流式内容仍会把列表拉回底部，
+                        // 表现为「拖不动 / 拖到一半被拽回去」。
+                        followTail.onDragStart()
                     }
 
                     is androidx.compose.foundation.interaction.DragInteraction.Stop -> {
+                        pendingSample = true
+                    }
+
+                    // 手势被打断（来电、布局突变导致的手势取消）同样要采样，
+                    // 否则 pendingSample 永远不会置位，跟随状态会停在上一次的值。
+                    is androidx.compose.foundation.interaction.DragInteraction.Cancel -> {
                         pendingSample = true
                     }
 
@@ -215,7 +236,7 @@ fun ChatScreen(
             .collect { scrolling ->
                 if (!scrolling && pendingSample) {
                     pendingSample = false
-                    followTail = atBottom.value
+                    followTail.onDragSettled(atBottom.value)
                 }
             }
     }
@@ -229,7 +250,7 @@ fun ChatScreen(
         // 下标在替换瞬间会短暂塌到 0（条目全换了一批，旧锚点消失），被误判成「翻到顶了」，
         // 接着就把几个月前的历史铺回来——这正是回复完成后界面突然退回几屏之前的原因。
         // 跟随标记是用户的真实意图，优先于位置推断。
-        if (followTail || state.running) return@LaunchedEffect
+        if (followTail.value || state.running) return@LaunchedEffect
         val curStart = rawStart.coerceAtMost((allItems.size - PAGE_SIZE).coerceAtLeast(0))
         if (curStart <= 0 || !atTop) return@LaunchedEffect
         // 内容不足一屏时列表根本滚不动，用户也无法再上滑，此时一路补到能滚动为止。
@@ -267,15 +288,15 @@ fun ChatScreen(
     }
 
     LaunchedEffect(state.messages.lastOrNull()?.id, state.currentChatId) {
-        if (state.messages.isNotEmpty() && followTail) stickToBottom()
+        if (state.messages.isNotEmpty() && followTail.value) stickToBottom()
     }
 
     LaunchedEffect(state.messages.lastOrNull()?.text?.length) {
-        if (state.messages.isNotEmpty() && followTail) stickToBottom()
+        if (state.messages.isNotEmpty() && followTail.value) stickToBottom()
     }
 
     LaunchedEffect(timeline.size) {
-        if (state.messages.isNotEmpty() && followTail) stickToBottom()
+        if (state.messages.isNotEmpty() && followTail.value) stickToBottom()
     }
 
     // 一轮结束（running 由 true 变 false）时再贴一次底。
@@ -284,7 +305,7 @@ fun ChatScreen(
     // 上面几个副作用即便都触发，也可能在「新列表还没完成测量」时按旧下标滚动，
     // 落到半路。这里等两帧让布局落定，再按**实际条目总数**滚到最后一行。
     LaunchedEffect(state.running) {
-        if (state.running || !followTail || state.messages.isEmpty()) return@LaunchedEffect
+        if (state.running || !followTail.value || state.messages.isEmpty()) return@LaunchedEffect
         withFrameNanos { }
         withFrameNanos { }
         val total = listState.layoutInfo.totalItemsCount
@@ -299,7 +320,7 @@ fun ChatScreen(
     // 用户看到的正是「点完发送，页面没反应」。
     LaunchedEffect(awaitingReply) {
         if (awaitingReply) {
-            followTail = true
+            followTail.onSend()
             listState.requestScrollToItem(lastItemIndex, TAIL_SCROLL_OFFSET)
         }
     }
@@ -409,23 +430,15 @@ fun ChatScreen(
                 ) { CircularProgressIndicator() }
 
                 // 用 lastOrNull 判断而非 isEmpty：加载中的空壳状态不应触发空态提示。
-                state.messages.lastOrNull() == null -> Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text(
-                        text = "开始新的对话",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "可渲染 Markdown、代码块与工具调用",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                state.messages.lastOrNull() == null -> io.qwenpaw.node.ui.chat.EmptyChatHome(
+                    appearance = appearance,
+                    // 预设消息会真的建立一个对话，触屏误触的成本不低，
+                    // 因此由空态组件内部先弹一次确认，这里只负责「确认之后」的发送。
+                    onSendPreset = { text ->
+                        onDraftChange(text)
+                        onSend()
+                    },
+                )
 
                 else -> io.qwenpaw.node.ui.theme.ChatFontScale {
                     LazyColumn(
@@ -453,6 +466,7 @@ fun ChatScreen(
                                     onImageClick = { viewingImage = it },
                                     onRetry = onRetry,
                                     appearance = appearance,
+                                    onOpenSource = onOpenSource,
                                 )
 
                                 is ChatItem.Steps -> StepsGroup(steps = item.steps)
@@ -482,7 +496,7 @@ fun ChatScreen(
                     visible = { !atBottom.value },
                     onClick = {
                         scope.launch {
-                            followTail = true
+                            followTail.onJumpToLatest()
                             listState.requestScrollToItem(lastItemIndex, TAIL_SCROLL_OFFSET)
                         }
                     },
@@ -494,7 +508,7 @@ fun ChatScreen(
     if (renaming) {
         AlertDialog(
             onDismissRequest = { renaming = false },
-            title = { Text("重命名会话") },
+            title = { Text("重命名对话") },
             text = {
                 OutlinedTextField(
                     value = renameText,
@@ -515,19 +529,21 @@ fun ChatScreen(
     }
 
     if (deleting) {
-        AlertDialog(
-            onDismissRequest = { deleting = false },
-            title = { Text("删除会话") },
-            text = { Text("删除后无法恢复，确定要删除这个会话吗？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    deleting = false
-                    onDelete()
-                }) { Text("删除") }
+        io.qwenpaw.node.ui.common.DestructiveActionDialog(
+            title = "删除对话",
+            message = "删除后无法恢复，确定要删除这个对话吗？",
+            impacts = listOf(
+                "对话「${state.currentChatName.ifBlank { "未命名对话" }}」的全部消息",
+                "与这些消息一同保存的图片与文件引用",
+                "本机为该对话缓存的离线历史",
+            ),
+            confirmLabel = "删除",
+            undoable = false,
+            onConfirm = {
+                deleting = false
+                onDelete()
             },
-            dismissButton = {
-                TextButton(onClick = { deleting = false }) { Text("取消") }
-            },
+            onDismiss = { deleting = false },
         )
     }
 
@@ -617,14 +633,15 @@ fun ChatScreen(
     }
 
     // 分组：首项固定「未分组」。此前下拉菜单里没有这一项，
-    // 会话一旦进了某个分组就无法移回去，只能重新建一个会话。
+    // 对话一旦进了某个分组就无法移回去，只能重新建一个对话。
     if (showGroupDialog) {
         OptionDialog(
             title = "移动到分组",
             items = state.groups.map { group ->
                 OptionItem(
                     key = group.id,
-                    label = group.name.ifBlank { group.id },
+                    // 内置分组的服务端名称是英文，这里与列表表头用同一套中文名。
+                    label = groupTitle(group),
                     selected = group.id == state.currentChatGroupId,
                 )
             },
@@ -639,6 +656,44 @@ fun ChatScreen(
             },
             onDismiss = { showGroupDialog = false },
         )
+    }
+}
+
+/**
+ * 「是否跟随列表末尾」的状态机。
+ *
+ * 抽成普通对象而不是 `mutableStateOf`：它的取值只在副作用里读写，
+ * 不参与组合，因此不需要触发重组；抽出来是为了能在 JVM 单测里
+ * 完整断言四条转移规则，而不必搭一台模拟器去拖列表。
+ *
+ * 四条规则：
+ * - 手指按下即停跟随（[onDragStart]）：按住上滑的几秒里，流式内容仍在把列表拉回底部。
+ * - 松手且惯性停下后按落点定（[onDragSettled]）：滑回底部恢复、停在中间保持停止。
+ * - 发送消息强制恢复（[onSend]）：点发送本身就是「我要看这条」。
+ * - 「跳到最新」强制恢复（[onJumpToLatest]）。
+ */
+internal class FollowTail(initial: Boolean = true) {
+    var value: Boolean = initial
+        private set
+
+    /** 用户手指按下，立即停止跟随。 */
+    fun onDragStart() {
+        value = false
+    }
+
+    /** 拖动与惯性都结束，按最终是否在底部同步。 */
+    fun onDragSettled(atBottom: Boolean) {
+        value = atBottom
+    }
+
+    /** 用户发出消息，强制跟随。 */
+    fun onSend() {
+        value = true
+    }
+
+    /** 用户点「跳到最新」，强制跟随。 */
+    fun onJumpToLatest() {
+        value = true
     }
 }
 
@@ -791,7 +846,7 @@ private fun ErrorBar(text: String, onClose: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = Icons.Default.Close,
+                imageVector = QwenIcons.close,
                 contentDescription = "关闭提示",
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onErrorContainer,

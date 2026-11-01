@@ -18,8 +18,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.model.TokenUsageDto
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** Token 用量统计页：总体概览 + 按模型 / 按日期明细。 */
 @Composable
@@ -67,7 +66,7 @@ fun TokenUsageScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = QwenIcons.arrowLeft,
                             contentDescription = "返回",
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
@@ -173,7 +172,9 @@ private fun OverviewCard(usage: TokenUsageDto) {
         MetricRow("总调用次数", usage.totalCalls.toString())
         MetricRow("输入 tokens", formatTokens(usage.totalPromptTokens))
         MetricRow("输出 tokens", formatTokens(usage.totalCompletionTokens))
-        MetricRow("缓存命中率", "%.1f%%".format(usage.cacheHitRate))
+        // 没有调用时服务端给的是 null，不是 0。写成「0.0%」会把「还没测过」
+        // 说成「命中率为零」，两者对用户的含义完全不同。
+        MetricRow("缓存命中率", usage.cacheHitRate?.let { "%.1f%%".format(it) } ?: "暂无数据")
     }
 }
 

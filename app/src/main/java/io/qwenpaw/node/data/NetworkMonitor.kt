@@ -35,6 +35,18 @@ class NetworkMonitor(private val context: Context) {
 
     private val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
+    /**
+     * 当前网络是否按流量计费。
+     *
+     * 供大文件下载前提示用：[Snapshot.kind] 只能区分 wifi / vpn / other，
+     * 而「手机热点连着的 wifi」同样算 wifi，却可能走的是蜂窝流量。
+     * 系统给的 `isActiveNetworkMetered` 才是运营商口径，两者不可互相替代。
+     * 拿不到时按「计费」处理：宁可多问一次，也不要静默消耗流量。
+     */
+    fun isMetered(): Boolean = runCatching {
+        cm?.isActiveNetworkMetered ?: true
+    }.getOrDefault(true)
+
     private val _current = MutableStateFlow(read())
     val current: StateFlow<Snapshot> = _current.asStateFlow()
 

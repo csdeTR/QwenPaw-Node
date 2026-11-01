@@ -22,8 +22,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.imageLoader
 import coil.request.ImageRequest
 import io.qwenpaw.node.avatar.AvatarStore
+import java.io.File
 
 /**
  * 圆形头像。
@@ -36,6 +38,12 @@ import io.qwenpaw.node.avatar.AvatarStore
  * 静态 PNG 走同一条路径，没有第二条代码分支。
  *
  * [version] 变化时重新构建请求：设置页换完头像返回聊天页，靠它触发刷新。
+ *
+ * [serverImage] 是服务端头像的本地缓存文件，只有用户侧会传；
+ * [useServerAvatar] 是设置里的开关。取值顺序由 [resolveUserAvatar] 决定：
+ * 本地文件 → 服务端文件（开关打开时）→ 首字。
+ * 智能体侧恒为 null 且开关不起作用：服务端的 `avatar_owner()` 固定 `"console"`，
+ * 没有按智能体区分的头像端点。
  */
 @Composable
 fun ChatAvatar(
@@ -44,25 +52,47 @@ fun ChatAvatar(
     name: String,
     size: Dp = 32.dp,
     version: Long = 0,
+    serverImage: File? = null,
+    useServerAvatar: Boolean = true,
 ) {
-    val file = remember(kind, version) { runCatching { store?.fileFor(kind) }.getOrNull() }
+    val local = remember(kind, version) { runCatching { store?.fileFor(kind) }.getOrNull() }
+    val source = remember(local, serverImage, useServerAvatar) {
+        resolveUserAvatar(
+            hasLocal = local != null,
+            serverEnabled = useServerAvatar,
+            hasServerImage = serverImage != null,
+        )
+    }
+    val file = when (source) {
+        UserAvatarSource.LOCAL -> local
+        UserAvatarSource.SERVER -> serverImage
+        UserAvatarSource.INITIAL -> null
+    }
+    // 智能体侧没有本机图片时，用内置的 QwenPaw 标志当默认头像，与官方网页一致。
+    // 用户侧不做这件事：自己的头像缺省时用首字，比一个通用标志更容易分辨「哪个是我」。
+    val builtinAgentLogo = file == null && kind == AvatarStore.KIND_AGENT
     // 加载失败（文件损坏、格式不被支持）就退回首字，不能留一个空洞。
-    var failed by remember(kind, version) { mutableStateOf(false) }
-    var loaded by remember(kind, version) { mutableStateOf(false) }
+    var failed by remember(file) { mutableStateOf(false) }
+    var loaded by remember(file) { mutableStateOf(false) }
     val showImage = file != null && !failed
     // 动图必须走 AvatarStore 里注册过逐帧解码器的加载器，否则只会画出第一帧。
-    val loader = store?.imageLoader
+    // store 为 null 时（预览/测试）退回进程级加载器，头像是静态图，够用。
+    val context = LocalContext.current
+    val loader = store?.imageLoader ?: context.imageLoader
 
     Box(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(if (loaded && showImage) Color.Transparent else fallbackColor(name)),
+            .background(
+                if (builtinAgentLogo || (loaded && showImage)) Color.Transparent
+                else fallbackColor(name),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         // 首字只在图片就绪之前露出来。图片就绪后不再叠在下面：
         // 带头像的 GIF 常有透明区域，若首字还留着会从透明处透出来。
-        if (!loaded || !showImage) {
+        if (!builtinAgentLogo && (!loaded || !showImage)) {
             Text(
                 text = initialOf(name),
                 style = MaterialTheme.typography.labelLarge,
@@ -70,9 +100,9 @@ fun ChatAvatar(
                 color = Color.White,
             )
         }
-        if (showImage && loader != null) {
+        if (showImage) {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
+                model = ImageRequest.Builder(context)
                     .data(file)
                     // 头像总在同一位置反复出现，淡入会让长列表滚动时一直闪。
                     .crossfade(false)
@@ -93,6 +123,18 @@ fun ChatAvatar(
                         else -> Unit
                     }
                 },
+            )
+        } else if (builtinAgentLogo) {
+            // 内置标志是 288×288 的方形图，圆形裁切后正好是完整的「a」。
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(
+                    io.qwenpaw.node.R.drawable.agent_default,
+                ),
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size)
+                    .clip(CircleShape),
             )
         }
     }

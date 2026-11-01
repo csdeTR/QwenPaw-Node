@@ -26,6 +26,10 @@ class QwenPawApp : Application() {
         private set
     lateinit var avatarStore: io.qwenpaw.node.avatar.AvatarStore
         private set
+    lateinit var serverAvatar: io.qwenpaw.node.data.remote.ServerAvatarClient
+        private set
+    lateinit var chatIconStore: io.qwenpaw.node.avatar.ChatIconStore
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -33,7 +37,15 @@ class QwenPawApp : Application() {
         streamClient = ChatStreamClient(api, QwenPawApi.defaultClient())
         database = AppDatabase.build(this)
         networkMonitor = NetworkMonitor(this)
+        chatIconStore = io.qwenpaw.node.avatar.ChatIconStore(
+            this,
+            getSharedPreferences("qwenpaw_chat_icons", MODE_PRIVATE),
+        )
         avatarStore = io.qwenpaw.node.avatar.AvatarStore(this)
+        serverAvatar = io.qwenpaw.node.data.remote.ServerAvatarClient(
+            api,
+            java.io.File(filesDir, "server-avatar"),
+        )
         instanceRepository = InstanceRepository(InstanceStore(this), api, networkMonitor)
         fontManager = FontManager(this)
         // 进程级监听：地址选择与断网恢复都依赖它，生命周期跟应用一致。

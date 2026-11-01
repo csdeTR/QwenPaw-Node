@@ -24,11 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 底部输入区：全宽多行输入，下面一行是附件、模型名、语音和发送。 */
 @Composable
@@ -154,7 +150,7 @@ fun ChatInputBar(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton42(
-                    icon = Icons.Default.AttachFile,
+                    icon = QwenIcons.paperclip,
                     description = "添加附件",
                     onClick = onAttach,
                 )
@@ -187,7 +183,7 @@ fun ChatInputBar(
                 // 开关关闭时整个按钮不渲染（不是置灰、不占位）。
                 if (voiceVisible) {
                     IconButton42(
-                        icon = Icons.Default.Mic,
+                        icon = QwenIcons.mic,
                         description = if (voiceHoldMode) "按住说话" else "点击开始录音",
                         // 模型未就绪也可点：由外部弹提示引导下载，而不是把入口藏起来。
                         enabled = true,
@@ -331,7 +327,7 @@ private fun SendButton(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = Icons.Default.Send,
+                imageVector = QwenIcons.send,
                 contentDescription = "发送",
                 modifier = Modifier.size(14.dp),
                 tint = if (enabled) MaterialTheme.colorScheme.onPrimary
@@ -372,7 +368,7 @@ private fun AttachmentChip(name: String, onRemove: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = Icons.Default.Close,
+                imageVector = QwenIcons.close,
                 contentDescription = "移除附件",
                 modifier = Modifier.size(13.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,

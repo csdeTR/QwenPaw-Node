@@ -18,9 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,8 +36,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.model.ChatSpecDto
+import io.qwenpaw.node.ui.theme.QwenIcons
 
-/** 已归档会话列表：只读，可恢复或删除。 */
+/** 已归档对话列表：只读，可恢复或删除。 */
 @Composable
 fun ArchivedScreen(
     chats: List<ChatSpecDto>,
@@ -74,7 +72,7 @@ fun ArchivedScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = QwenIcons.arrowLeft,
                             contentDescription = "返回",
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
@@ -115,13 +113,13 @@ fun ArchivedScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = "还没有归档的会话",
+                        text = "还没有归档的对话",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "在会话列表中长按会话即可归档",
+                        text = "在对话列表中长按对话即可归档",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -141,19 +139,21 @@ fun ArchivedScreen(
     }
 
     deleting?.let { chat ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("删除会话") },
-            text = { Text("删除后无法恢复，确定要删除「${chat.name}」吗？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDelete(chat.id)
-                    deleting = null
-                }) { Text("删除") }
+        io.qwenpaw.node.ui.common.DestructiveActionDialog(
+            title = "删除对话",
+            message = "删除后无法恢复，确定要删除「${chat.name}」吗？",
+            impacts = listOf(
+                "该对话的全部消息记录",
+                "与这些消息一同保存的图片与文件引用",
+                "本机为该对话缓存的离线历史",
+            ),
+            confirmLabel = "删除",
+            undoable = false,
+            onConfirm = {
+                onDelete(chat.id)
+                deleting = null
             },
-            dismissButton = {
-                TextButton(onClick = { deleting = null }) { Text("取消") }
-            },
+            onDismiss = { deleting = null },
         )
     }
 }
@@ -175,7 +175,7 @@ private fun ArchivedRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = chat.name.ifBlank { "未命名会话" },
+                    text = chat.name.ifBlank { "未命名对话" },
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,

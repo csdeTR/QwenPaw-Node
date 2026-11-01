@@ -1,5 +1,10 @@
 package io.qwenpaw.node.ui.settings
 
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,10 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -35,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +53,7 @@ import io.qwenpaw.node.font.FontState
 import io.qwenpaw.node.ui.VoiceTrigger
 import io.qwenpaw.node.ui.theme.ThemeMode
 import io.qwenpaw.node.voice.ModelState
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 设置页：实例、外观、消息显示、通知与行为、语音输入、运行日志、关于。 */
 @Composable
@@ -131,6 +134,16 @@ fun SettingsScreen(
     avatarVersion: Long = 0L,
     onPickAvatar: (String) -> Unit = {},
     onRemoveAvatar: (String) -> Unit = {},
+    /** 是否使用服务端（网页端）头像。本机头像优先，关掉不影响本机头像。 */
+    useServerAvatar: Boolean = true,
+    onUseServerAvatar: (Boolean) -> Unit = {},
+    /** 服务端头像的本地缓存文件，用于预览。 */
+    serverAvatarFile: java.io.File? = null,
+    /** 进入设置页时重新核对服务端头像。 */
+    onRefreshServerAvatar: () -> Unit = {},
+    /** 消息底部操作行样式。 */
+    actionStyle: io.qwenpaw.node.ui.chat.ActionStyle = io.qwenpaw.node.ui.chat.ActionStyle.TEXT,
+    onActionStyle: (io.qwenpaw.node.ui.chat.ActionStyle) -> Unit = {},
 ) {
     var adding by remember { mutableStateOf(false) }
     // 添加实例的两种方式：null 表示在方式选择页，否则是具体形态。
@@ -138,18 +151,86 @@ fun SettingsScreen(
     var editing by remember { mutableStateOf<InstanceConfig?>(null) }
     val context = LocalContext.current
 
-    // 添加/编辑是设置页内的子页面：系统返回键先退回方式选择页，再退出添加，
-    // 而不是直接跳回聊天页，否则用户会以为设置被关掉了。
-    androidx.activity.compose.BackHandler(enabled = adding || editing != null) {
-        when {
-            addMode != null && adding -> addMode = null
-            adding -> adding = false
-            else -> editing = null
+    // 每次进入设置页核对一次服务端头像。不做轮询：头像不是时效性数据，
+    // 用户改完网页端的头像再来这里就是最常见的一次刷新时机。
+    androidx.compose.runtime.LaunchedEffect(Unit) { onRefreshServerAvatar() }
+
+    // 一级页当前打开的分区。MAIN 是列表，其余是子页。
+    var section by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
+    // 待确认移除的实例。移除会连带清掉地址与智能体选择，点一下就走太危险。
+    var pendingRemove by remember { mutableStateOf<InstanceConfig?>(null) }
+
+    // 子页的导航状态。
+    //
+    // 必须把「页 + 这一页依赖的数据」作为整体交给 AnimatedContent，而不是只传枚举：
+    // 只传枚举时，正在退出的旧槽位仍会读外部的 addMode / editing，
+    // 而它们在点击瞬间已经变了，旧槽位就被画成新页面——
+    // 表现为先瞬间跳到目标页，再两个相同的画面互推一遍。
+    val nav = SettingsNav(
+        page = when {
+            adding && addMode == null -> SettingsPage.ADD_MODE
+            adding && addMode == AddMode.FORM -> SettingsPage.ADD_FORM
+            adding && addMode == AddMode.WIZARD -> SettingsPage.ADD_WIZARD
+            editing != null -> SettingsPage.EDIT
+            else -> section
+        },
+        addMode = addMode,
+        editing = editing,
+    )
+
+    // 系统返回键按层级后退：表单 → 方式选择 → 关闭添加；子页 → 一级列表。
+    androidx.activity.compose.BackHandler(enabled = nav.page != SettingsPage.MAIN) {
+        when (nav.page) {
+            SettingsPage.ADD_FORM, SettingsPage.ADD_WIZARD -> addMode = null
+            SettingsPage.ADD_MODE -> adding = false
+            SettingsPage.EDIT -> editing = null
+            else -> section = SettingsPage.MAIN
         }
     }
 
+    // 移除实例的确认。不提供撤销：服务端与本机都没有回收站，
+    // 承诺一个做不到的撤销比多弹一次确认更糟。
+    pendingRemove?.let { instance ->
+        io.qwenpaw.node.ui.common.DestructiveActionDialog(
+            title = "移除实例",
+            message = "将移除「${instance.name.ifBlank { "未命名" }}」及其地址配置。",
+            impacts = listOf(
+                "该实例的地址列表、地址偏好与智能体选择",
+                "本机缓存的离线消息仍会保留，重新添加同一实例后可继续查看",
+            ),
+            confirmLabel = "移除",
+            undoable = false,
+            onConfirm = {
+                onRemove(instance.id)
+                pendingRemove = null
+            },
+            onDismiss = { pendingRemove = null },
+        )
+    }
+
+    androidx.compose.animation.AnimatedContent(
+        targetState = nav,
+        transitionSpec = {
+            // 子页的入口都在行尾箭头（屏幕右边缘），因此深入从右滑入、返回向右退出。
+            val forward = targetState.page.ordinal > initialState.page.ordinal
+            (androidx.compose.animation.fadeIn(
+                androidx.compose.animation.core.tween(180),
+            ) + androidx.compose.animation.slideInHorizontally(
+                androidx.compose.animation.core.tween(220),
+            ) { if (forward) it / 3 else -it / 3 })
+                .togetherWith(
+                    androidx.compose.animation.fadeOut(
+                        androidx.compose.animation.core.tween(140),
+                    ) + androidx.compose.animation.slideOutHorizontally(
+                        androidx.compose.animation.core.tween(220),
+                    ) { if (forward) -it / 3 else it / 3 },
+                )
+        },
+        label = "settings-page",
+    ) { current ->
+    when (current.page) {
     // 添加实例先选方式：填表适合熟手，引导适合不清楚各项含义的人。
-    if (adding) {
+    SettingsPage.ADD_MODE, SettingsPage.ADD_FORM, SettingsPage.ADD_WIZARD -> {
         Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
             Column(
                 modifier = Modifier
@@ -160,9 +241,14 @@ fun SettingsScreen(
                     onBack = {
                         if (addMode != null) addMode = null else adding = false
                     },
-                    subtitle = if (addMode == null) "添加实例" else "添加实例 · 引导式",
+                    subtitle = when (current.addMode) {
+                        null -> "添加实例"
+                        AddMode.FORM -> "添加实例 · 填表"
+                        AddMode.WIZARD -> "添加实例 · 引导式"
+                    },
                 )
-                when (addMode) {
+                // 读 current 而不是外部 addMode：退出中的旧槽位要保留它自己那一页的内容。
+                when (current.addMode) {
                     null -> AddModeChooser(
                         onPickFill = { addMode = AddMode.FORM },
                         onPickWizard = { addMode = AddMode.WIZARD },
@@ -206,11 +292,10 @@ fun SettingsScreen(
                 }
             }
         }
-        return
     }
 
     // 编辑实例同样走这套交互，地址预填并自动读取智能体列表。
-    editing?.let { instance ->
+    SettingsPage.EDIT -> current.editing?.let { instance ->
         Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
             Column(
                 modifier = Modifier
@@ -247,23 +332,114 @@ fun SettingsScreen(
                 )
             }
         }
-        return
     }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+    // 一级列表与各子页共用同一个 Scaffold：只有内容按 section 切换，
+// 这样标题栏与返回行为不必在每页重复一遍。
+    else -> Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+        // 这一分支必须读 current.page 而不是外层 section：
+        // section 在点击瞬间就变成新值，正在退出的旧槽位会被画成新页面，
+        // 表现为先瞬切到目标页、再两个相同画面互推一遍。
+        val page = current.page
+        val scrollState = rememberScrollState()
+        // 切到子页时回到顶部：沿用上一页的滚动位置会让用户落在半截内容里。
+        androidx.compose.runtime.LaunchedEffect(page) { scrollState.scrollTo(0) }
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            SettingsTopBar(onBack = onBack, subtitle = "QwenPaw Node 版本 $appVersion")
+            SettingsTopBar(
+                onBack = { if (page == SettingsPage.MAIN) onBack() else section = SettingsPage.MAIN },
+                subtitle = if (page == SettingsPage.MAIN) {
+                    "QwenPaw Node 版本 $appVersion"
+                } else {
+                    sectionTitle(page)
+                },
+            )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .padding(bottom = 24.dp),
             ) {
+                when (page) {
+                SettingsPage.MAIN -> {
+                    // 一级列表：每行一个入口，副标题直接给出当前状态，
+                    // 不必点进去才知道「语音是开还是关」。
+                    Card {
+                        NavRow(
+                            icon = QwenIcons.server,
+                            title = "服务器",
+                            subtitle = serverSummary(instances, activeId),
+                            onClick = { section = SettingsPage.SERVER },
+                        )
+                    }
+                    SectionHeader("个人资料与外观")
+                    Card {
+                        NavRow(
+                            icon = QwenIcons.user,
+                            title = "我的资料",
+                            subtitle = "$userName · 头像",
+                            onClick = { section = SettingsPage.PROFILE },
+                        )
+                        Divider()
+                        NavRow(
+                            icon = QwenIcons.palette,
+                            title = "外观",
+                            subtitle = "${themeLabel(themeMode)} · 字号 ${percent(uiScale)}",
+                            onClick = { section = SettingsPage.APPEARANCE },
+                        )
+                        Divider()
+                        NavRow(
+                            icon = QwenIcons.messageSquare,
+                            title = "消息显示",
+                            subtitle = collapseLabel(assistantCollapse) +
+                                " · 用量${if (showMessageStats) "开" else "关"}",
+                            onClick = { section = SettingsPage.MESSAGES },
+                        )
+                    }
+                    SectionHeader("此手机")
+                    Card {
+                        NavRow(
+                            icon = QwenIcons.mic,
+                            title = "语音",
+                            subtitle = voiceSummary(voiceEnabled, modelState),
+                            onClick = { section = SettingsPage.VOICE },
+                        )
+                        Divider()
+                        NavRow(
+                            icon = QwenIcons.bell,
+                            title = "通知与行为",
+                            subtitle = "紧凑排版${if (compactList) "开" else "关"}" +
+                                " · 常亮${if (keepScreenOn) "开" else "关"}",
+                            onClick = { section = SettingsPage.BEHAVIOR },
+                        )
+                        Divider()
+                        NavRow(
+                            icon = QwenIcons.receiptText,
+                            title = "运行日志",
+                            subtitle = if (logEnabled) {
+                                "记录中 · ${logKinds.size} 类事件"
+                            } else {
+                                "已关闭"
+                            },
+                            onClick = { section = SettingsPage.LOGS },
+                        )
+                    }
+                    SectionHeader("关于")
+                    Card {
+                        NavRow(
+                            icon = QwenIcons.info,
+                            title = "关于",
+                            subtitle = "版本 $appVersion",
+                            onClick = { section = SettingsPage.ABOUT },
+                        )
+                    }
+                }
+
                 // 服务器实例
+                SettingsPage.SERVER -> {
                 SectionHeader("服务器实例", "${instances.size} 个")
                 Card {
                     instances.forEachIndexed { index, instance ->
@@ -271,7 +447,7 @@ fun SettingsScreen(
                             instance = instance,
                             active = instance.id == activeId,
                             onSwitch = { onSwitch(instance.id) },
-                            onRemove = { onRemove(instance.id) },
+                            onRemove = { pendingRemove = instance },
                             onEdit = { editing = instance },
                             onPickAgent = { onPickAgent(instance) },
                             onChooseAddress = { url -> onChooseAddress(instance.id, url) },
@@ -284,9 +460,9 @@ fun SettingsScreen(
                     if (instances.isNotEmpty()) Divider()
                     ActionRow(text = "添加实例", onClick = { adding = true })
                 }
+                }
 
-                // 外观
-                SectionHeader("外观")
+                SettingsPage.APPEARANCE -> {
                 Card {
                     // 主题不另起一行标题：三张预览卡下方各自写着「跟随系统」「浅色」「深色」，
                     // 选中的那张有描边，再加一行说明只是把同一件事说第二遍。
@@ -312,10 +488,32 @@ fun SettingsScreen(
                         max = io.qwenpaw.node.ui.theme.FontScaling.CHAT_MAX,
                         onValueChange = onChatScale,
                     )
+                    Divider()
+                    // MiSans 与字号同属「字怎么显示」，放在外观组而不是通知组。
+                    SwitchRow(
+                        title = "使用 MiSans 字体",
+                        subtitle = if (fontState is FontState.Ready) {
+                            "替换系统默认字体"
+                        } else {
+                            "需先在下方下载字体"
+                        },
+                        checked = useMiSans,
+                        enabled = fontState is FontState.Ready,
+                        onCheckedChange = onUseMiSans,
+                    )
+                    Divider()
+                    FontRow(
+                        state = fontState,
+                        onDownload = onDownloadFont,
+                        onRemove = {
+                            onRemoveFont()
+                            onUseMiSans(false)
+                        },
+                    )
+                }
                 }
 
-                // 头像
-                SectionHeader("头像")
+                SettingsPage.PROFILE -> {
                 Card {
                     AvatarRow(
                         title = "我的头像",
@@ -337,6 +535,15 @@ fun SettingsScreen(
                         onRemove = onRemoveAvatar,
                     )
                     Divider()
+                    SwitchRow(
+                        title = "使用 QwenPaw 服务端头像",
+                        subtitle = "读取网页端设置的头像；本机头像优先",
+                        checked = useServerAvatar,
+                        onCheckedChange = onUseServerAvatar,
+                    )
+                    Divider()
+                    ServerAvatarRow(file = serverAvatarFile)
+                    Divider()
                     NicknameRow(value = userName, onCommit = onUserName)
                     Divider()
                     SettingLabel(
@@ -345,9 +552,9 @@ fun SettingsScreen(
                             "头像在对话里显示为 32dp 的圆形，超过这个尺寸的部分会被裁掉",
                     )
                 }
+                }
 
-                // 消息显示
-                SectionHeader("消息显示")
+                SettingsPage.MESSAGES -> {
                 Card {
                     SettingLabel(
                         "智能体消息折叠",
@@ -373,35 +580,32 @@ fun SettingsScreen(
                         checked = showMessageStats,
                         onCheckedChange = onShowMessageStats,
                     )
+                    Divider()
+                    SettingLabel(
+                        "消息操作行",
+                        "只影响消息下方的「复制」「复制为 Markdown」「选择文本」三项；" +
+                            "图标档下三项图形接近，长按菜单始终保留文字",
+                    )
+                    ChipRow {
+                        io.qwenpaw.node.ui.chat.ActionStyle.entries.forEach { style ->
+                            Chip(
+                                text = when (style) {
+                                    io.qwenpaw.node.ui.chat.ActionStyle.TEXT -> "文字"
+                                    io.qwenpaw.node.ui.chat.ActionStyle.ICON -> "图标"
+                                },
+                                selected = actionStyle == style,
+                                onClick = { onActionStyle(style) },
+                            )
+                        }
+                    }
+                }
                 }
 
-                // 通知与行为
-                SectionHeader("通知与行为")
+                SettingsPage.BEHAVIOR -> {
                 Card {
                     SwitchRow(
-                        title = "使用 MiSans 字体",
-                        subtitle = if (fontState is FontState.Ready) {
-                            "替换系统默认字体"
-                        } else {
-                            "需先在下方下载字体"
-                        },
-                        checked = useMiSans,
-                        enabled = fontState is FontState.Ready,
-                        onCheckedChange = onUseMiSans,
-                    )
-                    Divider()
-                    FontRow(
-                        state = fontState,
-                        onDownload = onDownloadFont,
-                        onRemove = {
-                            onRemoveFont()
-                            onUseMiSans(false)
-                        },
-                    )
-                    Divider()
-                    SwitchRow(
-                        title = "会话列表紧凑排版",
-                        subtitle = "仅显示名称与时间，单屏可容纳更多会话",
+                        title = "对话列表紧凑排版",
+                        subtitle = "仅显示名称与时间，单屏可容纳更多对话",
                         checked = compactList,
                         onCheckedChange = onCompactList,
                     )
@@ -413,90 +617,94 @@ fun SettingsScreen(
                         onCheckedChange = onKeepScreenOn,
                     )
                 }
+                }
 
-                // 语音识别
-                SectionHeader("语音输入")
-                Card {
-                    SwitchRow(
-                        title = "显示语音按钮",
-                        subtitle = "首次使用需下载识别模型",
-                        checked = voiceEnabled,
-                        onCheckedChange = onVoiceEnabled,
-                    )
-                    Divider()
-                    Text(
-                        text = "触发方式",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 8.dp),
-                    )
-                    ChipRow {
-                        VoiceTrigger.entries.forEach { trigger ->
-                            Chip(
-                                text = when (trigger) {
-                                    VoiceTrigger.TAP -> "点击开始"
-                                    VoiceTrigger.HOLD -> "按住说话"
-                                },
-                                selected = voiceTrigger == trigger,
-                                onClick = { onVoiceTrigger(trigger) },
+                SettingsPage.VOICE -> {
+                    Card {
+                        SwitchRow(
+                            title = "显示语音按钮",
+                            subtitle = "首次使用需下载识别模型",
+                            checked = voiceEnabled,
+                            onCheckedChange = onVoiceEnabled,
+                        )
+                        Divider()
+                        Text(
+                            text = "触发方式",
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(
+                                start = 14.dp,
+                                end = 14.dp,
+                                top = 12.dp,
+                                bottom = 8.dp,
+                            ),
+                        )
+                        ChipRow {
+                            VoiceTrigger.entries.forEach { trigger ->
+                                Chip(
+                                    text = when (trigger) {
+                                        VoiceTrigger.TAP -> "点击开始"
+                                        VoiceTrigger.HOLD -> "按住说话"
+                                    },
+                                    selected = voiceTrigger == trigger,
+                                    onClick = { onVoiceTrigger(trigger) },
+                                )
+                            }
+                        }
+                        // 自动停止只在「点一下」模式下有意义：按住说话本来就是松手即停。
+                        if (voiceTrigger == VoiceTrigger.TAP) {
+                            Divider()
+                            SwitchRow(
+                                title = "说完自动停止",
+                                subtitle = "关闭时需再次点击麦克风结束",
+                                checked = voiceAutoStop,
+                                onCheckedChange = onVoiceAutoStop,
                             )
                         }
-                    }
-                    // 自动停止只在「点一下」模式下有意义：按住说话本来就是松手即停。
-                    if (voiceTrigger == VoiceTrigger.TAP) {
                         Divider()
-                        SwitchRow(
-                            title = "说完自动停止",
-                            subtitle = "关闭时需再次点击麦克风结束",
-                            checked = voiceAutoStop,
-                            onCheckedChange = onVoiceAutoStop,
+                        ModelRow(
+                            state = modelState,
+                            onDownload = onDownloadModel,
+                            onRemove = onRemoveModel,
                         )
                     }
-                    Divider()
-                    ModelRow(
-                        state = modelState,
-                        onDownload = onDownloadModel,
-                        onRemove = onRemoveModel,
-                    )
                 }
 
-                // 运行日志。这里记录的是本机客户端的事件，
-                // 与 QwenPaw 服务端的日志是两回事，后者要在 Web 控制台查看。
-                SectionHeader("运行日志")
-                Card {
-                    SwitchRow(
-                        title = "记录运行日志",
-                        subtitle = "只记录本次运行期间的事件",
-                        checked = logEnabled,
-                        onCheckedChange = onLogEnabled,
-                    )
-                    Divider()
-                    SettingLabel("记录类型", "排查某一类问题时，可关闭其余类别以减少干扰")
-                    ChipRow {
-                        io.qwenpaw.node.log.LogKind.entries.forEach { kind ->
-                            Chip(
-                                text = kind.label,
-                                selected = kind in logKinds,
-                                onClick = { onToggleLogKind(kind) },
-                            )
+                SettingsPage.LOGS -> {
+                    Card {
+                        SwitchRow(
+                            title = "记录运行日志",
+                            subtitle = "只记录本次运行期间的事件",
+                            checked = logEnabled,
+                            onCheckedChange = onLogEnabled,
+                        )
+                        Divider()
+                        SettingLabel("记录类型", "排查某一类问题时，可关闭其余类别以减少干扰")
+                        ChipRow {
+                            io.qwenpaw.node.log.LogKind.entries.forEach { kind ->
+                                Chip(
+                                    text = kind.label,
+                                    selected = kind in logKinds,
+                                    onClick = { onToggleLogKind(kind) },
+                                )
+                            }
                         }
+                        Divider()
+                        LinkRow(
+                            title = "查看运行日志",
+                            subtitle = "按时间查看本次运行记录的事件",
+                            onClick = onOpenLogs,
+                        )
+                        Divider()
+                        LinkRow(
+                            title = "分享运行日志",
+                            subtitle = "通过系统分享发送给其它应用，便于反馈问题时一并提供",
+                            action = "分享",
+                            onClick = onExportLogs,
+                        )
                     }
-                    Divider()
-                    LinkRow(
-                        title = "查看运行日志",
-                        subtitle = "按时间查看本次运行记录的事件",
-                        onClick = onOpenLogs,
-                    )
-                    Divider()
-                    LinkRow(
-                        title = "导出运行日志",
-                        subtitle = "导出为文本文件，便于反馈问题时一并提供",
-                        action = "导出",
-                        onClick = onExportLogs,
-                    )
                 }
 
-                // 关于
-                SectionHeader("关于")
+                SettingsPage.ABOUT -> {
                 Card {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -543,24 +751,135 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         CreditLine(
-                            name = "sherpa-onnx",
+                            name = "agentscope-ai/QwenPaw",
+                            url = "https://github.com/agentscope-ai/QwenPaw",
+                            detail = "本项目连接的服务端。QwenPaw Node 是它的第三方 Android 客户端，" +
+                                "全部功能通过它的 HTTP 接口实现",
+                        )
+                        CreditLine(
+                            name = "openclaw/openclaw",
+                            url = "https://github.com/openclaw/openclaw",
+                            detail = "部分交互与节点能力的设计参考了它的 Android 客户端",
+                        )
+                        CreditLine(
+                            name = "k2-fsa/sherpa-onnx",
+                            url = "https://github.com/k2-fsa/sherpa-onnx",
                             detail = "离线语音识别引擎（Apache-2.0），语音模型按需下载",
                         )
                         CreditLine(
-                            name = "MiSans",
-                            detail = "可选字体，版权归小米科技有限责任公司，" +
-                                "遵循 MiSans 字体许可协议，按需从 GitHub 项目 " +
-                                "${io.qwenpaw.node.font.FontManager.SOURCE_REPO} 下载",
+                            name = "adivenxnataly/MiSans",
+                            url = "https://github.com/adivenxnataly/MiSans",
+                            detail = "可选字体，版权归小米科技有限责任公司；" +
+                                "遵循 MiSans 字体许可协议，按需从该仓库下载",
                         )
                         CreditLine(
-                            name = "Coil",
+                            name = "coil-kt/coil",
+                            url = "https://github.com/coil-kt/coil",
                             detail = "头像图片加载与 GIF 逐帧解码（Apache-2.0）",
                         )
+                        Spacer(Modifier.height(10.dp))
+                        // 结尾这句不挂链接：它不是某一项资源，硬塞一个地址会误导点击。
+                        Text(
+                            text = "QwenPaw Node 的诞生离不开这些开源项目",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
+                }
+                }
+                // 子页之外的枚举值不会出现在这里：添加与编辑已被外层 when 接走。
+                else -> Unit
                 }
             }
         }
     }
+    }
+    }
+}
+
+/**
+ * 设置页内的层级。
+ *
+ * 顺序即深度，子页一律排在 MAIN 之后：`AnimatedContent` 用它判断这次切换
+ * 是「深入」还是「返回」，从而决定滑动方向。ADD_* 与 EDIT 是实例表单，
+ * 深度最大，排在最后。
+ */
+internal enum class SettingsPage {
+    MAIN,
+    SERVER,
+    PROFILE,
+    APPEARANCE,
+    MESSAGES,
+    VOICE,
+    BEHAVIOR,
+    LOGS,
+    ABOUT,
+    ADD_MODE,
+    ADD_FORM,
+    ADD_WIZARD,
+    EDIT,
+}
+
+/**
+ * 交给 `AnimatedContent` 的导航状态。
+ *
+ * 把页与它依赖的数据包在一起，是为了让正在退出的旧槽位保留自己那一帧的数据。
+ * 只传枚举时，旧槽位会读外部状态（已被点击改掉），于是先瞬切、再播一遍动画。
+ */
+private data class SettingsNav(
+    val page: SettingsPage,
+    val addMode: AddMode? = null,
+    val editing: InstanceConfig? = null,
+)
+
+/** 子页标题。与一级列表的入口文案保持一致，避免同一个页有两个名字。 */
+private fun sectionTitle(section: SettingsPage): String = when (section) {
+    SettingsPage.SERVER -> "服务器"
+    SettingsPage.PROFILE -> "我的资料"
+    SettingsPage.APPEARANCE -> "外观"
+    SettingsPage.MESSAGES -> "消息显示"
+    SettingsPage.VOICE -> "语音"
+    SettingsPage.BEHAVIOR -> "通知与行为"
+    SettingsPage.LOGS -> "运行日志"
+    SettingsPage.ABOUT -> "关于"
+    else -> "设置"
+}
+
+/** 一级列表「服务器」行的副标题：当前实例名与地址，没有实例时如实说明。 */
+private fun serverSummary(instances: List<InstanceConfig>, activeId: String?): String {
+    val active = instances.firstOrNull { it.id == activeId } ?: instances.firstOrNull()
+        ?: return "尚未添加服务器"
+    val host = active.addresses.firstOrNull()?.url?.let { compactUrl(it) } ?: "未设置地址"
+    // 名称留空时连接流程会用地址当名称，两者相同就只说一次，
+    // 否则副标题会变成「10.10.0.211:8088 · 10.10.0.211:8088」。
+    val name = active.name.ifBlank { "" }
+    return if (name.isEmpty() || name == host) host else "$name · $host"
+}
+
+/** 主题的中文名。`ThemeSelector` 里用的是同一套措辞。 */
+private fun themeLabel(mode: ThemeMode): String = when (mode) {
+    ThemeMode.SYSTEM -> "跟随系统"
+    ThemeMode.LIGHT -> "浅色"
+    ThemeMode.DARK -> "深色"
+}
+
+/** 消息折叠策略的中文名，与「消息显示」页里的 Chip 一致。 */
+private fun collapseLabel(mode: io.qwenpaw.node.ui.chat.AssistantCollapse): String = when (mode) {
+    io.qwenpaw.node.ui.chat.AssistantCollapse.EXPANDED -> "全部展开"
+    io.qwenpaw.node.ui.chat.AssistantCollapse.PROCESS_COLLAPSED -> "折叠过程"
+    io.qwenpaw.node.ui.chat.AssistantCollapse.RESULT_COLLAPSED -> "折叠结果"
+}
+
+/** 语音入口的副标题：开关状态与模型状态各一句，与子页里看到的一致。 */
+private fun voiceSummary(enabled: Boolean, state: ModelState): String {
+    val model = when (state) {
+        is ModelState.Ready -> "模型已就绪"
+        is ModelState.Downloading -> "模型下载中"
+        else -> "模型未下载"
+    }
+    return "${if (enabled) "已开启" else "已关闭"} · $model"
 }
 
 @Composable
@@ -580,7 +899,7 @@ private fun SettingsTopBar(onBack: () -> Unit, subtitle: String) {
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    imageVector = QwenIcons.arrowLeft,
                     contentDescription = "返回",
                     modifier = Modifier.size(20.dp),
                 )
@@ -692,6 +1011,56 @@ private fun Card(content: @Composable () -> Unit) {
     ) { content() }
 }
 
+/**
+ * 一级列表的入口行：图标 + 标题 + 当前状态 + 箭头。
+ *
+ * 副标题显示的是**当前值**而不是固定说明（「跟随系统 · 字号 100%」），
+ * 这样不必点进子页就能确认状态；这也是把它与普通设置行区分开的地方。
+ */
+@Composable
+private fun NavRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        // 箭头是装饰：整行都可点，读屏不需要再念一遍「进入」。
+        Icon(
+            imageVector = QwenIcons.chevronRight,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun Divider() {
     Box(
@@ -795,6 +1164,16 @@ private fun InstanceRow(
                             chosen != null && chosen == shown -> append(" · 已指定")
                         }
                     },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // 当前智能体单独一行。此前只能进「选择智能体」对话框才知道连的是谁，
+                // 而多智能体实例下不同智能体的对话互不可见，串号时用户没有可对照的线索。
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "智能体：${instance.agentId}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -957,7 +1336,7 @@ private fun AddressChoice(
         if (selected) {
             Spacer(Modifier.width(6.dp))
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = QwenIcons.check,
                 contentDescription = "已选择",
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.secondary,
@@ -1014,7 +1393,7 @@ private fun ActionRow(text: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Default.Add,
+            imageVector = QwenIcons.plus,
             contentDescription = null,
             modifier = Modifier.size(15.dp),
             tint = MaterialTheme.colorScheme.secondary,
@@ -1250,14 +1629,26 @@ private fun LinkRow(
     }
 }
 
-/** 「关于」里的第三方资源说明行。 */
+/**
+ * 一条第三方资源。整行可点，跳转到 [url]。
+ *
+ * 显示的是 `仓库主人/仓库名称` 而不是项目的商品名：用户要判断「这条是谁的代码」，
+ * 仓库路径比「MiSans」这种名字更能说明来源，点进去也必然落在真实存在的地址上。
+ */
 @Composable
-private fun CreditLine(name: String, detail: String) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+private fun CreditLine(name: String, url: String, detail: String) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { openUrl(context, url) }
+            .padding(vertical = 4.dp),
+    ) {
         Text(
             text = name,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.primary,
         )
         Text(
             text = detail,
@@ -1413,6 +1804,39 @@ private fun AvatarRow(
         if (hasAvatar) {
             Spacer(Modifier.width(6.dp))
             MiniButton("移除", onClick = { onRemove(kind) }, danger = true)
+        }
+    }
+}
+
+/**
+ * 服务端头像的只读预览行。
+ *
+ * 不提供「从服务端移除」：这是网页端的设置，客户端删掉会让用户以为需要在
+ * 两边各删一次。这里只如实显示当前取到的结果。
+ */
+@Composable
+private fun ServerAvatarRow(file: java.io.File?) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        io.qwenpaw.node.ui.chat.ChatAvatar(
+            store = null,
+            kind = io.qwenpaw.node.avatar.AvatarStore.KIND_USER,
+            name = "我",
+            size = 40.dp,
+            serverImage = file,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = "服务端头像", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = if (file == null) "服务端未设置头像" else "已读取网页端的头像",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

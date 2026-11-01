@@ -25,20 +25,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Checklist
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,13 +48,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.avatar.resolveChatIcon
 import io.qwenpaw.node.data.model.ChatSpecDto
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
- * 会话列表页。
+ * 对话列表页。
  *
- * 顶部是大标题和总数，下面一个搜索框，再往下是会话列表，
- * 新建会话固定在最底部。右上角可进入多选批量模式。
+ * 顶部是大标题和总数，下面一个搜索框，再往下是对话列表，
+ * 新建对话固定在最底部。右上角可进入多选批量模式。
  */
 @OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -93,11 +81,11 @@ fun ChatListScreen(
      * 今天是否还要为归档弹确认框。
      *
      * 用户勾过「今日不再提示」后为 false：此时归档直接执行，不再打断。
-     * 批量的关键信息（运行中的会话会被跳过）仍需告知，因此改由调用方提示。
+     * 批量的关键信息（运行中的对话会被跳过）仍需告知，因此改由调用方提示。
      */
     showArchiveTip: Boolean = true,
     onSuppressArchiveTip: () -> Unit = {},
-    /** 会话列表是附加页，左上角留一个回聊天页的入口。 */
+    /** 对话列表是附加页，左上角留一个回聊天页的入口。 */
     onBack: () -> Unit = {},
     /**
      * 下拉刷新。断网恢复后列表可能是空的，用户的第一反应是往下拉一把；
@@ -107,7 +95,7 @@ fun ChatListScreen(
     /** 分组方式：按时间 / 按来源 / 不分组。 */
     groupMode: GroupMode = GroupMode.TIME,
     onGroupMode: (GroupMode) -> Unit = {},
-    /** 服务端返回的会话分组，按来源分组时用。 */
+    /** 服务端返回的对话分组，按来源分组时用。 */
     groups: List<io.qwenpaw.node.data.model.ChatGroupDto> = emptyList(),
     /** 已折叠的分区 key。折叠只隐藏条目、保留表头。 */
     collapsed: Set<String> = emptySet(),
@@ -118,6 +106,12 @@ fun ChatListScreen(
     onRenameGroup: (groupId: String, name: String) -> Unit = { _, _ -> },
     /** 删除自定义分组。 */
     onDeleteGroup: (groupId: String) -> Unit = {},
+    /** 对话图标存储。为 null 时只显示默认图标，也不提供「设置图标」入口。 */
+    iconStore: io.qwenpaw.node.avatar.ChatIconStore? = null,
+    /** 图标版本：变化时重读图片。 */
+    iconVersion: Long = 0L,
+    /** 从相册为某对话选图标图片。参数是对话 id。 */
+    onPickIconImage: ((String) -> Unit)? = null,
 ) {
     var renaming by remember { mutableStateOf<ChatSpecDto?>(null) }
     var deleting by remember { mutableStateOf<ChatSpecDto?>(null) }
@@ -145,7 +139,7 @@ fun ChatListScreen(
         else chats.filter { it.name.contains(q, ignoreCase = true) }
     }
 
-    // 搜索时强制不分组：分组会把命中的会话拆到多个表头下，反而更难扫读。
+    // 搜索时强制不分组：分组会把命中的对话拆到多个表头下，反而更难扫读。
     val effectiveMode = if (query.isNotBlank()) GroupMode.NONE else groupMode
     // 原始分区与折叠后的分区都算一次：
     // 折叠后 chats 为空，但表头仍要显示该组原本的数量，所以两边都要有。
@@ -166,7 +160,11 @@ fun ChatListScreen(
         selected = emptySet()
     }
 
-    // 会话被外部删掉/归档后，选中集合里可能有失效 id，这里对齐一次。
+    // 对话图标对话框。放在列表层而不是行内：一个对话只有一份图标，
+    // 每次只可能有一个对话框，行内各自持有状态反而会留下多份。
+    var iconTarget by remember { mutableStateOf<ChatSpecDto?>(null) }
+
+    // 对话被外部删掉/归档后，选中集合里可能有失效 id，这里对齐一次。
     LaunchedEffect(chats) {
         if (selecting) {
             val live = chats.map { it.id }.toSet()
@@ -212,7 +210,7 @@ fun ChatListScreen(
                     count = selected.size,
                     onArchive = {
                         if (selected.isNotEmpty()) {
-                            // 今日不再提示时直接执行。运行中的会话会被服务端跳过，
+                            // 今日不再提示时直接执行。运行中的对话会被服务端跳过，
                             // 这条信息仍要告知，因此由调用方用轻提示补充。
                             if (showArchiveTip) {
                                 archiveTipChecked = false
@@ -248,14 +246,14 @@ fun ChatListScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Add,
+                            imageVector = QwenIcons.plus,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onPrimary,
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "新建会话",
+                            text = "新建对话",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
@@ -286,13 +284,13 @@ fun ChatListScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = if (query.isBlank()) "还没有会话" else "没有匹配的会话",
+                        text = if (query.isBlank()) "还没有对话" else "没有匹配的对话",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = if (query.isBlank()) "点击下方按钮即可新建会话" else "请更换关键词后重试",
+                        text = if (query.isBlank()) "点击下方按钮即可新建对话" else "请更换关键词后重试",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -331,6 +329,8 @@ fun ChatListScreen(
                                 preview = previews[chat.id],
                                 selecting = selecting,
                                 checked = chat.id in selected,
+                                iconStore = iconStore,
+                                iconVersion = iconVersion,
                                 onClick = {
                                     if (selecting) {
                                         selected = if (chat.id in selected) {
@@ -356,6 +356,9 @@ fun ChatListScreen(
                                         onArchive(chat.id)
                                     }
                                 },
+                                // 只有传入了存储才提供入口；预览/测试环境没有存储，
+                                // 显示一个点了没反应的菜单项比不显示更糟。
+                                onSetIcon = iconStore?.let { { iconTarget = chat } },
                             )
                         }
                     }
@@ -367,7 +370,7 @@ fun ChatListScreen(
     renaming?.let { chat ->
         AlertDialog(
             onDismissRequest = { renaming = null },
-            title = { Text("重命名会话") },
+            title = { Text("重命名对话") },
             text = {
                 OutlinedTextField(
                     value = renameText,
@@ -388,26 +391,28 @@ fun ChatListScreen(
     }
 
     deleting?.let { chat ->
-        AlertDialog(
-            onDismissRequest = { deleting = null },
-            title = { Text("删除会话") },
-            text = { Text("删除后无法恢复，确定要删除「${chat.name}」吗？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDelete(chat.id)
-                    deleting = null
-                }) { Text("删除") }
+        io.qwenpaw.node.ui.common.DestructiveActionDialog(
+            title = "删除对话",
+            message = "删除后无法恢复，确定要删除「${chat.name}」吗？",
+            impacts = listOf(
+                "该对话的全部消息记录",
+                "与这些消息一同保存的图片与文件引用",
+                "本机为该对话缓存的离线历史",
+            ),
+            confirmLabel = "删除",
+            undoable = false,
+            onConfirm = {
+                onDelete(chat.id)
+                deleting = null
             },
-            dismissButton = {
-                TextButton(onClick = { deleting = null }) { Text("取消") }
-            },
+            onDismiss = { deleting = null },
         )
     }
 
     archiving?.let { chat ->
         AlertDialog(
             onDismissRequest = { archiving = null },
-            title = { Text("归档会话") },
+            title = { Text("归档对话") },
             text = {
                 Column {
                     Text("归档后可在「已归档」中恢复，确定归档「${chat.name}」吗？")
@@ -430,39 +435,71 @@ fun ChatListScreen(
         )
     }
 
+    // 图标对话框：预设网格 + 从相册选 + 恢复默认。
+    // 只在这一处渲染，行菜单只负责把目标对话塞进来。
+    iconTarget?.let { chat ->
+        ChatIconDialog(
+            chat = chat,
+            store = iconStore,
+            version = iconVersion,
+            onPickPreset = { key ->
+                iconStore?.savePreset(chat.id, key)
+                iconTarget = null
+            },
+            onPickImage = {
+                iconTarget = null
+                onPickIconImage?.invoke(chat.id)
+            },
+            onReset = {
+                iconStore?.clear(chat.id)
+                iconTarget = null
+            },
+            onDismiss = { iconTarget = null },
+        )
+    }
+
     confirmBatch?.let { action ->
         val count = selected.size
+        if (action == BatchAction.DELETE) {
+            io.qwenpaw.node.ui.common.DestructiveActionDialog(
+                title = "批量删除",
+                message = "将删除选中的 $count 个对话，删除后无法恢复。",
+                impacts = listOf(
+                    "共 $count 个对话的全部消息记录",
+                    "与这些消息一同保存的图片与文件引用",
+                    "本机为这些对话缓存的离线历史",
+                ),
+                confirmLabel = "删除 $count 个对话",
+                undoable = false,
+                onConfirm = {
+                    onBatchDelete(selected.toList())
+                    confirmBatch = null
+                    exitSelection()
+                },
+                onDismiss = { confirmBatch = null },
+            )
+            return@let
+        }
         AlertDialog(
             onDismissRequest = { confirmBatch = null },
-            title = { Text(if (action == BatchAction.ARCHIVE) "批量归档" else "批量删除") },
+            title = { Text("批量归档") },
             text = {
                 Column {
                     Text(
-                        if (action == BatchAction.ARCHIVE) {
-                            "将归档选中的 $count 个会话，之后可在「已归档」中恢复。" +
-                                "正在运行的会话会被跳过。"
-                        } else {
-                            "将删除选中的 $count 个会话，删除后无法恢复。"
-                        },
+                        "将归档选中的 $count 个对话，之后可在「已归档」中恢复。" +
+                            "正在运行的对话会被跳过。",
                     )
                     // 「今日不再提示」只对归档有意义：删除不可恢复，每次都该确认。
-                    if (action == BatchAction.ARCHIVE) {
-                        ArchiveTipRow(
-                            checked = archiveTipChecked,
-                            onCheckedChange = { archiveTipChecked = it },
-                        )
-                    }
+                    ArchiveTipRow(
+                        checked = archiveTipChecked,
+                        onCheckedChange = { archiveTipChecked = it },
+                    )
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val ids = selected.toList()
-                    if (action == BatchAction.ARCHIVE) {
-                        if (archiveTipChecked) onSuppressArchiveTip()
-                        onBatchArchive(ids)
-                    } else {
-                        onBatchDelete(ids)
-                    }
+                    if (archiveTipChecked) onSuppressArchiveTip()
+                    onBatchArchive(selected.toList())
                     confirmBatch = null
                     exitSelection()
                 }) {
@@ -509,7 +546,7 @@ fun ChatListScreen(
         AlertDialog(
             onDismissRequest = { groupMenuFor = null },
             title = { Text(group.name.ifBlank { group.id }) },
-            text = { Text("可重命名或删除该分组；删除后组内会话将移回「未分组」。") },
+            text = { Text("可重命名或删除该分组；删除后组内对话将移回「未分组」。") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -565,8 +602,8 @@ fun ChatListScreen(
             title = { Text("删除分组") },
             text = {
                 Text(
-                    "删除「${group.name.ifBlank { group.id }}」后，组内会话会移回「未分组」，" +
-                        "会话本身不会被删除。",
+                    "删除「${group.name.ifBlank { group.id }}」后，组内对话会移回「未分组」，" +
+                        "对话本身不会被删除。",
                 )
             },
             confirmButton = {
@@ -624,7 +661,7 @@ private fun BatchActionBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (count == 0) "选择会话" else "已选 $count 个",
+            text = if (count == 0) "选择对话" else "已选 $count 个",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
@@ -696,7 +733,7 @@ private fun ListHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (selecting) {
                 Text(
-                    text = if (selectedCount == 0) "选择会话" else "已选 $selectedCount 个",
+                    text = if (selectedCount == 0) "选择对话" else "已选 $selectedCount 个",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -722,13 +759,13 @@ private fun ListHeader(
                 )
             } else {
                 IconButtonCell(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    icon = QwenIcons.arrowLeft,
                     description = "返回聊天",
                     onClick = onBack,
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = "会话",
+                    text = "对话",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -743,25 +780,25 @@ private fun ListHeader(
                 Spacer(Modifier.weight(1f))
                 if (archivedCount > 0) {
                     IconButtonCell(
-                        icon = Icons.Default.Inventory2,
+                        icon = QwenIcons.packageIcon,
                         description = "已归档 $archivedCount 个",
                         onClick = onOpenArchived,
                     )
                 }
                 IconButtonCell(
-                    icon = Icons.Default.BarChart,
+                    icon = QwenIcons.barChart,
                     description = "用量统计",
                     onClick = onOpenTokenUsage,
                 )
                 if (count > 0) {
                     IconButtonCell(
-                        icon = Icons.Default.Checklist,
+                        icon = QwenIcons.clipboardList,
                         description = "批量管理",
                         onClick = onToggleSelecting,
                     )
                 }
                 IconButtonCell(
-                    icon = Icons.Default.Settings,
+                    icon = QwenIcons.settings,
                     description = "设置",
                     onClick = onOpenSettings,
                 )
@@ -789,7 +826,7 @@ private fun ListHeader(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Search,
+                        imageVector = QwenIcons.search,
                         contentDescription = null,
                         modifier = Modifier.size(15.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -798,7 +835,7 @@ private fun ListHeader(
                     Box(modifier = Modifier.weight(1f)) {
                         if (query.isEmpty()) {
                             Text(
-                                text = "搜索会话名称",
+                                text = "搜索对话名称",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -824,7 +861,7 @@ private fun ListHeader(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
+                                imageVector = QwenIcons.close,
                                 contentDescription = "清空搜索",
                                 modifier = Modifier.size(13.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -916,7 +953,7 @@ private fun SectionHeaderRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+            imageVector = if (collapsed) QwenIcons.chevronDown else QwenIcons.chevronUp,
             contentDescription = if (collapsed) "已折叠，点击展开" else "点击折叠",
             modifier = Modifier.size(15.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -960,12 +997,25 @@ private fun ChatRow(
     onArchive: () -> Unit,
     selecting: Boolean = false,
     checked: Boolean = false,
+    iconStore: io.qwenpaw.node.avatar.ChatIconStore? = null,
+    iconVersion: Long = 0L,
+    /** 点「设置图标」。为 null 时菜单不显示该项。 */
+    onSetIcon: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     // 时间文案只在时间戳变化时重算，避免每次重组都解析日期。
     val time = remember(chat.updatedAt, chat.lastFinishedAt, chat.createdAt) {
         timeLabel(chat)
     }
+    // 图标只在非紧凑排版下显示，紧凑排版的整个左侧图标区都被去掉了。
+    // 按 (chatId, version) 记忆：滚动时反复重组不应重复查磁盘。
+    val iconFile = remember(chat.id, iconVersion, compact) {
+        if (!compact) runCatching { iconStore?.fileFor(chat.id) }.getOrNull() else null
+    }
+    val presetKey = remember(chat.id, iconVersion, compact) {
+        if (!compact) iconStore?.presetFor(chat.id) else null
+    }
+    val iconSource = resolveChatIcon(hasImage = iconFile != null, hasPreset = presetKey != null)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1013,16 +1063,44 @@ private fun ChatRow(
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.Chat,
-                        contentDescription = null,
-                        modifier = Modifier.size(17.dp),
-                        tint = if (chat.status == "running") {
-                            MaterialTheme.colorScheme.secondary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
+                    when (iconSource) {
+                        io.qwenpaw.node.avatar.ChatIconSource.IMAGE -> coil.compose.AsyncImage(
+                            model = coil.request.ImageRequest.Builder(
+                                androidx.compose.ui.platform.LocalContext.current,
+                            )
+                                .data(iconFile)
+                                .crossfade(false)
+                                .build(),
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(10.dp)),
+                        )
+
+                        io.qwenpaw.node.avatar.ChatIconSource.PRESET -> Icon(
+                            imageVector = iconStore?.presetIcon(presetKey)
+                                ?: QwenIcons.messageCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp),
+                            tint = if (chat.status == "running") {
+                                MaterialTheme.colorScheme.secondary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+
+                        io.qwenpaw.node.avatar.ChatIconSource.DEFAULT -> Icon(
+                            imageVector = QwenIcons.messageCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp),
+                            tint = if (chat.status == "running") {
+                                MaterialTheme.colorScheme.secondary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                 }
                 Spacer(Modifier.width(10.dp))
             }
@@ -1030,7 +1108,7 @@ private fun ChatRow(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (chat.pinned) {
                         Icon(
-                            imageVector = Icons.Default.PushPin,
+                            imageVector = QwenIcons.pin,
                             contentDescription = "已置顶",
                             modifier = Modifier.size(13.dp),
                             tint = MaterialTheme.colorScheme.tertiary,
@@ -1038,7 +1116,7 @@ private fun ChatRow(
                         Spacer(Modifier.width(4.dp))
                     }
                     Text(
-                        text = chat.name.ifBlank { "未命名会话" },
+                        text = chat.name.ifBlank { "未命名对话" },
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -1054,7 +1132,7 @@ private fun ChatRow(
                         maxLines = 1,
                     )
                 }
-                // 预览文案：紧凑模式也保留，用户扫一眼就能认出会话内容。
+                // 预览文案：紧凑模式也保留，用户扫一眼就能认出对话内容。
                 if (!preview.isNullOrBlank()) {
                     Spacer(Modifier.height(3.dp))
                     Text(
@@ -1095,6 +1173,12 @@ private fun ChatRow(
                     menu = false
                     onArchive()
                 },
+                onSetIcon = onSetIcon?.let { action ->
+                    {
+                        menu = false
+                        action()
+                    }
+                },
             )
         }
         Box(
@@ -1129,7 +1213,7 @@ private fun SelectionCheck(checked: Boolean) {
     ) {
         if (checked) {
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = QwenIcons.check,
                 contentDescription = "已选择",
                 modifier = Modifier.size(13.dp),
                 tint = MaterialTheme.colorScheme.onPrimary,
@@ -1185,6 +1269,8 @@ private fun ChatRowMenu(
     onDelete: () -> Unit,
     onTogglePin: () -> Unit,
     onArchive: () -> Unit,
+    /** 为 null 时不显示「设置图标」。 */
+    onSetIcon: (() -> Unit)? = null,
 ) {
     androidx.compose.material3.DropdownMenu(
         expanded = expanded,
@@ -1192,25 +1278,144 @@ private fun ChatRowMenu(
     ) {
         androidx.compose.material3.DropdownMenuItem(
             text = { Text("重命名") },
+            leadingIcon = { MenuIcons.Leading(MenuAction.RENAME) },
             onClick = onRename,
         )
         androidx.compose.material3.DropdownMenuItem(
             text = { Text(if (pinned) "取消置顶" else "置顶") },
+            leadingIcon = {
+                MenuIcons.Leading(if (pinned) MenuAction.UNPIN else MenuAction.PIN)
+            },
             onClick = onTogglePin,
         )
+        if (onSetIcon != null) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("设置图标") },
+                leadingIcon = { MenuIcons.Leading(MenuAction.SET_ICON) },
+                onClick = onSetIcon,
+            )
+        }
         androidx.compose.material3.DropdownMenuItem(
             text = { Text("归档") },
+            leadingIcon = { MenuIcons.Leading(MenuAction.ARCHIVE) },
             onClick = onArchive,
         )
         androidx.compose.material3.DropdownMenuItem(
             text = { Text("删除") },
+            leadingIcon = { MenuIcons.Leading(MenuAction.DELETE) },
             onClick = onDelete,
         )
     }
 }
 
 /**
- * 会话时间标签。
+ * 对话图标设置对话框。
+ *
+ * 三部分：预设网格、从相册选择、恢复默认。
+ * 预设网格用 `FlowRow` 一屏铺满 8 个，不必滚动；每项都带文字标签，
+ * 只有图标时用户很难判断「星」和「想法」哪个是自己的用途。
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChatIconDialog(
+    chat: ChatSpecDto,
+    store: io.qwenpaw.node.avatar.ChatIconStore?,
+    version: Long,
+    onPickPreset: (String) -> Unit,
+    onPickImage: () -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val currentPreset = remember(chat.id, version) { store?.presetFor(chat.id) }
+    val hasImage = remember(chat.id, version) { store?.fileFor(chat.id) != null }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("对话图标") },
+        text = {
+            Column {
+                Text(
+                    text = "「${chat.name.ifBlank { "未命名对话" }}」使用哪个图标",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    io.qwenpaw.node.avatar.ChatIconStore.presets.forEach { preset ->
+                        val selected = currentPreset == preset.key && !hasImage
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onPickPreset(preset.key) }
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (selected) {
+                                            MaterialTheme.colorScheme.secondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.outlineVariant
+                                        },
+                                        RoundedCornerShape(10.dp),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = preset.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(19.dp),
+                                    tint = if (selected) {
+                                        MaterialTheme.colorScheme.secondary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = preset.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "自选图片会裁剪为正方形并压缩，优先于上面的预设显示。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onPickImage) { Text("从相册选择") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onReset) { Text("恢复默认") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
+}
+
+/**
+ * 对话时间标签。
  *
  * 服务端给的是 UTC ISO 时间，必须换算到本地时区再切日期与时分：
  * 旧实现直接截字符串前 10 位，等于按 UTC 日界划分「今天／昨天」，

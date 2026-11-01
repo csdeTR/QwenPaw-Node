@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.stream.DeliveredFile
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
  * 智能体通过 `send_file_to_user` 交付的文件。
@@ -158,7 +157,7 @@ private fun DeliveredFileThumbnail(
             )
         } else {
             Icon(
-                imageVector = Icons.Default.Description,
+                imageVector = QwenIcons.fileText,
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,

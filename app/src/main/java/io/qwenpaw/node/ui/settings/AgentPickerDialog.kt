@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -39,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.model.AgentDto
 import kotlinx.coroutines.launch
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 智能体选择面板，设置页切换实例的智能体时用。 */
 @Composable
@@ -192,7 +191,7 @@ private fun PickerRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Box(modifier = Modifier.size(16.dp)) {
                 Icon(
-                    imageVector = Icons.Default.Check,
+                    imageVector = QwenIcons.check,
                     contentDescription = "已选择",
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.secondary,
