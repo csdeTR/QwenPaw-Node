@@ -208,6 +208,11 @@ git tag -a v0.1.0 -m "QwenPaw Node v0.1.0 — 首个最小可用版本"
 secrets 缺失时 workflow 在「解码签名密钥」一步报错退出，不会产出未签名的包；
 `apksigner verify` 不通过同样中止发布。产物命名为 `QwenPaw-Node-<tag>-<abi>.apk`。
 
+Release 正文里的「本版变化」由 workflow 从 `CHANGELOG.md` 抽取：取第一个版本小节，
+并要求它与 `$TAG` 一致，否则中止。两处各写一份历史上已经对不上过，
+因此正文以 CHANGELOG 为唯一来源，安装包表格与签名说明仍写在 workflow 里。
+抽取失败不静默跳过：正文缺一段，比发出去的说明与代码不一致更难被发现。
+
 workflow 运行时带 `CI=true`，`settings.gradle.kts` 据此跳过阿里云镜像，
 只使用 `google()`、`mavenCentral()` 与 `gradlePluginPortal()`。
 镜像在本机可达、在 runner 上不可达，这一分支不能删。

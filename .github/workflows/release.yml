@@ -119,6 +119,41 @@ jobs:
           done
           ls -l dist
 
+      # Release 正文里的「本版变化」直接取 CHANGELOG 的同版本小节，避免两处各写一份。
+      # 抽不到时（版本号与 tag 不一致、CHANGELOG 缺该版）不静默通过：
+      # 正文缺一段比发出去的说明与代码对不上更难发现。
+      - name: 拼装 Release 正文
+        run: |
+          FIRST=$(grep -m1 '^## ' CHANGELOG.md)
+          if [[ "$FIRST" != "## ${TAG}" && "$FIRST" != "## ${TAG} "* ]]; then
+            echo "::error::CHANGELOG 首个版本小节是「$FIRST」，与 tag ${TAG} 不一致"
+            exit 1
+          fi
+          sed '1,/^## /d' CHANGELOG.md | sed '/^## /,$d' | sed '1d' > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "::error::CHANGELOG.md 的 ${TAG} 小节为空"
+            exit 1
+          fi
+          {
+            echo 'RELEASE_BODY<<RELEASE_BODY_EOF'
+            echo '## 本版变化'
+            echo
+            cat /tmp/release-notes.md
+            echo
+            echo '## 安装包'
+            echo
+            echo '| 架构 | 说明 |'
+            echo '| --- | --- |'
+            echo '| `arm64-v8a` | 已实测。2019 年之后发布的绝大多数手机 |'
+            echo '| `x86_64` | 已实测。用于模拟器 |'
+            echo '| `armeabi-v7a` | **未实测**，仅为兼容 32 位旧设备而构建 |'
+            echo '| `x86` | **未实测**，仅为兼容 32 位模拟器而构建 |'
+            echo
+            echo '未实测的两个包只确认可以编译产出，不保证安装或运行。遇到问题请改用 `arm64-v8a`。'
+            echo '每个包都已校验签名有效。'
+            echo 'RELEASE_BODY_EOF'
+          } >> "$GITHUB_ENV"
+
       - name: 创建 Release 并上传
         uses: softprops/action-gh-release@v2
         with:
@@ -127,16 +162,5 @@ jobs:
           draft: false
           generate_release_notes: true
           append_body: true
-          body: |
-            ## 安装包
-
-            | 架构 | 说明 |
-            | --- | --- |
-            | `arm64-v8a` | 已实测。2019 年之后发布的绝大多数手机 |
-            | `x86_64` | 已实测。用于模拟器 |
-            | `armeabi-v7a` | **未实测**，仅为兼容 32 位旧设备而构建 |
-            | `x86` | **未实测**，仅为兼容 32 位模拟器而构建 |
-
-            未实测的两个包只确认可以编译产出，不保证安装或运行。遇到问题请改用 `arm64-v8a`。
-            每个包都已校验签名有效。
+          body: ${{ env.RELEASE_BODY }}
           files: dist/*.apk
