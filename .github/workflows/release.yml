@@ -161,6 +161,8 @@ jobs:
           name: ${{ env.TAG }}
           draft: false
           generate_release_notes: true
-          append_body: true
+          # 不能用 append_body：它是为「多步往同一 Release 追加」设计的，
+          # 重跑时会叠在上一版正文后面，安装包表格出现两次。
+          append_body: false
           body: ${{ env.RELEASE_BODY }}
           files: dist/*.apk

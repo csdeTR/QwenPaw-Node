@@ -213,6 +213,10 @@ Release 正文里的「本版变化」由 workflow 从 `CHANGELOG.md` 抽取：�
 因此正文以 CHANGELOG 为唯一来源，安装包表格与签名说明仍写在 workflow 里。
 抽取失败不静默跳过：正文缺一段，比发出去的说明与代码不一致更难被发现。
 
+`append_body` 必须保持 `false`。它是给「分几步往同一个 Release 追加内容」用的，
+重跑时会叠在上一版正文后面，安装包表格出现两次；实测过一次才发现，
+workflow 里已写明原因。
+
 workflow 运行时带 `CI=true`，`settings.gradle.kts` 据此跳过阿里云镜像，
 只使用 `google()`、`mavenCentral()` 与 `gradlePluginPortal()`。
 镜像在本机可达、在 runner 上不可达，这一分支不能删。
