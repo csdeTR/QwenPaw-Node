@@ -170,7 +170,8 @@ internal fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnn
 
             // 段落里直接写的上下标（`x^2`、`H_2O`）。不经 LaTeX 也要能读，
             // 因为模型在解释里常常只用纯文本写一个指数或下标。
-            text[i] == '^' || (text[i] == '_' && isWordInternalUnderscore(text, i)) -> {
+            // 判据对 `^` 与 `_` 同时生效：`^` 原先不设限，`[^1]` 这类写法会被排成上标。
+            (text[i] == '^' || text[i] == '_') && isBareScriptAt(text, i) -> {
                 val script = readBareScript(text, i + 1)
                 if (script == null) {
                     append(text[i]); i++
@@ -185,10 +186,21 @@ internal fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnn
                 }
             }
 
-            text.startsWith("*", i) || text.startsWith("_", i) -> {
-                val marker = text[i]
-                val end = text.indexOf(marker, i + 1)
+            text.startsWith("*", i) -> {
+                val end = text.indexOf('*', i + 1)
                 if (end > i + 1) {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(text.substring(i + 1, end))
+                    }
+                    i = end + 1
+                } else {
+                    append(text[i]); i++
+                }
+            }
+
+            text[i] == '_' -> {
+                val end = closingUnderscoreEmphasis(text, i)
+                if (end > 0) {
                     withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                         append(text.substring(i + 1, end))
                     }
@@ -226,8 +238,8 @@ private fun AnnotatedString.Builder.appendInlineMath(source: String): Boolean {
 /**
  * 读裸上下标的内容，返回「内容 to 结束下标」。
  *
- * 只取花括号里的整段或紧跟的一个字符：`x^{n+1}` 与 `x^2` 都常见；
- * `x^ 2` 里 `^` 后面是空白，多半是字面量，因此不吞掉后面的内容。
+ * 取花括号里的整段，或紧跟的一串数字：`x^{n+1}` 与 `x^2`、`H_2O` 与 `x_12` 都常见，
+ * 数字成串时整段算一个下标，否则 `x_12` 会排成「₁2」这种半截下标。
  */
 private fun readBareScript(text: String, start: Int): Pair<String, Int>? {
     if (start >= text.length) return null
@@ -236,23 +248,65 @@ private fun readBareScript(text: String, start: Int): Pair<String, Int>? {
         if (close <= start + 1) return null
         return text.substring(start + 1, close) to close + 1
     }
-    val c = text[start]
-    if (c.isWhitespace() || c == '{') return null
-    return c.toString() to start + 1
+    if (!isAsciiDigit(text[start])) return null
+    var end = start
+    while (end < text.length && isAsciiDigit(text[end])) end++
+    return text.substring(start, end) to end
 }
 
 /**
- * 词内下划线。
+ * 正文里「这是裸上下标」的判据，`^` 与 `_` 共用。
  *
- * CommonMark 规定 `_` 两侧都是字母数字时不成对构成强调（`H_2O`、`a_i`），
- * 这里反过来把这种位置当成裸下标；行首或空白后的 `_` 仍是斜体标记，
- * `_斜体_`、`_ text _` 的原有行为不受影响。
+ * 两个条件各挡一类误判。前一个字符必须是 ASCII 字母或数字，于是 `[^1]` 这种脚注
+ * （前一个是 `[`）和「第_1_章」这种汉字夹注都不排版；后一个字符必须是数字或 `{`，
+ * 于是 `P_A`、`msg_id`、`user_name` 保持原文——CommonMark 也不承认词内下划线构成强调，
+ * 而标识符在解释文字里出现的频率远高于化学式。
+ *
+ * 判据落在被标注的一侧而不是主体一侧，代价是 `C^2` 仍会排成上标：
+ * 改判主体会让 `x^2`、`2^10` 一起失效，得不偿失。
  */
-private fun isWordInternalUnderscore(text: String, index: Int): Boolean {
+private fun isBareScriptAt(text: String, index: Int): Boolean {
     val prev = text.getOrNull(index - 1) ?: return false
     val next = text.getOrNull(index + 1) ?: return false
-    return prev.isLetterOrDigit() && (next.isLetterOrDigit() || next == '{')
+    return prev.isAsciiLetterOrDigit() && (isAsciiDigit(next) || next == '{')
 }
+
+/**
+ * `_斜体_` 的闭合位置，不构成强调时返回 -1。
+ *
+ * 上一版把 `*` 与 `_` 合在一起处理，闭合用的是「行内下一个 `_`」：
+ * 一句话里任何一个孤立下划线都会和远处那个配上，把中间整段变成斜体。
+ * 收紧裸下标之后落进这里的 `_` 变多，不补边界就会把「`P_A、P_B` 被吞掉下划线」
+ * 换成「`A、P` 整段斜体」，更难看。
+ *
+ * 按 CommonMark 补四条：开侧前不接词字符、开侧后不接空白、闭侧前不接空白、
+ * 闭侧后不接词字符。词字符按 Unicode 判定（汉字也算），这是「`第_1_章`、
+ * `这是_重点_内容` 保持原文」的依据——CommonMark 与 GitHub 同款处理，
+ * 中文里要强调请用 `*重点*` 或 `**重点**`，或在两侧留空格：`见 _重点_ 内容`。
+ */
+private fun closingUnderscoreEmphasis(text: String, start: Int): Int {
+    if (text.getOrNull(start - 1)?.isScriptWordChar() == true) return -1
+    val afterOpen = text.getOrNull(start + 1) ?: return -1
+    if (afterOpen.isWhitespace()) return -1
+    var i = start + 1
+    while (i < text.length) {
+        if (text[i] == '_') {
+            if (text[i - 1].isWhitespace()) return -1
+            if (text.getOrNull(i + 1)?.isScriptWordChar() == true) return -1
+            return i
+        }
+        i++
+    }
+    return -1
+}
+
+private fun Char.isAsciiLetterOrDigit(): Boolean =
+    this in 'a'..'z' || this in 'A'..'Z' || isAsciiDigit(this)
+
+private fun isAsciiDigit(c: Char): Boolean = c in '0'..'9'
+
+/** CommonMark 意义上的「词字符」，汉字与全角数字都算，下划线本身也算。 */
+private fun Char.isScriptWordChar(): Boolean = isLetterOrDigit() || this == '_'
 
 /** 行内公式的起始判据：`$` 后紧跟非空白，且不是 `$$`（那是块级定界符）。 */
 private fun isInlineMathStart(text: String, index: Int): Boolean {

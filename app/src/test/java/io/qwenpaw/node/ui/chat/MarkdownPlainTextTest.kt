@@ -49,7 +49,23 @@ class MarkdownPlainTextTest {
     @Test
     fun `underscore emphasis does not eat identifiers`() {
         assertEquals("user_id_name", MarkdownPlainText.strip("user_id_name"))
+        assertEquals("P_A、P_B", MarkdownPlainText.strip("P_A、P_B"))
         assertEquals("斜体", MarkdownPlainText.strip("_斜体_"))
+        assertEquals("见 重点 内容", MarkdownPlainText.strip("见 _重点_ 内容"))
+        // 词字符按 Unicode 判定，中文句子里的 `这是_重点_内容` 属词内，保留原文。
+        assertEquals("这是_重点_内容", MarkdownPlainText.strip("这是_重点_内容"))
+    }
+
+    /**
+     * 汉字句子里的孤立下划线不能跨过去配对。
+     *
+     * 旧规则的 `(?<![\w])` 不含汉字，「附录_ 与 表_」会被吃掉整段中间文字，
+     * 与气泡里渲染出的斜体一致地错。复制出来的文本应当仍然能还原成原文。
+     */
+    @Test
+    fun `stray underscores in chinese sentences are kept`() {
+        assertEquals("附录_ 与 表_", MarkdownPlainText.strip("附录_ 与 表_"))
+        assertEquals("_ text _", MarkdownPlainText.strip("_ text _"))
     }
 
     @Test

@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.chat
 
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.BaselineShift
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +12,9 @@ import org.junit.Test
  *
  * 模型解释时常常直接写 `x^2`、`H_2O` 而不套 `$`，过去这些文本原样显示成「x^2」。
  * 这里验证它们变成带基线偏移的 span，同时不破坏 Markdown 的斜体、粗体与行内代码。
+ *
+ * 判据只认数字与花括号：`P_A`、`msg_id`、`user_name` 这类写法保持原文。
+ * 早期版本按 `isLetterOrDigit()` 判定词内下划线，把标识符和 `[^1]` 一起排成了上下标。
  */
 class MarkdownScriptTest {
 
@@ -19,6 +23,9 @@ class MarkdownScriptTest {
 
     private fun subscriptSpans(text: String): Int =
         inline(text).spanStyles.count { it.item.baselineShift == BaselineShift.Subscript }
+
+    private fun italicSpans(text: String): Int =
+        inline(text).spanStyles.count { it.item.fontStyle == FontStyle.Italic }
 
     @Test
     fun `caret produces superscript span`() {
@@ -34,12 +41,98 @@ class MarkdownScriptTest {
         assertEquals(1, superscriptSpans("x^{n+1}"))
     }
 
+    /** 数字下标仍然排版，且连续数字整段算一个下标，不留「₁2」这种半截。 */
     @Test
-    fun `word internal underscore produces subscript span`() {
+    fun `digit subscript produces subscript span`() {
         assertEquals("H2O", inline("H_2O").text)
         assertEquals(1, subscriptSpans("H_2O"))
-        assertEquals("ai", inline("a_i").text)
-        assertEquals(1, subscriptSpans("a_i"))
+        assertEquals("x12", inline("x_12").text)
+        assertEquals(1, subscriptSpans("x_12"))
+    }
+
+    /**
+     * 字母下标退回原文。
+     *
+     * `P_A、P_B` 是用户报的那一条：下划线被吞掉、字母掉到基线以下。
+     * 断言里同时盯 0 个斜体 span——下标判据收紧后，落空的 `_` 会掉进行内强调分支，
+     * 若配对不设限就会把「A、P」整段变成斜体，比原症状更难读。
+     */
+    @Test
+    fun `letter subscripts stay literal`() {
+        assertEquals("a_i", inline("a_i").text)
+        assertEquals(0, subscriptSpans("a_i"))
+
+        assertEquals("P_A、P_B", inline("P_A、P_B").text)
+        assertEquals(0, subscriptSpans("P_A、P_B"))
+        assertEquals(0, italicSpans("P_A、P_B"))
+
+        assertEquals("msg_id 和 user_name", inline("msg_id 和 user_name").text)
+        assertEquals(0, subscriptSpans("msg_id 和 user_name"))
+        assertEquals(0, italicSpans("msg_id 和 user_name"))
+
+        assertEquals("foo_bar_baz", inline("foo_bar_baz").text)
+        assertEquals(0, subscriptSpans("foo_bar_baz"))
+        assertEquals(0, italicSpans("foo_bar_baz"))
+    }
+
+    /** 花括号是作者的显式意图，字母也照排下标。 */
+    @Test
+    fun `braced letter subscript renders`() {
+        assertEquals("PA", inline("P_{A}").text)
+        assertEquals(1, subscriptSpans("P_{A}"))
+    }
+
+    /** 判据里的「词字符」按 ASCII 收，汉字邻居不算，否则「第_1_章」会被拆坏。 */
+    @Test
+    fun `cjk neighbour is not a script base`() {
+        assertEquals("第_1_章", inline("第_1_章").text)
+        assertEquals(0, subscriptSpans("第_1_章"))
+    }
+
+    /**
+     * `^` 与 `_` 共用判据。
+     *
+     * `[^1]` 的前一个字符是 `[`，不再是上标；主体一侧不设限，所以 `C^2` 照旧排成上标。
+     */
+    @Test
+    fun `caret follows the same predicate`() {
+        assertEquals("[^1]", inline("[^1]").text)
+        assertEquals(0, superscriptSpans("[^1]"))
+        assertEquals("210", inline("2^10").text)
+        assertEquals(1, superscriptSpans("2^10"))
+        assertEquals(1, superscriptSpans("C^2"))
+    }
+
+    /**
+     * 孤立下划线不跨句配对，词内下划线不成对。
+     *
+     * 词字符按 Unicode 判定，因此中文句子里的 `_…_` 保持原文（与 CommonMark、
+     * GitHub 一致）；要强调得写成 `*重点*`，或者在标记两侧留空格。
+     */
+    @Test
+    fun `underscore emphasis needs word boundaries`() {
+        assertEquals("附录_ 与 表_", inline("附录_ 与 表_").text)
+        assertEquals(0, italicSpans("附录_ 与 表_"))
+
+        assertEquals("_ text _", inline("_ text _").text)
+        assertEquals(0, italicSpans("_ text _"))
+
+        assertEquals("这是_重点_内容", inline("这是_重点_内容").text)
+        assertEquals(0, italicSpans("这是_重点_内容"))
+
+        assertEquals("见 重点 内容", inline("见 _重点_ 内容").text)
+        assertEquals(1, italicSpans("见 _重点_ 内容"))
+    }
+
+    /** 表格单元格走同一个行内解析，标识符表头不能被拆坏。 */
+    @Test
+    fun `table cells keep identifiers literal`() {
+        val block = MarkdownParser.parse("| msg_id | user_name |").single()
+        val cells = (block as MdBlock.Table).rows.first()
+        assertEquals("msg_id", inline(cells[0]).text)
+        assertEquals(0, subscriptSpans(cells[0]))
+        assertEquals("user_name", inline(cells[1]).text)
+        assertEquals(0, italicSpans(cells[1]))
     }
 
     /** `_斜体_` 的首个下划线不在词内，仍按强调处理，不能变成下标。 */
