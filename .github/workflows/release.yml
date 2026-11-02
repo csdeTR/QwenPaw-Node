@@ -136,8 +136,6 @@ jobs:
           fi
           {
             echo 'RELEASE_BODY<<RELEASE_BODY_EOF'
-            echo '## 本版变化'
-            echo
             cat /tmp/release-notes.md
             echo
             echo '## 安装包'

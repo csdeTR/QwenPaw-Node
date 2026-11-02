@@ -208,9 +208,12 @@ git tag -a v0.1.0 -m "QwenPaw Node v0.1.0 — 首个最小可用版本"
 secrets 缺失时 workflow 在「解码签名密钥」一步报错退出，不会产出未签名的包；
 `apksigner verify` 不通过同样中止发布。产物命名为 `QwenPaw-Node-<tag>-<abi>.apk`。
 
-Release 正文里的「本版变化」由 workflow 从 `CHANGELOG.md` 抽取：取第一个版本小节，
-并要求它与 `$TAG` 一致，否则中止。两处各写一份历史上已经对不上过，
-因此正文以 CHANGELOG 为唯一来源，安装包表格与签名说明仍写在 workflow 里。
+Release 正文以 `CHANGELOG.md` 的版本小节开头，workflow 抽取第一个版本小节，
+并要求它与 `$TAG` 一致，否则中止，后面接安装包表格与自动生成的 Full Changelog。
+正文不再另加「本版变化」一类标题：CHANGELOG 小节本身就是正文，
+多一层标题只是把同一件事说两遍。
+两处各写一份历史上已经对不上过，因此正文以 CHANGELOG 为唯一来源，
+安装包表格与签名说明仍写在 workflow 里。
 抽取失败不静默跳过：正文缺一段，比发出去的说明与代码不一致更难被发现。
 
 `append_body` 必须保持 `false`。它是给「分几步往同一个 Release 追加内容」用的，
