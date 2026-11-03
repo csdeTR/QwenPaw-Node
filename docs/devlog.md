@@ -53,6 +53,8 @@
 | [39](#39正文裸上下标的判据收口2026-11-03) | 截图来源逐项核查、下标判据收窄、`_` 配对按 Unicode 词边界 | 439 个单测；只收判据会让孤立 `_` 斜体化整段，两条必须同轮改 | [ui-guidelines.md](ui-guidelines.md) 8.7、[CHANGELOG.md](../CHANGELOG.md) |
 | [40](#40待办清单改为版本制2026-11-03) | 阶段制改版本制、合并重复条目、逐条核对搬运 | 端点行去重后两版一致（61 条）；汇编时丢了五处段落，靠逐串比对找回 | [待办清单.md](../待办清单.md)、[AGENTS.md](../AGENTS.md) 5.4 |
 | [41](#41插件排期与插件探测2026-11-03) | 插件从 0.2.1 起并行、客户端探测规则、禁用态实测 | 禁用后重启才生效，且与未安装无法区分；列表不回传 `qwenpaw_version` | [protocol.md](protocol.md) 第 19 节、[待办清单.md](../待办清单.md) 0.2.1 |
+| [42](#42插件版本号与探测改由插件自述2026-11-03) | 插件独立版本号、探测改打 `/info`、新增 0.2.2 | 未注册的插件路径 404 而非 SPA HTML；`/api/plugins` 不在鉴权白名单 | [protocol.md](protocol.md) 第 19 节、[待办清单.md](../待办清单.md) 0.2.1、0.2.2 |
+| [43](#43阶段-1-起步与主体合并发版2026-11-03) | 分页骨架、频道筛选、斜杠补全、上下标字号、收件箱、工具/环境变量/后台策略 | 497 个单测；`tools` 的 `config_fields` 实测为 `null`；M3 的 `MaterialTheme` 自带 `ProvideTextStyle(bodyLarge)` | [protocol.md](protocol.md) 第 20–22 节、[ui-guidelines.md](ui-guidelines.md) 8.7、[CHANGELOG.md](../CHANGELOG.md) |
 
 ---
 
@@ -3466,7 +3468,7 @@ MiMark 在本仓库不存在，逐项核查如下。结论：那条横幅不是�
 
 **否决的写法三：比 `qwenpaw_version`。** 列表响应里没有这个字段——manifest 的版本约束
 只在安装校验时由 loader 读取并交给 `PluginApi`，不回传到列表。客户端拿不到兼容区间，
-于是把能力自述交给插件自己：新增 `GET /api/plugins/node-bridge/info`，
+于是把能力自述交给插件自己：新增 `GET /api/plugins/qwenpaw-node-bridge/info`，
 返回 `capabilities` 数组，客户端按名字开关功能。这条形状是两端约定的草案，
 尚未实现，文档里已写明「草案、未实测」，避免下一轮把它当成既成事实。
 
@@ -3501,6 +3503,261 @@ MiMark 在本仓库不存在，逐项核查如下。结论：那条横幅不是�
 结论落点：端点形状、判定规则与禁用态表现 → [protocol.md](protocol.md) 第 19 节；
 排期与客户端条目的分层 → [待办清单.md](../待办清单.md) 的 0.2.1「配套插件探测」
 与「独立仓库」一节的开发排期表。
+
+---
+
+## 42、插件版本号与探测改由插件自述（2026-11-03）
+
+用户提出两件事：待办清单只按客户端版本排期，看不出「某个功能需要插件做到什么程度」；
+以及既然插件能回传版本号，探测是否应当改由插件自己实现。两问都成立，
+第二轮据此改了排期表结构与 0.2.1 的探测方案。
+
+### 42.1 插件版本独立编号，不跟客户端同号
+
+第 41 节只写了「从 0.2.1 起并行」，没有给插件版本号，于是排期表里的
+「起点 0.2.1」既指客户端版本又指时间点，无法回答「0.2.2 要的插件是哪一版」。
+
+三种编号方式比较过：与客户端同号、只写 capability 不写版本、插件独立语义化版本。
+选了第三种。同号的问题在插件侧：客户端不发版时插件就不能发，或者只能越号，
+而插件修一个 `snippet()` 的边界缺陷不需要客户端跟着发一版。只写 capability
+则回到原状，排期表里看不出进度。独立编号的代价是多一张对照表，
+收益是两端可以各自发版，且版本号能出现在设置页与日志里，用户报问题时可直接说版本。
+
+版本号只用于展示与排查，**仍不参与能力判断**——这一点沿用第 41 节否决的写法三，
+没有因为现在有版本号就改回「比版本」。
+
+### 42.2 探测改打插件自己的 `/info`
+
+新方案只请求 `GET /api/plugins/qwenpaw-node-bridge/info`：200 视为已检测到，
+404 一律视为未检测到，不再查核心的 `/api/plugins` 列表。
+
+这样能省掉第 41 节的两条判定：`enabled` 与 `loaded` 的启动竞态、
+以及 2.3 上才有的 `status == "active"`。`/info` 能返回 200 本身证明插件路由挂上了，
+证明力比查列表更强——列表里 `loaded: true` 只说明 loader 记住了记录，
+不说明该插件的 router 已经注册成功。
+
+**核实过的两件事**（本机 8088，2.2.2.post1，只读）：
+
+1. `GET /api/plugins/qwenpaw-node-bridge/info` → 404 `{"detail":"Not Found"}`，
+   不是 SPA 返回的 `index.html`。`_app.py` 的 catch-all 里有
+   `if full_path.startswith("api/"): raise HTTPException(404)`，因此客户端可以用
+   404 明确判定「未安装」，不必额外判断响应体是不是 HTML。
+   `GET /api/plugins/qwenpaw-node-bridge/status` 则是 404 `Plugin 'qwenpaw-node-bridge' not found.`，
+   两者都是 404，但 detail 不同，日志里可区分。
+2. `auth.py` 的 `_PUBLIC_PATHS` 与 `_PUBLIC_PREFIXES` 都不含 `/api/plugins`。
+   开启登录后插件路由需要 token，因此探测只能排在验证与登录之后。
+   验证阶段尚无 token，此时若收到 401 应记为「待重探」而不是未安装——
+   否则开着鉴权的服务端会永远显示「未装插件」。
+
+### 42.3 插件路由不得与核心路由同名
+
+`plugins/registry.py` 的 `register_http_router` 把插件 prefix 拼成 `/api` + prefix
+再挂到 app 上。核心 `plugins.py` 在模块级先注册，插件路由随后插入，
+路径相同时命中核心那条。
+
+这一条最初只是读源码的推断，收尾时补了实测。在未装插件的实例上请求同一前缀下的
+四个子路径，结果分成两类：
+
+```
+/status    → 404 Plugin 'qwenpaw-node-bridge' not found.   参数化 detail，进了核心 router
+/files/x   → 404 Plugin 'qwenpaw-node-bridge' not found    同上
+/info      → 404 {"detail":"Not Found"}                    通用 404
+/search    → 404 {"detail":"Not Found"}                    通用 404
+```
+
+前两条连 detail 都带插件 id，说明请求确实被核心 `/{plugin_id}/status` 吃掉了；
+后两条没匹配上任何路由。因此 `/status` 与 `/files/**` 不能给插件用。
+这条同时说明：**404 仍然能当「未安装」的判据**，但要靠 detail 的形状区分是
+「进了核心 router 但插件没装」还是「根本没有这条路由」，两者都不影响探测结论。
+
+### 42.3.1 id 与 prefix 统一为完整名
+
+第一版把插件 id 写作 `qwenpaw-node-bridge`、HTTP 前缀写作 `/plugins/node-bridge`，
+两种写法混着用。前缀一旦真的按 id 注册，端点会变成
+`/api/plugins/qwenpaw-node-bridge/info`，与上面的实测路径才对得上。
+两段字符串现已统一：id 与 prefix 都用 `qwenpaw-node-bridge`，
+文档里不再出现 `/plugins/node-bridge` 这一缩写形式。
+
+### 42.4 新增 0.2.2，SSE 从 0.4.x 提前
+
+第 41 节把 SSE 排在 0.4.x，理由是「0.2.0 发完才有稳定的轮询可替代」。
+但按那个理由，0.2.0 一发完条件就满足了，继续等三个版本只是让插件装上去却用不上。
+新增 0.2.2「插件能力接入」，包含会话检索与 SSE 两件，都需要插件先就位。
+
+**版本号没有重编**：0.3.0 及之后的号保持原样，只是发布顺序顺延到 0.2.2 之后。
+重编会让已经写进文档与 devlog 的版本引用全部失效，成本高于收益。
+
+`fork` 转发仍不排期。第一版改写时误把它写进插件 v0.2.0，与第 41 节的结论矛盾，
+已改回：它面向 `spawn_subagent(fork=True)`，客户端没有子智能体界面。
+`portability` 则保留在 v0.2.0，因为 0.6.0 的智能体导入导出是真实界面需求。
+顺带核实 `portability_imports.py` 的 `_local_only`：局域网调用返回
+403 `Import endpoints are localhost-only`，与第 41 节的记录一致。
+
+### 42.5 `/info` 字段里的 `server_version`
+
+`plugin_version` 由 `api.manifest["version"]` 直接读取（`plugins/loader.py:607`
+构造 `PluginApi` 时传入完整 manifest），不另存常量，避免 `plugin.json` 与代码两处不一致。
+
+`server_version` 在草案里新增，插件从 `qwenpaw.__version__` 读取
+（`__version__.py` 只有一行 `__version__ = "2.2.2.post1"`）。这个字段只用于排查
+两端版本配错的情况，客户端不据此分支——一旦拿它做判断，又回到「比版本号」。
+字段形状仍是两端约定的草案，插件实现后需补一次真实响应到 protocol.md 第 19 节。
+
+### 42.6 收尾
+
+本轮只改文档，没有改代码，也没有启动容器（本机实例的探测均为只读 GET）。
+`待办清单.md` 改了版本总览、0.2.1 探测条目、新增 0.2.2、独立仓库的版本号规则与
+对应表；`protocol.md` 第 19 节的判定规则同步改为「以 `/info` 为准」。
+
+结论落点：排期与版本号规则 → [待办清单.md](../待办清单.md) 版本总览与「独立仓库」一节；
+探测端点、鉴权与路由冲突 → [protocol.md](protocol.md) 第 19 节。
+
+---
+
+## 43、阶段 1 起步与主体合并发版（2026-11-03）
+
+### 43.1 两版合一的理由
+
+`待办清单.md` 把 0.1.3（分页骨架、频道筛选、斜杠补全、正文上下标字号）与
+0.1.4（收件箱、工具开关、环境变量、后台策略）排成两版，理由是后者的收件箱依赖前者的分页骨架。
+分开做的问题是分页骨架这一版没有任何真实调用方：11-01 写过的 `ui/common/Paging.kt` 就是因为
+无调用方无单测，在第 38 节审计时被删掉。只发一版「零证明力」的骨架，等于把同一个风险再走一遍。
+
+合并后分页骨架的第一批调用方与它同轮落地，`PagingTest` 的四种情形（首页拼接、翻页续接、
+空页结束、重复游标）由收件箱的真实字段形状驱动。代价是改动面横跨数据层、列表页、输入框、
+三个新页面与 Markdown 渲染，构建轮次变多；这一轮按「纯 JVM → 数据层 → 列表页 → 输入框 →
+新页面 → 发版」的顺序串行推进，每个子步都能单独跑通单测。
+
+合并的另一个后果是版本号：0.1.3 未单独发布，因此 `versionCode` 从 3 直接到 4，
+`versionName` 为 `0.1.4`。`CHANGELOG.md` 只有一个 `## v0.1.4` 小节——Release 正文取第一个
+`##` 小节并与 tag 比对，出现 `## v0.1.3` 会让 CI 中止。
+
+### 43.2 待办清单的前提被字节码推翻
+
+0.1.3 的上下标条目写明「基准从 `MaterialTheme.typography` 取，不要读 `LocalTextStyle`，
+因为全仓没有 `ProvideTextStyle`，运行时它必然是 `Unspecified`」。这条前提不成立。
+
+`material3-android:1.3.1` 的 `MaterialThemeKt$MaterialTheme$1` 字节码里依次是：
+
+```
+41: invokevirtual  androidx/compose/material3/Typography.getBodyLarge()
+50: invokestatic   androidx/compose/material3/TextKt.ProvideTextStyle(...)
+```
+
+`MaterialTheme` 自己就提供了 `LocalTextStyle = typography.bodyLarge`。而 `ChatFontScale`
+内部又套了一层 `MaterialTheme(typography = scaled)`，所以该作用域内的 `LocalTextStyle`
+是**已乘过 chatScale 的 bodyLarge**，与段落实际渲染字号严格一致。
+
+原来的判断来自一次源码搜索：全仓确实没有 `ProvideTextStyle`，但提供方在依赖库里，
+搜索覆盖不到。结论：段落基准直接取 `MaterialTheme.typography.bodyLarge.fontSize`，
+不需要给 `MarkdownText` 加参数，也不需要改 `MessageBubble` 的两处调用点。
+为了把隐式依赖变显式，段落、列表、引用三处 `Text` 补上了 `style = bodyLarge`。
+
+### 43.3 分页骨架的两处实现取舍
+
+**并发护栏用 `tryLock` 而不是 `withLock`。** 第一版写成 `gate.withLock`，第二次并发调用会
+排队等前一次结束再执行，等于同一列表连发两次请求。测试用例 `concurrent loadNext is ignored`
+要求第二次当场返回 `Busy`，才发现这个写法与语义不符。
+
+**空响应归为结束，不当作错误。** `QwenPawApi.decode` 对空 body 抛 `ApiException(204)`，
+真正的 HTTP 204 与「200 空 body」在这一层已经无法区分。分页把 204 归为「空页 = 结束」，
+因为干净实例上的「0 条事件」不该弹一条「服务端返回了空响应」。其余异常照原样上抛，
+失败时 `items`/`hasMore`/`next` 都不改动，调用方可以直接重试。
+
+**重复游标时保留本页已取到的条目。** 游标不推进是服务端缺陷，但已经到货的数据没有理由丢弃；
+代价是服务端若重复返回同一批数据，客户端会出现重复条目。这一取舍在 0.1.4 的收件箱上没有触发
+（offset 形态靠 `total` 判断），等有真实重复行为时再收紧。
+
+### 43.4 频道筛选最容易踩的坑
+
+候选值必须从**未过滤**的完整列表算。若从切片结果算，选中某个频道后候选立刻退化成它自己，
+控件随之消失，用户被锁死在该频道里。`ChannelFilterTest` 里
+`candidates do not collapse when a channel is selected` 专门守这一条。
+
+状态放界面本地 `remember`，不持久化：换服务器或换智能体后，记住的频道在新数据里可能根本不存在，
+用户进入列表会看到空页却找不到原因。为此补了「选中值不在候选内即回落到全部」的钳制。
+
+管线次序是「先按频道切片，再在切片里搜索」。反过来搜索会跨频道命中，而列表头显示的是频道切片。
+
+### 43.5 斜杠候选放在输入条内部
+
+候选列表内嵌在 `ChatInputBar` 的 `Column` 里，不用 `Popup`。那个 `Column` 已经挂了
+`navigationBars ∪ ime` 的内边距，候选自然被键盘顶上去，不需要自己算浮层位置；
+`Popup` 开新窗口后要么抢焦点导致键盘收起，要么点到窗口外无法穿透。
+
+`ChatScreen` 的 `bottomBar` 本来就同时容纳 `ApprovalBanner`、`ErrorBar`、`VoiceSheet`，
+高度随状态变化是这个界面的常态，内嵌不会引入新的布局问题。
+
+触发判据与服务端 `SlashCommandRegistry.resolve` 对齐：只有整条草稿以 `/` 开头、
+且其后不含空白时才是一次命令输入。点击候选写回 `"/name "`（带尾随空格），
+下一次判据立刻返回 `null`，候选自动收起。
+
+请求失败静默：`refreshCommands` 的失败分支不写 `state.error`，这是 `ChatViewModel` 里唯一的例外。
+补全缺失不影响手打命令，弹一条错误只会打断正在输入的人。
+
+### 43.6 实测才发现的两个 `null` 形状
+
+服务端 2.2.2.post1 的 `GET /api/tools` 有两处会让整份响应解析失败：
+
+1. 无配置项的工具返回 `"config_fields": null` 与 `"config_values": null`，不是空数组/空对象。
+2. 非 select 类型的配置字段返回 `"options": null`。
+
+DTO 里把它们声明成非空集合后，页面上表现为「没有可用的工具」——一个字段就能让整份列表反序列化失败，
+而从响应里看不出任何异常。改为可空并补了两条单测钉住形状。
+
+同时修了空态的语义：`tools.isEmpty()` 且 `error != null` 时显示「加载失败：…」而不是「没有可用的工具」，
+后者会让用户以为服务端确实一个工具都没装。
+
+### 43.7 `AppViewModel` 构造期访问未初始化字段
+
+`AppViewModel` 的 `init` 里调 `bind`，而 `bind` 需要清空收件箱与三张表单的状态。
+把这两个对象写成普通 `val` 后，debug 包首次启动直接崩溃：
+
+```
+NullPointerException: Attempt to invoke virtual method 'void ...InboxViewModel.clear()'
+on a null object reference
+```
+
+kotlin 的属性按声明顺序初始化，`init` 先于它们执行。改成 `by lazy` 同样不行：
+lazy 的委托字段自己也是属性，在这个时点仍是 null。最终用显式可空字段加 getter 惰性创建，
+并在 `bind` 里只清「真的换过实例/智能体」的那一次——首次绑定没有旧数据可清，
+也不必为此提前创建两个 ViewModel。
+
+### 43.8 收件箱与列表页角标
+
+收件箱的 `created_at` 是浮点秒（服务端 `time.time()`），不是 ISO 字符串，
+因此 `TimeLabels` 加了一个走 `Instant.ofEpochMilli` 的入口，时区作为参数显式传入，
+单测钉住东八区输出。金额、时间的断言依赖默认时区是本地通过、CI 失败的典型原因。
+
+未读数由服务端在每页查询时一并返回，客户端不在本地推算。列表页的入口角标原本只在
+进过收件箱后才有值，改为落到 `Screen.LIST` 时拉一次。代价是一页事件（30 条）。
+
+### 43.9 验证范围
+
+单测 497 个全通过，新增覆盖：分页 11 例、频道筛选 6 例、斜杠 8 例 + API 3 例、
+上下标字号 5 例、收件箱时间格式 2 例、三张表单端点与遮罩 12 例。
+
+模拟器（qp35 + 容器 `10.10.0.211:8088`）上逐场景验证了 debug 包：
+斜杠候选、收窄、回填、断网静默；频道 chip 的出现、过滤、不塌缩与单渠道隐藏；
+收件箱的事件列表、全部已读、删除与列表页角标；工具开关往返、后台策略往返、
+环境变量默认遮罩与离开恢复。
+
+上下标用像素量化确认：`H_2O` 里 `H` 的墨迹高 30px、下标 `2` 为 17px（约 0.57），
+`x^2` 里 `x` 22px、上标 `2` 17px；上下标没有撑高行距。
+
+**release 包的业务路径没有走通。** release 包能启动、版本号 `0.1.4` 正确、无崩溃、
+四个 ABI 包齐全且签名生效、R8 构建无 missing 警告；但「新建实例」向导的
+`OutlinedTextField` 在 `adb input text` 下不触发 `onValueChange`，
+地址输不进去，因而连不上服务端复跑业务场景。同一套输入方式在聊天输入框
+（`BasicTextField`）和斜杠命令验证上都工作正常，因此判断为 adb 注入与
+`OutlinedTextField` 的兼容问题，与本次改动无关；未在 release 包上复验的项记在此处。
+
+### 43.10 收尾
+
+结论落点：分页三形态与收件箱端点 → [protocol.md](protocol.md) 第 20、21 节；
+工具、环境变量与后台策略端点及三处坑 → [protocol.md](protocol.md) 第 22 节；
+上下标字号与底部候选列表 → [ui-guidelines.md](ui-guidelines.md) 8.7、9.14；
+用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) v0.1.4。
 
 ---
 

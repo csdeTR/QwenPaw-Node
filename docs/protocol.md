@@ -893,8 +893,15 @@ curl -s http://10.10.0.220:8088/api/version
 
 ## 19、插件探测
 
-客户端需要判断服务端有没有装配套插件（`qwenpaw-node-bridge`），并据此决定
+客户端需要判断服务端有没有装配套插件（id `qwenpaw-node-bridge`），并据此决定
 功能入口是禁用还是走替代路径。本节记录 2026-11-03 在两个容器上的实测。
+
+**id 与 HTTP 前缀是两段不同的字符串。** 插件 id 为 `qwenpaw-node-bridge`，
+但插件路由的 prefix 取 `qwenpaw-node-bridge` 会得到
+`/api/plugins/qwenpaw-node-bridge/...`，与核心 `plugins.py` 的
+`/{plugin_id}/status`、`/{plugin_id}/files/{path}` 同层，容易撞车（见下文同名规则）。
+两端约定插件统一用 prefix `/plugins/qwenpaw-node-bridge`，端点路径因此是
+`GET /api/plugins/qwenpaw-node-bridge/info`，与 id 保持一致，不再出现缩写形式。
 
 ### 端点与两版差异
 
@@ -920,17 +927,45 @@ curl -s http://10.10.0.220:8088/api/version
 
 ### 判定规则
 
-**以 `GET /api/plugins` 查固定 id，`loaded == true` 才算可用**；
-2.3 上再加 `status == "active"`。三条不能用：
+**以插件自己的 `GET /api/plugins/qwenpaw-node-bridge/info` 为准：200 即可用，404 即未检测到。**
+不查核心的 `GET /api/plugins` 列表，理由如下。
 
-1. **不能只看 `enabled`。** loader 尚未初始化时走磁盘扫描（`_list_plugins_from_disk`），
-   返回 `enabled: true, loaded: false`。把它当「已启用」会让界面在启动竞态时误判。
-2. **不用 `GET /api/plugins/{id}`。** 该路由在 2.2.2.post1 不存在（404），
+1. **列表判定的两种麻烦，`/info` 都没有。** 查列表要区分 `enabled` 与 `loaded`：
+   loader 尚未初始化时走磁盘扫描（`_list_plugins_from_disk`），返回
+   `enabled: true, loaded: false`，把它当「已启用」会在启动竞态时误判；
+   2.3 上还要再加 `status == "active"`。`/info` 返回 200 本身就说明该插件的
+   router 已注册成功，比列表里的 `loaded: true` 证明力更强。
+2. **不要用 `GET /api/plugins/{id}` 查单插件。** 该路由在 2.2.2.post1 不存在（404），
    2.3.0b2 才有（200）。用它做判定会让稳定版上所有插件都显示为未安装，
    而 2.2 恰恰是当前基线版本。
-3. **不能比 `qwenpaw_version`。** 列表响应不含该字段，`plugin.json` 里的
+3. **不能比 `qwenpaw_version`。** 列表与 `/status` 响应都不含该字段，`plugin.json` 里的
    `qwenpaw_version.min` 只在安装校验时由服务端读取
    （`plugins/loader.py` 载入 manifest 后交给 `PluginApi`），不回传到列表。
+
+**未注册的插件路径返回 404，不是 SPA 页面。** 本机 2.2.2.post1 实测
+`GET /api/plugins/qwenpaw-node-bridge/info` → 404 `{"detail":"Not Found"}`；
+`GET /api/plugins/qwenpaw-node-bridge/status` → 404 `Plugin 'qwenpaw-node-bridge' not found.`。
+`_app.py` 的 SPA catch-all 里有 `if full_path.startswith("api/")` 直接抛 404 的分支，
+因此客户端不必再判断响应体是不是 HTML。
+
+**插件路由不在鉴权白名单里。** `auth.py` 的 `_PUBLIC_PATHS` 与 `_PUBLIC_PREFIXES`
+都不含 `/api/plugins`，服务端开启登录后访问插件路由需要 token。探测因此只能排在
+登录之后；验证阶段拿到 401 应记为「待重探」，不能当成未安装。
+
+**插件路由与核心路由同名时命中核心的那条，已实测。** 插件 prefix 被 `registry.py`
+拼成 `/api` + prefix，核心 `plugins.py` 在模块级先注册，插件路由随后插入。
+在未安装插件的实例上请求同一前缀下的四个子路径，结果分成两类：
+
+```
+GET /api/plugins/qwenpaw-node-bridge/status    → 404 Plugin 'qwenpaw-node-bridge' not found.
+GET /api/plugins/qwenpaw-node-bridge/files/x   → 404 Plugin 'qwenpaw-node-bridge' not found
+GET /api/plugins/qwenpaw-node-bridge/info      → 404 {"detail":"Not Found"}
+GET /api/plugins/qwenpaw-node-bridge/search    → 404 {"detail":"Not Found"}
+```
+
+前两条的参数化 detail 说明请求已进入核心 router；后两条连核心路由都没匹配上，
+落到通用 404。因此 `/status` 与 `/files/**` 这两个子路径**不能给插件用**，
+插件定义同名路由也收不到请求。插件只用 `/info`、`/search`、`/events` 这类子路径。
 
 ### 禁用与未安装不可区分
 
@@ -949,30 +984,173 @@ curl -s http://10.10.0.220:8088/api/version
 因为客户端拿不到版本约束，插件自己暴露能力清单：
 
 ```
-GET /api/plugins/node-bridge/info
-{"plugin_version":"1.0.0","protocol_version":1,"capabilities":["search","sse","push"]}
+GET /api/plugins/qwenpaw-node-bridge/info
+{"plugin_version":"0.1.1","protocol_version":1,
+ "server_version":"2.2.2.post1",
+ "capabilities":["info","search"]}
 ```
 
 客户端按 capability 名开关功能，不按插件版本推断。端点挂在插件自己的 router 上
-（`api.register_http_router(prefix="/plugins/node-bridge")`），返回 404 即视为不可用。
-`protocol_version` 用于将来契约变更时拒绝不兼容的旧插件。
+（`api.register_http_router(prefix="/plugins/qwenpaw-node-bridge")`），返回 404 即视为不可用。
+`protocol_version` 用于将来契约变更时拒绝不兼容的旧插件，客户端只接受 `1`。
 
-**这条形状是两端约定的草案，尚未实现，也没有实测。** 上面三条判定规则、
-禁用态的表现与两版端点差异来自实测；`/info` 的字段名与 capability 取值由本仓库
+`plugin_version` 由插件读 `api.manifest["version"]`，即 `plugin.json` 的 `version`，
+不另存常量。`server_version` 由插件读 `qwenpaw.__version__`（该模块只有一行版本常量），
+只用于排查两端配错版本，客户端不据此分支。两个版本号**都只用于展示与排查**。
+
+**这条形状仍是两端约定的草案，尚未实现。** 判定以 `/info` 为准、404 的形状、
+鉴权与路由冲突四条来自实测与源码；`/info` 的字段名与 capability 取值由本仓库
 与插件仓库共同商定，落地前不属于「已实测」的内容。插件实现后需补齐一次真实响应
 到本节，并把「草案」二字去掉。
 
 ### 回归方法
 
 ```bash
-# 两版都应返回 200 与数组
-curl -s http://10.10.0.211:8088/api/plugins | head -c 200
-curl -s http://10.10.0.220:8088/api/plugins | head -c 200
+# 探测判定的标准对照：未装应 404，装好后应 200
+curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-node-bridge/info
+curl -s -w " | %{http_code}\n" http://10.10.0.220:8088/api/plugins/qwenpaw-node-bridge/info
 
-# 已装 / 未装的标准对照
+# 核心列表与单插件状态仍可用于排查，两版都应返回 200
+curl -s http://10.10.0.211:8088/api/plugins | head -c 200
 curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/status
-curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-node-bridge/status
 ```
 
 测禁用态时改完目录必须重启服务端（`screen -S qwenpaw -X quit` 后重开），
 否则内存里的实例仍报告已加载。测完把目录名改回去再重启一次。
+---
+
+## 20、分页的三种形态
+
+服务端的列表类端点有三种分页写法，客户端的 `data/remote/Paging.kt` 把三者归一成
+「取下一页 / 是否还有更多 / 追加到已有列表」，界面只看条目与 `hasMore`。
+
+| 形态 | 代表端点 | 请求参数 | 响应字段 | 结束判据 |
+| --- | --- | --- | --- | --- |
+| `limit`/`offset` | `GET /api/console/inbox/events` | `limit`、`offset` | `{items, total}` | **无 `has_more`**；已取条数 ≥ `total` 即结束，`total` 缺失时以「取满一页」为准 |
+| `cursor` | `GET /api/workspace/tree` | `cursor`、`limit` | `{entries, has_more, next_cursor}` | `has_more` 为布尔时以它为准；`has_more=false` 时即便带着 `next_cursor` 也一律结束 |
+| 仅 `limit` | 备份、日志类 | `limit` | 裸数组或 `{items}` | 短页即结束（返回条数 < limit） |
+
+三条公共护栏，写在 `settle()` 一处：
+
+1. **空页且无游标视为结束。** 服务端已经给不出内容。
+2. **游标与上一页相同视为结束。** 服务端没推进游标，继续请求只会死循环；
+   本页已取到的条目保留，不因为游标缺陷丢数据。
+3. **空白响应归为结束。** `QwenPawApi.decode` 对空 body 抛 `ApiException(204)`，
+   真正的 HTTP 204 与「200 空 body」在这一层无法区分。干净实例上的「0 条事件」
+   不该弹「服务端返回了空响应」，因此 204 按空页处理；其余异常照原样上抛。
+
+`limit`/`offset` 端点**没有 `has_more`**，这一点容易按 cursor 形态写错：
+按「有没有下一页字段」实现会永远判成结束，列表只显示第一页。
+
+---
+
+## 21、收件箱
+
+服务端把 cron 执行、自动记忆写入一类的系统消息写进 `WORKING_DIR/inbox_events.json`
+（上限 5000 条），由 console router 对外提供。以下形状在 2.2.2.post1 实测。
+
+### 端点
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| GET | `/api/console/inbox/events` | 事件列表，支持 `limit`/`offset`/`source_type`/`source_types`/`status`/`agent_id`/`unread_only` |
+| POST | `/api/console/inbox/read` | 标记已读，body `{event_ids: [String], all: Boolean}` |
+| DELETE | `/api/console/inbox/events/{event_id}` | 删除单条，不存在时 404 |
+| GET | `/api/console/inbox/traces/{run_id}` | 该次运行的完整轨迹，不存在时 404 |
+
+`limit` 默认 50、上限 500；`offset` 最小 0。
+
+### 响应形状
+
+```json
+{"events": [...], "total": 0, "unread_count": 0}
+```
+
+**没有 `has_more`。** `total` 与 `unread_count` 都是**过滤之后**的计数：
+`unread_count` 在 `unread_only=true` 时与 `total` 相等，因此客户端不应在本地推算未读。
+
+### 事件结构
+
+```json
+{"id": "uuid", "agent_id": "default", "source_type": "cron", "source_id": "",
+ "event_type": "cron_result", "status": "success", "severity": "info",
+ "title": "...", "body": "...", "payload": {}, "read": false,
+ "created_at": 1793679546.0410624}
+```
+
+**`created_at` 是浮点秒**（服务端 `time.time()`），不是 ISO 字符串，也不是毫秒。
+按 1000 乘后交 `Instant.ofEpochMilli` 格式化；时区必须显式传入，
+否则本地通过、CI 失败。
+
+轨迹形状：`{run_id, created_at, completed_at, status, meta, events[{at, event}], error?}`，
+`events[].at` 同样是浮点秒，`event` 是服务端原样的任意结构。
+
+### 删除的连带效果
+
+删除事件时若该 `run_id` 不再被其它事件引用，服务端会同时删掉轨迹，
+响应返回 `{deleted, trace_deleted, run_id}`。客户端不需要自己判断引用关系。
+
+---
+
+## 22、工具、环境变量与后台策略
+
+三张配置表单的端点。以下形状在 2.2.2.post1 实测与源码确认。
+
+### 工具
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/tools` | 返回**数组**，不是 `{tools: [...]}` |
+| PATCH | `/api/tools/{name}/toggle` | **没有请求体**，服务端取反 |
+| PATCH | `/api/tools/{name}/async-execution` | body `{async_execution: Boolean}` |
+| GET | `/api/tools/{name}/config` | 返回裸配置字典 |
+| POST | `/api/tools/{name}/config` | body `{"config": {...}}`，不是扁平字典 |
+
+全部走 `X-Agent-Id` 归属。
+
+工具字段：`name`、`enabled`、`source_plugin_id`、`source_plugin_name`、`category`、
+`description`、`async_execution`、`icon`、`requires_config`、`config_fields`、`config_values`。
+
+**两处 `null` 会让整份响应解析失败**（实测）：
+
+```json
+{"name": "read_file", ..., "category": null, "config_fields": null, "config_values": null}
+```
+
+无配置项的工具返回 `config_fields: null` 与 `config_values: null`，不是空数组/空对象；
+非 select 类型的字段返回 `"options": null`。把任一字段声明成非空集合，
+整份 `/api/tools` 反序列化失败，页面上表现为「没有可用的工具」——从响应看不出异常。
+
+`config_values` 里的密码类字段已被服务端替换成 `***`。那是占位符不是真值，
+原样提交会把密钥写成三个星号，客户端必须当作空处理。
+
+### 环境变量
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/envs` | 返回 `[{key, value}]`，**value 是明文** |
+| GET | `/api/envs/catalog` | 规格元数据 |
+| PATCH | `/api/envs` | 集合级，body 是扁平 `{"KEY": "value"}`，合并保存 |
+| PUT | `/api/envs` | 整体替换 |
+| DELETE | `/api/envs/{key}` | 只删自定义变量 |
+| POST | `/api/envs/{key}/reset` | 内置变量恢复继承值 |
+
+**`GET /api/envs` 在局域网内直接返回明文密钥。** 服务端只在落盘时加密、读取时透明解密，
+当前实例 `auth.status.enabled=false` 时任何能连上的人都看得到。客户端默认遮罩，
+点击才显示，离开页面恢复遮罩；遮罩长度固定，不跟随原值长度。
+
+**`PATCH /api/envs` 是集合级，不是 `/{key}`。** body 是扁平字典，不是 `[{key, value}]` 数组。
+
+**内置变量不能删除，只能重置。** 对 `catalog` 里出现过的 key 调 DELETE 返回
+400 `Known variable must be reset`；客户端因此只给内置变量提供「恢复默认」。
+`catalog` 里 `editable=false` 的项连编辑都不允许。
+
+### 后台策略
+
+| 方法 | 路径 | body |
+| --- | --- | --- |
+| GET | `/api/settings/offload-policy` | 返回 `{"default_action": "keep_foreground"}` |
+| PUT | `/api/settings/offload-policy` | `{"default_action": "keep_foreground" | "offload"}` |
+
+只有这一个字段，取值经正则限定为两个。写入后服务端会热更
+`coordinator.offload_on_deadline`，不需要重启。
