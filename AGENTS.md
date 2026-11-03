@@ -145,10 +145,19 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 
   ```bash
   $HOME/Android/Sdk/emulator/emulator -avd qp35 \
-      -memory 2048 -no-window -gpu swiftshader_indirect
+      -memory 2048 -no-window -gpu swiftshader_indirect -feature -BluetoothEmulation
   ```
 
-  内存固定 2048 MB，其余参数同样不得修改。`adb` 在 `$HOME/Android/Sdk/platform-tools/adb`。
+  内存固定 2048 MB，其余参数同样不得修改。
+  **`-feature -BluetoothEmulation` 不是可选项。** 2026-11-03 起，不带该参数时
+  模拟器会卡在 QEMU 初始化：日志报 `detected a hanging thread 'QEMU2 CPU0 thread'`
+  （约 19 秒无响应），进程随后以段错误退出，`adb devices` 先是 `offline` 后为空。
+  此时 `lsmod` 里 `kvm` 的引用计数为 0，`-accel off`（纯软件模拟）同样卡住，
+  可排除 KVM 与 AVD 损坏；根因是蓝牙模拟器（netsim）在启动阶段阻塞——
+  日志末尾的 `Unable to connect to packet streamer` 与 `netsim_stderr.log` 的
+  `DeviceActor: Startup timeout` 是线索。带上该参数后 59 秒内 boot 完成。
+  **不要因为这个现象去擦除 AVD 数据**：擦除后同样卡住，只会白丢一次冷启动。
+  `adb` 在 `$HOME/Android/Sdk/platform-tools/adb`。
 - **启动前确认 `/dev/kvm` 存在。** x86_64 模拟必须有硬件加速，缺失时报
   `x86_64 emulation currently requires hardware acceleration`。
   本机曾出现内核模块未加载的情况，用 `ls -l /dev/kvm` 检查，

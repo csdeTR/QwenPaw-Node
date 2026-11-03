@@ -1,6 +1,7 @@
 package io.qwenpaw.node.ui.chat
 
 import io.qwenpaw.node.data.model.SlashCommandDto
+import io.qwenpaw.node.ui.CommandCopy
 
 /**
  * 斜杠命令补全的纯逻辑。
@@ -27,6 +28,22 @@ internal fun visibleCommands(
     if (token.isEmpty()) return usable
     return usable.filter { it.name.startsWith(token, ignoreCase = true) }
 }
+
+/**
+ * 供补全列表使用的候选：先剔除内部命令，再按前缀收窄。
+ *
+ * 过滤必须在前缀匹配**之前**：若反过来，打 `/` 时的全量与打 `/d` 后的结果
+ * 会来自两个不同的集合，用户会看到「先出现、后消失」的条目。
+ * 已敲下的完整命令名仍能命中（服务端照常执行），只是不再提示。
+ */
+internal fun presentableCommands(
+    commands: List<SlashCommandDto>,
+    token: String,
+): List<SlashCommandDto> =
+    visibleCommands(
+        commands.filter { io.qwenpaw.node.ui.CommandCopy.isUserFacing(it.name) },
+        token,
+    )
 
 /**
  * 按分类分组，保持服务端顺序。

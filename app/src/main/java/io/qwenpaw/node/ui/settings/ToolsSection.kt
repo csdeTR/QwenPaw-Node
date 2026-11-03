@@ -1,6 +1,9 @@
 package io.qwenpaw.node.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,9 +11,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,15 +25,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.model.ToolConfigFieldDto
 import io.qwenpaw.node.data.model.ToolDto
+import io.qwenpaw.node.ui.ToolCopy
+import io.qwenpaw.node.ui.theme.qwenSwitchColors
 
 /**
  * 工具开关。
  *
- * 每行两个开关：启用与异步执行。后者只对已启用的工具开放——关掉的工具不会被执行，
- * 给它保留一个异步开关只会让人以为设置没生效。
+ * 每个工具占一行：左侧是名称与描述，右侧是「同步 / 异步」两段圆片再加启用开关。
+ *
+ * 先前是两行开关（启用一行、异步一行），两个开关外观相同、上下相邻，
+ * 看起来像同一个设置被重复了一次。改成分段圆片后，两种状态的差别一眼可辨，
+ * 也不必再让用户从位置推断哪个开关管的是什么。
+ *
+ * 圆片只在工具启用时出现：关掉的工具不会被执行，给它留着异步选项
+ * 只会让人以为设置没生效。
  */
 @Composable
 internal fun ToolsSection(
@@ -75,26 +91,14 @@ internal fun ToolsSection(
             }
         }
         grouped.forEach { (category, list) ->
-            SectionHeader(category.ifBlank { "未分类" }, trailing = "${list.size} 个")
+            SectionHeader(ToolCopy.category(category), trailing = "${list.size} 个")
             Card {
                 list.forEachIndexed { index, tool ->
-                    SwitchRow(
-                        title = "${tool.icon} ${tool.name}",
-                        subtitle = tool.description.ifBlank {
-                            if (tool.asyncExecution) "已启用 · 异步执行" else "已启用"
-                        },
-                        checked = tool.enabled,
-                        onCheckedChange = { onToggle(tool.name) },
+                    ToolRow(
+                        tool = tool,
+                        onToggle = { onToggle(tool.name) },
+                        onAsync = { onAsync(tool.name, it) },
                     )
-                    if (tool.enabled) {
-                        Divider()
-                        SwitchRow(
-                            title = "异步执行",
-                            subtitle = "超时后转入后台继续跑，结果稍后送达",
-                            checked = tool.asyncExecution,
-                            onCheckedChange = { onAsync(tool.name, it) },
-                        )
-                    }
                     if (configurable.containsKey(tool.name)) {
                         Divider()
                         Row(
@@ -146,6 +150,103 @@ internal fun ToolsSection(
             onSave = { values ->
                 onSaveConfig(tool.name, values)
                 configuring = null
+            },
+        )
+    }
+}
+
+/**
+ * 一个工具一行。
+ *
+ * 整行**不加** `clickable`：行内已有圆片与开关两个可点区域，再给整行挂点击，
+ * 点圆片时事件会同时落到两处，异步设置会被启用开关顺手改掉。
+ * 关闭态的点击区域靠开关本身，与其它设置页的开关行一致。
+ */
+@Composable
+private fun ToolRow(
+    tool: ToolDto,
+    onToggle: () -> Unit,
+    onAsync: (Boolean) -> Unit,
+) {
+    val copy = ToolCopy.of(tool.name)
+    val title = copy?.first ?: tool.name
+    val subtitle = copy?.second ?: tool.description
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "${tool.icon} $title",
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (tool.enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (tool.enabled) {
+            SyncAsyncChip(async = tool.asyncExecution, onChange = onAsync)
+            Spacer(Modifier.width(10.dp))
+        }
+        Switch(
+            checked = tool.enabled,
+            onCheckedChange = { onToggle() },
+            colors = qwenSwitchColors(),
+        )
+    }
+}
+
+/**
+ * 「同步 / 异步」两段圆片。
+ *
+ * 服务端的 `async_execution` 是布尔值，没有第三态，因此只做两段。
+ * 用圆片而非第二个开关：开关之间外观完全相同，并排时看不出区别；
+ * 圆片本身就是一排选项，选中段有底色，扫一眼就知道当前是哪一种。
+ */
+@Composable
+private fun SyncAsyncChip(async: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(999.dp)),
+    ) {
+        SyncAsyncSegment("同步", selected = !async, onClick = { onChange(false) })
+        SyncAsyncSegment("异步", selected = async, onClick = { onChange(true) })
+    }
+}
+
+@Composable
+private fun SyncAsyncSegment(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else androidx.compose.ui.graphics.Color.Transparent,
+            )
+            // 用 selectable 而不是 clickable：圆片是一组单选，选中态要能报给无障碍服务，
+            // 否则读屏只能念出「同步 / 异步」两个词，听不出当前选的是哪个。
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
     }

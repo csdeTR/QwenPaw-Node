@@ -1499,7 +1499,7 @@ private fun MiniButton(text: String, onClick: () -> Unit, danger: Boolean = fals
 }
 
 @Composable
-private fun ActionRow(text: String, onClick: () -> Unit) {
+internal fun ActionRow(text: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

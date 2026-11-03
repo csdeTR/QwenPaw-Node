@@ -55,6 +55,7 @@
 | [41](#41插件排期与插件探测2026-11-03) | 插件从 0.2.1 起并行、客户端探测规则、禁用态实测 | 禁用后重启才生效，且与未安装无法区分；列表不回传 `qwenpaw_version` | [protocol.md](protocol.md) 第 19 节、[待办清单.md](../待办清单.md) 0.2.1 |
 | [42](#42插件版本号与探测改由插件自述2026-11-03) | 插件独立版本号、探测改打 `/info`、新增 0.2.2 | 未注册的插件路径 404 而非 SPA HTML；`/api/plugins` 不在鉴权白名单 | [protocol.md](protocol.md) 第 19 节、[待办清单.md](../待办清单.md) 0.2.1、0.2.2 |
 | [43](#43阶段-1-起步与主体合并发版2026-11-03) | 分页骨架、频道筛选、斜杠补全、上下标字号、收件箱、工具/环境变量/后台策略 | 497 个单测；`tools` 的 `config_fields` 实测为 `null`；M3 的 `MaterialTheme` 自带 `ProvideTextStyle(bodyLarge)` | [protocol.md](protocol.md) 第 20–22 节、[ui-guidelines.md](ui-guidelines.md) 8.7、[CHANGELOG.md](../CHANGELOG.md) |
+| [44](#44v014-收尾中文文案与工具行形态2026-11-03) | 命令与工具中文化、工具行改单行圆片、环境变量新增 | 518 个单测；中文只在 Console 打包产物里；模拟器须关蓝牙模拟；`toggle` 是取反语义 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.7、9.15、[AGENTS.md](../AGENTS.md) 第 3.1 节、[CHANGELOG.md](../CHANGELOG.md) |
 
 ---
 
@@ -3757,6 +3758,150 @@ lazy 的委托字段自己也是属性，在这个时点仍是 null。最终用�
 结论落点：分页三形态与收件箱端点 → [protocol.md](protocol.md) 第 20、21 节；
 工具、环境变量与后台策略端点及三处坑 → [protocol.md](protocol.md) 第 22 节；
 上下标字号与底部候选列表 → [ui-guidelines.md](ui-guidelines.md) 8.7、9.14；
+用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) v0.1.4。
+
+---
+
+## 44、v0.1.4 收尾：中文文案与工具行形态（2026-11-03）
+
+### 44.1 中文文案只能从 Console 打包产物里取
+
+服务端没有 i18n 接口。`GET /api/workspace/commands/available` 的响应里
+`description` 就是英文原句，实测 35 条命令中只有 11 条带描述；
+`GET /api/tools` 的 33 个工具同样只有英文 `description`。
+
+中文译文只存在于 Console 前端打包产物：
+`qwenpaw/console/assets/zh-*.js`。其中 `commands:{...}` 给出 11 条命令描述，
+`catalog:{...}` 给出 33 条工具名与描述（形如 `read_file:{name:"读取文件",description:"…"}`），
+另有 `groups:{files, web, media, agents, runtime, migration, other}` 的工具分组译名。
+
+浏览器端的资源客户端取不到，因此译文**静态内置在 `ui/LocalCopy.kt`**。
+这是查表而非运行时合并：服务端新增命令或工具时查不到就回退到服务端原文，界面不会开天窗。
+工具侧有两条差异：`view_audio` 在接口里有、语言包里没有，按 `view_video` 的句式补了一条；
+`enhance_and_generate_image` 在语言包里有、当前版本接口未下发，保留无害。
+
+命令侧另有一处译名冲突：Console 把 `conversation` 分类译作「会话内容」，
+`ui-guidelines.md` §9.11 要求界面一律用「对话」，客户端取后者。
+
+### 44.2 候选列表用黑名单而不是白名单
+
+只给「面向用户的命令」写白名单看似更省事，但服务端还会注册插件与技能提供的命令——
+白名单会把它们一并挡掉，表现为装了插件却看不到它的斜杠命令。
+因此反过来只列内部命令（17 条：对话侧的程序化命令、daemon 子命令、`cron-*`），
+命中即从候选里剔除；未收录的命令一律保留。
+
+过滤必须排在前缀匹配之前。反过来写的话，打 `/` 时的全量与打 `/d` 后的结果来自两个不同的集合，
+用户会看到「先出现、后消失」的条目。已敲完的完整命令名仍能执行，只是不再提示。
+
+### 44.3 工具行：从两行开关到单行圆片
+
+原实现是「启用」开关一行、启用后再挂一行「异步执行」开关。
+两个 `Switch` 外观完全相同且上下相邻，看起来像同一个设置被重复了一次。
+
+改版后每个工具占一行：左侧名称与中文描述，右侧是「同步 / 异步」两段圆片与启用开关。
+第一版在描述下面又加了一行英文工具名（便于和服务端字段对账），模拟器实测每行从 3 行文字
+堆到 4 行，比原来的两行开关还高，与「更清爽」的目标相反，因此删掉。
+
+两处实现细节值得记下：
+
+1. **整行不能挂 `clickable`。** 行内已有圆片与开关两个可点区域，
+   再给整行加点击后，点圆片时事件会同时落到两处，异步设置会被启用开关顺手改掉。
+   关闭态的点击区域靠开关本身。
+2. **圆片用 `selectable` 而非 `clickable`。** `clickable` 生成的语义节点不带选中态，
+   `uiautomator dump` 里 `checked` 与 `selected` 都是 `false`，读屏也念不出当前选的是哪一个。
+   改成 `selectable(selected, role = Role.RadioButton)` 后节点才带状态。
+
+圆片只在工具启用时出现，与「关掉的工具不会被执行」一致。实测关闭工具后该行圆片消失
+（radio 节点 20 → 18），行随之上移。
+
+### 44.4 新增环境变量复用 PATCH 的合并语义
+
+服务端没有 `POST /api/envs`。新增走 `PATCH /api/envs`：`store.py` 的 `update_env_vars`
+是 `{**old, **updates}`，提交一个此前不存在的 key 即等于创建，未提交的已有项不受影响，
+响应返回合并后的全量列表。客户端已有的 `saveEnvs(Map)` 直接可用，不必加接口方法。
+
+2.2.2.post1 上实测的四条响应：
+
+| 请求体 | 结果 |
+| --- | --- |
+| `{"QA_PROBE_VAR":"probe-1"}` | 200，返回全量列表 |
+| `{"qa_probe_var":"x"}` | 400 `Environment variable names conflict: QA_PROBE_VAR, qa_probe_var` |
+| `{"1BAD":"x"}` | 400 `Invalid environment variable name: 1BAD` |
+| `{"qwenpaw_x":"y"}` | 400 `QwenPaw environment variable must be uppercase: qwenpaw_x` |
+| `{"QWENPAW_LLM_MAX_RETRIES":"5"}` | 400 `Environment variable is read-only: …` |
+
+本地校验与之逐条对应，但**只读判定排在重名判定之前**。
+`catalog` 列出全部 17 个内置项（含未配置的），先查重会让只读项得到「已存在」这句无用提示，
+用户看不出它其实是被服务端锁住的。与已有项比对按 `uppercase()`，
+服务端就是大小写不敏感查重的。
+
+**未配置的内置可写项允许新增。** 这类项在 `catalog` 里有、在 `vars` 里没有，
+「新增」是覆盖其默认值的唯一入口；把它们当成重名挡掉，那两个 `hot_runtime`
+变量就永远只能停在默认值。已配置的内置项仍按重名拦下，应当去编辑原值。
+
+界面入口放在已配置卡片内部、列表最后一项之后，与「添加实例」同一写法。
+**空列表时也要有入口**——一个变量都没有的实例，这是唯一的添加路径。
+
+### 44.5 模拟器启动失败：蓝牙模拟器阻塞
+
+本轮模拟器连续六次卡在 QEMU 初始化，日志报
+`detected a hanging thread 'QEMU2 CPU0 thread'. No response for ~19s`，
+进程随后在 `-gpu off`、`-no-snapshot`、`-wipe-data` 下均以段错误退出。
+
+排查过程与结论：
+
+- `emulator -accel-check` 报 KVM 可用，`/dev/kvm` 可读写。
+- 卡住期间 `lsmod` 里 `kvm` 的引用计数为 0，说明虚拟机根本没有开始执行；
+  抓 `/proc/<pid>/task/*/wchan`，CPU 线程停在 `futex_wait_queue`，不是缺页或 IO。
+- `-accel off`（纯 TCG 软件模拟）同样卡住，**排除 KVM**。
+- 日志末尾的 `Unable to connect to packet streamer, no bluetooth emulation available`
+  是唯一指向具体子系统的线索；`netsim_stderr.log` 显示
+  `DeviceActor: Startup timeout reached (no devices connected), initiating shutdown`。
+- 加 `-feature -BluetoothEmulation` 后一次启动成功，59 秒内 boot 完成。
+
+**这台机器此后启动模拟器必须带 `-feature -BluetoothEmulation`**，
+否则会误判成 AVD 损坏而反复擦除数据。AGENTS.md 第 3.1 节的启动命令已按此更新。
+
+期间还有一次干扰：19:03 的 `app.slice` 被 OOM killer 杀掉，当时 Gradle daemon
+与模拟器同时在跑。按第 1 节的约束，构建与模拟器应当串行。
+
+### 44.6 验证范围与未覆盖项
+
+单测 518 个全通过（54 个测试文件），本轮新增 21 例：
+中文命令表 5 例、工具表 4 例、新增变量校验 9 例、候选过滤 3 例。
+
+模拟器（qp35 + 容器 `10.10.0.211:8088`）上验证了 debug 包：
+
+- 斜杠候选只列「控制 / 对话」两组，描述全为中文；`/c` 得 checkpoint / clear / compact；
+  `/du` 无候选，`dump_history` 已隐藏。
+- 工具页 32 个工具按「未分类」列出，名称与描述为中文；点「异步」后服务端
+  `async_execution` 变 true，点「同步」变回 false；关闭工具后圆片消失。
+- 环境变量页空列表下仍有「添加变量」入口；对话框无输入直接点「保存」显示「请输入变量名」；
+  在服务端新增 `QA_UI_TEST` 后重新进入页面，显示「1 项」、值以圆点遮罩、带「删除」。
+
+**未覆盖：对话框内的文字注入。** `adb input text` 与逐字 `keyevent` 都进不了
+Compose 对话框里的 `OutlinedTextField`：点击后 `dumpsys input_method` 的 `mServedView`
+仍是主窗口的 `AndroidComposeView`，文字被送到底层页面。用既有的编辑对话框做对照实验，
+同样输不进去，而且点击「显示」时对话框被静默关掉——说明这是模拟器与 Compose 对话框的
+注入兼容问题，与本轮新增无关，与 43.9 记录的是同一类。
+因此「填写名称后保存成功」这条路径只在服务端侧验证过，界面上验证的是入口、
+空名校验与新增后的列表渲染。
+
+release 包已重建：四个 ABI 齐全，签名 `CN=QwenPaw Node` 验证通过。
+
+### 44.7 收尾
+
+测试数据已清理：删除 `QA_PROBE_VAR` 与 `QA_UI_TEST`；工具启用与异步状态按实测基线逐项核对
+（`mismatch none`）；卸载测试包、关闭模拟器、停掉容器内服务并确认 8088 释放。
+
+`PATCH /api/tools/{name}/toggle` 是**取反**语义，不是设置目标值。还原时误按「设为启用」的
+思路调用，把一批本就启用的工具关掉了；正确做法是先读当前状态，只对与基线不一致的项取反。
+设置异步走 `/async-execution`，body 是 `{"async_execution": bool}`，
+写成 `{"enabled": bool}` 会得到 422。
+
+结论落点：端点与校验规则 → [protocol.md](protocol.md) 第 22 节；
+工具行与候选列表的形态约定 → [ui-guidelines.md](ui-guidelines.md) 9.7、9.15；
+模拟器启动参数 → [AGENTS.md](../AGENTS.md) 第 3.1 节；
 用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) v0.1.4。
 
 ---

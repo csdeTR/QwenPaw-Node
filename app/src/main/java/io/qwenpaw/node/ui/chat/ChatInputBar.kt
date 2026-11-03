@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import io.qwenpaw.node.ui.CommandCopy
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 底部输入区：全宽多行输入，下面一行是附件、模型名、语音和发送。 */
@@ -96,7 +97,7 @@ fun ChatInputBar(
     // 正在输入命令时给出候选。要求输入框有焦点：失去焦点后列表还挂着会盖住页面。
     val token = if (focused) slashToken(draft) else null
     val candidates = remember(token, commands) {
-        if (token == null) emptyList() else visibleCommands(commands, token)
+        if (token == null) emptyList() else presentableCommands(commands, token)
     }
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -258,7 +259,7 @@ private fun SlashCommandCandidates(
         groupByCategory(commands).forEach { (category, items) ->
             if (category.isNotBlank()) {
                 Text(
-                    text = category,
+                    text = CommandCopy.category(category),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp),
@@ -276,9 +277,12 @@ private fun SlashCommandCandidates(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    if (cmd.description.isNotBlank()) {
+                    // 本地表优先：服务端给的是英文，未收录的命令（插件、技能）才用它兜底。
+                    val description = CommandCopy.description(cmd.name)
+                        ?: cmd.description
+                    if (description.isNotBlank()) {
                         Text(
-                            text = cmd.description,
+                            text = description,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

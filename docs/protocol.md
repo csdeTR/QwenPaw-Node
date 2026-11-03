@@ -1124,6 +1124,11 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 `config_values` 里的密码类字段已被服务端替换成 `***`。那是占位符不是真值，
 原样提交会把密钥写成三个星号，客户端必须当作空处理。
 
+**`toggle` 是取反，不是设置目标值。** 批量还原状态时若按「设为启用」的思路调用，
+会把本就启用的工具逐个关掉；正确做法是先读当前状态，只对与目标不一致的项取反。
+设置异步走 `/async-execution`，body 必须是 `{"async_execution": bool}`，
+写成 `{"enabled": bool}` 会得到 422。
+
 ### 环境变量
 
 | 方法 | 路径 | 说明 |
@@ -1144,6 +1149,33 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 **内置变量不能删除，只能重置。** 对 `catalog` 里出现过的 key 调 DELETE 返回
 400 `Known variable must be reset`；客户端因此只给内置变量提供「恢复默认」。
 `catalog` 里 `editable=false` 的项连编辑都不允许。
+
+#### 新增环境变量
+
+**没有 `POST /api/envs`。** 新增走 `PATCH /api/envs`：`store.py` 的 `update_env_vars`
+是 `{**old, **updates}`，提交一个此前不存在的 key 即等于创建，未提交的已有项不受影响，
+响应返回合并后的全量列表。用 `PUT` 会整体替换，省略的 key 会被删掉，不能用于新增。
+
+`envs.py` 的 `_validate_updates` 与 `registry.py` 的校验依次为：
+
+| 规则 | 实现位置 | 违反时 |
+| --- | --- | --- |
+| key 只含 `[A-Za-z0-9_]`，首字符不能是数字 | `registry.py:16` | 400 `Invalid environment variable name: {key}` |
+| `QWENPAW_` 前缀必须全大写 | `registry.py:199-212` | 400 `QwenPaw environment variable must be uppercase: {key}` |
+| `editable=false` 的内置项 | `registry.py:199-212` | 400 `Environment variable is read-only: {key}` |
+| 与已有项大小写不敏感重名 | `envs.py:52-71` | 400 `Environment variable names conflict: {a}, {b}` |
+| 内置 number / float 项的值格式 | `registry.py:215-230` | 400 `Invalid float value for {key}` 等 |
+
+未知 key 与 `value_type == "string"` 的项**不校验内容**，key 与 value 都没有长度上限。
+提交前服务端只对 key 做 `strip()`，value 原样保存。
+
+客户端在本地做前四条校验，措辞按中文给出；本地拦不住的（例如新增的 key 恰好是
+内置数值型变量、值格式不符）仍然提交，由服务端的 `detail` 显示回页面。
+只读判定排在重名判定之前：`catalog` 列出全部 17 个内置项（含未配置的），
+先查重会让只读项得到「已存在」这句无用提示。
+
+**未配置的内置可写项允许新增**，这是覆盖其默认值的唯一入口；
+已配置的内置项仍按重名拦下，应去编辑原值。
 
 ### 后台策略
 
