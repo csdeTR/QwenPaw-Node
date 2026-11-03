@@ -1129,6 +1129,13 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 设置异步走 `/async-execution`，body 必须是 `{"async_execution": bool}`，
 写成 `{"enabled": bool}` 会得到 422。
 
+**`category` 只在插件工具上有意义。** 内置工具的 `category` 为 `null`，
+`icon` 服务端下发的是 emoji（如 `🔧`）。官方 Console 的界面分组与图标都不依赖这两个字段：
+它有一张 `TOOL_PRESENTATION` 静态表（`console/assets/toolPresentation-*.js`），
+按 `name` 给出分组与一个 lucide 组件；只有 `source_plugin_id` 非空的工具才用 `category`，
+且 `category` 不在 `files / web / media / agents / runtime / migration` 之列时归入 `other`。
+客户端照此表实现，见 `docs/ui-guidelines.md` 9.16。
+
 ### 环境变量
 
 | 方法 | 路径 | 说明 |
@@ -1148,7 +1155,26 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 
 **内置变量不能删除，只能重置。** 对 `catalog` 里出现过的 key 调 DELETE 返回
 400 `Known variable must be reset`；客户端因此只给内置变量提供「恢复默认」。
-`catalog` 里 `editable=false` 的项连编辑都不允许。
+`catalog` 里 `editable=false` 的项连编辑都不允许。实测对
+`QWENPAW_LLM_MAX_RETRIES` 发 `PATCH` 返回 400 `Environment variable is read-only: …`。
+
+**`catalog` 的元素形状**（`app/routers/envs.py:31-43`，2.2.2.post1 实测 17 项）：
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `effective_value` | 字符串 | 当前生效值：已配置取落盘值，否则取进程环境变量，再否则取默认值 |
+| `source` | `user` / `system` / `default` | 与上一列的选择顺序一一对应 |
+| `default` | 字符串 | 代码默认值 |
+| `editable` | 布尔 | 等价于 `mutability == "hot_runtime"` |
+| `mutability` | `hot_runtime` / `startup_only` | 17 项中只有 `QWENPAW_LLM_STREAM_FIRST_CONTENT_TIMEOUT` 与 `QWENPAW_LLM_STREAM_IDLE_TIMEOUT` 是 `hot_runtime` |
+| `readonly_reason_code` | `startup` / `initial_default` / `agent_owned` / `null` | 来源 `envs/registry.py:112-136`；可热改项为 `null` |
+| `configured` | 布尔 | 该 key 是否已落盘 |
+| `description_key` | 字符串 | i18n 键名，服务端不提供译文正文 |
+
+`startup_only` 的 15 项里，`QWENPAW_WORKING_DIR` 与 `QWENPAW_SECRET_DIR` 属于
+`_PROTECTED_BOOTSTRAP_KEYS`（`envs/registry.py:181`）：`store.py:362` 在把落盘值注入环境时
+会跳过它们，因此 `PATCH` 虽然能写进文件，重启后也不会覆盖启动时的值。
+这两个目录必须先于配置加载确定，只能由启动命令的进程环境变量给出。
 
 #### 新增环境变量
 

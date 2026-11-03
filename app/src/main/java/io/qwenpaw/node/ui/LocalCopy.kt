@@ -98,6 +98,7 @@ internal object ToolCopy {
     /**
      * 分类名 → 中文。
      *
+     * 分组归属由 `ToolGrouping.kt` 按官方静态表决定，这里只负责把组键翻成中文。
      * Console 的分组键是 `files` / `web` / `media` / `agents` / `runtime` / `migration`，
      * 服务端下发的 `category` 实测为空（插件工具才有值），因此这里同时收了单数写法。
      */

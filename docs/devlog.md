@@ -56,6 +56,7 @@
 | [42](#42插件版本号与探测改由插件自述2026-11-03) | 插件独立版本号、探测改打 `/info`、新增 0.2.2 | 未注册的插件路径 404 而非 SPA HTML；`/api/plugins` 不在鉴权白名单 | [protocol.md](protocol.md) 第 19 节、[待办清单.md](../待办清单.md) 0.2.1、0.2.2 |
 | [43](#43阶段-1-起步与主体合并发版2026-11-03) | 分页骨架、频道筛选、斜杠补全、上下标字号、收件箱、工具/环境变量/后台策略 | 497 个单测；`tools` 的 `config_fields` 实测为 `null`；M3 的 `MaterialTheme` 自带 `ProvideTextStyle(bodyLarge)` | [protocol.md](protocol.md) 第 20–22 节、[ui-guidelines.md](ui-guidelines.md) 8.7、[CHANGELOG.md](../CHANGELOG.md) |
 | [44](#44v014-收尾中文文案与工具行形态2026-11-03) | 命令与工具中文化、工具行改单行圆片、环境变量新增 | 518 个单测；中文只在 Console 打包产物里；模拟器须关蓝牙模拟；`toggle` 是取反语义 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.7、9.15、[AGENTS.md](../AGENTS.md) 第 3.1 节、[CHANGELOG.md](../CHANGELOG.md) |
+| [45](#45工具分组与环境变量三段2026-11-03) | 工具按官方静态表分组、emoji 换 lucide、环境变量三段常驻与二次确认 | 534 个单测；`category` 对内置工具为 `null`；catalog 17 项里只有 2 项可热改 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.16、[guide.md](guide.md) 第 2 节 |
 
 ---
 
@@ -3903,6 +3904,104 @@ release 包已重建：四个 ABI 齐全，签名 `CN=QwenPaw Node` 验证通过
 工具行与候选列表的形态约定 → [ui-guidelines.md](ui-guidelines.md) 9.7、9.15；
 模拟器启动参数 → [AGENTS.md](../AGENTS.md) 第 3.1 节；
 用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) v0.1.4。
+
+---
+
+## 45、工具分组与环境变量三段（2026-11-03）
+
+### 45.1 工具分组不能照抄服务端的 `category`
+
+设置页的工具列表此前按 `groupBy { it.category }` 分组，结果页面上只有「未分类」一组。
+原因是内置工具的 `category` 实测为 `null`，只有插件工具才带值。
+
+官方 Console 不依赖这个字段。`console/assets/toolPresentation-*.js` 里有一张静态表
+`TOOL_PRESENTATION`，按工具名给出分组与图标；归属函数 `toolGroup(e)` 的写法是
+「`source_plugin_id` 非空就用 `category`，否则查表」，`category` 不在六个已知组里时一并归入 `other`。
+客户端照此把规则搬进 `ui/settings/ToolGrouping.kt`，组顺序固定为
+`files / web / media / agents / runtime / migration / other`，空组不输出。
+
+服务端下发的 33 个工具里有 32 个在表内；`view_audio` 不在，按 `view_video` 的语体归入 `media`。
+插件工具仍按 `category` 走，未识别的分类落到「未分类」，与官方一致。
+
+### 45.2 图标从 emoji 换成 lucide 0.562.0
+
+`ToolDto.icon` 由服务端下发，值是 emoji（例如 `🔧`）。它与 `QwenIcons` 里那套线性图标
+字宽不同、基线不齐，深色模式下的对比度也不可控。
+
+官方表里每一项都引用了一个 lucide 组件。打包产物把注释与名字都保留了下来
+（`Ne("file-text", …)` 一类），因此可以把 25 个组件的 path 数据逐个还原。
+版本是 **0.562.0**，比 `QwenIcons` 原有的 0.400.0 新，个别图标几何有变化
+（例如 `send` 从三角形改成了纸飞机形）。聊天页的发送键仍用旧几何，
+新表里的同名图标另起名 `sendPlane`，避免改到无关界面。
+
+`QwenIcons` 的图标从 59 个增至 78 个（新增 19 个），`ToolGrouping.kt` 的 `TOOL_ICONS`
+完成工具名到图标的映射。
+未收录的工具用 `QwenIcons.wrench` 兜底。模拟器上逐个核对过：读取文件是带文字的文档、
+写入文件是带加号的文档、编辑文件是带笔的文档、查找文件是带放大镜的文件夹、
+发送文件是纸飞机、搜索代码结构是四角框加放大镜，与官方页一致。
+
+### 45.3 环境变量三段：已配置、实时配置、只读配置
+
+`GET /api/envs` 只返回「已显式保存」的项，默认返回空数组，因此新装实例的环境变量页
+此前是一条列表为空、下面一大段说明的界面，看不出服务端还有哪些可调项。
+官方页常驻「实时配置」与「只读配置」两段，内容来自 `GET /api/envs/catalog`。
+
+实测 2.2.2.post1 的 catalog 共 17 项，`mutability` 为 `hot_runtime` 的只有
+`QWENPAW_LLM_STREAM_FIRST_CONTENT_TIMEOUT` 与 `QWENPAW_LLM_STREAM_IDLE_TIMEOUT`，
+其余 15 项是 `startup_only`。分段直接按这个字段做，不另立名单。
+
+**同一项会在两段同时出现。** 可热改的项一经修改就会进入 `GET /api/envs`，
+于是「已配置」与「实时配置」里都会有它。取舍是保留两处：已配置段是落盘清单，
+实时配置段是服务端声明的可改项，两者的含义不同。为了让关系可见，
+已配置段的这类行挂「实时配置」小标签，实时配置段已改过的行挂「已修改」。
+
+对 `QWENPAW_LLM_MAX_RETRIES` 实测发 `PATCH` 返回
+400 `Environment variable is read-only: …`，与 `editable=false` 的声明一致。
+
+### 45.4 只读项的说明文案有两处来源
+
+官方语言包里只给了两条流式超时项的 `description`，
+`mutabilityDescription.startup_only` 则是那句「仅供查看，QwenPaw 运行期间不能修改。」，
+与需求里的提示语一字不差，因此直接沿用。
+其余 15 个只读项的描述与修改方式按 `constant.py`、`config/config.py`、`envs/registry.py`
+的读取位置逐条补写，放在 `ui/settings/EnvCatalogCopy.kt`，文件头注明这部分是客户端自撰。
+
+**`_PROTECTED_BOOTSTRAP_KEYS` 的含义要读准。** 一开始把它理解成「客户端写不进去」，
+实测并非如此：`store.py:362` 只是在把落盘值注入进程环境时跳过这两个键，
+`PATCH` 仍会写进文件。准确的说法是「落盘可以，但重启后不会覆盖启动值」。
+最终只对 `QWENPAW_WORKING_DIR` 与 `QWENPAW_SECRET_DIR` 写「只能通过启动时的进程环境变量设置」，
+`CONFIG_FILE` / `JOBS_FILE` / `CHATS_FILE` 归入普通的「重启后生效」。
+
+### 45.5 二次确认复用既有弹窗
+
+`ui/common/DestructiveAction.kt` 的 `DestructiveActionDialog` 已经用于会话删除，
+列出「将影响哪些对象」并要求确认。删除环境变量直接复用。
+「恢复默认」同样需要确认，但它不销毁数据，确认按钮若沿用错误色会让人以为后果更重，
+因此给该组件加了一个 `confirmDanger: Boolean = true` 参数，恢复默认传 `false`。
+其余调用方不传，行为不变。
+
+### 45.6 验证
+
+单测 534 个全部通过（新增 `ToolGroupingTest` 10 个、`EnvCatalogCopyTest` 6 个，
+`QwenIconsTest` 补了 20 个图标）。模拟器上连 `qp-test`（10.10.0.211:8088）核对：
+
+- 工具页分组依次为文件与代码 8 个、网页与浏览器 3 个、智能体协作 6 个、
+  运行与自动化 6 个、应用迁移 5 个，图标与官方页一致；
+- 环境变量页三段常驻，实时配置 2 项、只读配置 15 项；
+- 点开 `QWENPAW_LLM_MAX_RETRIES` 显示提示语、当前值 3、默认值 3、来源「默认」、
+  只读原因「仅作为 Agent 配置的初始化默认值」、说明与修改方式；
+- 删除 QPN_TEST_KEY 与恢复默认 QWENPAW_LLM_STREAM_IDLE_TIMEOUT 都先出确认框；
+  取消后 `GET /api/envs` 不变，确认后服务端同步变更。
+
+**离开子页再进入时不会重新拉取**：`loadEnvs` 在没有 `force` 时直接返回已缓存状态，
+因此服务端侧新增的变量需要重启应用或下拉刷新才能看到。本轮未改动这个行为，验收时按此操作。
+
+release 包重建通过，四个 ABI 齐全，签名 `CN=QwenPaw Node` 验证通过。
+测试数据已清理（`GET /api/envs` 现为空数组），模拟器关闭，Gradle 与 Kotlin 守护进程已停。
+
+结论落点：分组与图标的实现约定 → [ui-guidelines.md](ui-guidelines.md) 9.16；
+catalog 字段与只读语义 → [protocol.md](protocol.md) 第 22 节；
+用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) 未发布、[guide.md](guide.md) 第 2 节。
 
 ---
 

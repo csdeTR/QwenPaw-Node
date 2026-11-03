@@ -2,7 +2,6 @@ package io.qwenpaw.node.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -29,13 +29,21 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
+import io.qwenpaw.node.ui.common.DestructiveActionDialog
+
+/** 服务端 `mutability` 取值，可热改的那一类。 */
+private const val HOT_RUNTIME = "hot_runtime"
 
 /**
  * 环境变量。
  *
- * **值默认遮罩。** 服务端 `GET /api/envs` 返回明文（落盘加密、读时解密），
+ * 页面按官方控制台的结构常驻三段：已配置、实时配置、只读配置。
+ * 前两段的值默认遮罩——服务端 `GET /api/envs` 返回明文（落盘加密、读时解密），
  * 局域网里任何能连上实例的人都能看到；客户端若不遮罩，等于把密钥摊在屏幕上。
- * 只有点开某一项才显示，离开页面状态即丢弃，再次进入又回到遮罩。
+ * 只读项不含用户密钥，且用户点进来往往正是为了核对值，因此在弹窗里直接显示明文。
+ *
+ * 删除与恢复默认都走二次确认：这两个动作一旦误触，密钥会直接消失或被打回默认值，
+ * 而服务端没有回收站。
  */
 @Composable
 internal fun EnvironmentsSection(
@@ -52,8 +60,13 @@ internal fun EnvironmentsSection(
     var revealed by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<EnvVarDto?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<EnvVarDto?>(null) }
+    var pendingReset by remember { mutableStateOf<EnvVarDto?>(null) }
+    var viewingReadonly by remember { mutableStateOf<EnvCatalogDto?>(null) }
 
     val specByKey = remember(catalog) { catalog.associateBy { it.key } }
+    val liveSpecs = remember(catalog) { catalog.filter { it.mutability == HOT_RUNTIME } }
+    val readonlySpecs = remember(catalog) { catalog.filter { it.mutability != HOT_RUNTIME } }
 
     Column(
         modifier = modifier
@@ -75,12 +88,13 @@ internal fun EnvironmentsSection(
                     EnvRow(
                         envVar = v,
                         editable = spec?.editable ?: true,
+                        live = spec != null && spec.mutability == HOT_RUNTIME,
                         revealed = revealed == v.key,
                         onToggleReveal = { revealed = if (revealed == v.key) null else v.key },
                         onEdit = { editing = v },
-                        onReset = { onReset(v.key) },
+                        onReset = { pendingReset = v },
                         // 内置变量只能重置：DELETE 会返回 400「Known variable must be reset」。
-                        onDelete = { onDelete(v.key) }.takeIf { spec == null },
+                        onDelete = { pendingDelete = v }.takeIf { spec == null },
                         resetLabel = if (spec != null) "恢复默认" else null,
                     )
                     Divider()
@@ -89,10 +103,53 @@ internal fun EnvironmentsSection(
             ActionRow(text = "添加变量", onClick = { adding = true })
         }
 
+        SectionHeader("实时配置", trailing = "改完即生效")
+        Card {
+            if (liveSpecs.isEmpty()) {
+                Text(
+                    text = if (loading) "正在加载" else "服务端没有提供可实时修改的配置",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
+                )
+            } else {
+                liveSpecs.forEachIndexed { index, spec ->
+                    LiveEnvRow(
+                        spec = spec,
+                        configured = vars.any { it.key == spec.key },
+                        revealed = revealed == spec.key,
+                        onToggleReveal = { revealed = if (revealed == spec.key) null else spec.key },
+                        onEdit = {
+                            editing = EnvVarDto(key = spec.key, value = spec.effectiveValue)
+                        },
+                    )
+                    if (index != liveSpecs.lastIndex) Divider()
+                }
+            }
+        }
+
+        SectionHeader("只读配置", trailing = "仅供查看")
+        Card {
+            if (readonlySpecs.isEmpty()) {
+                Text(
+                    text = if (loading) "正在加载" else "服务端没有提供只读配置",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
+                )
+            } else {
+                readonlySpecs.forEachIndexed { index, spec ->
+                    ReadonlyEnvRow(spec = spec, onClick = { viewingReadonly = spec })
+                    if (index != readonlySpecs.lastIndex) Divider()
+                }
+            }
+        }
+
         SectionHeader("说明")
         Text(
-            text = "这里的值会注入服务端进程的环境变量。新变量用下方「添加变量」新建；" +
-                "内置变量不能删除，只能恢复默认；标为只读的项由服务端控制，客户端不提供修改。",
+            text = "新变量用「已配置」下方的「添加变量」新建，提交后写入服务端进程的环境变量。" +
+                "实时配置在每次操作开始时读取，修改后立即生效；只读配置在启动时确定，" +
+                "点开可以查看当前值、说明与修改方式。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp),
@@ -131,6 +188,193 @@ internal fun EnvironmentsSection(
             },
         )
     }
+
+    pendingDelete?.let { target ->
+        DestructiveActionDialog(
+            title = "删除环境变量",
+            message = "删除后服务端进程将不再读到这个变量。",
+            impacts = listOf(target.key, "当前值：${maskValue(target.value)}"),
+            confirmLabel = "删除",
+            onConfirm = {
+                onDelete(target.key)
+                pendingDelete = null
+            },
+            onDismiss = { pendingDelete = null },
+        )
+    }
+
+    pendingReset?.let { target ->
+        DestructiveActionDialog(
+            title = "恢复默认",
+            message = "恢复后这一项将回到系统值或代码默认值。",
+            impacts = listOf(target.key, "当前值：${maskValue(target.value)}"),
+            confirmLabel = "恢复默认",
+            confirmDanger = false,
+            onConfirm = {
+                onReset(target.key)
+                pendingReset = null
+            },
+            onDismiss = { pendingReset = null },
+        )
+    }
+
+    viewingReadonly?.let { spec ->
+        ReadonlyEnvDialog(spec = spec, onDismiss = { viewingReadonly = null })
+    }
+}
+
+/**
+ * 实时配置的一行。整行可点，点击编辑；值默认遮罩，点值才显示。
+ *
+ * `configured` 为真说明这一项已被用户改过，它同时也会出现在「已配置」里。
+ * 两处都显示是刻意的：已配置段反映落盘的完整清单，这一段列出服务端声明的可改项，
+ * 内容不随改动增删，便于对照。
+ */
+@Composable
+private fun LiveEnvRow(
+    spec: EnvCatalogDto,
+    configured: Boolean,
+    revealed: Boolean,
+    onToggleReveal: () -> Unit,
+    onEdit: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onEdit)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = spec.key,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (configured) {
+                    Spacer(Modifier.width(6.dp))
+                    MiniTag("已修改")
+                }
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = if (revealed) spec.effectiveValue else maskValue(spec.effectiveValue),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable(onClick = onToggleReveal),
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        SmallAction(text = "编辑", onClick = onEdit)
+    }
+}
+
+/**
+ * 只读配置的一行。整行可点，打开详情弹窗。
+ *
+ * 值不做遮罩：这些项由服务端在启动时确定，不含用户密钥。
+ */
+@Composable
+private fun ReadonlyEnvRow(spec: EnvCatalogDto, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = spec.key,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = if (spec.effectiveValue.isEmpty()) "（空）" else spec.effectiveValue,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "查看",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+    }
+}
+
+/** 只读项的详情弹窗：提示语、当前值、说明与修改方式。 */
+@Composable
+private fun ReadonlyEnvDialog(spec: EnvCatalogDto, onDismiss: () -> Unit) {
+    val copy = envSpecCopy(spec.key)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(spec.key, style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column {
+                Text(
+                    text = READONLY_HINT,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                DetailLine("当前值", if (spec.effectiveValue.isEmpty()) "（空）" else spec.effectiveValue)
+                DetailLine("默认值", if (spec.default.isEmpty()) "（空）" else spec.default)
+                DetailLine("来源", envSourceText(spec.source))
+                readonlyReasonText(spec.readonlyReasonCode)?.let { DetailLine("只读原因", it) }
+                DetailLine("说明", copy?.description ?: "服务端暂未提供说明。")
+                DetailLine("修改方式", copy?.howToModify ?: "由服务端控制，客户端不提供修改。")
+            }
+        },
+        confirmButton = {
+            Text(
+                text = "关闭",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier
+                    .clickable(onClick = onDismiss)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        },
+    )
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Row(modifier = Modifier.padding(vertical = 3.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(64.dp),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** 行内的小标签，用于标明「实时配置」「已修改」这类状态。 */
+@Composable
+private fun MiniTag(text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
 }
 
 /**
@@ -164,7 +408,7 @@ private fun EnvAddDialog(
         if (validateNewEnvKey(key, existing, catalog) == null) onSave(key, valueText)
     }
 
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("添加变量", style = MaterialTheme.typography.titleMedium) },
         text = {
@@ -279,6 +523,7 @@ internal fun validateNewEnvKey(
 private fun EnvRow(
     envVar: EnvVarDto,
     editable: Boolean,
+    live: Boolean,
     revealed: Boolean,
     onToggleReveal: () -> Unit,
     onEdit: () -> Unit,
@@ -294,11 +539,18 @@ private fun EnvRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = envVar.key,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = envVar.key,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                // 标记这一项同时出现在下方「实时配置」段里，避免用户以为两处是不同变量。
+                if (live) {
+                    Spacer(Modifier.width(6.dp))
+                    MiniTag("实时配置")
+                }
+            }
             Spacer(Modifier.height(3.dp))
             Text(
                 text = if (revealed) envVar.value else maskValue(envVar.value),
@@ -348,7 +600,7 @@ private fun EnvEditDialog(
     var text by remember(envVar.key) { mutableStateOf(envVar.value) }
     var visible by remember(envVar.key) { mutableStateOf(false) }
 
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(envVar.key, style = MaterialTheme.typography.titleMedium) },
         text = {

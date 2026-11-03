@@ -31,6 +31,9 @@ import io.qwenpaw.node.ui.theme.QwenIcons
  * [undoable] 为真时才在按钮上写「撤销窗口」，用来区分「删了还能回来」与「删了就没了」。
  * 服务端的 DELETE 类端点没有回收站，因此这类调用方必须传 false，
  * 不能为了让文案好看而承诺一个做不到的撤销。
+ *
+ * [confirmDanger] 为 false 时确认按钮改用常规强调色。恢复默认一类的操作同样需要
+ * 二次确认，但它不销毁数据，标成红色会让用户以为后果比实际更重。
  */
 @Composable
 fun DestructiveActionDialog(
@@ -39,6 +42,7 @@ fun DestructiveActionDialog(
     impacts: List<String> = emptyList(),
     confirmLabel: String = "删除",
     undoable: Boolean = false,
+    confirmDanger: Boolean = true,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -101,7 +105,14 @@ fun DestructiveActionDialog(
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text(text = confirmLabel, color = MaterialTheme.colorScheme.error)
+                Text(
+                    text = confirmLabel,
+                    color = if (confirmDanger) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.secondary
+                    },
+                )
             }
         },
         dismissButton = {

@@ -342,4 +342,185 @@ object QwenIcons {
     val listBullet: ImageVector by lazy {
         icon("listBullet", "M8 6L21 6", "M8 12L21 12", "M8 18L21 18", "M3 6L3.01 6", "M3 12L3.01 12", "M3 18L3.01 18")
     }
+
+    // ---- 以下图标取自 lucide 0.562.0，用于工具页，与官方控制台 TOOL_PRESENTATION 同源 ----
+
+    /** lucide `file-pen-line`。 */
+    val filePen: ImageVector by lazy {
+        icon(
+            "filePen",
+            "m18.226 5.226-2.52-2.52A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-.351",
+            "M21.378 12.626a1 1 0 0 0-3.004-3.004l-4.01 4.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z",
+            "M8 18h1",
+        )
+    }
+
+    /** lucide `file-plus-corner`。 */
+    val filePlus: ImageVector by lazy {
+        icon(
+            "filePlus",
+            "M11.35 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v5.35",
+            "M14 2v5a1 1 0 0 0 1 1h5",
+            "M14 19h6",
+            "M17 16v6",
+        )
+    }
+
+    /** lucide `scan-search`。 */
+    val scanSearch: ImageVector by lazy {
+        icon(
+            "scanSearch",
+            "M3 7V5a2 2 0 0 1 2-2h2",
+            "M17 3h2a2 2 0 0 1 2 2v2",
+            "M21 17v2a2 2 0 0 1-2 2h-2",
+            "M7 21H5a2 2 0 0 1-2-2v-2",
+            "M9 12A3 3 0 1 0 15 12A3 3 0 1 0 9 12Z",
+            "m16 16-1.9-1.9",
+        )
+    }
+
+    /** lucide `mail-check`。 */
+    val mailCheck: ImageVector by lazy {
+        icon(
+            "mailCheck",
+            "M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h8",
+            "m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7",
+            "m16 19 2 2 4-4",
+        )
+    }
+
+    /** lucide `layers`。 */
+    val layers: ImageVector by lazy {
+        icon(
+            "layers",
+            "M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z",
+            "M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12",
+            "M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17",
+        )
+    }
+
+    /** lucide `blocks`。 */
+    val blocks: ImageVector by lazy {
+        icon(
+            "blocks",
+            "M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2",
+            "M14 2H22A1 1 0 0 1 23 3V11A1 1 0 0 1 22 12H14A1 1 0 0 1 13 11V3A1 1 0 0 1 14 2Z",
+        )
+    }
+
+    /** lucide `gauge`。 */
+    val gauge: ImageVector by lazy {
+        icon("gauge", "m12 14 4-4", "M3.34 19a10 10 0 1 1 17.32 0")
+    }
+
+    /** lucide `send`（0.562 几何）。与聊天页的 [send] 并行存在，后者沿用旧几何。 */
+    val sendPlane: ImageVector by lazy {
+        icon(
+            "sendPlane",
+            "M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z",
+            "m21.854 2.147-10.94 10.939",
+        )
+    }
+
+    /** lucide `list-checks`。 */
+    val listChecks: ImageVector by lazy {
+        icon(
+            "listChecks",
+            "M13 5h8",
+            "M13 12h8",
+            "M13 19h8",
+            "m3 17 2 2 4-4",
+            "m3 7 2 2 4-4",
+        )
+    }
+
+    /** lucide `messages-square`。 */
+    val messagesSquare: ImageVector by lazy {
+        icon(
+            "messagesSquare",
+            "M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
+            "M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1",
+        )
+    }
+
+    /** lucide `users`。 */
+    val users: ImageVector by lazy {
+        icon(
+            "users",
+            "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
+            "M16 3.128a4 4 0 0 1 0 7.744",
+            "M22 21v-2a4 4 0 0 0-3-3.87",
+            "M5 7A4 4 0 1 0 13 7A4 4 0 1 0 5 7Z",
+        )
+    }
+
+    /** lucide `panels-top-left`。 */
+    val panelsTopLeft: ImageVector by lazy {
+        icon(
+            "panelsTopLeft",
+            "M3 3H21A2 2 0 0 1 23 5V19A2 2 0 0 1 21 21H3A2 2 0 0 1 1 19V5A2 2 0 0 1 3 3Z",
+            "M3 9h18",
+            "M9 21V9",
+        )
+    }
+
+    /** lucide `workflow`。 */
+    val workflow: ImageVector by lazy {
+        icon(
+            "workflow",
+            "M3 3H11A2 2 0 0 1 13 5V11A2 2 0 0 1 11 13H3A2 2 0 0 1 1 11V5A2 2 0 0 1 3 3Z",
+            "M7 11v4a2 2 0 0 0 2 2h4",
+            "M13 13H21A2 2 0 0 1 23 15V21A2 2 0 0 1 21 23H13A2 2 0 0 1 11 21V15A2 2 0 0 1 13 13Z",
+        )
+    }
+
+    /** lucide `image`。 */
+    val image: ImageVector by lazy {
+        icon(
+            "image",
+            "M3 3H21A2 2 0 0 1 23 5V19A2 2 0 0 1 21 21H3A2 2 0 0 1 1 19V5A2 2 0 0 1 3 3Z",
+            "M7 9A2 2 0 1 0 11 9A2 2 0 1 0 7 9Z",
+            "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21",
+        )
+    }
+
+    /** lucide `monitor`。 */
+    val monitor: ImageVector by lazy {
+        icon(
+            "monitor",
+            "M2 3H22A2 2 0 0 1 24 5V17A2 2 0 0 1 22 19H2A2 2 0 0 1 0 17V5A2 2 0 0 1 2 3Z",
+            "M8 21L16 21",
+            "M12 17L12 21",
+        )
+    }
+
+    /** lucide `folder-search`。 */
+    val folderSearch: ImageVector by lazy {
+        icon(
+            "folderSearch",
+            "M10.7 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v4.1",
+            "m21 21-1.9-1.9",
+            "M14 17A3 3 0 1 0 20 17A3 3 0 1 0 14 17Z",
+        )
+    }
+
+    /** lucide `terminal`。 */
+    val terminal: ImageVector by lazy {
+        icon("terminal", "M12 19h8", "m4 17 6-6-6-6")
+    }
+
+    /** lucide `check-check`。 */
+    val checkCheck: ImageVector by lazy {
+        icon("checkCheck", "M18 6 7 17l-5-5", "m22 10-7.5 7.5L13 16")
+    }
+
+    /** lucide `volume-2`。用于 `view_audio`，官方分组表未收录该工具。 */
+    val volume: ImageVector by lazy {
+        icon(
+            "volume",
+            "M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z",
+            "M16 9a5 5 0 0 1 0 6",
+            "M19.364 18.364a9 9 0 0 0 0-12.728",
+        )
+    }
 }

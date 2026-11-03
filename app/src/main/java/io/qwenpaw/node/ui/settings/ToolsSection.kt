@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -56,11 +58,8 @@ internal fun ToolsSection(
     onSaveConfig: (String, Map<String, String>) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
-    // 按分类分组，保持服务端顺序；没有分类的排在最后。
-    val grouped = remember(tools) {
-        tools.groupBy { it.category.orEmpty() }.toList()
-            .sortedBy { (category, _) -> if (category.isBlank()) 1 else 0 }
-    }
+    // 按官方控制台的分组表分组；服务端下发的 `category` 对内置工具为空，不能直接用。
+    val grouped = remember(tools) { groupTools(tools) }
     // 正在编辑配置的工具。`requires_config` 为真但没有字段定义的工具不进这里：
     // 那是服务端声明了配置却没有下发规格，客户端没有可填的东西。
     var configuring by remember { mutableStateOf<ToolDto?>(null) }
@@ -178,15 +177,23 @@ private fun ToolRow(
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val titleColor = if (tool.enabled) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        Icon(
+            imageVector = toolIcon(tool),
+            contentDescription = null,
+            tint = titleColor,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "${tool.icon} $title",
+                text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (tool.enabled) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                color = titleColor,
             )
             if (subtitle.isNotBlank()) {
                 Text(

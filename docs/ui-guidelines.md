@@ -767,6 +767,7 @@ minSdk 是 26，两条分支都必须留。静态 PNG 与 GIF 走同一个 `Asyn
 界面图标全部取自 `io.qwenpaw.node.ui.theme.QwenIcons`，几何图形源自 lucide 0.400.0
 （ISC 许可）。选它的依据是官方 Console 用 `lucide-react`：`ui-vendor` 打包产物里
 该库出现 232 次，同一套图形才能让两端的线宽与圆角看起来一致。
+工具页的 19 个图标取自同一套库的 0.562.0，理由见 9.16。
 
 构建方式是统一参数：24×24 视口、2px 描边、圆头端与圆角接、`fill = null`。
 描边色恒为 `Color.Black`，由 `Icon(tint = …)` 的 ColorFilter 整体替换，
@@ -852,3 +853,35 @@ minSdk 是 26，两条分支都必须留。静态 PNG 与 GIF 走同一个 `Asyn
 `ui/LocalCopy.kt` 的 `CommandCopy` 与 `ToolCopy`，未收录的条目回退到服务端原文
 （插件工具、技能命令走这条）。服务端没有 i18n 接口，译文只能从 Console 打包产物摘取，
 因此这是一份静态数据，不随服务端版本自动更新。
+
+### 9.16 工具分组与图标、环境变量页的三段结构
+
+**工具分组按官方静态表，不按服务端 `category`。** `GET /api/tools` 的内置工具
+`category` 实测为 `null`，照它分组会把 33 个工具全部塞进「未分类」。
+官方 Console 的规则是：`source_plugin_id` 非空的插件工具用 `category`，
+内置工具查 `toolPresentation-*.js` 的 `TOOL_PRESENTATION`。
+客户端把这份表照搬到 `ui/settings/ToolGrouping.kt` 的 `TOOL_GROUP_OF`，
+组顺序固定为 `files / web / media / agents / runtime / migration / other`，空组不输出。
+服务端新增内置工具且未收录时落入「未分类」，不影响其它组的渲染。
+
+**工具行的图标是 lucide，不再用服务端下发的 emoji。** 官方 `TOOL_PRESENTATION`
+每项带一个 lucide 组件（0.562.0），客户端逐个还原成 `QwenIcons` 里的等价 path
+（转换规则见 9.12），由 `ToolGrouping.kt` 的 `TOOL_ICONS` 映射到工具名。
+未收录的工具用 `QwenIcons.wrench` 兜底。`view_audio` 在官方表里没有条目，
+按语义取 `volume-2`。DTO 的 `icon` 字段仍照常解析，只是不再展示。
+
+**环境变量页常驻三段：已配置、实时配置、只读配置。** 分段依据是 catalog 的
+`mutability`：`hot_runtime` 的两项进「实时配置」，`startup_only` 的 15 项进「只读配置」。
+「已配置」仍是 `GET /api/envs` 落盘的完整清单，因此被改过的实时项会在两段同时出现；
+已配置段给这类行挂「实时配置」小标签，实时配置段给 `configured=true` 的行挂「已修改」，
+让两处的关系可见，而不是当成重复项删掉其中一处。
+
+**只读项整行可点，弹窗直接显示明文。** 只读项不含用户密钥，用户点进来是为了核对值。
+弹窗首句固定为「仅供查看，QwenPaw 运行期间不能修改。」（与官方 `startup_only` 文案一致），
+下面列当前值、默认值、来源、只读原因、说明与修改方式。
+说明文案见 `ui/settings/EnvCatalogCopy.kt`：官方只提供了两条流式超时项，
+其余按 `qwenpaw/constant.py` 与 `config/config.py` 的读取位置补写，属于客户端自撰。
+
+**删除与恢复默认都走二次确认。** 复用 `ui/common/DestructiveAction.kt` 的
+`DestructiveActionDialog`，列出变量名与遮罩后的当前值。恢复默认不是销毁数据的操作，
+通过 `confirmDanger = false` 让确认按钮用强调色而不是错误色。
