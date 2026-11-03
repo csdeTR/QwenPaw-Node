@@ -886,4 +886,93 @@ curl -s http://10.10.0.220:8088/api/version
    [待办清单.md](../待办清单.md) 对应条目里写明「2.3.0 起服务端已移除」，
    并注明最后一次可用版本，避免下一轮重新设计。
 3. 只有新版本有、旧版本没有（如插件管理）：**接入，旧版本上按 404 说明不支持**，
-   不做功能降级。
+   不做功能降级。「说明不支持」时给安装指引而不是「去启用」——插件被禁用后
+   与未安装不可区分，见第 19 节。
+
+---
+
+## 19、插件探测
+
+客户端需要判断服务端有没有装配套插件（`qwenpaw-node-bridge`），并据此决定
+功能入口是禁用还是走替代路径。本节记录 2026-11-03 在两个容器上的实测。
+
+### 端点与两版差异
+
+| 方法与路径 | 2.2.2.post1 | 2.3.0b2 |
+| --- | --- | --- |
+| `GET /api/plugins` | 200，数组 | 200，数组，多 `status` 与 `diagnostics` |
+| `GET /api/plugins/{id}/status` | 200 `{id, loaded, enabled, version}` | 200，同上并多 `status` |
+| `GET /api/plugins/{id}` | **404，该路由不存在** | 200 |
+| `POST /api/plugins/{id}/enabled` | **不存在** | 存在，body `{enabled, interrupt_tasks}` |
+| `GET /api/plugins/{id}/config` | 404（只有 PUT） | 404（只有 PUT） |
+| `GET /api/plugins/{id}/enabled` | 404（只有 POST） | 404（只有 POST） |
+
+列表元素形状（2.2 实测）：
+
+```json
+{"id":"qwenpaw-hub","name":"QwenPaw Hub","version":"1.0.0","description":"...",
+ "author":"QwenPaw Team","enabled":true,"loaded":true,"plugin_type":"hub",
+ "frontend_entry":null}
+```
+
+2.3.0b2 在同一形状上多出 `status: "active"` 与 `diagnostics: []`。
+源码见 `qwenpaw/app/routers/plugins.py` 的 `list_plugins` 与 `get_plugin_status`。
+
+### 判定规则
+
+**以 `GET /api/plugins` 查固定 id，`loaded == true` 才算可用**；
+2.3 上再加 `status == "active"`。三条不能用：
+
+1. **不能只看 `enabled`。** loader 尚未初始化时走磁盘扫描（`_list_plugins_from_disk`），
+   返回 `enabled: true, loaded: false`。把它当「已启用」会让界面在启动竞态时误判。
+2. **不用 `GET /api/plugins/{id}`。** 该路由在 2.2.2.post1 不存在（404），
+   2.3.0b2 才有（200）。用它做判定会让稳定版上所有插件都显示为未安装，
+   而 2.2 恰恰是当前基线版本。
+3. **不能比 `qwenpaw_version`。** 列表响应不含该字段，`plugin.json` 里的
+   `qwenpaw_version.min` 只在安装校验时由服务端读取
+   （`plugins/loader.py` 载入 manifest 后交给 `PluginApi`），不回传到列表。
+
+### 禁用与未安装不可区分
+
+禁用插件的方式是把目录改名加 `.disabled` 后缀，发现阶段直接跳过
+（`plugins/loader.py` 的 `_is_disabled_plugin_dir`）。实测：把 `clawhub-hub` 改名为
+`clawhub-hub.disabled` 后，运行中的实例仍报告 `loaded: true`——已加载的实例在内存里，
+要重启才生效；重启后列表只剩 3 个插件，`GET /api/plugins/clawhub-hub/status`
+返回 404 `Plugin 'clawhub-hub' not found.`，与从未安装的表现完全相同。
+
+因此客户端只设「已检测到」与「未检测到」两态。对未检测到的情况给安装指引，
+**不要给「去启用」**——对 2.2 而言禁用的插件没有可用的启用开关，
+把用户引过去只会看到一个不存在的入口。
+
+### 插件能力自述
+
+因为客户端拿不到版本约束，插件自己暴露能力清单：
+
+```
+GET /api/plugins/node-bridge/info
+{"plugin_version":"1.0.0","protocol_version":1,"capabilities":["search","sse","push"]}
+```
+
+客户端按 capability 名开关功能，不按插件版本推断。端点挂在插件自己的 router 上
+（`api.register_http_router(prefix="/plugins/node-bridge")`），返回 404 即视为不可用。
+`protocol_version` 用于将来契约变更时拒绝不兼容的旧插件。
+
+**这条形状是两端约定的草案，尚未实现，也没有实测。** 上面三条判定规则、
+禁用态的表现与两版端点差异来自实测；`/info` 的字段名与 capability 取值由本仓库
+与插件仓库共同商定，落地前不属于「已实测」的内容。插件实现后需补齐一次真实响应
+到本节，并把「草案」二字去掉。
+
+### 回归方法
+
+```bash
+# 两版都应返回 200 与数组
+curl -s http://10.10.0.211:8088/api/plugins | head -c 200
+curl -s http://10.10.0.220:8088/api/plugins | head -c 200
+
+# 已装 / 未装的标准对照
+curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/status
+curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-node-bridge/status
+```
+
+测禁用态时改完目录必须重启服务端（`screen -S qwenpaw -X quit` 后重开），
+否则内存里的实例仍报告已加载。测完把目录名改回去再重启一次。
