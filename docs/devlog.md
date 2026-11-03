@@ -4001,7 +4001,7 @@ release 包重建通过，四个 ABI 齐全，签名 `CN=QwenPaw Node` 验证通
 
 结论落点：分组与图标的实现约定 → [ui-guidelines.md](ui-guidelines.md) 9.16；
 catalog 字段与只读语义 → [protocol.md](protocol.md) 第 22 节；
-用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) 未发布、[guide.md](guide.md) 第 2 节。
+用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) v0.1.4、[guide.md](guide.md) 第 2 节。
 
 ---
 
