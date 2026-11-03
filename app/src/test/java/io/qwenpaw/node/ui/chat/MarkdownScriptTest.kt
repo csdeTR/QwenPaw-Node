@@ -1,7 +1,9 @@
 package io.qwenpaw.node.ui.chat
 
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.unit.TextUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -26,6 +28,68 @@ class MarkdownScriptTest {
 
     private fun italicSpans(text: String): Int =
         inline(text).spanStyles.count { it.item.fontStyle == FontStyle.Italic }
+
+    /** 取出下标 span 的字号。没有字号 span 时返回 null，便于断言「未缩」这类回归。 */
+    private fun subscriptSize(text: String, base: Float = 16f): TextUnit? =
+        inline(text, baseSize = base).spanStyles
+            .firstOrNull { it.item.baselineShift == BaselineShift.Subscript }
+            ?.item?.fontSize
+
+    private fun superscriptSize(text: String, base: Float = 16f): TextUnit? =
+        inline(text, baseSize = base).spanStyles
+            .firstOrNull { it.item.baselineShift == BaselineShift.Superscript }
+            ?.item?.fontSize
+
+    /**
+     * 下标要缩字号。
+     *
+     * 只做基线偏移不缩字号时，`H_2O` 会被读成「一个大写字符掉下去」。
+     * 0.58 与 `LatexView` 的块级上下标同源。
+     */
+    @Test
+    fun `subscript shrinks to 0_58 of base`() {
+        val size = subscriptSize("H_2O", base = 16f)!!
+        assertTrue(size.isSp)
+        assertEquals(16f * SCRIPT_SIZE_RATIO, size.value, 1e-4f)
+    }
+
+    @Test
+    fun `superscript shrinks to 0_58 of base`() {
+        val size = superscriptSize("x^2", base = 16f)!!
+        assertTrue(size.isSp)
+        assertEquals(16f * SCRIPT_SIZE_RATIO, size.value, 1e-4f)
+    }
+
+    /** 花括号写法的字母下标同样缩字号，不是只有数字那条路径。 */
+    @Test
+    fun `braced script shrinks to 0_58 of base`() {
+        val size = subscriptSize("P_{A}", base = 16f)!!
+        assertEquals(16f * SCRIPT_SIZE_RATIO, size.value, 1e-4f)
+    }
+
+    /** 三个基准各不相同，字号必须跟着传进来的基准走，而不是写死一个值。 */
+    @Test
+    fun `script size follows the given base`() {
+        assertEquals(14f * SCRIPT_SIZE_RATIO, subscriptSize("H_2O", base = 14f)!!.value, 1e-4f)
+        assertEquals(22f * SCRIPT_SIZE_RATIO, subscriptSize("H_2O", base = 22f)!!.value, 1e-4f)
+    }
+
+    /** 行内代码的字号仍按 13 × scale，改基准时不能误伤它。 */
+    @Test
+    fun `inline code keeps 13 times scale`() {
+        val code = inline("`x`", scale = 2f, baseSize = 16f).spanStyles
+            .first { it.item.fontFamily == FontFamily.Monospace }
+        assertEquals(26f, code.item.fontSize.value, 1e-4f)
+    }
+
+    /** 标题渲染字号与行内基准共用 headingSizeSp，三层各自钉住。 */
+    @Test
+    fun `heading size follows level and floors at 13`() {
+        assertEquals(20f, headingSizeSp(1, 1f), 1e-4f)
+        assertEquals(14f, headingSizeSp(4, 1f), 1e-4f)
+        assertEquals(13f, headingSizeSp(6, 1f), 1e-4f)
+        assertEquals(40f, headingSizeSp(1, 2f), 1e-4f)
+    }
 
     @Test
     fun `caret produces superscript span`() {

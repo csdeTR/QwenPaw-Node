@@ -105,6 +105,8 @@ fun ChatScreen(
     appearance: MessageAppearance = MessageAppearance(),
     /** 「选择文本」里选「显示」时，把这条消息的原始 Markdown 交给上层打开原文页。 */
     onOpenSource: (String) -> Unit = {},
+    /** 可补全的斜杠命令；空列表时不显示候选。 */
+    commands: List<io.qwenpaw.node.data.model.SlashCommandDto> = emptyList(),
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -411,6 +413,7 @@ fun ChatScreen(
                     // 胶囊本身就是「当前模型」的显示，点它是改模型的自然入口，
                     // 比让用户去右上角「...」里翻更直接。
                     onModelClick = { showModelDialog = true },
+                    commands = commands,
                     // 底部留白交给输入条自己处理：它需要把留白加在 Surface 内部，
                     // 这样底色能一直铺到屏幕底边，不会在系统栏处露出一条页面底色。
                 )

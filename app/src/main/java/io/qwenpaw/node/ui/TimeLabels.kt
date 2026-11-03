@@ -85,4 +85,30 @@ object TimeLabels {
         val days = ChronoUnit.DAYS.between(time.toLocalDate(), today)
         return if (days == 0L) time.format(timeFormatter) else time.format(shortDateFormatter)
     }
+
+    /**
+     * 浮点秒时间戳转本地时刻。
+     *
+     * 收件箱事件的 `created_at` 是服务端用 `time.time()` 写入的秒级浮点数，
+     * 不是上面那些 ISO 字符串，因此不能走 [parse]。时区显式作为参数传入，
+     * 单测才能钉住东八区的输出而不依赖运行环境的默认值。
+     */
+    fun fromEpochSeconds(seconds: Double, zone: java.time.ZoneId): ZonedDateTime? =
+        runCatching { Instant.ofEpochMilli((seconds * 1000).toLong()).atZone(zone) }.getOrNull()
+
+    /** 浮点秒时间戳的展示：今天 `HH:mm`，更早 `MM-dd`。解析失败返回空串。 */
+    fun epochStamp(seconds: Double, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+        val time = fromEpochSeconds(seconds, zone) ?: return ""
+        return relativeEpochStamp(time, zone)
+    }
+
+    /** 完整的小时分钟，供收件箱的详情行使用。 */
+    fun epochTime(seconds: Double, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+        fromEpochSeconds(seconds, zone)?.format(timeFormatter).orEmpty()
+
+    private fun relativeEpochStamp(time: ZonedDateTime, zone: java.time.ZoneId): String {
+        val today = LocalDate.now(zone)
+        val days = ChronoUnit.DAYS.between(time.toLocalDate(), today)
+        return if (days == 0L) time.format(timeFormatter) else time.format(shortDateFormatter)
+    }
 }

@@ -3,6 +3,7 @@ package io.qwenpaw.node.data.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /**
  * QwenPaw 服务端协议模型。
@@ -390,3 +391,158 @@ data class TokenUsageBucketDto(
     @SerialName("provider_id") val providerId: String? = null,
     val model: String? = null,
 )
+
+// ---------------- 收件箱 ----------------
+
+/**
+ * 收件箱事件，对应 `GET /api/console/inbox/events` 的元素。
+ *
+ * `created_at` 是**浮点秒**（服务端用 `time.time()` 写入），不是 ISO 字符串，
+ * 也不是毫秒。声明成 `Double` 后由展示层乘 1000 再格式化。
+ */
+@Serializable
+data class InboxEventDto(
+    val id: String = "",
+    @SerialName("agent_id") val agentId: String = "default",
+    @SerialName("source_type") val sourceType: String = "",
+    @SerialName("source_id") val sourceId: String = "",
+    @SerialName("event_type") val eventType: String = "",
+    val status: String = "",
+    val severity: String = "info",
+    val title: String = "",
+    val body: String = "",
+    val payload: JsonObject? = null,
+    val read: Boolean = false,
+    @SerialName("created_at") val createdAt: Double = 0.0,
+)
+
+/**
+ * 收件箱一页。
+ *
+ * 响应里**没有 `has_more`**，只有 `total`；结束判定交给 `PagedList.ofOffset`：
+ * 已取条数达到 `total` 即结束。
+ */
+@Serializable
+data class InboxPageDto(
+    val events: List<InboxEventDto> = emptyList(),
+    val total: Int = 0,
+    @SerialName("unread_count") val unreadCount: Int = 0,
+)
+
+/** 一次运行的完整轨迹，对应 `GET /api/console/inbox/traces/{run_id}`。 */
+@Serializable
+data class InboxTraceDto(
+    @SerialName("run_id") val runId: String = "",
+    /** 浮点秒。 */
+    @SerialName("created_at") val createdAt: Double = 0.0,
+    @SerialName("completed_at") val completedAt: Double? = null,
+    val status: String = "",
+    val meta: JsonObject? = null,
+    val events: List<InboxTraceEventDto> = emptyList(),
+    val error: String? = null,
+)
+
+/** 轨迹里的一条事件。`event` 是服务端原样的任意结构，这里只保留可读的文本与时间。 */
+@Serializable
+data class InboxTraceEventDto(
+    val at: Double = 0.0,
+    val event: JsonElement? = null,
+)
+
+// ---------------- 工具、环境变量与后台策略 ----------------
+
+/**
+ * 工具信息，对应 `GET /api/tools` 的元素。
+ *
+ * 注意字段名是 `config_fields` / `config_values`，**不是** `config`：
+ * 按 `config` 解析会得到空表，表现为「有配置项的工具在客户端里看不到任何输入框」。
+ * `config_values` 里的密码类字段已被服务端替换成 `***`。
+ */
+@Serializable
+data class ToolDto(
+    val name: String = "",
+    val enabled: Boolean = false,
+    @SerialName("source_plugin_id") val sourcePluginId: String? = null,
+    @SerialName("source_plugin_name") val sourcePluginName: String? = null,
+    val category: String? = null,
+    val description: String = "",
+    @SerialName("async_execution") val asyncExecution: Boolean = false,
+    val icon: String = "🔧",
+    @SerialName("requires_config") val requiresConfig: Boolean = false,
+    // 实测 2.2.2.post1 对无配置的工具返回 `"config_fields":null` / `"config_values":null`，
+    // 不是空数组/空对象。声明成非空集合会让整份工具列表解析失败。
+    @SerialName("config_fields") val configFields: List<ToolConfigFieldDto>? = null,
+    @SerialName("config_values") val configValues: Map<String, JsonElement>? = null,
+)
+
+/** 工具配置项的字段定义。`type` 取 text / password / number / boolean / select / textarea。 */
+@Serializable
+data class ToolConfigFieldDto(
+    val name: String = "",
+    val label: String = "",
+    val type: String = "text",
+    val required: Boolean = false,
+    val placeholder: String? = null,
+    val help: String? = null,
+    // 实测 2.2.2.post1：非 select 类型的字段返回 `"options":null`，
+    // 不是空数组。声明成非空集合会让整份工具列表解析失败，页面显示「没有可用的工具」。
+    val options: List<String>? = null,
+    val default: JsonElement? = null,
+    val min: Double? = null,
+    val max: Double? = null,
+)
+
+/** 一个已显式配置的环境变量。**`value` 是明文**，展示层必须默认遮罩。 */
+@Serializable
+data class EnvVarDto(
+    val key: String = "",
+    val value: String = "",
+)
+
+/**
+ * 环境变量的规格元数据，对应 `GET /api/envs/catalog`。
+ *
+ * 内置变量不可删除，只能重置；`editable=false` 的项连编辑都不允许。
+ */
+@Serializable
+data class EnvCatalogDto(
+    val key: String = "",
+    val default: String = "",
+    @SerialName("effective_value") val effectiveValue: String = "",
+    val source: String = "default",
+    @SerialName("description_key") val descriptionKey: String = "",
+    val editable: Boolean = true,
+    @SerialName("value_type") val valueType: String = "string",
+    @SerialName("readonly_reason_code") val readonlyReasonCode: String? = null,
+    val mutability: String = "hot_runtime",
+    val configured: Boolean = false,
+)
+
+/** 后台策略，对应 `GET|PUT /api/settings/offload-policy`。 */
+@Serializable
+data class OffloadPolicyDto(
+    @SerialName("default_action") val defaultAction: String = "keep_foreground",
+)
+
+/** 一条可补全的斜杠命令，对应 `GET /api/workspace/commands/available` 的元素。 */
+@Serializable
+data class SlashCommandDto(
+    val name: String = "",
+    val description: String = "",
+    /** 分类；服务端允许空串，此时界面按「未分类」处理。 */
+    val category: String = "",
+)
+
+/**
+ * 命令列表响应。
+ *
+ * 服务端实测返回 `{"commands":[...]}`；`items` 只是兼容位——响应形状没有实测记录时，
+ * 两种键名都能解析比只认一种更稳，代价是一个几乎不会用到的字段。
+ */
+@Serializable
+data class AvailableCommandsDto(
+    val commands: List<SlashCommandDto> = emptyList(),
+    val items: List<SlashCommandDto> = emptyList(),
+) {
+    val all: List<SlashCommandDto> get() = commands.ifEmpty { items }
+}

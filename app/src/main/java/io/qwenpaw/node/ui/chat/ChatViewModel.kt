@@ -83,6 +83,8 @@ data class ChatUiState(
     val boundUrl: String = "",
     /** 该地址的显示名：有别名用别名，否则是地址本身。 */
     val boundLabel: String = "",
+    /** 可补全的斜杠命令。空列表表示未拉到或服务端没有命令，界面不显示候选。 */
+    val slashCommands: List<io.qwenpaw.node.data.model.SlashCommandDto> = emptyList(),
     /**
      * 实例显示名（设置里的「服务器名称」）。
      *
@@ -371,6 +373,22 @@ class ChatViewModel(
         // 审批模式与工作区目录都挂在智能体上，换实例就要重新读一遍。
         refreshAgent(conn.agentId)
         refreshProjectDir()
+        refreshCommands()
+    }
+
+    /**
+     * 拉取可补全的斜杠命令。
+     *
+     * **失败时静默，不写 error。** 补全缺失不影响用户手打命令，弹一条错误只会
+     * 打断正在输入的人；这是本类里唯一不向 `state.error` 记录失败的路径。
+     * 空列表与「没有命令」等价，界面据此不显示候选。
+     */
+    fun refreshCommands() {
+        val conn = currentConnection ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.availableCommands(conn) } }
+                .onSuccess { list -> _state.update { it.copy(slashCommands = list) } }
+        }
     }
 
     // ---------------- 列表 ----------------

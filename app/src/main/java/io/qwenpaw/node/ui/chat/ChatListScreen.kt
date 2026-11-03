@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -77,6 +79,10 @@ fun ChatListScreen(
     onOpenArchived: () -> Unit = {},
     onOpenTokenUsage: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    /** 打开收件箱。 */
+    onOpenInbox: () -> Unit = {},
+    /** 收件箱未读数；0 时不显示角标。 */
+    inboxUnread: Int = 0,
     /**
      * 今天是否还要为归档弹确认框。
      *
@@ -120,6 +126,9 @@ fun ChatListScreen(
     var archiveTipChecked by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
+    // 频道筛选只在列表页有效，不持久化：换服务器或换智能体后旧频道可能根本不存在，
+    // 记住它会让用户进入列表看到空页却找不到原因。
+    var channel by remember { mutableStateOf<String?>(null) }
 
     // 分组管理：新建 / 长按表头弹出的菜单。
     var creatingGroup by remember { mutableStateOf(false) }
@@ -133,10 +142,21 @@ fun ChatListScreen(
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var confirmBatch by remember { mutableStateOf<BatchAction?>(null) }
 
-    val filtered = remember(chats, query) {
+    // 候选从完整列表算，不能从切片结果算：否则选中后候选退化成单个，控件直接消失。
+    val channels = remember(chats) { channelCandidates(chats) }
+    val showChannelFilter = remember(channels) { shouldShowChannelFilter(channels) }
+
+    // 刷新可能删掉某渠道的最后一个会话，残留的选中值会让列表变成空页。
+    LaunchedEffect(channels) {
+        if (!channelStillValid(channel, channels)) channel = null
+    }
+
+    // 顺序是「先按频道切片，再在切片里搜索」：用户看某个渠道时的搜索预期是在该渠道内找，
+    // 反过来会跨频道命中，而列表头显示的是频道切片，容易对不上。
+    val filtered = remember(chats, query, channel) {
+        val inChannel = filterByChannel(chats, channel)
         val q = query.trim()
-        if (q.isEmpty()) chats
-        else chats.filter { it.name.contains(q, ignoreCase = true) }
+        if (q.isEmpty()) inChannel else inChannel.filter { it.name.contains(q, ignoreCase = true) }
     }
 
     // 搜索时强制不分组：分组会把命中的对话拆到多个表头下，反而更难扫读。
@@ -183,11 +203,17 @@ fun ChatListScreen(
                 onOpenSettings = onOpenSettings,
                 onOpenArchived = onOpenArchived,
                 onOpenTokenUsage = onOpenTokenUsage,
+                onOpenInbox = onOpenInbox,
+                inboxUnread = inboxUnread,
                 archivedCount = archivedCount,
                 selecting = selecting,
                 selectedCount = selected.size,
                 groupMode = groupMode,
                 onGroupMode = { onGroupMode(groupMode.next()) },
+                channels = channels,
+                showChannelFilter = showChannelFilter,
+                channel = channel,
+                onChannel = { channel = it },
                 onCreateGroup = {
                     groupNameText = ""
                     creatingGroup = true
@@ -284,13 +310,21 @@ fun ChatListScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = if (query.isBlank()) "还没有对话" else "没有匹配的对话",
+                        text = when {
+                            chats.isEmpty() -> "还没有对话"
+                            query.isNotBlank() -> "没有匹配的对话"
+                            else -> "该频道没有对话"
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = if (query.isBlank()) "点击下方按钮即可新建对话" else "请更换关键词后重试",
+                        text = when {
+                            chats.isEmpty() -> "点击下方按钮即可新建对话"
+                            query.isNotBlank() -> "请更换关键词后重试"
+                            else -> "请切换到「全部」或其它频道"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -712,6 +746,8 @@ private fun ListHeader(
     onOpenSettings: () -> Unit,
     onOpenArchived: () -> Unit,
     onOpenTokenUsage: () -> Unit,
+    onOpenInbox: () -> Unit = {},
+    inboxUnread: Int = 0,
     archivedCount: Int,
     selecting: Boolean = false,
     selectedCount: Int = 0,
@@ -721,6 +757,13 @@ private fun ListHeader(
     onCreateGroup: () -> Unit = {},
     onToggleSelecting: () -> Unit = {},
     onSelectAll: () -> Unit = {},
+    /** 频道候选（已去重排序）。 */
+    channels: List<String> = emptyList(),
+    /** 候选多于一个才显示筛选行。 */
+    showChannelFilter: Boolean = false,
+    /** 当前选中的频道，null 表示全部。 */
+    channel: String? = null,
+    onChannel: (String?) -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -778,6 +821,29 @@ private fun ListHeader(
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 Spacer(Modifier.weight(1f))
+                // 收件箱入口。有未读时叠一个数字角标，没有时不额外占位。
+                Box(contentAlignment = Alignment.TopEnd) {
+                    IconButtonCell(
+                        icon = QwenIcons.bell,
+                        description = if (inboxUnread > 0) "收件箱 $inboxUnread 条未读" else "收件箱",
+                        onClick = onOpenInbox,
+                    )
+                    if (inboxUnread > 0) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 2.dp, end = 2.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.error)
+                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                        ) {
+                            Text(
+                                text = if (inboxUnread > 99) "99+" else "$inboxUnread",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onError,
+                            )
+                        }
+                    }
+                }
                 if (archivedCount > 0) {
                     IconButtonCell(
                         icon = QwenIcons.packageIcon,
@@ -916,7 +982,52 @@ private fun ListHeader(
                     }
                 }
             }
+            // 频道筛选只在候选多于一个时出现：只有一个渠道的实例上这一行不该占位置。
+            if (showChannelFilter) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // 候选不设上限时不换行，横向滚动比撑高顶栏更可控。
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    ChannelChip(label = "全部", selected = channel == null) { onChannel(null) }
+                    channels.forEach { name ->
+                        ChannelChip(label = name, selected = channel == name) { onChannel(name) }
+                    }
+                }
+            }
         }
+    }
+}
+
+/** 频道筛选胶囊。视觉配方与分组按钮一致，选中态改用次要容器色。 */
+@Composable
+private fun ChannelChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surface,
+            )
+            .border(
+                1.dp,
+                if (selected) MaterialTheme.colorScheme.secondary
+                else MaterialTheme.colorScheme.outlineVariant,
+                RoundedCornerShape(10.dp),
+            )
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
     }
 }
 

@@ -144,6 +144,8 @@ fun SettingsScreen(
     /** 消息底部操作行样式。 */
     actionStyle: io.qwenpaw.node.ui.chat.ActionStyle = io.qwenpaw.node.ui.chat.ActionStyle.TEXT,
     onActionStyle: (io.qwenpaw.node.ui.chat.ActionStyle) -> Unit = {},
+    /** 工具、环境变量与后台策略的状态与动作。为 null 时三个入口不显示。 */
+    config: SettingsConfig? = null,
 ) {
     var adding by remember { mutableStateOf(false) }
     // 添加实例的两种方式：null 表示在方式选择页，否则是具体形态。
@@ -427,6 +429,54 @@ fun SettingsScreen(
                             onClick = { section = SettingsPage.LOGS },
                         )
                     }
+                    // 三张配置表单都改的是服务端状态，挂在独立的「服务端配置」下，
+                    // 避免与「此手机」里的本机偏好混在一起。
+                    if (config != null) {
+                        SectionHeader("服务端配置")
+                        Card {
+                            NavRow(
+                                icon = QwenIcons.wrench,
+                                title = "工具",
+                                subtitle = if (config.tools.loaded) {
+                                    "${config.tools.tools.count { it.enabled }} / ${config.tools.tools.size} 个已启用"
+                                } else {
+                                    "开关与异步执行"
+                                },
+                                onClick = {
+                                    config.onLoadTools()
+                                    section = SettingsPage.TOOLS
+                                },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.zap,
+                                title = "环境变量",
+                                subtitle = if (config.envs.loaded) {
+                                    "${config.envs.vars.size} 项已配置"
+                                } else {
+                                    "读写服务端环境变量"
+                                },
+                                onClick = {
+                                    config.onLoadEnvs()
+                                    section = SettingsPage.ENVIRONMENTS
+                                },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.clock,
+                                title = "后台策略",
+                                subtitle = if (config.offload.action == OFFLOAD) {
+                                    "工具超时后转入后台"
+                                } else {
+                                    "工具超时后直接中止"
+                                },
+                                onClick = {
+                                    config.onLoadOffload()
+                                    section = SettingsPage.OFFLOAD
+                                },
+                            )
+                        }
+                    }
                     SectionHeader("关于")
                     Card {
                         NavRow(
@@ -704,6 +754,44 @@ fun SettingsScreen(
                     }
                 }
 
+                SettingsPage.TOOLS -> {
+                    config?.let { c ->
+                        ToolsSection(
+                            tools = c.tools.tools,
+                            loading = c.tools.loading,
+                            error = c.tools.error,
+                            onToggle = c.onToggleTool,
+                            onAsync = c.onToolAsync,
+                            onSaveConfig = c.onSaveToolConfig,
+                        )
+                    }
+                }
+
+                SettingsPage.ENVIRONMENTS -> {
+                    config?.let { c ->
+                        EnvironmentsSection(
+                            vars = c.envs.vars,
+                            catalog = c.envs.catalog,
+                            loading = c.envs.loading,
+                            error = c.envs.error,
+                            onSave = c.onSaveEnvs,
+                            onDelete = c.onDeleteEnv,
+                            onReset = c.onResetEnv,
+                        )
+                    }
+                }
+
+                SettingsPage.OFFLOAD -> {
+                    config?.let { c ->
+                        OffloadPolicySection(
+                            action = c.offload.action,
+                            loading = c.offload.loading,
+                            error = c.offload.error,
+                            onAction = c.onSetOffload,
+                        )
+                    }
+                }
+
                 SettingsPage.ABOUT -> {
                 Card {
                     Column(modifier = Modifier.padding(14.dp)) {
@@ -820,6 +908,9 @@ internal enum class SettingsPage {
     ADD_FORM,
     ADD_WIZARD,
     EDIT,
+    TOOLS,
+    ENVIRONMENTS,
+    OFFLOAD,
 }
 
 /**
@@ -844,8 +935,33 @@ private fun sectionTitle(section: SettingsPage): String = when (section) {
     SettingsPage.BEHAVIOR -> "通知与行为"
     SettingsPage.LOGS -> "运行日志"
     SettingsPage.ABOUT -> "关于"
+    SettingsPage.TOOLS -> "工具"
+    SettingsPage.ENVIRONMENTS -> "环境变量"
+    SettingsPage.OFFLOAD -> "后台策略"
     else -> "设置"
 }
+
+/**
+ * 三张配置表单的状态与动作。
+ *
+ * 打包成一个参数而不是十几个回调：三者都挂在同一个 ViewModel 上，
+ * 生命周期与加载时机一致，拆开只会让调用方多写十几行转发。
+ */
+data class SettingsConfig(
+    val tools: ToolsUiState = ToolsUiState(),
+    val envs: EnvsUiState = EnvsUiState(),
+    val offload: OffloadUiState = OffloadUiState(),
+    val onLoadTools: () -> Unit = {},
+    val onToggleTool: (String) -> Unit = {},
+    val onToolAsync: (String, Boolean) -> Unit = { _, _ -> },
+    val onSaveToolConfig: (String, Map<String, String>) -> Unit = { _, _ -> },
+    val onLoadEnvs: () -> Unit = {},
+    val onSaveEnvs: (Map<String, String>) -> Unit = {},
+    val onDeleteEnv: (String) -> Unit = {},
+    val onResetEnv: (String) -> Unit = {},
+    val onLoadOffload: () -> Unit = {},
+    val onSetOffload: (String) -> Unit = {},
+)
 
 /** 一级列表「服务器」行的副标题：当前实例名与地址，没有实例时如实说明。 */
 private fun serverSummary(instances: List<InstanceConfig>, activeId: String?): String {
@@ -972,7 +1088,7 @@ private fun ModelRow(
 }
 
 @Composable
-private fun SectionHeader(title: String, trailing: String? = null) {
+internal fun SectionHeader(title: String, trailing: String? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -996,7 +1112,7 @@ private fun SectionHeader(title: String, trailing: String? = null) {
 }
 
 @Composable
-private fun Card(content: @Composable () -> Unit) {
+internal fun Card(content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1062,7 +1178,7 @@ private fun NavRow(
 }
 
 @Composable
-private fun Divider() {
+internal fun Divider() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1674,7 +1790,7 @@ private fun openUrl(context: android.content.Context, url: String) {
 }
 
 @Composable
-private fun SwitchRow(
+internal fun SwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,

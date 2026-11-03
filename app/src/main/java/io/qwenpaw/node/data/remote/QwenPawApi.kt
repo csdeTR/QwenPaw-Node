@@ -7,27 +7,37 @@ import io.qwenpaw.node.data.model.ApprovalDto
 import io.qwenpaw.node.data.model.ApprovalListDto
 import io.qwenpaw.node.data.model.AuthStatusDto
 import io.qwenpaw.node.data.model.AuthTokenDto
+import io.qwenpaw.node.data.model.AvailableCommandsDto
 import io.qwenpaw.node.data.model.BatchChatResultDto
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.data.model.ChatStatusDto
+import io.qwenpaw.node.data.model.EnvCatalogDto
+import io.qwenpaw.node.data.model.EnvVarDto
+import io.qwenpaw.node.data.model.InboxPageDto
+import io.qwenpaw.node.data.model.InboxTraceDto
 import io.qwenpaw.node.data.model.ModelPoolDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
+import io.qwenpaw.node.data.model.OffloadPolicyDto
 import io.qwenpaw.node.data.model.ProviderDto
 import io.qwenpaw.node.data.model.ProjectDirDto
 import io.qwenpaw.node.data.model.PushMessagesDto
+import io.qwenpaw.node.data.model.SlashCommandDto
 import io.qwenpaw.node.data.model.ThinkingViewDto
 import io.qwenpaw.node.data.model.TokenUsageDto
+import io.qwenpaw.node.data.model.ToolDto
 import io.qwenpaw.node.data.model.UploadResultDto
 import io.qwenpaw.node.data.model.VersionDto
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -376,6 +386,18 @@ class QwenPawApi(
         )
     }
 
+    /**
+     * 当前智能体可用的斜杠命令。
+     *
+     * 命令注册表挂在智能体上，端点走 `X-Agent-Id` 归属（`baseBuilder` 已统一注入）。
+     * 注册表为空时返回空数组，不是 404。
+     */
+    fun availableCommands(conn: Connection): List<SlashCommandDto> =
+        decode(
+            request(conn, "GET", "/api/workspace/commands/available"),
+            AvailableCommandsDto.serializer(),
+        ).all
+
     /** token 用量汇总。 */
     fun tokenUsage(conn: Connection, startDate: String? = null, endDate: String? = null): TokenUsageDto {
         val query = buildList {
@@ -384,6 +406,161 @@ class QwenPawApi(
         }.joinToString("&")
         val path = if (query.isBlank()) "/api/token-usage" else "/api/token-usage?$query"
         return decode(request(conn, "GET", path), TokenUsageDto.serializer())
+    }
+
+    // ---------- 收件箱 ----------
+
+    /**
+     * 收件箱事件一页。
+     *
+     * 响应没有 `has_more`，只有 `total`；分页结束判定交给 `PagedList.ofOffset`。
+     */
+    fun inboxEvents(
+        conn: Connection,
+        limit: Int = 50,
+        offset: Int = 0,
+        unreadOnly: Boolean = false,
+    ): InboxPageDto {
+        val query = buildList {
+            add("limit=$limit")
+            add("offset=$offset")
+            if (unreadOnly) add("unread_only=true")
+        }.joinToString("&")
+        return decode(
+            request(conn, "GET", "/api/console/inbox/events?$query"),
+            InboxPageDto.serializer(),
+        )
+    }
+
+    /**
+     * 标记已读。
+     *
+     * `all` 为 true 时服务端忽略 `event_ids`，整批标记；返回实际更新条数。
+     */
+    fun markInboxRead(conn: Connection, eventIds: List<String> = emptyList(), all: Boolean = false): Int {
+        val body = buildJsonObject {
+            if (all) {
+                put("all", true)
+            } else {
+                putJsonArray("event_ids") { eventIds.forEach { add(it) } }
+            }
+        }
+        val raw = request(conn, "POST", "/api/console/inbox/read", body)
+        return json.parseToJsonElement(raw).jsonObject["updated"]?.toString()?.toIntOrNull() ?: 0
+    }
+
+    /** 删除单条事件。事件不存在时服务端返回 404。 */
+    fun deleteInboxEvent(conn: Connection, eventId: String) {
+        request(conn, "DELETE", "/api/console/inbox/events/$eventId")
+    }
+
+    /** 该次运行的完整轨迹。轨迹不存在时服务端返回 404。 */
+    fun inboxTrace(conn: Connection, runId: String): InboxTraceDto =
+        decode(
+            request(conn, "GET", "/api/console/inbox/traces/$runId"),
+            InboxTraceDto.serializer(),
+        )
+
+    // ---------- 环境变量 ----------
+
+    /**
+     * 已显式配置的环境变量。
+     *
+     * **返回值是明文**：服务端只在落盘时加密，读取时透明解密。展示层必须默认遮罩。
+     */
+    fun envVars(conn: Connection): List<EnvVarDto> =
+        decode(
+            request(conn, "GET", "/api/envs"),
+            kotlinx.serialization.builtins.ListSerializer(EnvVarDto.serializer()),
+        )
+
+    /**
+     * 合并保存若干变量，不删除未提交的项。
+     *
+     * 端点是集合级的 `PATCH /api/envs`，body 是扁平对象 `{"KEY":"value"}`，
+     * 不是 `{"key":..,"value":..}` 的数组。
+     */
+    fun patchEnvVars(conn: Connection, values: Map<String, String>): List<EnvVarDto> {
+        val body = buildJsonObject { values.forEach { (k, v) -> put(k, v) } }
+        return decode(
+            request(conn, "PATCH", "/api/envs", body),
+            kotlinx.serialization.builtins.ListSerializer(EnvVarDto.serializer()),
+        )
+    }
+
+    /** 删除一个自定义变量。已登记的内置变量会返回 400，必须走 [resetEnvVar]。 */
+    fun deleteEnvVar(conn: Connection, key: String): List<EnvVarDto> =
+        decode(
+            request(conn, "DELETE", "/api/envs/$key"),
+            kotlinx.serialization.builtins.ListSerializer(EnvVarDto.serializer()),
+        )
+
+    /** 把内置变量恢复为继承值。 */
+    fun resetEnvVar(conn: Connection, key: String): List<EnvVarDto> =
+        decode(
+            request(conn, "POST", "/api/envs/$key/reset"),
+            kotlinx.serialization.builtins.ListSerializer(EnvVarDto.serializer()),
+        )
+
+    /** 环境变量规格。客户端据此判断内置变量（只能重置）与只读项。 */
+    fun envCatalog(conn: Connection): List<EnvCatalogDto> =
+        decode(
+            request(conn, "GET", "/api/envs/catalog"),
+            kotlinx.serialization.builtins.ListSerializer(EnvCatalogDto.serializer()),
+        )
+
+    // ---------- 工具 ----------
+
+    /** 工具列表。返回数组，不是 `{tools:[...]}`。 */
+    fun tools(conn: Connection): List<ToolDto> =
+        decode(
+            request(conn, "GET", "/api/tools"),
+            kotlinx.serialization.builtins.ListSerializer(ToolDto.serializer()),
+        )
+
+    /** 切换启用状态。**端点没有请求体**，服务端自行取反。 */
+    fun toggleTool(conn: Connection, name: String): ToolDto =
+        decode(
+            request(conn, "PATCH", "/api/tools/$name/toggle"),
+            ToolDto.serializer(),
+        )
+
+    /** 设置异步执行。 */
+    fun setToolAsync(conn: Connection, name: String, enabled: Boolean): ToolDto {
+        val body = buildJsonObject { put("async_execution", enabled) }
+        return decode(
+            request(conn, "PATCH", "/api/tools/$name/async-execution", body),
+            ToolDto.serializer(),
+        )
+    }
+
+    /** 读取某个工具的配置。返回的是裸配置字典，密码字段已被服务端打码。 */
+    fun toolConfig(conn: Connection, name: String): Map<String, JsonElement> {
+        val raw = request(conn, "GET", "/api/tools/$name/config")
+        return json.parseToJsonElement(raw).jsonObject
+    }
+
+    /** 保存工具配置。body 是 `{"config": {...}}`，不是扁平字典。 */
+    fun saveToolConfig(conn: Connection, name: String, values: Map<String, JsonElement>) {
+        val body = buildJsonObject { put("config", JsonObject(values)) }
+        request(conn, "POST", "/api/tools/$name/config", body)
+    }
+
+    // ---------- 后台策略 ----------
+
+    fun offloadPolicy(conn: Connection): OffloadPolicyDto =
+        decode(
+            request(conn, "GET", "/api/settings/offload-policy"),
+            OffloadPolicyDto.serializer(),
+        )
+
+    /** 设置默认动作，取值 `keep_foreground` 或 `offload`。 */
+    fun setOffloadPolicy(conn: Connection, action: String): OffloadPolicyDto {
+        val body = buildJsonObject { put("default_action", action) }
+        return decode(
+            request(conn, "PUT", "/api/settings/offload-policy", body),
+            OffloadPolicyDto.serializer(),
+        )
     }
 
     fun deleteChat(conn: Connection, chatId: String) {
@@ -571,6 +748,7 @@ class QwenPawApi(
             "GET" -> builder.get()
             "POST" -> builder.post(requestBody ?: EMPTY_BODY)
             "PUT" -> builder.put(requestBody ?: EMPTY_BODY)
+            "PATCH" -> builder.patch(requestBody ?: EMPTY_BODY)
             "DELETE" -> builder.delete()
             else -> error("不支持的方法 $method")
         }

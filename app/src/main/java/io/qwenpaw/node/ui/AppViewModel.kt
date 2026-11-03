@@ -717,6 +717,37 @@ class AppViewModel(
 
     fun chat(): ChatViewModel = chatViewModel
 
+    // ---------------- 收件箱 ----------------
+
+    // 用显式可空字段而不是 `by lazy`/普通 val：`init` 里就会调 `bind`，
+    // 那时这些属性（以及 lazy 的委托字段）都还没完成初始化。
+    private var inboxHolder: io.qwenpaw.node.ui.inbox.InboxViewModel? = null
+
+    /** 收件箱。连接在调用时现取，可能在切换实例之后才第一次被访问。 */
+    val inbox: io.qwenpaw.node.ui.inbox.InboxViewModel
+        get() = inboxHolder ?: io.qwenpaw.node.ui.inbox.InboxViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { inboxHolder = it }
+
+    /** 工具、环境变量与后台策略共用同一个连接来源。 */
+    private var configHolder: io.qwenpaw.node.ui.settings.SettingsConfigViewModel? = null
+
+    val settingsConfig: io.qwenpaw.node.ui.settings.SettingsConfigViewModel
+        get() = configHolder ?: io.qwenpaw.node.ui.settings.SettingsConfigViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { configHolder = it }
+
+    private fun activeConnection(): io.qwenpaw.node.data.remote.Connection? =
+        repository.active()?.let { instance ->
+            io.qwenpaw.node.data.remote.Connection(
+                repository.resolvedBaseUrl(instance),
+                instance.token,
+                instance.agentId,
+            )
+        }
+
     // ---------------- Token 用量 ----------------
 
     private val _tokenUsage = MutableStateFlow<io.qwenpaw.node.data.model.TokenUsageDto?>(null)
@@ -757,10 +788,22 @@ class AppViewModel(
             instanceLabel = instance.labelOf(url),
             instanceName = instance.serverDisplayName,
         )
+        // 换实例或换智能体时收件箱里的事件归属已经变了，必须清空。
+        // `bind` 每次重绑都会走一遍，因此只在标识真的变化时清。
+        val key = "${instance.id}|${instance.agentId}"
+        val previous = inboxKey
+        inboxKey = key
+        // 只在「真的换过」时清：首次绑定没有旧数据可清，也不必为此提前创建两个 ViewModel。
+        if (previous != null && previous != key) {
+            inboxHolder?.clear()
+            configHolder?.clear()
+        }
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。
         refreshServerAvatar()
     }
+
+    private var inboxKey: String? = null
 
     override fun onCleared() {
         chatViewModel.detach()

@@ -182,4 +182,28 @@ class TimeLabelsTest {
         assertEquals(':', text[13])
         assertEquals(19, text.length)
     }
+
+    /**
+     * 收件箱的 `created_at` 是浮点秒，不是 ISO 字符串。
+     *
+     * 时区显式传入，不依赖运行环境默认值：CI 的 runner 是 UTC，
+     * 依赖默认时区会让本地通过、CI 失败。
+     */
+    @Test
+    fun `epoch seconds convert in the given zone`() {
+        // 2026-10-26T00:15:42Z = 1761437742；东八区应为 08:15。
+        val zone = java.time.ZoneId.of("Asia/Shanghai")
+        val time = TimeLabels.fromEpochSeconds(1761437742.0, zone)!!
+        assertEquals(8, time.hour)
+        assertEquals(15, time.minute)
+        assertEquals("08:15", TimeLabels.epochTime(1761437742.0, zone))
+    }
+
+    /** 保留小数部分：秒以下的精度在排序上仍然有意义。 */
+    @Test
+    fun `epoch seconds keep sub second precision`() {
+        val zone = java.time.ZoneId.of("Asia/Shanghai")
+        val time = TimeLabels.fromEpochSeconds(1761437742.75, zone)!!
+        assertEquals(750, time.nano / 1_000_000)
+    }
 }

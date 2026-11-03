@@ -122,7 +122,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX }
 
 @Composable
 private fun QwenPawNav(
@@ -183,6 +183,11 @@ private fun QwenPawNav(
     val tokenUsage by viewModel.tokenUsage.collectAsState()
     val tokenUsageLoading by viewModel.tokenUsageLoading.collectAsState()
     val tokenUsageError by viewModel.tokenUsageError.collectAsState()
+    val inboxState by viewModel.inbox.state.collectAsState()
+    val inboxUnread = inboxState.unreadCount
+    val toolsState by viewModel.settingsConfig.tools.collectAsState()
+    val envsState by viewModel.settingsConfig.envs.collectAsState()
+    val offloadState by viewModel.settingsConfig.offload.collectAsState()
     val fontState by viewModel.fontState.collectAsState()
     // 当前网络类型与 WiFi 名称：地址编辑区据此提示「这条现在会被优先使用」。
     val netSnapshot by app.networkMonitor.current.collectAsState()
@@ -513,6 +518,9 @@ private fun QwenPawNav(
         ) { current ->
         when (current) {
             Screen.LIST -> {
+                // 列表页要显示收件箱未读角标，而角标只在进过收件箱后才有值；
+                // 每次落到列表页拉一次，代价是一页事件（默认 30 条）。
+                LaunchedEffect(Unit) { viewModel.inbox.refresh() }
                 ChatListScreen(
                     chats = chatVmState.chats,
                     loading = chatVmState.loading,
@@ -542,6 +550,12 @@ private fun QwenPawNav(
                         viewModel.loadTokenUsage()
                         screen = Screen.TOKEN_USAGE
                     },
+                    onOpenInbox = {
+                        // 进入前刷新一次：未读数与列表内容都要是当前的。
+                        viewModel.inbox.refresh()
+                        screen = Screen.INBOX
+                    },
+                    inboxUnread = inboxUnread,
                     onOpenSettings = { screen = Screen.SETTINGS },
                     showArchiveTip = archiveTipVisible,
                     onSuppressArchiveTip = {
@@ -594,6 +608,7 @@ private fun QwenPawNav(
                     assistantCollapse = appState.assistantCollapse,
                     onDraftChange = chatVm::updateDraft,
                     onSend = { chatVm.send() },
+                    commands = chatVmState.slashCommands,
                     onStop = chatVm::stop,
                     onAttach = { pickFiles.launch(Unit) },
                     onVoiceStart = { startVoice() },
@@ -671,6 +686,19 @@ private fun QwenPawNav(
                     error = tokenUsageError,
                     onBack = { screen = Screen.LIST },
                     onRetry = { viewModel.loadTokenUsage() },
+                )
+            }
+
+            Screen.INBOX -> {
+                io.qwenpaw.node.ui.inbox.InboxScreen(
+                    state = inboxState,
+                    onBack = { screen = Screen.LIST },
+                    onRefresh = viewModel.inbox::refresh,
+                    onLoadMore = viewModel.inbox::loadMore,
+                    onMarkAllRead = viewModel.inbox::markAllRead,
+                    onMarkRead = viewModel.inbox::markRead,
+                    onDelete = viewModel.inbox::delete,
+                    onDismissError = viewModel.inbox::dismissError,
                 )
             }
 
@@ -788,6 +816,21 @@ private fun QwenPawNav(
                     onRefreshServerAvatar = viewModel::refreshServerAvatar,
                     actionStyle = appState.actionStyle,
                     onActionStyle = viewModel::setActionStyle,
+                    config = io.qwenpaw.node.ui.settings.SettingsConfig(
+                        tools = toolsState,
+                        envs = envsState,
+                        offload = offloadState,
+                        onLoadTools = { viewModel.settingsConfig.loadTools() },
+                        onToggleTool = viewModel.settingsConfig::toggleTool,
+                        onToolAsync = viewModel.settingsConfig::setToolAsync,
+                        onSaveToolConfig = viewModel.settingsConfig::saveToolConfig,
+                        onLoadEnvs = { viewModel.settingsConfig.loadEnvs() },
+                        onSaveEnvs = viewModel.settingsConfig::saveEnvs,
+                        onDeleteEnv = viewModel.settingsConfig::deleteEnv,
+                        onResetEnv = viewModel.settingsConfig::resetEnv,
+                        onLoadOffload = { viewModel.settingsConfig.loadOffload() },
+                        onSetOffload = viewModel.settingsConfig::setOffload,
+                    ),
                 )
             }
 
@@ -945,7 +988,7 @@ private fun shareText(context: android.content.Context, subject: String, text: S
 private fun parentOf(screen: Screen): Screen? = when (screen) {
     Screen.CHAT -> null
     Screen.LIST -> Screen.CHAT
-    Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE -> Screen.LIST
+    Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE, Screen.INBOX -> Screen.LIST
     Screen.RUN_LOG -> Screen.SETTINGS
     // 原文页从聊天页的气泡进入，返回也回聊天页。
     Screen.MESSAGE_SOURCE -> Screen.CHAT

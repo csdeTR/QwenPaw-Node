@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -81,9 +83,21 @@ fun ChatInputBar(
      */
     onModelClick: () -> Unit = {},
     onRemoveAttachment: (String) -> Unit,
+    /**
+     * 可补全的斜杠命令。
+     *
+     * 候选列表内嵌在输入条里而不是弹 `Popup`：这个 Column 已经让开了键盘高度，
+     * 内嵌后候选自然被键盘顶上去，不需要自己算浮层位置，也不会出现浮层与输入条之间的白条。
+     */
+    commands: List<io.qwenpaw.node.data.model.SlashCommandDto> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
+    // 正在输入命令时给出候选。要求输入框有焦点：失去焦点后列表还挂着会盖住页面。
+    val token = if (focused) slashToken(draft) else null
+    val candidates = remember(token, commands) {
+        if (token == null) emptyList() else visibleCommands(commands, token)
+    }
     Surface(
         color = MaterialTheme.colorScheme.surface,
         modifier = modifier.fillMaxWidth(),
@@ -112,6 +126,13 @@ fun ChatInputBar(
             val borderColor = when {
                 focused -> MaterialTheme.colorScheme.primary
                 else -> MaterialTheme.colorScheme.outlineVariant
+            }
+            if (candidates.isNotEmpty()) {
+                SlashCommandCandidates(
+                    commands = candidates,
+                    onPick = { onDraftChange(commandInsertion(it)) },
+                )
+                Spacer(Modifier.size(6.dp))
             }
             Box(
                 modifier = Modifier
@@ -210,6 +231,61 @@ fun ChatInputBar(
                     onSend = onSend,
                     onStop = onStop,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 斜杠命令候选。限高后内部滚动，避免命令多时把输入条推走半屏。
+ *
+ * 点击只改草稿、不接管焦点：`clickable` 在触摸模式下不请求焦点，
+ * 键盘保持弹出，用户点完可以继续接参数。
+ */
+@Composable
+private fun SlashCommandCandidates(
+    commands: List<io.qwenpaw.node.data.model.SlashCommandDto>,
+    onPick: (io.qwenpaw.node.data.model.SlashCommandDto) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .heightIn(max = 200.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        groupByCategory(commands).forEach { (category, items) ->
+            if (category.isNotBlank()) {
+                Text(
+                    text = category,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp),
+                )
+            }
+            items.forEach { cmd ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPick(cmd) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = "/${cmd.name}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (cmd.description.isNotBlank()) {
+                        Text(
+                            text = cmd.description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }

@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.takeOrElse
 import kotlinx.coroutines.launch
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -56,10 +57,22 @@ fun MarkdownText(
     val blocks = remember(markdown) { MarkdownParser.parse(markdown) }
     // 标题/代码块这类固定尺寸也要跟着聊天字号缩放，否则调大后它们相对偏小。
     val scale = io.qwenpaw.node.ui.theme.LocalChatFontScale.current
+    // 段落基准字号：M3 的 MaterialTheme 会 ProvideTextStyle(typography.bodyLarge)，
+    // ChatFontScale 作用域内它就是已乘过 chatScale 的 bodyLarge，与下面 Text 的实际字号一致。
+    val bodyBase = MaterialTheme.typography.bodyLarge.fontSize.takeOrElse { 16.sp }.value
     // 行内样式（**粗体**、`代码`、*斜体*）的解析结果按块缓存。滚动时进入视口的条目
     // 会反复重组，不缓存就要每次重跑一遍逐字符解析、重建 AnnotatedString。
-    val inlines = remember(blocks, scale) {
-        blocks.map { block -> block.inlineText?.let { inline(it, scale) } }
+    // 基准字号也进缓存键：聊天字号或界面字号变化后若复用旧结果，上下标会停在旧字号上。
+    val inlines = remember(blocks, scale, bodyBase) {
+        blocks.map { block ->
+            block.inlineText?.let {
+                val base = when (block) {
+                    is MdBlock.Heading -> headingSizeSp(block.level, scale)
+                    else -> bodyBase
+                }
+                inline(it, scale, base)
+            }
+        }
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEachIndexed { index, block ->
@@ -67,17 +80,22 @@ fun MarkdownText(
             when (block) {
                 // 段落不再各自套 SelectionContainer：整条气泡由外层统一提供选区。
                 // 每段落套一层会让命中路径上的指针节点翻倍，逐事件的命中测试开销随之上涨。
-                is MdBlock.Paragraph -> Text(text = styled!!, color = color)
+                // 样式显式写出：正文基准字号正是从 bodyLarge 取的，两处同源才不会漂移。
+                is MdBlock.Paragraph -> Text(
+                    text = styled!!,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = color,
+                )
                 is MdBlock.Heading -> Text(
                     text = styled!!,
-                    fontSize = ((22 - block.level * 2).coerceAtLeast(13) * scale).sp,
+                    fontSize = headingSizeSp(block.level, scale).sp,
                     fontWeight = FontWeight.Bold,
                     color = color,
                 )
 
                 is MdBlock.Bullet -> Row {
-                    Text("•", color = color, modifier = Modifier.padding(end = 6.dp))
-                    Text(text = styled!!, color = color)
+                    Text("•", style = MaterialTheme.typography.bodyLarge, color = color, modifier = Modifier.padding(end = 6.dp))
+                    Text(text = styled!!, style = MaterialTheme.typography.bodyLarge, color = color)
                 }
 
                 is MdBlock.Code -> CodeBlock(block.code, block.language)
@@ -93,6 +111,7 @@ fun MarkdownText(
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = styled!!,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = color.copy(alpha = 0.8f),
                         fontStyle = FontStyle.Italic,
                     )
@@ -102,13 +121,30 @@ fun MarkdownText(
     }
 }
 
+/** 标题字号：层级越深越小，最低 13sp。渲染字号与行内上下标基准共用这一处。 */
+internal fun headingSizeSp(level: Int, scale: Float): Float =
+    (22 - level * 2).coerceAtLeast(13) * scale
+
+/**
+ * 行内上下标相对基准字号的缩放比。
+ *
+ * 与 `LatexView` 的块级上下标取同一个 0.58，两处保持一致后调参不必分头改。
+ */
+internal const val SCRIPT_SIZE_RATIO = 0.58f
+
 /**
  * 行内样式：**粗体**、`代码`、*斜体*，以及正文里直接写的上下标。
  *
  * `internal` 而非 `private`：上下标的 span 只能在纯 JVM 单测里断言，
  * 组合函数的渲染结果需要设备测试才能验证，成本高得多。
+ *
+ * @param scale 聊天字号缩放系数。行内代码按 `13 * scale` 排版。
+ * @param baseSize 该块正文的基准字号（sp）。上下标取 `baseSize * 0.58`——
+ *   只有基线偏移而不缩字号时，`H_2O` 看起来像一个掉下去的大写字符。
+ *   生产调用必须传真实基准：段落/列表/引用是 `bodyLarge`，标题按层级，
+ *   表格单元格是 `bodySmall`。默认值只给单测与无基准调用兜底。
  */
-internal fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnnotatedString {
+internal fun inline(text: String, scale: Float = 1f, baseSize: Float = 16f): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
         when {
@@ -181,7 +217,12 @@ internal fun inline(text: String, scale: Float = 1f): AnnotatedString = buildAnn
                     } else {
                         BaselineShift.Subscript
                     }
-                    withStyle(SpanStyle(baselineShift = shift)) { append(script.first) }
+                    withStyle(
+                        SpanStyle(
+                            baselineShift = shift,
+                            fontSize = (baseSize * SCRIPT_SIZE_RATIO).sp,
+                        ),
+                    ) { append(script.first) }
                     i = script.second
                 }
             }
@@ -406,10 +447,16 @@ private fun CodeBlock(code: String, language: String?) {
 private fun MarkdownTable(rows: List<List<String>>, color: Color) {
     if (rows.isEmpty()) return
     val columns = rows.maxOf { it.size }
+    val scale = io.qwenpaw.node.ui.theme.LocalChatFontScale.current
+    // 单元格用 bodySmall 渲染，上下标基准跟着它走，而不是段落基准。
+    val cellBase = MaterialTheme.typography.bodySmall.fontSize.takeOrElse { 12.sp }.value
     // 单元格的行内样式按内容缓存：一张十几行的表格有几十个单元格，
     // 若每次重组都逐字符重解析，可见表格在滚动期间会持续产生额外的主线程开销。
-    val cells = remember(rows, columns) {
-        rows.map { row -> (0 until columns).map { col -> inline(row.getOrElse(col) { "" }) } }
+    // 基准与缩放一并进键，理由同段落缓存。
+    val cells = remember(rows, columns, scale, cellBase) {
+        rows.map { row ->
+            (0 until columns).map { col -> inline(row.getOrElse(col) { "" }, scale, cellBase) }
+        }
     }
     Column(
         modifier = Modifier
