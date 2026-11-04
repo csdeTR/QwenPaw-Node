@@ -57,6 +57,8 @@
 | [43](#43阶段-1-起步与主体合并发版2026-11-03) | 分页骨架、频道筛选、斜杠补全、上下标字号、收件箱、工具/环境变量/后台策略 | 497 个单测；`tools` 的 `config_fields` 实测为 `null`；M3 的 `MaterialTheme` 自带 `ProvideTextStyle(bodyLarge)` | [protocol.md](protocol.md) 第 20–22 节、[ui-guidelines.md](ui-guidelines.md) 8.7、[CHANGELOG.md](../CHANGELOG.md) |
 | [44](#44v014-收尾中文文案与工具行形态2026-11-03) | 命令与工具中文化、工具行改单行圆片、环境变量新增 | 518 个单测；中文只在 Console 打包产物里；模拟器须关蓝牙模拟；`toggle` 是取反语义 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.7、9.15、[AGENTS.md](../AGENTS.md) 第 3.1 节、[CHANGELOG.md](../CHANGELOG.md) |
 | [45](#45工具分组与环境变量三段2026-11-03) | 工具按官方静态表分组、emoji 换 lucide、环境变量三段常驻与二次确认 | 534 个单测；`category` 对内置工具为 `null`；catalog 17 项里只有 2 项可热改 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.16、[guide.md](guide.md) 第 2 节 |
+| [46](#46v020-定时任务与工具调用控制2026-11-04) | cron 列表与表单、聊天页工具控制、双时区对照 | 578 个单测；服务端把 `dow` 归一化成 `mon`…`sun`；`promote` 后顶层 `meta.safety` 仍是锁 | [protocol.md](protocol.md) 第 23 节、[ui-guidelines.md](ui-guidelines.md) 9.17、[guide.md](guide.md) 第 9 节 |
+| [47](#47v020-试用反馈会话选择器与自动展开2026-11-04) | 会话选择器补名称与搜索、隐藏 `console`、工具卡片 7.5 秒自动展开 | 582 个单测；`dispatch-targets` 不带会话名；自动展开须让位于用户手动切换 | [ui-guidelines.md](ui-guidelines.md) 9.17、[CHANGELOG.md](../CHANGELOG.md) |
 
 ---
 
@@ -4002,6 +4004,129 @@ release 包重建通过，四个 ABI 齐全，签名 `CN=QwenPaw Node` 验证通
 结论落点：分组与图标的实现约定 → [ui-guidelines.md](ui-guidelines.md) 9.16；
 catalog 字段与只读语义 → [protocol.md](protocol.md) 第 22 节；
 用户可见变化 → [CHANGELOG.md](../CHANGELOG.md) v0.1.4、[guide.md](guide.md) 第 2 节。
+
+---
+
+## 46、v0.2.0：定时任务与工具调用控制（2026-11-04）
+
+### 46.1 接手时的状态
+
+工作区里已经有上一轮留下的半成品：`Dtos.kt` 的 cron 段、`QwenPawApi` 的 11 个 cron
+方法与 7 个 tool-call 方法、`AppViewModel` 的 `cron` 懒持有、`QwenIcons.calendarClock`
+与 `play`、`CronSchedule.kt`、`CronViewModel.kt`、`CronSection.kt`，以及
+`CronScheduleTest` / `NextRunsTest` / `ToolDeadlineTest` 三个单测文件。
+
+第一次编译直接失败：`CronSection.kt:357` 用了 `CircleShape` 却没有导入。
+补上后单测全绿（577 个）。这说明接手时未验证的改动里，至少有一处是编译不过的，
+不能默认「已经有代码」等于「已经能跑」。
+
+### 46.2 补完的数据层与状态
+
+- `ToolStreamClient.kt`：复用 `SseReader`，`callbackFlow` 骨架照 `ChatStreamClient.open`
+  但去掉聊天专用逻辑。只认 `chunk` 与 `done`，**不做重连**——服务端不重放，
+  重连只会立刻收到 `done`，属于白跑一次请求。
+- `ChatViewModel.currentSessionId` 做成派生属性而不是状态字段。本来按计划要新增字段，
+  但它就是 `currentChatId` 去看 `chats` 的 `sessionId`，而 `chats` 在多个路径里都会被替换。
+  派生写法少了一处「新列表挂旧会话」的同步点。
+- 工具动作的 202 响应不解析：`decode` 遇到空体会抛「服务端返回了空响应」，
+  只需要「成功与否」的动作照 `stopChat` 的写法丢弃返回值。
+
+### 46.3 两处只有实测才会暴露的契约
+
+这两条都是先按源码写了代码，联调时才发现与预期不符：
+
+1. **`dow` 会被服务端归一化成三字母缩写。** 客户端发 `0 9 * * 1,3`，
+   读回来的任务是 `0 9 * * mon,wed`（`app/crons/models.py::_crontab_dow_to_name`，
+   注释里特意说明 crontab 的数字编号与 APScheduler 的编号不一致，因此统一换成缩写）。
+   原 `parseCronExpression` 只认数字，后果是**用户每编辑一次自己创建的周任务，
+   表单都会退化成「直接编辑」**。补上 `mon`…`sun` 的解析后，逆运算才真正成立。
+   这类问题的隐蔽性在于：创建时一切正常，只有「再打开一次」才出错。
+
+2. **`promote` 之后顶层 `meta.safety` 仍是锁。** `promote` 的响应里
+   `enabled=false`、`meta.portability.requires_review=false`，但顶层
+   `meta.safety` 依旧写着 `disabled_until_explicit_promotion`。
+   原判定「任一命中即待审核」会把已审核任务永远标成「待迁移审核」，
+   并持续露出「审核通过」按钮。改成 `portability` 优先：
+   有这个键就以它为准，没有才回看 `safety`。
+
+### 46.4 验证
+
+单测 578 个全部通过（新增 `CronSpecSerializationTest` 5 个、`ToolDeadlineLabelTest` 5 个、
+`CronEndpointsApiTest` 5 个、`ToolCallsApiTest` 5 个，`CronScheduleTest` 补 1 个）。
+模拟器连 `qp-test`（10.10.0.211:8088）逐场景核对：
+
+- 新建「每天 09:00、消息内容」任务：列表出现，第二行「下次 11-04 09:00」；
+  服务端收到的 `schedule.timezone` 是 `Asia/Shanghai`；
+- 内容留空保存被本地校验拦下，提示与官方 `validation` 措辞一致；
+- 暂停 / 恢复 / 立即执行分别返回 `paused` / `resumed` / `started`，
+  执行记录里出现 `trigger=manual` 的 `success`；
+- 手工塞一个带 `meta.portability.requires_review` 的任务：列表标「待迁移审核」，
+  次行写「需审核通过后才能启用或立即执行」，`promote` 后 `enabled` 仍为 false；
+- 从客户端编辑并保存一次后，`meta.custom_key`、`meta.model_override`、
+  `request.model`、`request.provider_id` 全部还在；
+- 把 `user-timezone` 改成 `America/New_York`：列表顶部出现时间对照，
+  两行相差 13 小时（纽约 11-01 已结束夏令时），行内也写成
+  「下次 11-04 09:00（服务端 11-03 20:00）」；编辑器草稿用 `nextRuns` 推算两次。
+  测完已把服务端时区写回 `Asia/Shanghai`。
+- 通过 SSE 让智能体执行 `sleep 60`：卡片显示「运行中」，
+  展开后出现四个操作项与「7 秒后自动转入后台（67 秒后中止）」；
+  点「取消执行」二次确认后服务端返回 202、`end_state=interrupted`，卡片收起；
+  对已结束条目再取消返回 409 `Cannot cancel`。
+
+### 46.5 未做的事
+
+官方的「工具执行中 · 是否转后台？」自动倒计时弹窗与「后台任务」汇总页没有做；
+定时任务的日历视图、内置模板与批量操作也没有做。这些都是产品取舍，见
+[待办清单](../待办清单.md) 的「本轮不做」。
+
+结论落点：cron 与 tool-call 端点形状、`meta`/`request` 原样回传、
+服务端时区默认 UTC 与客户端恒发 `Asia/Shanghai`、409 的两种含义、
+SSE 无重放与完成缓存 60 秒 → [protocol.md](protocol.md) 第 23 节；
+状态流与倒计时口径 → [architecture.md](architecture.md) 第 3.7、3.8 节；
+界面约定 → [ui-guidelines.md](ui-guidelines.md) 9.17；
+用户可见变化 → [CHANGELOG.md](../CHANGELOG.md)、[guide.md](guide.md) 第 9 节。
+
+---
+
+## 47、v0.2.0 试用反馈：会话选择器与自动展开（2026-11-04）
+
+### 47.1 会话选择器补名称与搜索
+
+`GET /api/cron/dispatch-targets` 的返回里只有 `channel` / `user_id` / `session_id`，
+**没有会话名称**（`crons/models.py::CronDispatchTargetItem`）。因此原先的选择器
+只能显示 `console · 1793496108871-ciozfnb` 这种串，用户没法确认选的是哪段对话。
+
+改法是 `loadTargets()` 在同一次加载里顺带拉 `GET /api/chats`，按 `session_id` 建
+`session_id → name` 的映射（`CronUiState.chatNames`）。名称取不到时退回 `session_id`，
+不出现空白行，也不拦保存——投递目标与名称是两条各自可能失败的请求。
+
+`console` 从频道选项里去掉。移动端定时任务只有这一个可用通道，把它列成可选项
+反而让人以为需要挑一个；若服务端派生了别的频道，仍然照常显示。
+
+搜索按名称与 `session_id` 双字段匹配。只按名称匹配不够：名称如果被用户改成了
+「新对话」之类的通用词，就只剩 id 能区分。列表限高 360dp 并可滚动，
+会话多时不会把弹窗撑出屏幕。
+
+### 47.2 工具卡片 7.5 秒自动展开
+
+与官方网页对齐：命令运行超过 7.5 秒仍未结束就主动展开卡片。此前一直是折叠成
+一行「运行中」，长命令看起来像卡住了。
+
+这个自动行为必须让位于用户意图：加一个 `userToggled` 标记，用户点过卡片之后
+不再自动展开，也不自动收起。不这么做的话，用户刚收起又被弹开，比不自动展开更烦。
+判定抽成 `autoExpandDue(elapsedMs)` 放 `ui/chat/ToolDeadline.kt`，
+模拟器上验证过两种路径：不干预时约 7.5 秒后自动展开并露出操作项；
+手动收起后 15 秒内没有被重新弹开，且工具仍在运行。
+
+### 47.3 验证
+
+单测 582 个通过（新增 `CronTargetLabelTest` 3 个，`ToolDeadlineLabelTest` 补 1 个）。
+模拟器连 `qp-test` 核对：频道行不再出现 `console`；选择器显示「开启新的旅程」与
+其 `session_id` 两行；搜「zzz」提示「没有匹配的会话」，搜 `ciozfnb` 命中；
+选中后已选行写成「开启新的旅程 · 1793496108871-ciozfnb」。
+
+结论落点：[ui-guidelines.md](ui-guidelines.md) 9.17；
+用户可见变化 → [CHANGELOG.md](../CHANGELOG.md)、[guide.md](guide.md) 第 9 节。
 
 ---
 

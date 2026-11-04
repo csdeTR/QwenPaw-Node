@@ -1212,3 +1212,109 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 
 只有这一个字段，取值经正则限定为两个。写入后服务端会热更
 `coordinator.offload_on_deadline`，不需要重启。
+
+---
+
+## 23、定时任务与工具调用控制
+
+v0.2.0 接入的两组端点。以下形状在 2.2.2.post1 上实测与源码确认。
+
+### 定时任务
+
+路由在 `qwenpaw/app/crons/api.py`（前缀 `/cron`），同时以 `/api/cron/*` 与
+`/api/agents/{agentId}/cron/*` 两种方式挂载。客户端统一走全局路径加 `X-Agent-Id` 头
+（`QwenPawApi.baseBuilder` 已注入），不拼 agent 段。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/cron/jobs` | 返回 `list[CronJobSpec]`，**不含运行状态** |
+| GET | `/api/cron/jobs/{id}` | `CronJobView`（`spec` + `state`） |
+| POST | `/api/cron/jobs` | 新建，body 为 `CronJobSpec` |
+| PUT | `/api/cron/jobs/{id}` | **整体替换** |
+| DELETE | `/api/cron/jobs/{id}` | 返回 `{"deleted":true}` |
+| POST | `/api/cron/jobs/{id}/pause` \| `/resume` \| `/run` | 返回 `{"paused"|"resumed"|"started":true}` |
+| POST | `/api/cron/jobs/{id}/promote` | 返回 `CronJobSpec` |
+| GET | `/api/cron/jobs/{id}/state` | `CronJobState` |
+| GET | `/api/cron/jobs/{id}/history` | `list[CronExecutionRecord]`，按时间倒序 |
+| GET | `/api/cron/dispatch-targets` | `{channels, items}`，支持 `channel` / `keyword` / `limit` |
+
+**新建时 `id` 由服务端生成**，客户端传了也会被忽略；`PUT` 时 `spec.id` 与路径不符返回 400。
+`GET /cron/jobs` 不含状态，状态只在 `/state` 与详情里，因此列表需要二次逐条拉取。
+
+**`meta` 与 `request` 必须原样带回。** `request` 是 `extra="allow"` 模型，
+`meta` 里带迁移审阅标记。`PUT` 是整体替换，客户端若只序列化自己认识的字段，
+编辑一次就会抹掉审阅锁与模型覆盖。客户端因此两者都用 `JsonObject` 持有，编辑时只改已知键。
+实测：给任务写入 `meta.model_override` 与 `request.model` / `request.provider_id` 后，
+从客户端编辑并保存一次，四个未知键全部保留。
+
+**`save_result_to_inbox` 为 null 时由服务端计算**（`not (text && cron)`），客户端不发这个键。
+Kotlin 侧用 `explicitNulls = false` 保证序列化结果里没有该键。
+
+**`timezone` 服务端默认 UTC**，客户端必须显式传。客户端不做国际化，一律按
+`Asia/Shanghai`（UTC+8）创建与展示，不读设备时区，也不跟随服务端：
+跟随设备会让同一份任务在不同设备上得到不同表达式，而服务端的 UTC 默认会让任务在凌晨触发。
+
+**`silent` 只对 agent 任务有效**，text 任务带 silent 会被 422 拒绝。
+
+**服务端会把 `dow` 归一化成三字母缩写。** 客户端发 `0 9 * * 1,3`，
+`POST` 的响应里是 `0 9 * * mon,wed`（`app/crons/models.py::_crontab_dow_to_name`）。
+读取自己创建的任务时必须两种写法都认，否则每次编辑都会退化成「直接编辑」。
+`cron` 支持 5 段与可归一化的 4 段、3 段写法，6 段（带秒）返回 422。
+
+**409 有两种含义**：导入任务未审核（`PermissionError: Imported cron job requires explicit
+promotion`）与状态冲突。前者要展示「需先确认」并给「审核通过」入口，不能统一报「操作失败」。
+
+**`promote` 之后任务仍是禁用状态。** 实测 `promote` 的响应 `enabled=false`，
+`meta.portability.requires_review` 变成 false，但顶层 `meta.safety` 仍保留
+`disabled_until_explicit_promotion`。判定是否待审核只能看 `portability.requires_review`。
+
+| `CronJobSpec` 字段 | 说明 |
+| --- | --- |
+| `id`、`name`、`enabled` | `id` 由服务端生成 |
+| `schedule` | `type` 取 `cron` / `once`；`timezone` 客户端恒为 `Asia/Shanghai` |
+| `task_type` | `text` / `agent` |
+| `text` | `task_type=text` 时必填 |
+| `request` | `task_type=agent` 时必填，`extra="allow"` |
+| `dispatch` | `{type: "channel", channel, target: {user_id, session_id}, mode, silent}` |
+| `save_result_to_inbox` | 为 null 时服务端计算 |
+| `runtime` | `max_concurrency=1`、`timeout_seconds=120`、`misfire_grace_seconds=600`、`share_session=false`、`tool_safety=false` |
+| `meta` | 任意字典 |
+
+**服务端时区对照用 `GET /api/config/user-timezone`。** 返回 `{"timezone": "<IANA 名>"}`，
+只读不改。不一致时客户端把同一触发时刻在两个时区下并排列出。
+已保存任务的时间取服务端返回的 `next_run_at`（含偏移，如 `2026-11-04T09:00:00+08:00`），
+不在本地重算；表单里未保存的草稿才在本地按 `Asia/Shanghai` 推算。
+
+### 工具调用控制
+
+路由 `qwenpaw/app/routers/tool_calls.py`（前缀 `/tool-calls`），按 `session_id` 定位，不按 agent。
+
+| 方法 | 路径 | 状态码 |
+| --- | --- | --- |
+| GET | `/api/tool-calls/{session_id}` | 返回 `{items, total}` |
+| GET | `/api/tool-calls/{session_id}/{id}` | `ToolCallInfo` |
+| POST | `/api/tool-calls/{session_id}/{id}/cancel` | 202，body `{force: Boolean}` |
+| POST | `/api/tool-calls/{session_id}/{id}/offload` | 202，**没有请求体** |
+| POST | `/api/tool-calls/{session_id}/{id}/extend-deadline` | 202 |
+| GET | `/api/tool-calls/{session_id}/{id}/output` | `{tool_call_id, is_closed, final_state, content}` |
+| GET | `/api/tool-calls/{session_id}/{id}/stream` | SSE |
+
+**`extend-deadline` 的 body 是 `{seconds?, no_deadline, target}`。**
+`target=offload` 只能用于 running；`target=kill` 对 running 与 offloaded 都可用，
+但超过 `max_internal_timeout_secs` 会被拒绝。成功响应带回最新的
+`offload_remaining` / `kill_remaining` 快照。
+
+**失败分三档**：404 表示条目不存在或已过缓存期，409 表示状态已变化
+（实测对已结束条目取消返回 409 `Cannot cancel`）。
+
+**`started_at` 是 monotonic 秒，不是 epoch**，只能用于对照 `elapsed`，不能当时间戳显示。
+`offload_remaining` / `kill_remaining` 是取回时的快照，界面倒计时需要自己按已过时间递减。
+
+**`/stream` 没有 `event:` 行、没有重放。** 只发
+`data: {"type":"chunk","data":{...}}` 与结尾的 `data: {"type":"done"}`；
+晚订阅只能拿到 `done`。因此实时输出只是加分项，`/output` 才是权威值。
+
+**完成后的条目只在缓存里保留约 60 秒**，之后一律 404。
+
+**`tool_call_id` 就是聊天 SSE 里 `plugin_call` 的 `call_id`**，客户端 `ToolCard.callId`
+已经持有，不需要另加字段。

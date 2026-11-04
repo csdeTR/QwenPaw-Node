@@ -151,6 +151,42 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 `refreshAll()` 复用 `bind()` 是合理的——它本来就是「重新绑定当前实例」；
 问题不在复用，在于 `bind()` 把「重新绑定」误解成了「换实例」。
 
+### 3.7 定时任务：列表与状态分开拉
+
+`CronViewModel` 结构与 `InboxViewModel` 一致（`SupervisorJob + Dispatchers.Main.immediate`、
+`MutableStateFlow`、`ErrorText.of`），但不复用分页骨架：cron 列表本身不翻页。
+
+`GET /api/cron/jobs` 不带运行状态，状态只在 `/state` 与详情里。因此 `refresh()`
+是两步：先换列表，再按并发上限 4 逐条拉 `/state` 填 `states`。
+单条 `/state` 取不到只让该行显示「状态未知」，不把整页打成错误态——
+一个任务的状态缺失不影响其余任务的开关与操作。
+`serverTimezone` 与列表并行读取，失败保持 null，对照块不显示。
+
+**整页错误与单行错误分开存放**：`error` 是列表拉取失败，`rowErrors[jobId]`
+是单条动作失败。一个删除请求返回 409 不代表这一页加载失败。
+409 且报文含 `promotion` 时，该行标成「需先确认」而不是「操作失败」，并露出审核入口。
+
+**编辑时 `request` / `meta` 整份带回。** `CronDraft` 用 `JsonObject` 持有原始 JSON，
+`toSpec()` 只替换 `input` / `session_id` / `user_id` 三个已知键，其余原样保留。
+`id` 与 `enabled` 也原样带回，避免一次改名把暂停的任务重新启用、
+或让 `PUT` 因 id 与路径不符返回 400。
+
+### 3.8 工具调用控制：服务端快照 + 本地递减
+
+聊天页的工具卡片 `ToolCard.callId` 就是 `tool_call_id`，`ChatUiState.toolCalls`
+按它索引服务端登记的条目。只有 `!tool.done && toolCalls[callId] != null` 时才显示操作区：
+服务端为已完成的条目只保留约 60 秒缓存，之后一律 404，给结束的卡片留按钮等于给了
+一个必然失败的入口。
+
+**倒计时不能依赖服务端刷新。** `offload_remaining` / `kill_remaining` 是取回那一刻的快照。
+界面记下取回时的 `SystemClock.elapsedRealtime()`，每秒用「快照值 − 已过秒数」重算
+（纯函数 `toolDeadlineLabel` 在 `ui/chat/ToolDeadline.kt`，由 `ToolDeadlineLabelTest` 覆盖），
+归零后写「即将转入后台 / 即将中止」并触发一次 `refreshToolCalls()` 拿真实状态。
+
+实时输出通过 `ToolStreamClient` 订阅 `/stream`，它不重连：服务端不重放，
+重连只会立刻收到 `done`。流结束后用 `/output` 的权威结果替换 `toolLive`。
+`currentSessionId` 是从 `currentChatId` 与 `chats` 现算的派生属性，不在状态里另存一份。
+
 ---
 
 ## 4、本地持久化
