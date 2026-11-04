@@ -2,6 +2,7 @@ package io.qwenpaw.node.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -546,3 +547,167 @@ data class AvailableCommandsDto(
 ) {
     val all: List<SlashCommandDto> get() = commands.ifEmpty { items }
 }
+
+// ---------------- 定时任务 ----------------
+
+/**
+ * 客户端统一使用的 cron 时区。
+ *
+ * 不做国际化：不读设备时区，也不跟随服务端（服务端默认 UTC）。固定北京时间，
+ * 同一份任务在任何设备上算出的触发时刻才一致。
+ */
+internal const val CRON_TIMEZONE = "Asia/Shanghai"
+
+/**
+ * 一个定时任务，对应 `GET /api/cron/jobs` 的元素与 `POST|PUT` 的请求体。
+ *
+ * `request` 是服务端的 `extra="allow"` 模型，`meta` 里带迁移审阅标记
+ * （`portability.requires_review` / `safety=disabled_until_explicit_promotion`）。
+ * `PUT` 是整体替换，因此两者都保留原始 JSON：只序列化已知字段会在编辑一次之后
+ * 抹掉审阅锁与模型覆盖。
+ */
+@Serializable
+data class CronJobSpecDto(
+    val id: String? = null,
+    val name: String = "",
+    val enabled: Boolean = true,
+    val schedule: CronScheduleDto = CronScheduleDto(),
+    @SerialName("task_type") val taskType: String = "agent",
+    val text: String? = null,
+    val request: JsonObject? = null,
+    val dispatch: CronDispatchDto = CronDispatchDto(),
+    /** 为 null 时由服务端计算：`not (text 且 cron)`。 */
+    @SerialName("save_result_to_inbox") val saveResultToInbox: Boolean? = null,
+    val runtime: CronRuntimeDto = CronRuntimeDto(),
+    val meta: JsonObject = JsonObject(emptyMap()),
+)
+
+/** 调度规则。`type` 取 `cron` / `once`。 */
+@Serializable
+data class CronScheduleDto(
+    val type: String = "cron",
+    val cron: String? = null,
+    @SerialName("run_at") val runAt: String? = null,
+    val timezone: String = CRON_TIMEZONE,
+    @SerialName("repeat_every_days") val repeatEveryDays: Int? = null,
+    @SerialName("repeat_end_type") val repeatEndType: String? = null,
+    @SerialName("repeat_until") val repeatUntil: String? = null,
+    @SerialName("repeat_count") val repeatCount: Int? = null,
+)
+
+/** 投递目标。`user_id` / `session_id` 服务端允许空串。 */
+@Serializable
+data class CronTargetDto(
+    @SerialName("user_id") val userId: String = "",
+    @SerialName("session_id") val sessionId: String = "",
+)
+
+/** 结果投递方式。`silent` 只对 agent 任务有效，text 任务带它会 422。 */
+@Serializable
+data class CronDispatchDto(
+    val type: String = "channel",
+    val channel: String = "console",
+    val target: CronTargetDto = CronTargetDto(),
+    val mode: String = "stream",
+    val silent: Boolean = false,
+    val meta: JsonObject = JsonObject(emptyMap()),
+)
+
+/** 单次执行的运行时约束，默认值与服务端 `JobRuntimeSpec` 一致。 */
+@Serializable
+data class CronRuntimeDto(
+    @SerialName("max_concurrency") val maxConcurrency: Int = 1,
+    @SerialName("timeout_seconds") val timeoutSeconds: Int = 120,
+    @SerialName("misfire_grace_seconds") val misfireGraceSeconds: Int = 600,
+    @SerialName("share_session") val shareSession: Boolean = false,
+    @SerialName("tool_safety") val toolSafety: Boolean = false,
+)
+
+/** 运行状态。`GET /api/cron/jobs` 不含这段，需另取 `/state`。 */
+@Serializable
+data class CronJobStateDto(
+    @SerialName("next_run_at") val nextRunAt: String? = null,
+    @SerialName("last_run_at") val lastRunAt: String? = null,
+    @SerialName("last_status") val lastStatus: String? = null,
+    @SerialName("last_error") val lastError: String? = null,
+)
+
+/** 一条执行记录，按时间倒序返回。 */
+@Serializable
+data class CronExecutionRecordDto(
+    @SerialName("run_at") val runAt: String = "",
+    val status: String = "",
+    val error: String? = null,
+    val trigger: String = "scheduled",
+)
+
+/** `GET /api/cron/jobs/{id}` 的响应。 */
+@Serializable
+data class CronJobViewDto(
+    val spec: CronJobSpecDto = CronJobSpecDto(),
+    val state: CronJobStateDto = CronJobStateDto(),
+)
+
+/** 一个可投递的会话目标，由已有会话派生。 */
+@Serializable
+data class CronDispatchTargetItemDto(
+    val channel: String = "",
+    @SerialName("user_id") val userId: String = "",
+    @SerialName("session_id") val sessionId: String = "",
+)
+
+/** `GET /api/cron/dispatch-targets`。`console` 恒在 `channels` 首位。 */
+@Serializable
+data class CronDispatchTargetsDto(
+    val channels: List<String> = emptyList(),
+    val items: List<CronDispatchTargetItemDto> = emptyList(),
+)
+
+/** `GET /api/config/user-timezone`，`timezone` 可能为 null 或空串。 */
+@Serializable
+data class UserTimezoneDto(
+    val timezone: String? = null,
+)
+
+// ---------------- 工具调用控制 ----------------
+
+/**
+ * 会话内的一次工具调用，对应 `GET /api/tool-calls/{session_id}` 的元素。
+ *
+ * `startedAt` 是服务端的 monotonic 秒，不是 epoch：只能用于对照 `elapsed`，
+ * 不能当成时间戳显示。`offloadRemaining` / `killRemaining` 是取回时的快照，
+ * 界面倒计时需要自己按已过时间递减。
+ */
+@Serializable
+data class ToolCallInfoDto(
+    @SerialName("tool_call_id") val toolCallId: String = "",
+    @SerialName("tool_name") val toolName: String = "",
+    @SerialName("session_id") val sessionId: String = "",
+    @SerialName("agent_id") val agentId: String = "",
+    val status: String = "",
+    @SerialName("started_at") val startedAt: Double = 0.0,
+    val elapsed: Double = 0.0,
+    @SerialName("offload_remaining") val offloadRemaining: Double? = null,
+    @SerialName("kill_remaining") val killRemaining: Double? = null,
+    val extra: JsonObject = JsonObject(emptyMap()),
+    @SerialName("end_state") val endState: String? = null,
+    @SerialName("force_cancelled") val forceCancelled: Boolean = false,
+    @SerialName("max_internal_timeout_secs") val maxInternalTimeoutSecs: Double? = null,
+    @SerialName("offload_reason") val offloadReason: String? = null,
+)
+
+/** `GET /api/tool-calls/{session_id}` 的响应。 */
+@Serializable
+data class ToolCallListDto(
+    val items: List<ToolCallInfoDto> = emptyList(),
+    val total: Int = 0,
+)
+
+/** `GET /api/tool-calls/{session_id}/{id}/output`。`content` 是 agentscope 的块数组。 */
+@Serializable
+data class ToolCallOutputDto(
+    @SerialName("tool_call_id") val toolCallId: String = "",
+    @SerialName("is_closed") val isClosed: Boolean = false,
+    @SerialName("final_state") val finalState: String? = null,
+    val content: JsonArray = JsonArray(emptyList()),
+)

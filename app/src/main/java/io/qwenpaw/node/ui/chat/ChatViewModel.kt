@@ -92,7 +92,22 @@ data class ChatUiState(
      * 与 [boundLabel] 是两件事：那个描述「走哪条地址」，这个描述「连的是哪台」。
      */
     val boundServerName: String = "",
-)
+    /** 会话内工具调用，key 为 `tool_call_id`（即 `ToolCard.callId`）。 */
+    val toolCalls: Map<String, io.qwenpaw.node.data.model.ToolCallInfoDto> = emptyMap(),
+    /** 实时输出片段，key 为 `tool_call_id`；收到 `done` 后改用 `/output` 的权威结果。 */
+    val toolLive: Map<String, String> = emptyMap(),
+) {
+    /**
+     * 当前对话的 session_id，工具调用控制按它定位。
+     *
+     * 派生而不是单独存字段：对话列表刷新或切换对话时它会跟着变，
+     * 不需要在多处状态更新里各补一次同步。
+     */
+    val currentSessionId: String
+        get() = currentChatId?.takeIf { it.isNotBlank() }?.let { id ->
+            chats.firstOrNull { it.id == id }?.sessionId ?: id
+        }.orEmpty()
+}
 
 /**
  * 链路状态。
@@ -191,6 +206,11 @@ data class ModelChoice(
 class ChatViewModel(
     private val api: QwenPawApi,
     private val streamClient: ChatStreamClient,
+    /** 工具调用实时输出。测试可传入默认构造的实例。 */
+    private val toolStreamClient: io.qwenpaw.node.data.stream.ToolStreamClient = io.qwenpaw.node.data.stream.ToolStreamClient(
+        api,
+        QwenPawApi.defaultClient(),
+    ),
     private val db: AppDatabase,
     private val appContext: android.content.Context,
     /** 由 Activity 维护的「是否在前台」判断，用于决定要不要发本地通知。 */
@@ -1385,6 +1405,8 @@ class ChatViewModel(
         scope.launch {
             withContext(Dispatchers.IO) { db.chatDao().deleteDraft(instanceId, chatId) }
         }
+        // 本轮开始后拉一次工具调用列表：卡片操作区只在服务端登记过时才出现。
+        refreshToolCalls()
 
         streamJob?.cancel()
         streamJob = scope.launch {
@@ -1763,12 +1785,161 @@ class ChatViewModel(
         }
     }
 
-    // ---------------- 工具 ----------------
+    // ---------------- 工具调用控制 ----------------
+
+    /** 工具调用实时流的订阅任务，同一时刻只保留一个。 */
+    private var toolStreamJob: Job? = null
+
+    /** 拉取会话内工具调用。单条失败不影响整页。 */
+    fun refreshToolCalls() {
+        val conn = currentConnection ?: return
+        val sessionId = _state.value.currentSessionId
+        if (sessionId.isBlank()) return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.toolCalls(conn, sessionId) } }
+                .onSuccess { list ->
+                    _state.update { s ->
+                        s.copy(toolCalls = list.items.associateBy { it.toolCallId })
+                    }
+                }
+        }
+    }
+
+    /** 取消执行。成功后单条重取状态；404/409 分别给一句能落地的话。 */
+    fun cancelTool(toolCallId: String, force: Boolean = false) {
+        val conn = currentConnection ?: return
+        val sessionId = _state.value.currentSessionId
+        if (sessionId.isBlank()) return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.cancelToolCall(conn, sessionId, toolCallId, force) }
+            }.onSuccess {
+                _state.update { s -> s.copy(error = null) }
+                refreshToolCall(toolCallId)
+            }.onFailure { e ->
+                _state.update { it.copy(error = toolActionError(e, "取消")) }
+            }
+        }
+    }
+
+    /** 转入后台。成功后单条重取状态。 */
+    fun offloadTool(toolCallId: String) {
+        val conn = currentConnection ?: return
+        val sessionId = _state.value.currentSessionId
+        if (sessionId.isBlank()) return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.offloadToolCall(conn, sessionId, toolCallId) }
+            }.onSuccess {
+                _state.update { s -> s.copy(error = null) }
+                refreshToolCall(toolCallId)
+            }.onFailure { e ->
+                _state.update { it.copy(error = toolActionError(e, "转入后台")) }
+            }
+        }
+    }
+
+    /**
+     * 延长时限。[seconds] 为 null 表示不再设限（[noDeadline] 为真）。
+     * 服务端对 `kill` 的上限另有校验，超限返回 409。
+     */
+    fun extendTool(toolCallId: String, seconds: Double?, target: String) {
+        val conn = currentConnection ?: return
+        val sessionId = _state.value.currentSessionId
+        if (sessionId.isBlank()) return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.extendToolDeadline(
+                        conn,
+                        sessionId,
+                        toolCallId,
+                        seconds = seconds,
+                        noDeadline = seconds == null,
+                        target = target,
+                    )
+                }
+            }.onSuccess {
+                _state.update { s -> s.copy(error = null) }
+                refreshToolCall(toolCallId)
+            }.onFailure { e ->
+                _state.update { it.copy(error = toolActionError(e, "延长时限")) }
+            }
+        }
+    }
+
+    /** 单条重取。取不到就保留旧值，不把卡片打成错误态。 */
+    private fun refreshToolCall(toolCallId: String) {
+        val conn = currentConnection ?: return
+        val sessionId = _state.value.currentSessionId
+        if (sessionId.isBlank()) return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.toolCall(conn, sessionId, toolCallId) }
+            }.onSuccess { info ->
+                _state.update { s -> s.copy(toolCalls = s.toolCalls + (toolCallId to info)) }
+            }
+        }
+    }
+
+    /** 订阅某条工具调用的实时输出。服务端不重放，晚订阅只会立刻收到结束帧。 */
+    fun openToolStream(toolCallId: String) {
+        val conn = currentConnection ?: return
+        val sessionId = _state.value.currentSessionId
+        if (sessionId.isBlank()) return
+        closeToolStream()
+        toolStreamJob = scope.launch {
+            runCatching {
+                toolStreamClient.open(conn, sessionId, toolCallId).collect { event ->
+                    when (event) {
+                        is io.qwenpaw.node.data.stream.ToolStreamEvent.Chunk ->
+                            _state.update { s ->
+                                val text = (s.toolLive[toolCallId].orEmpty() + event.text)
+                                s.copy(toolLive = s.toolLive + (toolCallId to text))
+                            }
+
+                        io.qwenpaw.node.data.stream.ToolStreamEvent.Done -> Unit
+                    }
+                }
+            }
+            // 结束（含断流）后用 /output 拉权威结果替换实时内容。
+            runCatching {
+                withContext(Dispatchers.IO) { api.toolCallOutput(conn, sessionId, toolCallId) }
+            }.onSuccess { output ->
+                val text = output.content.mapNotNull { block: kotlinx.serialization.json.JsonElement ->
+                    runCatching {
+                        (block as? kotlinx.serialization.json.JsonObject)
+                            ?.get("text")?.let { it as? kotlinx.serialization.json.JsonPrimitive }
+                            ?.content
+                    }.getOrNull()
+                }.joinToString("")
+                if (text.isNotBlank()) {
+                    _state.update { s -> s.copy(toolLive = s.toolLive + (toolCallId to text)) }
+                }
+            }
+        }
+    }
+
+    fun closeToolStream() {
+        toolStreamJob?.cancel()
+        toolStreamJob = null
+    }
+
+    /** 404 表示已经结束并过了缓存期；409 表示状态已变化。 */
+    private fun toolActionError(e: Throwable, action: String): String {
+        val failure = e as? ApiException
+        return when (failure?.code) {
+            404 -> "该工具调用已结束，无法${action}"
+            409 -> "工具状态已变化，请刷新后再试"
+            else -> friendly(e)
+        }
+    }
 
     fun detach() {
         streamJob?.cancel()
         pollJob?.cancel()
         pollJob = null
+        closeToolStream()
     }
 
     private fun pushSnapshot() {

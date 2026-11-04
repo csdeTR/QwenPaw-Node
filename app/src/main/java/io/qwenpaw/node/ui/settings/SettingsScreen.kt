@@ -144,7 +144,7 @@ fun SettingsScreen(
     /** 消息底部操作行样式。 */
     actionStyle: io.qwenpaw.node.ui.chat.ActionStyle = io.qwenpaw.node.ui.chat.ActionStyle.TEXT,
     onActionStyle: (io.qwenpaw.node.ui.chat.ActionStyle) -> Unit = {},
-    /** 工具、环境变量与后台策略的状态与动作。为 null 时三个入口不显示。 */
+    /** 工具、环境变量、后台策略与定时任务的状态与动作。为 null 时这些入口不显示。 */
     config: SettingsConfig? = null,
 ) {
     var adding by remember { mutableStateOf(false) }
@@ -459,6 +459,20 @@ fun SettingsScreen(
                                 onClick = {
                                     config.onLoadEnvs()
                                     section = SettingsPage.ENVIRONMENTS
+                                },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.calendarClock,
+                                title = "定时任务",
+                                subtitle = if (config.cron.loaded) {
+                                    "${config.cron.jobs.size} 个任务"
+                                } else {
+                                    "按计划自动执行"
+                                },
+                                onClick = {
+                                    config.onLoadCron()
+                                    section = SettingsPage.CRON
                                 },
                             )
                             Divider()
@@ -792,6 +806,49 @@ fun SettingsScreen(
                     }
                 }
 
+                SettingsPage.CRON -> {
+                    config?.let { c ->
+                        CronSection(
+                            state = c.cron,
+                            onToggle = c.onToggleCron,
+                            onRun = c.onRunCron,
+                            onPromote = c.onPromoteCron,
+                            onDelete = c.onDeleteCron,
+                            onLoadHistory = c.onLoadCronHistory,
+                            dismissRowError = c.dismissCronRowError,
+                            dismissError = c.dismissCronError,
+                            onNew = {
+                                c.onEditCron(null)
+                                section = SettingsPage.CRON_EDIT
+                            },
+                            onEdit = {
+                                c.onEditCron(it)
+                                section = SettingsPage.CRON_EDIT
+                            },
+                        )
+                    }
+                }
+
+                SettingsPage.CRON_EDIT -> {
+                    config?.let { c ->
+                        CronEditorSection(
+                            initial = c.cron.draft,
+                            targets = c.cron.targets,
+                            targetChannels = c.cron.targetChannels,
+                            chatNames = c.cron.chatNames,
+                            serverTimezone = c.cron.serverTimezone,
+                            saving = c.cron.saving,
+                            error = c.cron.error,
+                            onLoadTargets = c.onLoadCronTargets,
+                            onSave = { spec, originalId ->
+                                c.onSaveCron(spec, originalId) { ok ->
+                                    if (ok) section = SettingsPage.CRON
+                                }
+                            },
+                        )
+                    }
+                }
+
                 SettingsPage.ABOUT -> {
                 Card {
                     Column(modifier = Modifier.padding(14.dp)) {
@@ -911,6 +968,8 @@ internal enum class SettingsPage {
     TOOLS,
     ENVIRONMENTS,
     OFFLOAD,
+    CRON,
+    CRON_EDIT,
 }
 
 /**
@@ -938,6 +997,8 @@ private fun sectionTitle(section: SettingsPage): String = when (section) {
     SettingsPage.TOOLS -> "工具"
     SettingsPage.ENVIRONMENTS -> "环境变量"
     SettingsPage.OFFLOAD -> "后台策略"
+    SettingsPage.CRON -> "定时任务"
+    SettingsPage.CRON_EDIT -> "新建任务 / 编辑任务"
     else -> "设置"
 }
 
@@ -961,6 +1022,24 @@ data class SettingsConfig(
     val onResetEnv: (String) -> Unit = {},
     val onLoadOffload: () -> Unit = {},
     val onSetOffload: (String) -> Unit = {},
+    val cron: CronUiState = CronUiState(),
+    val onLoadCron: () -> Unit = {},
+    val onToggleCron: (String, Boolean) -> Unit = { _, _ -> },
+    val onRunCron: (String) -> Unit = {},
+    val onPromoteCron: (String) -> Unit = {},
+    val onDeleteCron: (String) -> Unit = {},
+    val onLoadCronHistory: (String) -> Unit = {},
+    val dismissCronRowError: (String) -> Unit = {},
+    val dismissCronError: () -> Unit = {},
+    val onLoadCronTargets: () -> Unit = {},
+    /** 打开编辑器：传 null 表示新建，传任务表示编辑。 */
+    val onEditCron: (io.qwenpaw.node.data.model.CronJobSpecDto?) -> Unit = {},
+    /** 保存。[onResult] 返回是否成功，失败时留在表单里显示错误。 */
+    val onSaveCron: (
+        spec: io.qwenpaw.node.data.model.CronJobSpecDto,
+        originalId: String?,
+        onResult: (Boolean) -> Unit,
+    ) -> Unit = { _, _, _ -> },
 )
 
 /** 一级列表「服务器」行的副标题：当前实例名与地址，没有实例时如实说明。 */
@@ -1537,7 +1616,7 @@ private fun SettingLabel(title: String, subtitle: String) {
 
 /** 外观选项卡片行：每个选项是一张可点的卡，比小圆片更好按也更好认。 */
 @Composable
-private fun ChipRow(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+internal fun ChipRow(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
     Row(
         modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1546,7 +1625,7 @@ private fun ChipRow(content: @Composable androidx.compose.foundation.layout.RowS
 }
 
 @Composable
-private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
+internal fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))

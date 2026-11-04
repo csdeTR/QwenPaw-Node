@@ -238,6 +238,24 @@ object QwenIcons {
         icon("clock", "M2 12A10 10 0 1 0 22 12A10 10 0 1 0 2 12Z", "M12 6L12 12L16 14")
     }
 
+    /** lucide `calendar-clock`。 */
+    val calendarClock: ImageVector by lazy {
+        icon(
+            "calendarClock",
+            "M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5",
+            "M16 2v4",
+            "M8 2v4",
+            "M3 10h5",
+            "M17.5 17.5 16 16.3V14",
+            "M10 16A6 6 0 1 0 22 16A6 6 0 1 0 10 16Z",
+        )
+    }
+
+    /** lucide `play`。 */
+    val play: ImageVector by lazy {
+        icon("play", "M6 3L20 12L6 21L6 3Z")
+    }
+
     /** lucide `code-xml`。 */
     val code: ImageVector by lazy {
         icon("code", "m18 16 4-4-4-4", "m6 8-4 4 4 4", "m14.5 4-5 16")

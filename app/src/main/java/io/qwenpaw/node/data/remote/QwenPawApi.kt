@@ -13,6 +13,11 @@ import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.data.model.ChatStatusDto
+import io.qwenpaw.node.data.model.CronDispatchTargetsDto
+import io.qwenpaw.node.data.model.CronExecutionRecordDto
+import io.qwenpaw.node.data.model.CronJobSpecDto
+import io.qwenpaw.node.data.model.CronJobStateDto
+import io.qwenpaw.node.data.model.CronJobViewDto
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
 import io.qwenpaw.node.data.model.InboxPageDto
@@ -26,8 +31,12 @@ import io.qwenpaw.node.data.model.PushMessagesDto
 import io.qwenpaw.node.data.model.SlashCommandDto
 import io.qwenpaw.node.data.model.ThinkingViewDto
 import io.qwenpaw.node.data.model.TokenUsageDto
+import io.qwenpaw.node.data.model.ToolCallInfoDto
+import io.qwenpaw.node.data.model.ToolCallListDto
+import io.qwenpaw.node.data.model.ToolCallOutputDto
 import io.qwenpaw.node.data.model.ToolDto
 import io.qwenpaw.node.data.model.UploadResultDto
+import io.qwenpaw.node.data.model.UserTimezoneDto
 import io.qwenpaw.node.data.model.VersionDto
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -562,6 +571,156 @@ class QwenPawApi(
             OffloadPolicyDto.serializer(),
         )
     }
+
+    // ---------- 定时任务 ----------
+
+    fun cronJobs(conn: Connection): List<CronJobSpecDto> =
+        decode(
+            request(conn, "GET", "/api/cron/jobs"),
+            kotlinx.serialization.builtins.ListSerializer(CronJobSpecDto.serializer()),
+        )
+
+    fun cronJob(conn: Connection, id: String): CronJobViewDto =
+        decode(request(conn, "GET", "/api/cron/jobs/$id"), CronJobViewDto.serializer())
+
+    /** 新建。服务端忽略客户端传入的 `id`，以响应里的 id 为准。 */
+    fun createCronJob(conn: Connection, spec: CronJobSpecDto): CronJobSpecDto =
+        decode(
+            request(conn, "POST", "/api/cron/jobs", cronBody(spec)),
+            CronJobSpecDto.serializer(),
+        )
+
+    /** 整体替换。`spec.id` 必须与路径一致，否则 400。 */
+    fun updateCronJob(conn: Connection, id: String, spec: CronJobSpecDto): CronJobSpecDto =
+        decode(
+            request(conn, "PUT", "/api/cron/jobs/$id", cronBody(spec)),
+            CronJobSpecDto.serializer(),
+        )
+
+    fun deleteCronJob(conn: Connection, id: String) {
+        request(conn, "DELETE", "/api/cron/jobs/$id")
+    }
+
+    fun pauseCronJob(conn: Connection, id: String) {
+        request(conn, "POST", "/api/cron/jobs/$id/pause")
+    }
+
+    fun resumeCronJob(conn: Connection, id: String) {
+        request(conn, "POST", "/api/cron/jobs/$id/resume")
+    }
+
+    /** 导入任务的审阅闸门。通过后任务仍是禁用状态，需要用户再手动启用。 */
+    fun promoteCronJob(conn: Connection, id: String): CronJobSpecDto =
+        decode(request(conn, "POST", "/api/cron/jobs/$id/promote"), CronJobSpecDto.serializer())
+
+    /** 立即执行一次，不检查 `enabled`。 */
+    fun runCronJob(conn: Connection, id: String) {
+        request(conn, "POST", "/api/cron/jobs/$id/run")
+    }
+
+    fun cronJobState(conn: Connection, id: String): CronJobStateDto =
+        decode(request(conn, "GET", "/api/cron/jobs/$id/state"), CronJobStateDto.serializer())
+
+    fun cronJobHistory(conn: Connection, id: String): List<CronExecutionRecordDto> =
+        decode(
+            request(conn, "GET", "/api/cron/jobs/$id/history"),
+            kotlinx.serialization.builtins.ListSerializer(CronExecutionRecordDto.serializer()),
+        )
+
+    fun cronDispatchTargets(
+        conn: Connection,
+        channel: String? = null,
+        keyword: String? = null,
+        limit: Int = 500,
+    ): CronDispatchTargetsDto {
+        val query = buildList {
+            add("limit=$limit")
+            channel?.takeIf { it.isNotBlank() }?.let { add("channel=$it") }
+            keyword?.takeIf { it.isNotBlank() }?.let { add("keyword=$it") }
+        }.joinToString("&")
+        return decode(
+            request(conn, "GET", "/api/cron/dispatch-targets?$query"),
+            CronDispatchTargetsDto.serializer(),
+        )
+    }
+
+    /** 服务端配置的时区，只读。值为空或无法解析时返回 null。 */
+    fun userTimezone(conn: Connection): String? =
+        decode(
+            request(conn, "GET", "/api/config/user-timezone"),
+            UserTimezoneDto.serializer(),
+        ).timezone?.takeIf { it.isNotBlank() }
+
+    private fun cronBody(spec: CronJobSpecDto): JsonObject =
+        json.encodeToJsonElement(CronJobSpecDto.serializer(), spec).jsonObject
+
+    // ---------- 工具调用控制 ----------
+
+    fun toolCalls(conn: Connection, sessionId: String): ToolCallListDto =
+        decode(
+            request(conn, "GET", "/api/tool-calls/$sessionId"),
+            ToolCallListDto.serializer(),
+        )
+
+    fun toolCall(conn: Connection, sessionId: String, toolCallId: String): ToolCallInfoDto =
+        decode(
+            request(conn, "GET", "/api/tool-calls/$sessionId/$toolCallId"),
+            ToolCallInfoDto.serializer(),
+        )
+
+    /**
+     * 取消执行。服务端返回 202，响应体为空或只有一个确认对象。
+     *
+     * 与 [stopChat] 一样不解析返回值：`decode` 遇到空体会抛「服务端返回了空响应」。
+     * 409 表示工具状态已变化（已结束或已达上限），由调用方转成中文提示。
+     */
+    fun cancelToolCall(
+        conn: Connection,
+        sessionId: String,
+        toolCallId: String,
+        force: Boolean = false,
+    ) {
+        val body = buildJsonObject { put("force", force) }
+        request(conn, "POST", "/api/tool-calls/$sessionId/$toolCallId/cancel", body)
+    }
+
+    fun offloadToolCall(conn: Connection, sessionId: String, toolCallId: String) {
+        request(conn, "POST", "/api/tool-calls/$sessionId/$toolCallId/offload")
+    }
+
+    /**
+     * 延长时限。`target` 取 `offload`（推迟转后台）或 `kill`（延长执行超时）。
+     *
+     * `noDeadline` 为真表示不再自动转后台 / 不设中止时限，与 `seconds` 互斥；
+     * 服务端对 `kill` 的上限另有校验（`max_internal_timeout_secs`）。
+     */
+    fun extendToolDeadline(
+        conn: Connection,
+        sessionId: String,
+        toolCallId: String,
+        seconds: Double? = null,
+        noDeadline: Boolean = false,
+        target: String = "offload",
+    ) {
+        val body = buildJsonObject {
+            seconds?.let { put("seconds", it) }
+            put("no_deadline", noDeadline)
+            put("target", target)
+        }
+        request(conn, "POST", "/api/tool-calls/$sessionId/$toolCallId/extend-deadline", body)
+    }
+
+    fun toolCallOutput(conn: Connection, sessionId: String, toolCallId: String): ToolCallOutputDto =
+        decode(
+            request(conn, "GET", "/api/tool-calls/$sessionId/$toolCallId/output"),
+            ToolCallOutputDto.serializer(),
+        )
+
+    /** 实时输出的 SSE 请求。服务端不回放，晚订阅只能拿到结束帧。 */
+    fun toolCallStreamRequest(conn: Connection, sessionId: String, toolCallId: String): Request =
+        baseBuilder(conn, resolve(conn.baseUrl, "/api/tool-calls/$sessionId/$toolCallId/stream"))
+            .header("Accept", "text/event-stream")
+            .build()
 
     fun deleteChat(conn: Connection, chatId: String) {
         request(conn, "DELETE", "/api/chats/$chatId")

@@ -188,6 +188,7 @@ private fun QwenPawNav(
     val toolsState by viewModel.settingsConfig.tools.collectAsState()
     val envsState by viewModel.settingsConfig.envs.collectAsState()
     val offloadState by viewModel.settingsConfig.offload.collectAsState()
+    val cronState by viewModel.cron.state.collectAsState()
     val fontState by viewModel.fontState.collectAsState()
     // 当前网络类型与 WiFi 名称：地址编辑区据此提示「这条现在会被优先使用」。
     val netSnapshot by app.networkMonitor.current.collectAsState()
@@ -653,6 +654,15 @@ private fun QwenPawNav(
                     // 顶栏「连接中断，点击重连」走这条：重绑地址 + 重载当前对话。
                     onRefresh = { viewModel.refreshAll() },
                     appearance = messageAppearance,
+                    onToolOpen = { id ->
+                        chatVm.refreshToolCalls()
+                        chatVm.openToolStream(id)
+                    },
+                    onToolClose = chatVm::closeToolStream,
+                    onToolDeadline = chatVm::refreshToolCalls,
+                    onCancelTool = { id -> chatVm.cancelTool(id) },
+                    onOffloadTool = chatVm::offloadTool,
+                    onExtendTool = chatVm::extendTool,
                     onOpenSource = { text ->
                         sourceText = text
                         screen = Screen.MESSAGE_SOURCE
@@ -830,6 +840,18 @@ private fun QwenPawNav(
                         onResetEnv = viewModel.settingsConfig::resetEnv,
                         onLoadOffload = { viewModel.settingsConfig.loadOffload() },
                         onSetOffload = viewModel.settingsConfig::setOffload,
+                        cron = cronState,
+                        onLoadCron = viewModel.cron::refresh,
+                        onToggleCron = viewModel.cron::setEnabled,
+                        onRunCron = viewModel.cron::runNow,
+                        onPromoteCron = viewModel.cron::promote,
+                        onDeleteCron = viewModel.cron::delete,
+                        onLoadCronHistory = viewModel.cron::loadHistory,
+                        dismissCronRowError = viewModel.cron::dismissRowError,
+                        dismissCronError = viewModel.cron::dismissError,
+                        onLoadCronTargets = { viewModel.cron.loadTargets() },
+                        onEditCron = viewModel.cron::edit,
+                        onSaveCron = viewModel.cron::save,
                     ),
                 )
             }

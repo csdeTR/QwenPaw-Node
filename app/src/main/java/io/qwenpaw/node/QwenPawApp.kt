@@ -16,6 +16,8 @@ class QwenPawApp : Application() {
         private set
     lateinit var streamClient: ChatStreamClient
         private set
+    lateinit var toolStreamClient: io.qwenpaw.node.data.stream.ToolStreamClient
+        private set
     lateinit var database: AppDatabase
         private set
     lateinit var instanceRepository: InstanceRepository
@@ -35,6 +37,10 @@ class QwenPawApp : Application() {
         super.onCreate()
         api = QwenPawApi()
         streamClient = ChatStreamClient(api, QwenPawApi.defaultClient())
+        toolStreamClient = io.qwenpaw.node.data.stream.ToolStreamClient(
+            api,
+            QwenPawApi.defaultClient(),
+        )
         database = AppDatabase.build(this)
         networkMonitor = NetworkMonitor(this)
         chatIconStore = io.qwenpaw.node.avatar.ChatIconStore(

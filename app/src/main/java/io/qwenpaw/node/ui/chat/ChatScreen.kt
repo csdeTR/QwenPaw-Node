@@ -107,6 +107,13 @@ fun ChatScreen(
     onOpenSource: (String) -> Unit = {},
     /** 可补全的斜杠命令；空列表时不显示候选。 */
     commands: List<io.qwenpaw.node.data.model.SlashCommandDto> = emptyList(),
+    /** 工具调用控制。展开卡片时重取状态并订阅实时输出。 */
+    onToolOpen: (String) -> Unit = {},
+    onToolClose: () -> Unit = {},
+    onToolDeadline: () -> Unit = {},
+    onCancelTool: (String) -> Unit = {},
+    onOffloadTool: (String) -> Unit = {},
+    onExtendTool: (id: String, seconds: Double?, target: String) -> Unit = { _, _, _ -> },
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -472,7 +479,18 @@ fun ChatScreen(
                                     onOpenSource = onOpenSource,
                                 )
 
-                                is ChatItem.Steps -> StepsGroup(steps = item.steps)
+                                is ChatItem.Steps -> StepsGroup(
+                                    steps = item.steps,
+                                    toolCalls = state.toolCalls,
+                                    toolLive = state.toolLive,
+                                    onCancelTool = onCancelTool,
+                                    onOffloadTool = onOffloadTool,
+                                    onExtendOffload = { id -> onExtendTool(id, 30.0, "offload") },
+                                    onExtendKill = { id -> onExtendTool(id, 30.0, "kill") },
+                                    onToolOpen = onToolOpen,
+                                    onToolClose = onToolClose,
+                                    onToolDeadline = onToolDeadline,
+                                )
 
                                 is ChatItem.Files -> DeliveredFilesCard(
                                     files = item.files,

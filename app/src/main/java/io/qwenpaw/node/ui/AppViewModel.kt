@@ -739,6 +739,15 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { configHolder = it }
 
+    /** 定时任务。任务归属当前智能体，切换实例或智能体时一并清空。 */
+    private var cronHolder: io.qwenpaw.node.ui.settings.CronViewModel? = null
+
+    val cron: io.qwenpaw.node.ui.settings.CronViewModel
+        get() = cronHolder ?: io.qwenpaw.node.ui.settings.CronViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { cronHolder = it }
+
     private fun activeConnection(): io.qwenpaw.node.data.remote.Connection? =
         repository.active()?.let { instance ->
             io.qwenpaw.node.data.remote.Connection(
@@ -797,6 +806,7 @@ class AppViewModel(
         if (previous != null && previous != key) {
             inboxHolder?.clear()
             configHolder?.clear()
+            cronHolder?.clear()
         }
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。
@@ -848,6 +858,7 @@ class AppViewModel(
                     val chatVm = ChatViewModel(
                         api = app.api,
                         streamClient = app.streamClient,
+                        toolStreamClient = app.toolStreamClient,
                         db = app.database,
                         appContext = appContext,
                         isAppVisible = { AppVisibility.visibleCount > 0 },

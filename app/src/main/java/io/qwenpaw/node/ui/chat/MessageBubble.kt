@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,12 +39,14 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.os.SystemClock
 import android.widget.Toast
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.Role
 import io.qwenpaw.node.ui.theme.CodeTextStyle
 import io.qwenpaw.node.ui.theme.MessageMaxWidth
 import io.qwenpaw.node.ui.theme.QwenIcons
+import kotlinx.coroutines.delay
 
 /**
  * 一个回合折叠起来的「N 步」：中间正文、思考与工具调用并成一组。
@@ -55,6 +58,20 @@ import io.qwenpaw.node.ui.theme.QwenIcons
 fun StepsGroup(
     steps: List<ChatMessage>,
     modifier: Modifier = Modifier,
+    /** 服务端登记的工具调用，key 为 `tool_call_id`。缺项表示不可控制。 */
+    toolCalls: Map<String, io.qwenpaw.node.data.model.ToolCallInfoDto> = emptyMap(),
+    /** 实时输出，key 为 `tool_call_id`。 */
+    toolLive: Map<String, String> = emptyMap(),
+    onCancelTool: (String) -> Unit = {},
+    onOffloadTool: (String) -> Unit = {},
+    onExtendOffload: (String) -> Unit = {},
+    onExtendKill: (String) -> Unit = {},
+    /** 展开卡片时重取状态并订阅实时输出。 */
+    onToolOpen: (String) -> Unit = {},
+    /** 收起卡片时断开实时输出。 */
+    onToolClose: () -> Unit = {},
+    /** 倒计时归零后重取一次真实状态。 */
+    onToolDeadline: () -> Unit = {},
 ) {
     if (steps.isEmpty()) return
     // 用首条 id 记住手动展开状态：步骤追加进来时不会丢失用户的展开/收起选择。
@@ -77,7 +94,21 @@ fun StepsGroup(
             onToggle = { override = !expanded },
         )
         if (expanded) {
-            steps.forEach { StepRow(it) }
+            steps.forEach { step ->
+                StepRow(
+                    step = step,
+                    defaultOpen = false,
+                    toolCalls = toolCalls,
+                    toolLive = toolLive,
+                    onCancelTool = onCancelTool,
+                    onOffloadTool = onOffloadTool,
+                    onExtendOffload = onExtendOffload,
+                    onExtendKill = onExtendKill,
+                    onToolOpen = onToolOpen,
+                    onToolClose = onToolClose,
+                    onToolDeadline = onToolDeadline,
+                )
+            }
         }
     }
 }
@@ -89,10 +120,34 @@ fun StepsGroup(
  * 在两种位置下的样子一致。
  */
 @Composable
-internal fun StepRow(step: ChatMessage, defaultOpen: Boolean = false) {
+internal fun StepRow(
+    step: ChatMessage,
+    defaultOpen: Boolean = false,
+    toolCalls: Map<String, io.qwenpaw.node.data.model.ToolCallInfoDto> = emptyMap(),
+    toolLive: Map<String, String> = emptyMap(),
+    onCancelTool: (String) -> Unit = {},
+    onOffloadTool: (String) -> Unit = {},
+    onExtendOffload: (String) -> Unit = {},
+    onExtendKill: (String) -> Unit = {},
+    onToolOpen: (String) -> Unit = {},
+    onToolClose: () -> Unit = {},
+    onToolDeadline: () -> Unit = {},
+) {
     when (step.kind) {
         ChatMessage.Kind.REASONING -> ProcessReasoningRow(step, defaultOpen)
-        ChatMessage.Kind.TOOL -> ProcessToolRow(step, defaultOpen)
+        ChatMessage.Kind.TOOL -> ProcessToolRow(
+            step = step,
+            defaultOpen = defaultOpen,
+            toolCalls = toolCalls,
+            toolLive = toolLive,
+            onCancelTool = onCancelTool,
+            onOffloadTool = onOffloadTool,
+            onExtendOffload = onExtendOffload,
+            onExtendKill = onExtendKill,
+            onToolOpen = onToolOpen,
+            onToolClose = onToolClose,
+            onToolDeadline = onToolDeadline,
+        )
         // 中间正文折进组里也要能展开看到，否则用户会以为回答被吞了。
         ChatMessage.Kind.TEXT -> FoldedTextRow(step)
         else -> Unit
@@ -222,16 +277,92 @@ private fun ProcessReasoningRow(step: ChatMessage, defaultOpen: Boolean = false)
  * 让它在长对话里「退到背景」而不是每条都抢眼。
  */
 @Composable
-private fun ProcessToolRow(step: ChatMessage, defaultOpen: Boolean = false) {
+private fun ProcessToolRow(
+    step: ChatMessage,
+    defaultOpen: Boolean = false,
+    toolCalls: Map<String, io.qwenpaw.node.data.model.ToolCallInfoDto> = emptyMap(),
+    toolLive: Map<String, String> = emptyMap(),
+    onCancelTool: (String) -> Unit = {},
+    onOffloadTool: (String) -> Unit = {},
+    onExtendOffload: (String) -> Unit = {},
+    onExtendKill: (String) -> Unit = {},
+    onToolOpen: (String) -> Unit = {},
+    onToolClose: () -> Unit = {},
+    onToolDeadline: () -> Unit = {},
+) {
     val tool = step.tool ?: return
     var open by remember(step.id) { mutableStateOf(defaultOpen) }
+    // 用户手动收/展开过就按他的选择来，不再自动动。
+    var userToggled by remember(step.id) { mutableStateOf(false) }
     val argHint = tool.arguments.replace('\n', ' ').trim()
+    // 只有服务端登记过这一条时才给操作区：否则点了必然 404。
+    val info = toolCalls[tool.callId]
+    // 只有服务端登记过、且尚未结束时才可控制：结束的条目会被服务端清出缓存，点了必然 404。
+    val controllableNow = if (tool.done) null else info
+    var pendingCancel by remember(step.id) { mutableStateOf(false) }
+    // 倒计时从「取回那一刻」起算，快照本身不会随请求自动刷新。
+    val fetchedAt = remember(info) { SystemClock.elapsedRealtime() }
+    val live = toolLive[tool.callId]
+    val output = live ?: tool.output
+
+    // 运行超过 7.5 秒仍未结束就主动展开，与官方网页的行为一致。
+    // 只动还没被用户手动切换过的卡片：用户刚收起来又被自动弹开会很烦。
+    LaunchedEffect(tool.done, step.id) {
+        if (tool.done || userToggled || open) return@LaunchedEffect
+        val startedAt = SystemClock.elapsedRealtime()
+        while (!autoExpandDue(SystemClock.elapsedRealtime() - startedAt)) {
+            delay(250)
+        }
+        if (!userToggled && !open) {
+            open = true
+            onToolOpen(tool.callId)
+        }
+    }
+
+    // 归零后重取一次真实状态；只在还有操作区时做，避免结束后反复打请求。
+    LaunchedEffect(controllableNow) {
+        val active = controllableNow ?: return@LaunchedEffect
+        val wait = shorterRemaining(active.offloadRemaining, active.killRemaining)
+        if (wait == null || wait <= 0.0) return@LaunchedEffect
+        while (true) {
+            val elapsed = SystemClock.elapsedRealtime() - fetchedAt
+            if (remainingSeconds(shorterRemaining(active.offloadRemaining, active.killRemaining), elapsed) == 0.0) {
+                onToolDeadline()
+                break
+            }
+            delay(500)
+        }
+    }
+
+    // 每秒重算一次倒计时：只有这一行小字会重组，不牵动参数与输出。
+    var tick by remember(info) { mutableStateOf(0) }
+    LaunchedEffect(info) {
+        if (info == null) return@LaunchedEffect
+        while (true) {
+            delay(1000)
+            tick++
+        }
+    }
+    val deadline = remember(info, tick) {
+        info?.let {
+            toolDeadlineLabel(
+                it.offloadRemaining,
+                it.killRemaining,
+                SystemClock.elapsedRealtime() - fetchedAt,
+            )
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-            .clickable { open = !open }
+            .clickable {
+                open = !open
+                userToggled = true
+                if (open) onToolOpen(tool.callId) else onToolClose()
+            }
             .padding(horizontal = 9.dp, vertical = 5.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -255,10 +386,10 @@ private fun ProcessToolRow(step: ChatMessage, defaultOpen: Boolean = false) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (!tool.done) {
+            toolStateBadge(tool, info)?.let { badge ->
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = "运行中",
+                    text = badge,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.tertiary,
                 )
@@ -289,10 +420,12 @@ private fun ProcessToolRow(step: ChatMessage, defaultOpen: Boolean = false) {
                 Text("参数", style = MaterialTheme.typography.labelSmall)
                 SelectionContainer { Text(tool.arguments, style = CodeTextStyle) }
             }
-            val output = tool.output
             if (!output.isNullOrBlank()) {
                 Spacer(Modifier.height(5.dp))
-                Text("输出", style = MaterialTheme.typography.labelSmall)
+                Text(
+                    text = if (live != null) "输出（实时）" else "输出",
+                    style = MaterialTheme.typography.labelSmall,
+                )
                 SelectionContainer {
                     Text(text = output.take(MAX_TOOL_OUTPUT_CHARS), style = CodeTextStyle)
                 }
@@ -304,8 +437,91 @@ private fun ProcessToolRow(step: ChatMessage, defaultOpen: Boolean = false) {
                     )
                 }
             }
+            if (controllableNow != null) {
+                Spacer(Modifier.height(6.dp))
+                ToolControlRow(
+                    info = controllableNow,
+                    onCancel = { pendingCancel = true },
+                    onOffload = { onOffloadTool(tool.callId) },
+                    onExtendOffload = { onExtendOffload(tool.callId) },
+                    onExtendKill = { onExtendKill(tool.callId) },
+                )
+                deadline?.let {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                    )
+                }
+            }
         }
     }
+
+    if (pendingCancel) {
+        io.qwenpaw.node.ui.common.DestructiveActionDialog(
+            title = "取消执行",
+            message = "确定要取消工具「${tool.name.ifBlank { "工具调用" }}」的执行吗？",
+            impacts = listOf("该工具已产生的执行会被中断，结果不再返回"),
+            confirmLabel = "取消执行",
+            undoable = false,
+            onConfirm = {
+                onCancelTool(tool.callId)
+                pendingCancel = false
+            },
+            onDismiss = { pendingCancel = false },
+        )
+    }
+}
+
+/** 状态徽标：运行中 / 已转后台 / 已完成 / 已取消。 */
+private fun toolStateBadge(
+    tool: io.qwenpaw.node.data.stream.ToolCard,
+    info: io.qwenpaw.node.data.model.ToolCallInfoDto?,
+): String? = when {
+    info?.endState == "interrupted" || info?.forceCancelled == true -> "已取消"
+    info?.status == "offloaded" -> "已转后台"
+    tool.done -> "已完成"
+    else -> "运行中"
+}
+
+/** 展开后的操作行：取消执行 / 转入后台 / 推迟转后台 / 延长执行超时。 */
+@Composable
+private fun ToolControlRow(
+    info: io.qwenpaw.node.data.model.ToolCallInfoDto,
+    onCancel: () -> Unit,
+    onOffload: () -> Unit,
+    onExtendOffload: () -> Unit,
+    onExtendKill: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 两个延长按钮只在与字段对应时限存在时才有意义：没有时限就无从延长。
+        ToolAction("取消执行", onCancel)
+        if (info.status == "running") {
+            ToolAction("转入后台", onOffload)
+            if (info.offloadRemaining != null) ToolAction("推迟转后台", onExtendOffload)
+        }
+        if (info.killRemaining != null || info.status == "offloaded") {
+            ToolAction("延长执行超时", onExtendKill)
+        }
+    }
+}
+
+@Composable
+private fun ToolAction(text: String, onClick: () -> Unit) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.secondary,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+    )
 }
 
 /** 单条消息气泡。 */
