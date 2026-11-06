@@ -31,16 +31,21 @@ android {
         applicationId = "io.qwenpaw.node"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.2.0"
+        versionCode = 6
+        versionName = "0.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 「关于」页里展示的项目仓库地址，单独抽成 BuildConfig 字段，
+        // 「关于」页里展示的仓库地址，单独抽成 BuildConfig 字段，
         // fork 之后改这一处即可，不用去翻界面代码。
         buildConfigField(
             "String",
             "REPO_URL",
             "\"https://github.com/csdeTR/QwenPaw-Node\"",
+        )
+        buildConfigField(
+            "String",
+            "BRIDGE_REPO_URL",
+            "\"https://github.com/csdeTR/QwenPaw-Node-Bridge\"",
         )
 
         // sherpa-onnx 的 .so 每个 ABI 20-30MB，四个架构全打进一个包光 native 就 93MB。
@@ -70,6 +75,10 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // debug 与 release 用不同包名，两个包可以同时装在一台设备上。
+            // 包名相同的话每次装 debug 都要先卸载 release，登录状态与缓存一起丢掉。
+            // 应用名在 src/debug/res/values/strings.xml 里覆盖为「[debug]QP Node」。
+            applicationIdSuffix = ".debug"
         }
         release {
             isMinifyEnabled = true
