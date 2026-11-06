@@ -8,6 +8,10 @@ import org.junit.Test
  *
  * 只说「已连接」看不出连的是哪条路：一台机器可能同时存着局域网地址与隧道地址。
  * 这里验证别名与地址的两种写法不会互相污染，也不会出现双重引号。
+ *
+ * 地址的写法见 [io.qwenpaw.node.data.UrlDisplay]：协议与默认端口不显示，
+ * 因为那一行右边还有上下文胶囊，而 `http://` 与 `:443` 对「连的是哪台机器」
+ * 没有信息量。
  */
 class ConnectedLabelTest {
 
@@ -23,7 +27,7 @@ class ConnectedLabelTest {
     @Test
     fun `url is used unquoted when label equals it`() {
         assertEquals(
-            "已通过 http://192.168.1.10:8088 连接至 QwenPaw",
+            "已通过 192.168.1.10:8088 连接至 QwenPaw",
             connectedLabel("http://192.168.1.10:8088", "http://192.168.1.10:8088"),
         )
     }
@@ -32,7 +36,7 @@ class ConnectedLabelTest {
     @Test
     fun `blank label falls back to url`() {
         assertEquals(
-            "已通过 http://192.168.1.10:8088 连接至 QwenPaw",
+            "已通过 192.168.1.10:8088 连接至 QwenPaw",
             connectedLabel("http://192.168.1.10:8088", ""),
         )
     }
@@ -54,7 +58,7 @@ class ConnectedLabelTest {
     @Test
     fun `values are trimmed`() {
         assertEquals(
-            "已通过 http://a:8088 连接至 QwenPaw",
+            "已通过 a:8088 连接至 QwenPaw",
             connectedLabel("  http://a:8088  ", "  http://a:8088  "),
         )
     }
@@ -74,7 +78,7 @@ class ConnectedLabelTest {
     @Test
     fun `server name works without alias`() {
         assertEquals(
-            "已通过 http://a:8088 连接至「家里的机器」",
+            "已通过 a:8088 连接至「家里的机器」",
             connectedLabel("http://a:8088", "", "家里的机器"),
         )
     }

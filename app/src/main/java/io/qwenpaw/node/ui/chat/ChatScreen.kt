@@ -137,7 +137,17 @@ fun ChatScreen(
     val allItems = remember(state.messages, assistantCollapse) {
         buildItems(state.messages, assistantCollapse)
     }
-    var rawStart by remember(state.currentChatId) { mutableStateOf(Int.MAX_VALUE) }
+    // 初值必须让**最后一条用户消息**落在窗口内：流式期间重新进入会话时会立刻贴底，
+    // 一个回合的「思考 + 工具 + 多段正文」很容易把用户自己发的那条挤到窗口外，
+    // 而上滑到顶又会被补页守卫挡住，界面于是永远看不到「我说了什么」。
+    //
+    // 键里要带 `loaded`：进入会话时列表先是空的（历史还在路上），此时算出的起点是 0；
+    // 若只按 chatId 记忆，历史到达后 `rawStart` 仍是 0，整个窗口就等于「全部铺开」，
+    // 长会话会立刻掉帧。加这一维后，历史落地的第一帧就按真实条目数重算一次。
+    val loaded = allItems.isNotEmpty()
+    var rawStart by remember(state.currentChatId, loaded) {
+        mutableStateOf(timelineStartFor(allItems, PAGE_SIZE))
+    }
     val maxStart = (allItems.size - PAGE_SIZE).coerceAtLeast(0)
     val windowStart = rawStart.coerceAtMost(maxStart)
     val timeline = remember(allItems, windowStart) { buildTimeline(allItems, windowStart) }
@@ -253,13 +263,18 @@ fun ChatScreen(
     // 补页。效果以 timeline.size 为 key：每补一页它就变大，效果自然重跑，
     // 于是「还停在顶部」时会继续补，直到补够或用户离开顶部，能正常收敛。
     LaunchedEffect(atTop, canScrollForward, userScrolled, timeline.size, state.currentChatId) {
-        // 生成期间与跟随末尾时都不补页。
+        // 跟随末尾时不补页。
         //
         // 「停在顶部」与「跟随底部」本来互斥；但列表在回复结束时会被服务端历史整体替换，
         // 下标在替换瞬间会短暂塌到 0（条目全换了一批，旧锚点消失），被误判成「翻到顶了」，
         // 接着就把几个月前的历史铺回来——这正是回复完成后界面突然退回几屏之前的原因。
         // 跟随标记是用户的真实意图，优先于位置推断。
-        if (followTail.value || state.running) return@LaunchedEffect
+        //
+        // 这里**不能**再加 `state.running`：流式期间用户上滑到顶时，正是最需要补页的时刻
+        // （他要看本轮之前自己发的那条消息）。此前用 running 挡住补页，表现为
+        // 「停在顶部、提示行一直写着『向上滑动可查看更早的消息』，但怎么滑都不加载」。
+        // 生成中把列表拉回底部这件事由 followTail 负责，与补页无关。
+        if (followTail.value) return@LaunchedEffect
         val curStart = rawStart.coerceAtMost((allItems.size - PAGE_SIZE).coerceAtLeast(0))
         if (curStart <= 0 || !atTop) return@LaunchedEffect
         // 内容不足一屏时列表根本滚不动，用户也无法再上滑，此时一路补到能滚动为止。
@@ -451,6 +466,11 @@ fun ChatScreen(
                 )
 
                 else -> io.qwenpaw.node.ui.theme.ChatFontScale {
+                    // 工具卡片的倒计时文案要按服务端后台策略说话：
+                    // 策略为「保持前台」时，到期并不会自动转入后台。
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalAutoOffload provides (state.offloadAction == "offload"),
+                    ) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -503,6 +523,7 @@ fun ChatScreen(
                         if (awaitingReply) {
                             item(key = "awaiting-reply") { AwaitingReplyRow() }
                         }
+                    }
                     }
                 }
             }

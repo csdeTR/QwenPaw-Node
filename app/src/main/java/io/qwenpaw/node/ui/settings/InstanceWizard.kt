@@ -67,9 +67,27 @@ fun InstanceWizard(
     onFinish: (InstanceDraft) -> Unit,
     /** 查服务端是否要求登录。异常时返回 false，按「不需要」处理。 */
     onCheckAuth: suspend (String) -> Boolean,
-    onLoadAgents: suspend (hosts: List<String>, username: String, password: String) -> List<AgentDto>,
+    /**
+     * 试登录一次，判断账号密码是否可用。
+     *
+     * 返回 null 表示通过，否则返回要显示给用户的原因。第 2 步点「下一步」
+     * 时先调它，失败就留在这一步并把原因弹出来。
+     */
+    onCheckLogin: suspend (
+        url: String,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> String?,
+    onLoadAgents: suspend (
+        hosts: List<String>,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<AgentDto>,
     onVerifyHosts: suspend (
         hosts: List<String>,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
         onAttempt: (VerifyAttempt) -> Unit,
     ) -> VerifyResult,
     /**
@@ -90,12 +108,23 @@ fun InstanceWizard(
     var verified by remember { mutableStateOf(false) }
     var verifyMessage by remember { mutableStateOf<String?>(null) }
     var verifyFailed by remember { mutableStateOf(false) }
+    // 验证通过后检测到的安全风险。非空时弹窗，用户点「知道了」才清空。
+    var securityNotice by remember { mutableStateOf<io.qwenpaw.node.data.SecurityNotice?>(null) }
+    // 反向代理的 HTTP Basic 凭据。验证时被发现需要（proxyAuthRequired）就自动展开。
+    var basicUser by remember { mutableStateOf("") }
+    var basicPassword by remember { mutableStateOf("") }
+    var proxyExpanded by remember { mutableStateOf(false) }
+    var proxyRequired by remember { mutableStateOf(false) }
 
     // 第 2 步
     var checkingAuth by remember { mutableStateOf(false) }
     var needsLogin by remember { mutableStateOf<Boolean?>(null) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    // 点「下一步」时正在试登录。与 checkingAuth 分开：前者是进这一步的自动判定，
+    // 后者是用户主动触发的校验，两者都可能阻塞按钮。
+    var checkingLogin by remember { mutableStateOf(false) }
+    var loginIssue by remember { mutableStateOf<String?>(null) }
 
     // 第 3 步
     var agents by remember { mutableStateOf<List<AgentDto>>(emptyList()) }
@@ -114,7 +143,14 @@ fun InstanceWizard(
         username = username.trim(),
         password = password,
         agentId = agentId.ifBlank { "default" },
+        basicUser = basicUser.trim(),
+        basicPassword = basicPassword,
     )
+
+    /** 反代凭据；两个都非空才生效。 */
+    fun proxyAuth(): io.qwenpaw.node.data.remote.BasicAuth? =
+        io.qwenpaw.node.data.remote.BasicAuth(basicUser.trim(), basicPassword)
+            .takeIf { basicUser.isNotBlank() && basicPassword.isNotBlank() }
 
     fun verify() {
         if (url.isBlank() || verifying) return
@@ -122,13 +158,38 @@ fun InstanceWizard(
         verifyMessage = null
         verifyFailed = false
         scope.launch {
-            runCatching { onVerifyHosts(listOf(url.trim())) {} }
+            runCatching { onVerifyHosts(listOf(url.trim()), proxyAuth()) {} }
                 .onSuccess { result ->
-                    verified = true
+                    verified = !result.proxyAuthRequired
                     verifyFailed = false
-                    verifyMessage = buildString {
-                        append("连接正常")
-                        if (result.version.isNotBlank()) append("，服务端 ").append(result.version)
+                    proxyRequired = result.proxyAuthRequired
+                    if (result.proxyAuthRequired) {
+                        // 不是「连不上」：地址是通的，被反代拦住了。就地展开凭据输入，
+                        // 比让用户回到地址那一步重填有用得多。
+                        proxyExpanded = true
+                        verifyMessage = "该地址由反向代理保护，请填写反向代理账号与密码后重新验证"
+                    } else {
+                        verifyMessage = buildString {
+                            append("连接正常")
+                            if (result.version.isNotBlank()) append("，服务端 ").append(result.version)
+                            append("，").append(bridgeLabel(result.bridge))
+                        }
+                    }
+                    // 验证已经顺带查过 `/api/auth/status`，而且带着反代凭据。
+                    // 第 2 步不再重复查：反代开启 `auth_basic` 时，不带凭据的那一次
+                    // 必然 401，会被误判成「不需要登录」，于是第 2 步被跳过、
+                    // 直接进第 3 步报错。
+                    needsLogin = result.needsLogin
+                    // 地址通不通只是第一步：公网地址若不设防，等于是把整台机器
+                    // 交出去。提示放在这里而不是「完成」之后，因为这是唯一一个
+                    // 用户还愿意回头改地址或补凭据的时刻。
+                    securityNotice = if (result.proxyAuthRequired) {
+                        null
+                    } else {
+                        io.qwenpaw.node.data.assessSecurity(
+                            url = result.baseUrl,
+                            loginRequired = result.needsLogin,
+                        ).takeIf { it.any }
                     }
                 }
                 .onFailure { e ->
@@ -148,7 +209,9 @@ fun InstanceWizard(
         loadingAgents = true
         agentError = null
         scope.launch {
-            runCatching { onLoadAgents(listOf(url.trim()), username, password) }
+            runCatching {
+                onLoadAgents(listOf(url.trim()), username, password, proxyAuth())
+            }
                 .onSuccess { list ->
                     agents = list
                     if (list.size == 1) agentId = list.first().id
@@ -215,11 +278,36 @@ fun InstanceWizard(
                     verified = false
                     verifyMessage = null
                     verifyFailed = false
+                    // 「是否要登录」也是上一个地址的结论。
+                    needsLogin = null
+                    // 风险结论同样作废：它描述的是上一个地址。
+                    securityNotice = null
                 },
                 instanceName = instanceName,
                 onInstanceName = { instanceName = it },
                 alias = alias,
                 onAlias = { alias = it },
+                basicUser = basicUser,
+                onBasicUser = {
+                    basicUser = it
+                    // 凭据一改，上一轮验证结论与「反代拦住」的判定都作废，
+                    // 否则改完账号不点验证也能点「下一步」。
+                    verified = false
+                    verifyMessage = null
+                    verifyFailed = false
+                    needsLogin = null
+                },
+                basicPassword = basicPassword,
+                onBasicPassword = {
+                    basicPassword = it
+                    verified = false
+                    verifyMessage = null
+                    verifyFailed = false
+                    needsLogin = null
+                },
+                proxyExpanded = proxyExpanded,
+                onToggleProxy = { proxyExpanded = !proxyExpanded },
+                proxyRequired = proxyRequired,
                 verifying = verifying,
                 verified = verified,
                 verifyMessage = verifyMessage,
@@ -228,7 +316,7 @@ fun InstanceWizard(
             )
 
             2 -> StepLogin(
-                checking = checkingAuth,
+                checking = checkingAuth || checkingLogin,
                 needsLogin = needsLogin == true,
                 username = username,
                 onUsername = { username = it },
@@ -267,9 +355,12 @@ fun InstanceWizard(
         val canNext = when (step) {
             // 名称是可选项：留空时由 InstanceDraft.resolvedName() 回落到地址，
             // 与「填表添加」的名称字段口径一致。硬条件只有地址验证通过。
-            1 -> verified && !verifying
+            // 检测到安全风险时先要求读完提示（对话框未确认前这一步不可点），
+            // 否则「下一步」会被用户直接点掉，提示等于没出现过。
+            1 -> verified && !verifying && securityNotice == null
             2 -> needsLogin == true &&
-                username.isNotBlank() && password.isNotBlank() && !checkingAuth
+                username.isNotBlank() && password.isNotBlank() &&
+                !checkingAuth && !checkingLogin
             else -> agentId.isNotBlank() && !connecting
         }
         WizardButton(
@@ -279,11 +370,30 @@ fun InstanceWizard(
                 else -> if (connecting) "正在连接" else "完成"
             },
             enabled = canNext,
-            busy = connecting,
+            busy = connecting || checkingLogin,
             onClick = {
                 when (step) {
                     1 -> step = 2
-                    2 -> step = 3
+                    // 先把账号发给服务端核对。写错账号的人应当停在这一步，
+                    // 而不是进到第 3 步才发现拉不到智能体。
+                    2 -> if (!checkingLogin) {
+                        checkingLogin = true
+                        loginIssue = null
+                        scope.launch {
+                            val failure = runCatching {
+                                onCheckLogin(
+                                    url.trim(),
+                                    username.trim(),
+                                    password,
+                                    proxyAuth(),
+                                )
+                            }.getOrElse { e ->
+                                io.qwenpaw.node.data.remote.ErrorText.of(e)
+                            }
+                            checkingLogin = false
+                            if (failure == null) step = 3 else loginIssue = failure
+                        }
+                    }
                     else -> onFinish(draft())
                 }
             },
@@ -296,12 +406,91 @@ fun InstanceWizard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable(enabled = !connecting) { step = wizardBackStep(step, needsLogin) }
+                    .clickable(enabled = !connecting && !checkingLogin) {
+                        step = wizardBackStep(step, needsLogin)
+                    }
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             )
         }
         Spacer(Modifier.height(16.dp))
     }
+
+    securityNotice?.let { notice ->
+        SecurityNoticeDialog(
+            notice = notice,
+            onDismiss = { securityNotice = null },
+        )
+    }
+
+    // 账号密码被服务端拒绝时就地弹出来，用户改完再点一次「下一步」。
+    // 不用行内错误：第 2 步的内容区会被滚动推走，弹窗不会看丢。
+    loginIssue?.let { issue ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { loginIssue = null },
+            title = { Text("无法登录") },
+            text = { Text(issue, style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { loginIssue = null }) {
+                    Text("知道了")
+                }
+            },
+        )
+    }
+}
+
+/**
+ * 公网地址的安全风险提示。
+ *
+ * 两条风险合成一个对话框：它们同时出现时是同一件事的两面（公网 + 没设防），
+ * 拆成两次弹窗只会让用户连点两下「知道了」，反而记不住内容。
+ *
+ * 按钮只有「知道了」：这里不提供「一键去设置」，因为 `QWENPAW_AUTH_ENABLED`
+ * 与 SSL 证书都在服务端，客户端改不了，给一个点了也没用的入口更糟。
+ */
+@Composable
+internal fun SecurityNoticeDialog(
+    notice: io.qwenpaw.node.data.SecurityNotice,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("这个地址可能可以从公网访问") },
+        text = {
+            Column {
+                if (notice.exposed) {
+                    Text(
+                        text = "未检测到登录验证。任何能访问到 ${notice.host} 的人" +
+                            "都可以操作这台机器上的智能体、读取对话记录。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "建议在服务端设置环境变量 QWENPAW_AUTH_ENABLED=true，" +
+                            "并注册一个账号后再连接。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (notice.exposed && notice.noTls) Spacer(Modifier.height(12.dp))
+                if (notice.noTls) {
+                    Text(
+                        text = "QwenPaw Node与QwenPaw通信内容将明文传输，存在安全风险",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "建议为服务端配置 SSL 证书，并把地址改成 https:// 开头；" +
+                            "也可以在前面加一层带证书的反向代理。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("知道了") }
+        },
+    )
 }
 
 /**
@@ -328,6 +517,14 @@ private fun StepServer(
     onInstanceName: (String) -> Unit,
     alias: String,
     onAlias: (String) -> Unit,
+    basicUser: String,
+    onBasicUser: (String) -> Unit,
+    basicPassword: String,
+    onBasicPassword: (String) -> Unit,
+    proxyExpanded: Boolean,
+    onToggleProxy: () -> Unit,
+    /** 反代确实在要凭据：此时折叠项默认展开并给一句说明。 */
+    proxyRequired: Boolean,
     verifying: Boolean,
     verified: Boolean,
     verifyMessage: String?,
@@ -390,6 +587,62 @@ private fun StepServer(
         Spacer(Modifier.height(4.dp))
         Text(
             text = "只改这条地址在实例卡片上的显示名，留空则显示地址本身",
+            style = MaterialTheme.typography.labelSmall,
+            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+        )
+    }
+
+    Spacer(Modifier.height(10.dp))
+    // 反向代理验证收在折叠项里：多数人没有反代，把它铺开会让第 1 步多出两个
+    // 用不到的输入框。只有验证时真的被拦住，才自动展开并给说明。
+    Text(
+        text = if (proxyExpanded) "收起反向代理验证" else "反向代理验证（可选）",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onToggleProxy)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+    )
+    if (proxyExpanded) {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = if (proxyRequired) {
+                "该地址由反向代理保护，需要填写账号与密码才能访问服务端"
+            } else {
+                "仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。" +
+                    "它与「Web登录认证」无关。"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = if (proxyRequired) {
+                MaterialTheme.colorScheme.secondary
+            } else {
+                io.qwenpaw.node.ui.theme.LocalCaptionColor.current
+            },
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = basicUser,
+            onValueChange = onBasicUser,
+            placeholder = { Text("反向代理用户名") },
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = basicPassword,
+            onValueChange = onBasicPassword,
+            placeholder = { Text("反向代理密码") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "两个都填写才会生效；只填一项按未启用处理",
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )

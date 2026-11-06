@@ -96,7 +96,29 @@ data class InstanceConfig(
     /** 仅在内存与加密存储中使用，不进入日志。 */
     val token: String? = null,
     val username: String? = null,
+    /**
+     * 反向代理（nginx / openresty）的 HTTP Basic 账号。
+     *
+     * 与 [username] 是两套身份：[username] 是 QwenPaw 实例的登录账号，
+     * 这一对只用来通过反代那一层。两者都为空表示该地址没开反代验证。
+     */
+    val basicUser: String? = null,
+    /** 反向代理的 HTTP Basic 密码。与 [token] 一样只存在于加密存储与内存。 */
+    val basicPassword: String? = null,
 ) {
+    /**
+     * 反代凭据；两个字段都非空才生效。
+     *
+     * 只填账号不填密码视为未配置：缺一半的凭据发出去只会得到又一次 401，
+     * 不如按「没开反代验证」处理，让请求直接打到服务端。
+     */
+    val basicAuth: io.qwenpaw.node.data.remote.BasicAuth?
+        get() {
+            val user = basicUser?.takeIf { it.isNotBlank() } ?: return null
+            val password = basicPassword?.takeIf { it.isNotBlank() } ?: return null
+            return io.qwenpaw.node.data.remote.BasicAuth(user, password)
+        }
+
     /** 默认地址。列表为空时返回空串，调用方据空串判断配置是否可用。 */
     val primaryBaseUrl: String
         get() = addresses.firstOrNull()?.url.orEmpty()

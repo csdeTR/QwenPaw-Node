@@ -21,7 +21,9 @@ class ErrorTextTest {
     @Test
     fun `business errors win over network heuristics`() {
         // ApiException 继承自 IOException，若不先判会落进「网络中断」分支。
-        assertEquals("登录已失效，请重新登录", ErrorText.of(ApiException(401, "unauthorized")))
+        // 401 的三种成因各有专属文案，见 ErrorTextAuthTest；这里的 detail 无法归类，
+        // 按「未知 401」保留服务端原文。
+        assertEquals("unauthorized", ErrorText.of(ApiException(401, "unauthorized", tokenSent = true)))
         assertEquals("对话不存在或已被删除", ErrorText.of(ApiException(404, "not found")))
         assertEquals(
             "该对话已有任务在运行，请先停止或等待完成",

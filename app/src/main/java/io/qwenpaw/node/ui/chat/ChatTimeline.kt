@@ -171,6 +171,28 @@ fun buildTimeline(items: List<ChatItem>, start: Int): List<ChatItem> {
 }
 
 /**
+ * 首屏窗口该从哪一项开始。
+ *
+ * 规则：**保证最后一条用户消息落在窗口内**，其余按「只取末尾一页」截断。
+ *
+ * 为什么不能只取末尾一页：流式期间重新进入会话时，界面会立刻贴底，而一页只有
+ * 8 个条目；一个回合里的「思考 + 工具 + 多段正文」很容易把用户自己发的那条挤到
+ * 窗口之外。此时上滑到顶既不补页（见 `ChatScreen` 的补页守卫），界面就永远停在
+ * 「看不到我说了什么」。窗口下沿对齐到回合起点，用户至少能看到自己发的那句话。
+ *
+ * 无用户消息（纯系统消息、或历史还没回来）时退回「末尾一页」。
+ */
+fun timelineStartFor(items: List<ChatItem>, pageSize: Int): Int {
+    if (items.isEmpty()) return 0
+    val tail = (items.size - pageSize).coerceAtLeast(0)
+    val lastUser = items.indexOfLast {
+        it is ChatItem.Single && it.message.role == Role.USER
+    }
+    if (lastUser < 0) return tail
+    return lastUser.coerceAtMost(tail)
+}
+
+/**
  * 是否要在列表末尾画一行「正在生成」。
  *
  * 判据是「本轮在跑，且最后一条消息还是用户自己发的」。用「最后一条」而不是

@@ -152,7 +152,7 @@ fun VoiceSheet(
                     text = when (state) {
                         VoiceState.Listening -> when {
                             holdMode -> "正在听，松开麦克风结束"
-                            autoStop -> "正在听，停顿后会自己结束"
+                            autoStop -> "正在录音，随停顿自动结束"
                             else -> "正在听，点麦克风结束"
                         }
                         is VoiceState.Error -> state.message
@@ -167,7 +167,7 @@ fun VoiceSheet(
                     },
                 )
                 Text(
-                    text = partial.ifBlank { "说话的內容会实时出现在这里" },
+                    text = partial.ifBlank { "语音识别内容实时填入对话框" },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (partial.isBlank()) {
                         io.qwenpaw.node.ui.theme.LocalCaptionColor.current

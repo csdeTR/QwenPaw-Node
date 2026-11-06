@@ -269,4 +269,69 @@ class ChatTimelineTest {
 
         assertEquals(1, (items.last() as ChatItem.Files).files.size)
     }
+
+    // ---------------- 首屏窗口起点 ----------------
+
+    /**
+     * 已有一个很长的回合时，窗口必须把最后一条用户消息包进来。
+     *
+     * 这是「生成中退出再回来，滑到顶看不到自己发的消息」的直接判据：
+     * 一页只有 8 个条目，而「思考 + 工具 + 多段正文」很容易超过 8。
+     */
+    @Test
+    fun `window start keeps the last user message visible`() {
+        val messages = buildList {
+            add(textMessage("u0", Role.USER, "上一轮"))
+            add(textMessage("a0", Role.ASSISTANT, "好"))
+            add(textMessage("u1", Role.USER, "帮我查一下"))
+            // 本回合的过程消息足以把 u1 挤出「末尾一页」。
+            repeat(9) { add(reasoning("r$it")) }
+            add(textMessage("a1", Role.ASSISTANT, "正在处理"))
+        }
+        val items = buildItems(messages, AssistantCollapse.EXPANDED)
+
+        val start = timelineStartFor(items, pageSize = 8)
+        val window = buildTimeline(items, start)
+
+        assertTrue("窗口里必须包含用户消息 u1", window.any {
+            it is ChatItem.Single && it.message.id == "u1"
+        })
+    }
+
+    /** 条目不足一页时从 0 开始，不裁掉任何内容。 */
+    @Test
+    fun `short list starts at zero`() {
+        val items = buildItems(
+            listOf(
+                textMessage("u1", Role.USER, "你好"),
+                textMessage("a1", Role.ASSISTANT, "你好"),
+            ),
+            AssistantCollapse.EXPANDED,
+        )
+        assertEquals(0, timelineStartFor(items, pageSize = 8))
+    }
+
+    /** 没有用户消息（纯系统消息）时退回「末尾一页」。 */
+    @Test
+    fun `no user message falls back to the tail page`() {
+        val items = buildItems(
+            (0 until 12).map { reasoning("r$it") },
+            AssistantCollapse.EXPANDED,
+        )
+        assertEquals(4, timelineStartFor(items, pageSize = 8))
+    }
+
+    /** 最后一条用户消息就在末尾一页里时，起点仍是「末尾一页」而不是更早。 */
+    @Test
+    fun `tail page wins when the user message is already inside`() {
+        val messages = buildList {
+            repeat(10) { add(reasoning("r$it")) }
+            add(textMessage("u1", Role.USER, "最近一句"))
+            add(textMessage("a1", Role.ASSISTANT, "好"))
+        }
+        val items = buildItems(messages, AssistantCollapse.EXPANDED)
+        val tail = (items.size - 8).coerceAtLeast(0)
+
+        assertEquals(tail, timelineStartFor(items, pageSize = 8))
+    }
 }

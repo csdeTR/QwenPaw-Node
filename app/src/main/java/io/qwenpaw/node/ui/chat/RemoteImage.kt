@@ -29,6 +29,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -68,8 +69,10 @@ class ChatImageLoader {
         ) {
             return trimmed
         }
-        // 服务端本地绝对路径 → 预览端点。
-        val path = "/api/files/preview/" + trimmed.removePrefix("/")
+        // 服务端本地绝对路径 → 预览端点。交付文件给的是 `file:///tmp/a.webp`，
+        // 这层前缀必须先剥掉，否则会拼成 `/api/files/preview/file:///tmp/a.webp`。
+        val path = "/api/files/preview/" +
+            trimmed.removePrefix("file://").removePrefix("/")
         return QwenPawApi.resolve(conn.baseUrl, path).toString()
     }
 
@@ -81,9 +84,22 @@ class ChatImageLoader {
                 when {
                     key.startsWith("data:") -> decodeDataUri(key)
                     else -> {
-                        val builder = Request.Builder().url(key)
-                        conn.token?.takeIf { it.isNotBlank() }
-                            ?.let { builder.header("Authorization", "Bearer $it") }
+                        // 与 QwenPawApi.baseBuilder 同一套规则：反代 Basic 与
+                        // QwenPaw token 争用 Authorization，有 Basic 时 token 走 query。
+                        // 这里漏改的表现很具体：文字能出来、图片一直转圈。
+                        val imageUrl = if (conn.basicAuth != null && !conn.token.isNullOrBlank()) {
+                            (key.toHttpUrlOrNull() ?: return@runCatching null)
+                                .newBuilder()
+                                .addQueryParameter("token", conn.token)
+                                .build()
+                                .toString()
+                        } else {
+                            key
+                        }
+                        val builder = Request.Builder().url(imageUrl)
+                        conn.basicAuth?.let { builder.header("Authorization", it.headerValue) }
+                            ?: conn.token?.takeIf { it.isNotBlank() }
+                                ?.let { builder.header("Authorization", "Bearer $it") }
                         builder.header("X-Agent-Id", conn.agentId)
                         client.newCall(builder.build()).execute().use { response ->
                             if (!response.isSuccessful) null

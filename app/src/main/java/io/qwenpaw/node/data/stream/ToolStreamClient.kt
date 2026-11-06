@@ -37,7 +37,18 @@ class ToolStreamClient(
                 val response = call.execute()
                 if (!response.isSuccessful) {
                     val text = response.body?.string().orEmpty()
-                    close(ApiException(response.code, extractDetail(text, response.code)))
+                    val detail = extractDetail(text, response.code)
+                    // 与 REST 侧一致：带上 WWW-Authenticate 才能把「反代拦下」与
+                    // 「服务端拒绝凭据」分开，否则两者都只是一句 401。
+                    close(
+                        ApiException(
+                            response.code,
+                            detail,
+                            detail = detail,
+                            wwwAuthenticate = response.header("WWW-Authenticate"),
+                            tokenSent = conn.token != null || conn.basicAuth != null,
+                        ),
+                    )
                     awaitClose { }
                     return@callbackFlow
                 }

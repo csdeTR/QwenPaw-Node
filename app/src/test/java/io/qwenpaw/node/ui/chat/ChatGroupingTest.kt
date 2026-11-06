@@ -353,4 +353,25 @@ class ChatGroupingTest {
             groupTitle(ChatGroupDto(id = "g5", name = "", kind = CUSTOM_KIND)),
         )
     }
+
+    /**
+     * 移回「未分组」要发默认分组的 id。
+     *
+     * 服务端对 `group_id: null` 返回 400 `Unknown chat group: None`，
+     * 所以选项 key 为空时必须换成列表里 `kind == "default"` 的 id。
+     */
+    @Test
+    fun `ungrouped target is the default group id`() {
+        val groups = listOf(
+            ChatGroupDto(id = "g1", name = "分组A", kind = CUSTOM_KIND),
+            ChatGroupDto(id = "default", name = "Uncategorized", kind = "default"),
+        )
+        assertEquals("default", ChatGrouping.defaultGroupId(groups))
+    }
+
+    /** 分组列表还没拉到时不能把 null 发给服务端，兜底用 default。 */
+    @Test
+    fun `default group id falls back when groups missing`() {
+        assertEquals("default", ChatGrouping.defaultGroupId(emptyList()))
+    }
 }

@@ -409,7 +409,7 @@ internal fun CronEditorSection(
                     Spacer(Modifier.height(8.dp))
                     SwitchRow(
                         title = "直接编辑表达式",
-                        subtitle = "关闭时由上方选项自动生成；开启后可写任意 5 段写法",
+                        subtitle = "关闭时由上方选项自动生成；开启后可自行填写任意 5 段表达式",
                         checked = draft.directEdit,
                         onCheckedChange = { direct ->
                             draft = draft.copy(directEdit = direct)
@@ -597,7 +597,7 @@ internal fun CronEditorSection(
                     )
                     SwitchRow(
                         title = "工具审批检查",
-                        subtitle = "开启后高风险工具需要审批，可能阻塞无人值守执行",
+                        subtitle = "开启后，高风险工具需要审批，无人值守时任务可能停在等待审批",
                         checked = draft.toolSafety,
                         onCheckedChange = { draft = draft.copy(toolSafety = it) },
                     )
@@ -782,7 +782,7 @@ internal fun CronDispatchTargetItemDto.displayName(names: Map<String, String>): 
 /** 已选目标的单行写法：名称 + session_id，丢掉无信息量的 channel。 */
 internal fun targetLabel(item: CronDispatchTargetItemDto, names: Map<String, String>): String {
     val name = names[item.sessionId]?.takeIf { it.isNotBlank() }
-    return if (name == null) item.sessionId else "$name · ${item.sessionId}"
+    return if (name == null) item.sessionId else "$name，${item.sessionId}"
 }
 
 @Composable

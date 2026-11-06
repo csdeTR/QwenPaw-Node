@@ -45,7 +45,15 @@ class ChatStreamClient(
                     "SSE",
                     "建流被拒：${response.code} $detail",
                 )
-                close(ApiException(response.code, detail))
+                close(
+                    ApiException(
+                        response.code,
+                        detail,
+                        detail = detail,
+                        wwwAuthenticate = response.header("WWW-Authenticate"),
+                        tokenSent = conn.token != null || conn.basicAuth != null,
+                    ),
+                )
                 awaitClose { }
                 return@callbackFlow
             }

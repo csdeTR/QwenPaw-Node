@@ -63,13 +63,31 @@ class DeliveredFilesTest {
         assertTrue(DeliveredFiles.parse(pngArguments, "[]").isEmpty())
     }
 
+    /**
+     * webp 的实测返回：`source.type = "url"`，`media_type` 还是 `application/octet-stream`。
+     * 这种形状仍要生成卡片，否则用户在界面上完全看不到「文件已发送」这件事。
+     */
     @Test
-    fun `non base64 source is ignored`() {
-        val files = DeliveredFiles.parse(
-            pngArguments,
-            """[{"type":"data","source":{"type":"url","url":"http://x/y.png"}}]""",
-        )
-        assertTrue(files.isEmpty())
+    fun `webp url output still produces a card`() {
+        val args = """{"file_path":"/tmp/bridgetest.webp"}"""
+        val output = """[{"type":"data","id":"ea12","source":{"type":"url",""" +
+            """"url":"file:///tmp/bridgetest.webp","media_type":"application/octet-stream"},""" +
+            """"name":"bridgetest.webp"}]"""
+        val files = DeliveredFiles.parse(args, output)
+
+        assertEquals(1, files.size)
+        val file = files.single()
+        assertEquals("bridgetest.webp", file.name)
+        assertNull(file.dataUri)
+        assertEquals("file:///tmp/bridgetest.webp", file.remoteUrl)
+        assertTrue(file.isImage)
+    }
+
+    /** 输出为空时不能凭空造出「已发送」的卡片。 */
+    @Test
+    fun `empty output yields no card`() {
+        assertTrue(DeliveredFiles.parse(pngArguments, null).isEmpty())
+        assertTrue(DeliveredFiles.parse(pngArguments, "").isEmpty())
     }
 
     @Test

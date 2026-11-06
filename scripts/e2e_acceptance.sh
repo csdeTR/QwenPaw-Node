@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# QwenPaw Node 模拟器验收脚本。
+# QwenPaw Node redroid 验收脚本。
 #
 # 用法：
 #   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A6）
@@ -7,12 +7,13 @@
 #   ./scripts/e2e_acceptance.sh --only A4    # 只跑某个场景
 #
 # 设备：
-#   默认取 `adb devices` 里唯一在线设备；多设备时用 ADB_SERIAL 指定。
-#   只支持模拟器（x86_64 / Android 15），真机分支已移除。
+#   默认取 `adb devices` 里唯一在线设备；多设备时用 ADB_SERIAL 指定，
+#   redroid 上是 localhost:5555。
+#   只支持 redroid 容器（x86_64 / Android 15），真机与模拟器分支已移除。
 #
 # 前提：
-#   1. 模拟器已启动（emulator -avd qp35），参数见 AGENTS.md 3.1；
-#      A6 需要 `adb root` 才能用 iptables，模拟器可 root；
+#   1. redroid 容器已启动并连上 adb，步骤见 AGENTS.md 3.1；
+#      容器内 userdebug 默认 root，A6 断网用路由黑洞而不是 iptables；
 #   2. LXC 测试容器已启动 QwenPaw（默认 qp-test / 10.10.0.211:8088），
 #      启动方式见 AGENTS.md 2.1。本机 :8088 实例承载真实数据，不参与验收；
 #   3. 已执行 `./gradlew :app:assembleDebug`。
@@ -29,7 +30,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SDK="${ANDROID_HOME:-$HOME/Android/Sdk}"
 ADB_BIN="$SDK/platform-tools/adb"
-PKG="io.qwenpaw.node"
+# debug 包的 applicationId 带 .debug 后缀（见 app/build.gradle.kts），与 release 可以同机共存。
+PKG="${ADB_PKG:-io.qwenpaw.node.debug}"
 DEBUG_DIR="$ROOT/app/build/outputs/apk/debug"
 OUT="$ROOT/build/e2e"
 # 默认服务端指向 LXC 测试容器 qp-test（稳定版 2.2.2.post1）。
@@ -44,7 +46,7 @@ SERIAL="${ADB_SERIAL:-}"
 if [ -z "$SERIAL" ]; then
   SERIAL="$("$ADB_BIN" devices | awk 'NR>1 && $2=="device" {print $1}' | head -1)"
 fi
-[ -n "$SERIAL" ] || { echo "没有在线设备，先启动模拟器"; exit 1; }
+[ -n "$SERIAL" ] || { echo "没有在线设备，先按 AGENTS.md 3.1 启动 redroid 容器并 adb connect"; exit 1; }
 ADB=("$ADB_BIN" -s "$SERIAL")
 echo "设备：$SERIAL"
 
@@ -62,8 +64,6 @@ echo "安装包：$(basename "$APK")"
 echo "服务器地址：$HOST"
 # 第二实例（A5 用）：同一台宿主的 8099 端口。
 SECOND_HOST="${QWENPAW_HOST2:-${HOST%:*}:8099}"
-# 断网只封这个端口，避免误伤 adb 的 5555。
-PORT="${HOST##*:}"
 
 KEEP=0
 ONLY=""
@@ -123,21 +123,25 @@ try: print(sum(1 for c in json.load(sys.stdin) if c["status"]=="running"))
 except Exception: print(-1)'
 }
 
+# redroid 镜像内 netfilter 的 filter 表不可用（iptables -L 报 Table does not exist），
+# 因此用路由黑洞断网。黑洞在容器自己的 netns 内，不改动宿主网卡，
+# 也不影响 5555 的 adb 连接。
+HOST_IP="${HOST%%:*}"
+
 block_port() {
-  run_root "iptables -I OUTPUT -p tcp --dport $PORT -j DROP; iptables -I INPUT -p tcp --sport $PORT -j DROP"
+  run_root "ip route add blackhole $HOST_IP/32"
 }
 
-# 收尾时规则通常不存在，iptables 会往 stderr 打 "Bad rule"，不是故障。
 unblock_port() {
-  run_root "iptables -D OUTPUT -p tcp --dport $PORT -j DROP; iptables -D INPUT -p tcp --sport $PORT -j DROP" 2>/dev/null || true
+  run_root "ip route del blackhole $HOST_IP/32" 2>/dev/null || true
 }
 
-# 以 root 执行。模拟器支持 `adb root`，因此只有这一条提权路径。
+# 以 root 执行。redroid 容器是 userdebug，adb shell 默认 uid 0。
 run_root() {
   "${ADB[@]}" shell "$1"
 }
 
-# 断网需要 root。只封 HOST 的端口（不是 5555），所以不会切断 adb 自身。
+# 断网需要 root。只封服务端 IP（不是 5555），所以不会切断 adb 自身。
 can_block() {
   if [ "$("${ADB[@]}" shell id -u 2>/dev/null | tr -d '\r')" = "0" ]; then
     return 0
@@ -335,7 +339,7 @@ fi
 if want A6; then
   echo "== A6 断网 =="
   if ! can_block; then
-    echo "  [跳过] 模拟器没拿到 root（adb root 失败），无法断网"
+    echo "  [跳过] 设备没有 root，无法断网"
   else
   block_port
   if type_and_send "offline acceptance probe"; then

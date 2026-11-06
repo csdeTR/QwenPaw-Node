@@ -114,6 +114,34 @@ data class AppState(
      */
     val collapsedGroups: Set<String> = emptySet(),
     /**
+     * 是否启用安全提示。
+     *
+     * 默认开启：公网地址没有登录或没有 HTTPS 时，等于把整台机器交出去，
+     * 这个提醒值得每次启动出现一次。关闭是用户的显式选择，会二次确认。
+     */
+    val securityHintsEnabled: Boolean = true,
+    /**
+     * 本次运行检测到的安全风险；null 表示无需提示或已被用户关掉。
+     *
+     * 只在进程启动时填一次：把它做成持续状态会让用户每切一次页面就被弹一次。
+     */
+    val securityNotice: io.qwenpaw.node.data.SecurityNotice? = null,
+    /**
+     * 配套插件（QwenPaw Node Bridge）的探测结论。
+     *
+     * 设置页的插件行直接读它；后续依赖插件的功能只按 `capabilities` 开关，
+     * 不比对版本号。
+     */
+    val bridgeStatus: io.qwenpaw.node.data.plugin.BridgeStatus =
+        io.qwenpaw.node.data.plugin.BridgeStatus.Unknown,
+    /**
+     * 是否启用依赖配套插件的功能。
+     *
+     * 只是客户端侧的意愿；插件未安装时界面会禁用这个开关，
+     * 因此这里的值可能为 true 但实际不生效——以 [bridgeStatus] 为准。
+     */
+    val bridgeFeaturesEnabled: Boolean = false,
+    /**
      * 本次运行手动指定的地址：实例 id → 地址。
      *
      * 放进 state 而不是让界面直接读仓库里的内存 map：后者不是可观察对象，
@@ -131,6 +159,8 @@ class AppViewModel(
     private val network: io.qwenpaw.node.data.NetworkMonitor? = null,
     /** 服务端头像缓存。为 null 时（测试、预览）不显示服务端头像。 */
     private val serverAvatarClient: io.qwenpaw.node.data.remote.ServerAvatarClient? = null,
+    /** 配套插件探测。为 null 时（测试、预览）插件行固定显示「尚未检测」。 */
+    private val pluginProbe: io.qwenpaw.node.data.plugin.PluginProbe? = null,
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -180,6 +210,8 @@ class AppViewModel(
                 )
             }.getOrDefault(io.qwenpaw.node.ui.chat.GroupMode.TIME),
             collapsedGroups = readCollapsedGroups(),
+            securityHintsEnabled = prefs.getBoolean(KEY_SECURITY_HINTS, true),
+            bridgeFeaturesEnabled = prefs.getBoolean(KEY_BRIDGE_FEATURES, false),
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -263,6 +295,7 @@ class AppViewModel(
             repository.resolvedBaseUrl(instance),
             instance.token,
             instance.agentId,
+            instance.basicAuth,
         )
         scope.launch {
             val file = withContext(Dispatchers.IO) {
@@ -291,6 +324,10 @@ class AppViewModel(
             // 运行期缓存是空的，此时绑的地址只是「排序后第一个」，不一定可达。
             // 后台探一次：若备用地址才是通的，换过去再重载，用户不必手动刷新。
             probeAndRebind(boundUrl)
+            // 安全提示每次进程启动检查一次：公网地址不设防，等于把整台机器交出去。
+            checkSecurityNoticeOnce(instance, boundUrl)
+            // 插件探测由 bind() 末尾统一触发：插件路由不在鉴权公开路径里，
+            // 没有 token 的时候探只会拿到 401。这里再调一次会让每次冷启动多发一遍请求。
         }
     }
 
@@ -370,6 +407,8 @@ class AppViewModel(
             username = draft.username,
             password = draft.password,
             agentId = draft.agentId,
+            basicUser = draft.basicUser,
+            basicPassword = draft.basicPassword,
             onResult = onResult,
         )
     }
@@ -389,9 +428,16 @@ class AppViewModel(
          * 传空串时由 [InstanceDraft.resolvedName] 的同一规则回落到地址。
          */
         instanceName: String = "",
+        /** 反向代理的 HTTP Basic 凭据；两个都非空才生效。 */
+        basicUser: String = "",
+        basicPassword: String = "",
     ) {
         if (_state.value.connecting) return
         _state.update { it.copy(connecting = true, connectError = null) }
+        val basicAuth = io.qwenpaw.node.data.remote.BasicAuth(
+            basicUser.trim(),
+            basicPassword,
+        ).takeIf { basicUser.isNotBlank() && basicPassword.isNotBlank() }
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -404,6 +450,7 @@ class AppViewModel(
                         username = username.takeIf { it.isNotBlank() },
                         password = password.takeIf { it.isNotBlank() },
                         agentId = agentId.ifBlank { "default" },
+                        basicAuth = basicAuth,
                     )
                 }
             }.onSuccess { config ->
@@ -412,15 +459,34 @@ class AppViewModel(
                 chatViewModel.refreshChats()
                 onResult(true)
             }.onFailure { e ->
+                val hint = io.qwenpaw.node.data.remote.ErrorText.ofWithHint(
+                    e,
+                    io.qwenpaw.node.data.InstanceRepository.usesHttps(
+                        addresses.firstOrNull()?.url.orEmpty(),
+                    ),
+                )
+                // 401 且成因是「token 失效」时补一句去处：光说「登录已失效」，
+                // 用户在连接页上找不到任何可以「重新登录」的入口。
+                //
+                // 失败原因不是 401（例如半开连接、DNS 抖动）时再向 `/auth/verify`
+                // 问一次：token 真的被吊销了要引导重新登录，网络问题只需重试，
+                // 两种情况混成同一句话，用户会反复重试一个永远不会成功的动作。
+                val expired = e is io.qwenpaw.node.data.remote.ApiException &&
+                    e.code == 401 &&
+                    io.qwenpaw.node.data.remote.ErrorText.classify401(
+                        e.detail ?: e.message,
+                        e.wwwAuthenticate,
+                        e.tokenSent,
+                    ) == io.qwenpaw.node.data.remote.ErrorText.AuthFailure.TOKEN_EXPIRED
+                val revoked = !expired && tokenStillValid() == false
                 _state.update {
                     it.copy(
                         connecting = false,
-                        connectError = io.qwenpaw.node.data.remote.ErrorText.ofWithHint(
-                            e,
-                            io.qwenpaw.node.data.InstanceRepository.usesHttps(
-                                addresses.firstOrNull()?.url.orEmpty(),
-                            ),
-                        ),
+                        connectError = if (expired || revoked) {
+                            "$hint\n在「设置 → 服务器」里找到该实例，点「退出登录」，再重新输入账号密码"
+                        } else {
+                            hint
+                        },
                     )
                 }
                 onResult(false)
@@ -456,6 +522,49 @@ class AppViewModel(
         if (repository.activeId.value == instance.id) {
             bind(instance)
             chatViewModel.refreshChats()
+        }
+    }
+
+    /**
+     * 退出登录：吊销当前 token 并清掉本地凭据。
+     *
+     * 顺序是「先吊销再清本地」：反过来的话本地没有 token 就发不出吊销请求，
+     * 服务端那份凭据会一直留着，等于「在手机上登出了，但这张票还能用」。
+     *
+     * 服务端未启用登录时吊销接口返回 403，按成功处理并给一句说明——本来就没有
+     * 可吊销的东西，报错只会让用户以为操作失败。
+     */
+    fun logout(instanceId: String) {
+        val instance = instances.value.firstOrNull { it.id == instanceId } ?: return
+        val conn = repository.connection(instance)
+        scope.launch {
+            var note: String? = null
+            if (conn != null && !instance.token.isNullOrBlank()) {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { api.revokeToken(conn, null) }
+                }
+                result.exceptionOrNull()?.let { e ->
+                    note = if (e is io.qwenpaw.node.data.remote.ApiException && e.code == 403) {
+                        "该实例未启用登录验证，本地凭据已清除"
+                    } else {
+                        // 网络失败不阻塞登出：本地凭据必须清掉，否则用户「退不出去」。
+                        "吊销凭据失败：${io.qwenpaw.node.data.remote.ErrorText.of(e)}；本地凭据已清除"
+                    }
+                }
+            }
+            repository.logout(instanceId)
+            val updated = instances.value.firstOrNull { it.id == instanceId }
+            if (updated != null && repository.activeId.value == instanceId) {
+                bind(updated)
+                _state.update { it.copy(connected = true, connectError = note) }
+                chatViewModel.refreshChats()
+            } else {
+                _state.update { it.copy(connectError = note) }
+            }
+            // 登出是一项用户主动发起的状态变更，无论成败都要说一声，
+            // 否则点完没有任何反应。通知通道沿用 ChatViewModel 的轻提示，
+            // Nav 层已经在订阅它并转成 Toast。
+            chatViewModel.notify(note ?: "已退出登录，重新连接需再次输入账号密码")
         }
     }
 
@@ -509,8 +618,14 @@ class AppViewModel(
         hosts: List<String>,
         username: String,
         password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth? = null,
     ): List<AgentDto> = withContext(Dispatchers.IO) {
-        repository.probeAgents(hosts, username.ifBlank { null }, password.ifBlank { null })
+        repository.probeAgents(
+            hosts,
+            username.ifBlank { null },
+            password.ifBlank { null },
+            basicAuth,
+        )
     }
 
     /**
@@ -523,15 +638,44 @@ class AppViewModel(
         hosts: List<String>,
         onAttempt: (io.qwenpaw.node.ui.settings.VerifyAttempt) -> Unit = {},
         instanceId: String? = null,
+        /** 反向代理凭据；非空时验证的是「反代之后」的真实状态。 */
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth? = null,
+        /** 已保存实例的 token；带它才能读到配套插件版本。 */
+        token: String? = null,
     ): io.qwenpaw.node.data.VerifyResult = withContext(Dispatchers.IO) {
         repository.verify(hosts, { index, total, url ->
             onAttempt(io.qwenpaw.node.ui.settings.VerifyAttempt(index, total, url))
-        }, instanceId)
+        }, instanceId, basicAuth, token)
     }
 
     /** 服务端是否要求登录。用于引导页第 2 步判断要不要填账号。 */
     suspend fun authRequired(address: String): Boolean = withContext(Dispatchers.IO) {
         repository.authRequired(address)
+    }
+
+    /** 试登录一次。返回 null 表示账号密码可用，否则是给界面显示的原因。 */
+    suspend fun checkLogin(
+        address: String,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth? = null,
+    ): String? = withContext(Dispatchers.IO) {
+        repository.checkLogin(address, username, password, basicAuth)
+    }
+
+    /**
+     * 当前实例的 token 是否仍有效。
+     *
+     * 用于区分「token 失效」与「网络不通」：连接失败时先调它，前者要重新输入密码，
+     * 后者只需重试。返回 null 表示问不出来（没有实例、没有 token、或连不上）。
+     */
+    suspend fun tokenStillValid(): Boolean? {
+        val instance = repository.active() ?: return null
+        if (instance.token.isNullOrBlank()) return null
+        val conn = repository.connection(instance) ?: return null
+        return withContext(Dispatchers.IO) {
+            runCatching { api.verifyToken(conn) }.getOrNull()
+        }
     }
 
     /** 当前网络类型与 WiFi 名称，供地址编辑区提示。 */
@@ -578,6 +722,92 @@ class AppViewModel(
     fun setKeepScreenOn(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_KEEP_ON, enabled).apply()
         _state.update { it.copy(keepScreenOn = enabled) }
+    }
+
+    /**
+     * 记录「是否启用依赖配套插件的功能」。
+     *
+     * 插件是否真的可用由界面按 [AppState.bridgeStatus] 判定：未安装时开关不可点，
+     * 因此这里不做拦截，只负责落盘与状态同步。
+     */
+    fun setBridgeFeaturesEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_BRIDGE_FEATURES, enabled).apply()
+        _state.update { it.copy(bridgeFeaturesEnabled = enabled) }
+    }
+
+    /**
+     * 开关安全提示。
+     *
+     * 关闭后不再在启动时检查风险。二次确认由设置页负责——这里只管落盘，
+     * 避免同一条确认逻辑在 ViewModel 与界面里各写一份。
+     */
+    fun setSecurityHintsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SECURITY_HINTS, enabled).apply()
+        _state.update {
+            it.copy(
+                securityHintsEnabled = enabled,
+                // 关掉的当下就把已弹出的提示收起来，否则它会悬在屏幕上
+                // 与「已关闭提示」这个选择互相矛盾。
+                securityNotice = if (enabled) it.securityNotice else null,
+            )
+        }
+    }
+
+    /** 用户读完启动时的安全提示。 */
+    fun dismissSecurityNotice() {
+        _state.update { it.copy(securityNotice = null) }
+    }
+
+    /**
+     * 启动时检查一次当前地址的安全风险。
+     *
+     * 只查 `GET /api/auth/status`（公开路径，带反代凭据即可），不拉业务数据：
+     * 这个检查不该因为某个业务接口失败而漏掉。
+     *
+     * 结果只在「开关开着 + 确有风险」时写入 state，且进程内只写一次——
+     * 之后的重连、网络恢复都不再重复弹。
+     */
+    private fun checkSecurityNoticeOnce(instance: InstanceConfig, url: String) {
+        if (!_state.value.securityHintsEnabled) return
+        if (_state.value.securityNotice != null) return
+        scope.launch {
+            val needsLogin = withContext(Dispatchers.IO) {
+                runCatching {
+                    io.qwenpaw.node.data.InstanceRepository.loginRequired(
+                        api.authStatus(url, instance.basicAuth),
+                    )
+                }.getOrNull()
+            }
+            // 查不到就当「不需要登录」，与其它四处的判定口径一致；
+            // 但这里会因此倾向于提示，属于可接受的保守方向。
+            val notice = io.qwenpaw.node.data.assessSecurity(
+                url = url,
+                loginRequired = needsLogin ?: false,
+            )
+            if (!notice.any) return@launch
+            if (!_state.value.securityHintsEnabled) return@launch
+            _state.update { it.copy(securityNotice = notice) }
+        }
+    }
+
+    /**
+     * 探测配套插件。
+     *
+     * 时机：绑定连接后、以及用户回到前台时。前者覆盖「刚登录拿到 token」，
+     * 后者覆盖「服务端热加载插件」——服务端不必重启，用户切出去再回来就能看到。
+     *
+     * 401 记为「待重探」而不是「未安装」，见 [io.qwenpaw.node.data.plugin.PluginProbe]。
+     */
+    fun refreshBridgeStatus() {
+        val probe = pluginProbe ?: return
+        val instance = repository.active() ?: return
+        val conn = repository.connection(instance) ?: return
+        scope.launch {
+            val status = withContext(Dispatchers.IO) {
+                probe.probe(instance.id, conn)
+            }
+            _state.update { it.copy(bridgeStatus = status) }
+        }
     }
 
     fun setVoiceEnabled(enabled: Boolean) {
@@ -754,6 +984,7 @@ class AppViewModel(
                 repository.resolvedBaseUrl(instance),
                 instance.token,
                 instance.agentId,
+                instance.basicAuth,
             )
         }
 
@@ -774,7 +1005,12 @@ class AppViewModel(
         _tokenUsageLoading.value = true
         _tokenUsageError.value = null
         scope.launch {
-            val conn = Connection(repository.resolvedBaseUrl(instance), instance.token, instance.agentId)
+            val conn = Connection(
+                repository.resolvedBaseUrl(instance),
+                instance.token,
+                instance.agentId,
+                instance.basicAuth,
+            )
             runCatching { withContext(Dispatchers.IO) { api.tokenUsage(conn) } }
                 .onSuccess { _tokenUsage.value = it }
                 .onFailure { _tokenUsageError.value = it.message ?: "加载用量失败" }
@@ -785,7 +1021,7 @@ class AppViewModel(
     private fun bind(instance: InstanceConfig) {
         // 用仓库解析出的地址：本次运行已探明能连通的优先，否则用列表第一个。
         val url = repository.resolvedBaseUrl(instance)
-        val conn = Connection(url, instance.token, instance.agentId)
+        val conn = Connection(url, instance.token, instance.agentId, instance.basicAuth)
         // 顶栏要显示「已通过「EasyTier」连接至 QwenPaw」：优先用该地址的别名，
         // 没有别名时退回地址本身。不再用实例名——那样反而看不出连的是哪条路。
         // 实例名单独传给末尾的归属名。用 serverDisplayName 而不是 name：
@@ -811,6 +1047,9 @@ class AppViewModel(
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。
         refreshServerAvatar()
+        // 插件结论同样按实例区分，换实例后要重探；同一实例的重绑也会重探，
+        // 这样服务端热加载插件后，用户切一次页面就能看到。
+        refreshBridgeStatus()
     }
 
     private var inboxKey: String? = null
@@ -831,6 +1070,10 @@ class AppViewModel(
         private const val KEY_VOICE_AUTO_STOP = "voice_auto_stop"
         /** 归档提示被抑制到的日期（yyyy-MM-dd）。当天再次归档不再弹确认框。 */
         private const val KEY_ARCHIVE_TIP_DATE = "archive_tip_hidden_date"
+        /** 是否启用公网地址的安全提示。默认开启。 */
+        private const val KEY_SECURITY_HINTS = "security_hints_enabled"
+        /** 是否启用依赖配套插件的功能。默认关闭。 */
+        private const val KEY_BRIDGE_FEATURES = "bridge_features_enabled"
         private const val KEY_ASSISTANT_COLLAPSE = "assistant_collapse"
         private const val KEY_LAST_CHAT = "last_chat_id"
         /** 是否记录本次运行日志。默认关闭。 */
@@ -872,6 +1115,7 @@ class AppViewModel(
                         fontManager = app.fontManager,
                         network = app.networkMonitor,
                         serverAvatarClient = app.serverAvatar,
+                        pluginProbe = app.pluginProbe,
                     ) as T
                 }
             }

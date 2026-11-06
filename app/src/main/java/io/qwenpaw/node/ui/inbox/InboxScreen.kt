@@ -281,7 +281,7 @@ private fun InboxEventRow(
             Text(
                 text = buildString {
                     append(event.sourceType)
-                    if (event.status.isNotBlank()) append(" · ").append(event.status)
+                    if (event.status.isNotBlank()) append("，").append(event.status)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

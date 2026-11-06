@@ -31,6 +31,79 @@
 之后每个请求都要带上请求头 `Authorization: Bearer <token>`。
 token 失效时服务端返回 401，客户端需要清除凭据并回到连接页。
 
+### 401 的四种成因
+
+服务端的 401 只有一句话是不够用的：登录密码打错、token 过期、反向代理拦下
+这三种情况的处置完全不同。实测三种 `detail` 与一种响应头：
+
+| 来源 | 响应 | 判据 |
+| --- | --- | --- |
+| 反代 `auth_basic` | 401 + `WWW-Authenticate: Basic realm="…"` | 响应头含 `Basic`（不区分大小写） |
+| 登录接口 | 401 + `{"detail":"Invalid username or password"}` | detail 含 `Invalid username or password` |
+| 鉴权中间件 | 401 + `{"detail":"Invalid or expired token"}` | detail 含 `Invalid or expired token` |
+| 鉴权中间件（未带凭据） | 401 + `{"detail":"Not authenticated"}` | detail 含 `Not authenticated` |
+
+**`WWW-Authenticate` 必须优先于 detail。** 这个头只有反代会加，服务端自身从不发
+（`AuthMiddleware` 的两处 401 都是裸 `Response`，不带该头）。反代拦下时 detail
+可能是反代自己的 HTML 或空串，按 detail 猜必然猜错。
+
+「未带凭据」与「凭据过期」在客户端要分开：前者是「还没登录」，后者是「登录失效」。
+判据是这次请求有没有带过 token。
+
+### 反向代理的 Basic 与 Bearer 争用同一个头
+
+nginx / openresty 的 `auth_basic` 从 `Authorization: Basic …` 取值，QwenPaw 自身
+读 `Authorization: Bearer …`。**一个请求只能带一个 `Authorization`。**
+核对 `AuthMiddleware._extract_token`（`qwenpaw/app/auth.py`）后确认，服务端支持的提取顺序是：
+
+1. `Authorization: Bearer <token>`；
+2. 请求头 `connection` 含 `upgrade` 时读 `?token=`；
+3. 其余情况读 `?token=`。
+
+因此两层同时开启时，客户端把 `Authorization` 让给 Basic，QwenPaw 的 token 走查询参数
+`?token=<token>`。**没有** `X-` 形式的独立 token 头可用。
+
+| 层 | 凭据 | 位置 |
+| --- | --- | --- |
+| 反向代理 | Basic 账号密码 | `Authorization: Basic <base64(user:password)>` |
+| QwenPaw | 登录 token | `?token=<token>` |
+
+**代价：token 会出现在反代的 access log 里。** 不开反代时不走这条路，
+token 仍只在 `Authorization` 头里，不进 URL。客户端自身的 `RunLog` 不记录 query，
+不受影响。
+
+四处请求必须一起改，漏一处的表现各不相同：
+
+| 位置 | 漏改的表现 |
+| --- | --- |
+| `QwenPawApi.baseBuilder`（REST + 两种 SSE） | 发消息 401，版本探测正常 |
+| `ChatImageLoader.load`（自己拼 Header） | 文字能出来、图片一直转圈 |
+| 验证阶段的 `versionWith` / `authStatus` | 验证看不到真实的登录状态 |
+| `QwenPawApi.login`（登录换 token） | 登录页报「用户名或密码不正确」，反代 access log 里用户字段是 `-` |
+
+**`/api/auth/status` 与 `/api/auth/login` 也在反代之后。** 这两条是鉴权中间件的公开路径，
+但 `auth_basic` 拦在更前面，公开与否不影响反代先要凭据。2026-11-06 的判定
+`POST /api/auth/login` 实测就是 401（反代），客户端却把它翻译成密码错——
+区分方法见下一段。
+
+**`Not authenticated` 是三句合一。** 服务端对「没带 token」「token 过期」「token 被吊销」
+返回同一个 detail，客户端只能靠这次请求是否带过 token 来分：没带就是「还没登录」，
+带了才是「登录已失效」。把两者合并成一句「登录已失效」会让从没登录过的用户去找一个不存在的失效状态。
+
+反代拦下时**不是「地址不可达」**：换下一个地址同样会被拦，做地址回退没有意义。
+客户端的 `verify` 因此把它单独判成 `proxyAuthRequired`，就地展开凭据输入。
+
+### 客户端存储
+
+token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Android Keystore 托管。
+部分设备在 Keystore 初始化时会抛出异常（常见于系统刚恢复出厂或生物识别凭据被重置），
+因此实现上保留了降级路径：捕获该异常后改用普通 `SharedPreferences` 存储。
+降级意味着凭据以明文落盘，这是可用性优先于机密性的取舍，只在此类设备上发生。
+
+反向代理的 Basic 账号与密码同样存在这份加密偏好里（`basicUser` / `basicPassword`），
+与 QwenPaw 的 `username` / `token` 是两套独立字段。**两个都非空才生效**：
+只填一项视为未配置，让请求直接打到服务端，而不是拿半组凭据反复撞 401。
+
 **登录接口的 404 多半不是「没有这个端点」。** 服务端部署在 openresty 之后时，
 `http://<域名>` 会被 301 跳到 https。OkHttp 跟随 301 会把 POST 改写成 GET
 并丢弃请求体，`POST /api/auth/login` 于是变成 `GET /api/auth/login`，
@@ -40,13 +113,6 @@ token 失效时服务端返回 401，客户端需要清除凭据并回到连接�
 
 同一现象也解释了验证地址时为什么要按主机判协议：公网域名默认走 https，
 内网地址默认走 http，写错时表现为 404 或连接失败，而不是明确的协议错误。
-
-### 客户端存储
-
-token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Android Keystore 托管。
-部分设备在 Keystore 初始化时会抛出异常（常见于系统刚恢复出厂或生物识别凭据被重置），
-因此实现上保留了降级路径：捕获该异常后改用普通 `SharedPreferences` 存储。
-降级意味着凭据以明文落盘，这是可用性优先于机密性的取舍，只在此类设备上发生。
 
 ---
 
@@ -600,7 +666,7 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 ### 运行日志
 
 客户端另有「运行日志」，记录**本机客户端**的事件（网络请求、流建立与中断、
-轮询失败、存储操作、语音），与 QwenPaw 服务端日志是两回事。
+轮询失败、存储操作、语音），与 QwenPaw 服务端日志分开记录。
 
 日志只存在进程内的环形缓冲（上限 2000 条），默认关闭，关闭时所有写入是空操作。
 导出格式固定为 `HH:mm:ss.SSS [类别] tag · 内容`，导入按同样格式解析，
@@ -1318,3 +1384,140 @@ promotion`）与状态冲突。前者要展示「需先确认」并给「审核�
 
 **`tool_call_id` 就是聊天 SSE 里 `plugin_call` 的 `call_id`**，客户端 `ToolCard.callId`
 已经持有，不需要另加字段。
+
+---
+
+## 24、配套插件端点
+
+配套插件（`QwenPaw-Node-Plugin` 仓库，id `qwenpaw-node-bridge`）只补核心没有的能力。
+两端之间只有「路径 + 响应形状」这一层契约，版本号各自编号。
+
+### 自述端点
+
+```
+GET /api/plugins/qwenpaw-node-bridge/info
+```
+
+```json
+{"plugin_version":"0.1.0","protocol_version":1,
+ "server_version":"2.2.2.post1","capabilities":["info"]}
+```
+
+未安装返回 **404**；服务端开启登录而请求没带 token 返回 **401**。
+两者含义完全不同：前者是「没装」，后者是「现在问不了」。
+
+### 客户端判定的三态
+
+| 判定 | 条件 | 界面 |
+| --- | --- | --- |
+| 已检测到 | 200 且 `protocol_version == 1` | 已检测到 QwenPaw Node Bridge v{plugin_version} |
+| 未检测到 | 404，或 200 但 `protocol_version != 1` | 未检测到配套插件 |
+| 尚未检测 | 401 / 403，或连不上且此前无结论 | 尚未检测 |
+
+**`protocol_version` 更大时按「未检测到」处理**：契约已变更，旧客户端不该继续使用
+该插件的端点。功能开关一律看 `capabilities` 里的名字，不比对 `plugin_version`——
+靠版本号推断能力会让两端各维护一张对照表，迟早对不上。
+
+**没有「已禁用」这一态。** 禁用插件是把目录改名为 `.disabled`，发现阶段直接跳过，
+重启后列表里消失、端点返回 404，与从未安装完全一致。因此界面不提供「去启用」。
+
+### 插件侧的路径约束
+
+核心 `plugins.py` 已经注册了同前缀下的 `/status` 与 `/files` 下任意子路径，
+且**先于插件 router 匹配**：请求 `/api/plugins/qwenpaw-node-bridge/status` 时
+核心会返回 `{"detail":"Plugin 'qwenpaw-node-bridge' not found."}` 的 404，
+请求根本到不了插件。可安全使用的子路径是 `/info`、`/search`、`/events`。
+
+三条加载器约束（`qwenpaw/plugins/loader.py` 与 `architecture.py` 核对）：
+
+1. 后端入口必须导出名为 `plugin` 的对象并实现 `register(api)`；
+2. `register_http_router(router, prefix=…)` 的 prefix 不能是 `/`，也不能与其他插件重复；
+3. 只用核心没有的子路径。
+
+### 安装与校验
+
+`qwenpaw plugin validate` 的参数是**目录**而不是 zip：源码里按
+`plugin_path / "plugin.json"` 读取清单，对 zip 执行会报 `plugin.json not found`。
+打包后的 zip 只能在 `plugin install` 时使用。
+
+---
+
+## 25、运行中历史、分组默认值与交付文件形状
+
+本节记录 2026-11-07 一轮修复中实测到的服务端行为，几条都会直接影响客户端取值。
+
+### 25.1 运行中的 `GET /api/chats/{id}` 不完整
+
+生成过程中请求会话详情，返回的 `messages` **只包含已落库的轮次**：
+本轮用户消息与正在生成的正文都不在里面，`status` 为 `running`。
+
+实测（2.2.2.post1）：发出消息后立即取详情，`messages` 条数与刷新前一致，
+最新一条仍是上一轮的回答；生成结束后再取，本轮的问与答才出现。
+
+因此客户端不能把 `/api/chats/{id}` 当作「当前界面应该显示的全部内容」：
+刷新、切走再返回、进程重开后，若直接用服务端历史覆盖界面，本轮用户消息会消失。
+正确做法是**以服务端历史为底，再拼本地仍在生成的那一段**，
+并把本地尾部截到最近一条用户消息（见 [ui-guidelines](ui-guidelines.md) 3 节）。
+
+### 25.2 分组的默认值
+
+`GET /api/chats/groups` 里，内置分组之一满足 `kind == "default"`，
+其 `id` 为 `default`，`name` 为 `Uncategorized`（客户端显示「未分组」）。
+另外两个内置分组的 `kind` 是 `scheduled` 与 `subagent`。
+
+把一个会话移回默认分组时，请求必须写默认分组的 `id`：
+
+```json
+PUT /api/chats/{id}
+{"group_id": "default"}
+```
+
+写成 `{"group_id": null}` 会被拒绝，返回 **400 `Unknown chat group: None`**。
+客户端原先在「未分组」选项里发 `null`，界面没有报错（错误被 `runCatching` 吞掉），
+表现是「点了没反应」。默认分组的 id 应从 `GET /api/chats/groups` 取，取不到时才退回字面量
+`default`。
+
+**客户端不再合成前置的「未分组」选项。** 服务端已经返回 `kind == "default"` 的条目，
+再合成一个会让对话框出现两个「未分组」。移动对话框显式过滤 `kind == "default"`，
+用自己的前置项表示「未分组」。
+
+### 25.3 `send_file_to_user` 的两种输出形状
+
+同一个工具，按文件格式给出两种不同的 `output`：
+
+| 格式 | `source` | 内容 |
+| --- | --- | --- |
+| png | `{"type":"base64","media_type":"image/png","data":"…"}` | 字节内联在 JSON 里 |
+| webp | `{"type":"url","url":"file:///tmp/bridgetest.webp"}` | 只有服务端本地路径 |
+
+webp 这种没有内联字节，客户端要自己把 `file://` 绝对路径换成预览端点
+`GET /api/files/preview/{path}` 才能显示缩略图。**不能按 `media_type` 判断是不是图片**：
+webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按文件名扩展名判断。
+
+实测：卡片正常出现，缩略图由预览端点渲染，点击可全屏预览。
+
+### 25.4 服务端 keep-alive 是 5 秒
+
+用同一个 TCP 连接连续发两次 `GET /api/version`，中间空闲：
+
+| 空闲 | 结果 |
+| --- | --- |
+| 2 秒 | 复用成功，200 |
+| 4 秒 | 复用成功，200 |
+| 8 秒 | `RemoteDisconnected`，对端已关闭连接 |
+
+这对应 uvicorn 的默认 `--timeout-keep-alive 5`。
+
+**因此「验证连接」这类低频探测不能复用连接池。** 两次验证的间隔通常远超 5 秒，
+池里的连接早已被服务端关闭；复用它只会读到 EOF，把「地址是通的」误报成「网络中断」。
+探测客户端改为不保留连接（`ConnectionPool(0, 1, NANOSECONDS)`），每次重新握手。
+实测：同一实例间隔 60 秒连续验证两次，均返回「连接正常，服务端 2.2.2.post1，QwenPaw Node Bridge v0.1.0」。
+
+### 25.5 验证连接时的插件探测需要 token
+
+`GET /api/plugins/qwenpaw-node-bridge/info` 在服务端开启登录且请求没带 token 时返回 401。
+因此：
+
+- **编辑已有实例**时，验证连接带上已保存的 `token`，能读到 `plugin_version`（实测 `v0.1.0`）；
+- **新增实例**（填表添加、引导式第 1 步）此时还没有 token，401 只能显示「配套插件状态未能确认」；
+  安装情况在保存后由设置页「配套插件」行给出。

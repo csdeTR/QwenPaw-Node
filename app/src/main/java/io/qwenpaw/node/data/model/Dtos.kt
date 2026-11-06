@@ -213,6 +213,30 @@ data class VersionDto(
     val version: String = "",
 )
 
+/**
+ * 配套插件（QwenPaw Node Bridge）的自述，对应
+ * `GET /api/plugins/qwenpaw-node-bridge/info`。
+ *
+ * [protocolVersion] 是两端契约的版本号，客户端只接受 `1`：更大的值说明契约已变更，
+ * 旧客户端不该继续使用该插件的端点。功能开关一律看 [capabilities] 里的名字，
+ * **不看** [pluginVersion]——比版本号推断能力会让两端各维护一张对照表。
+ */
+@Serializable
+data class BridgeInfoDto(
+    @SerialName("plugin_version") val pluginVersion: String = "",
+    @SerialName("protocol_version") val protocolVersion: Int = 0,
+    @SerialName("server_version") val serverVersion: String = "",
+    val capabilities: List<String> = emptyList(),
+) {
+    /** 该能力是否被插件声明。 */
+    fun supports(name: String): Boolean = capabilities.contains(name)
+
+    companion object {
+        /** 当前客户端能对话的契约版本。 */
+        const val PROTOCOL = 1
+    }
+}
+
 /** 附件上传结果，对应 `POST /api/console/upload`。 */
 @Serializable
 data class UploadResultDto(

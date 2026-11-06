@@ -1,0 +1,47 @@
+# redroid 15 测试设备。启动方式见 AGENTS.md 3.1。
+#
+# 用法：
+#   docker compose -f scripts/redroid/docker-compose.yml up -d
+#   adb connect localhost:5555
+#
+# /data 是完整 Android 数据分区，会增长到数 GB，因此放在仓库之外。
+# 位置可用 REDROID_DATA 覆盖，默认 $HOME/redroid/qp15。
+services:
+  qp15:
+    image: docker.m.daocloud.io/redroid/redroid:15.0.0_64only-latest
+    container_name: qp15
+    # 不要设为 unless-stopped：宿主重启后 binder_linux 不会自动加载，
+    # 容器会在设备节点缺失时反复崩溃重启。启动步骤见 AGENTS.md 3.1。
+    restart: "no"
+    privileged: true
+    # 资源上限是硬约束：宿主机 15 GB 内存同时跑桌面、Trae 与服务端，
+    # 容器不设上限时曾把 swap 吃满导致桌面卡死。
+    # memswap_limit 与 mem_limit 相等表示容器内不使用 swap，
+    # 超出时由容器内 LMKD 回收，不拖累宿主机换页。
+    mem_limit: 3g
+    memswap_limit: 3g
+    cpus: 2.0
+    pids_limit: 4096
+    volumes:
+      - ${REDROID_DATA:-$HOME/redroid/qp15}:/data
+    ports:
+      - "127.0.0.1:5555:5555"
+    # 本机内核未开 CONFIG_ANDROID_BINDERFS，镜像内 /dev/binder 是指向
+    # /dev/binderfs/binder 的符号链接，挂载失败后会悬空，surfaceflinger
+    # 直接以 "Binder driver could not be opened" 退出。
+    # 因此把宿主机由 binder_linux 生成的设备节点映射到符号链接的目标位置。
+    devices:
+      - /dev/binder:/dev/binderfs/binder
+      - /dev/hwbinder:/dev/binderfs/hwbinder
+      - /dev/vndbinder:/dev/binderfs/vndbinder
+    # 参数含义见 https://github.com/remote-android/redroid-doc#configuration
+    # 720×1600 与 Pixel 6 模板的 1080×2400 相比像素少 55%，dp 视口不变。
+    # use_memfd=1 用于替代 6.x 内核已移除的 ashmem_linux。
+    # gpu_mode=guest 也就是软件渲染，与模拟器的 swiftshader 同属 CPU 光栅化，
+    # 由本机 GPU 不可用的前提决定；若后续接入 /dev/dri 可改 host。
+    command:
+      - androidboot.redroid_width=720
+      - androidboot.redroid_height=1600
+      - androidboot.redroid_dpi=280
+      - androidboot.use_memfd=1
+      - androidboot.redroid_gpu_mode=guest

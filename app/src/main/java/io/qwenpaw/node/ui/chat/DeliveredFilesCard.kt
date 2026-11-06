@@ -85,7 +85,7 @@ private fun DeliveredFileRow(
             .then(
                 // 图片可以点开全屏看；非图片没有可展示的内容，不做成可点。
                 if (file.isImage) {
-                    Modifier.clickable { file.dataUri?.let(onImageClick) }
+                    Modifier.clickable { file.previewSource?.let(onImageClick) }
                 } else {
                     Modifier
                 },
@@ -134,11 +134,12 @@ private fun DeliveredFileThumbnail(
     connection: Connection?,
 ) {
     val shape = RoundedCornerShape(8.dp)
-    var bitmap by remember(file.dataUri) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(file.dataUri, imageLoader, connection) {
-        val uri = file.dataUri ?: return@LaunchedEffect
+    val preview = file.previewSource
+    var bitmap by remember(preview) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(preview, imageLoader, connection) {
+        if (preview == null) return@LaunchedEffect
         if (imageLoader == null || connection == null) return@LaunchedEffect
-        bitmap = imageLoader.load(connection, uri)
+        bitmap = imageLoader.load(connection, preview)
     }
     val loaded = bitmap
     Box(

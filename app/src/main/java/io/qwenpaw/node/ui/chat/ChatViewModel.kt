@@ -96,6 +96,12 @@ data class ChatUiState(
     val toolCalls: Map<String, io.qwenpaw.node.data.model.ToolCallInfoDto> = emptyMap(),
     /** 实时输出片段，key 为 `tool_call_id`；收到 `done` 后改用 `/output` 的权威结果。 */
     val toolLive: Map<String, String> = emptyMap(),
+    /**
+     * 服务端后台策略，取值 `keep_foreground` 或 `offload`。null 表示尚未读取。
+     *
+     * 工具卡片的倒计时文案据此措辞：只有策略为 `offload` 时，到期才会自动转入后台。
+     */
+    val offloadAction: String? = null,
 ) {
     /**
      * 当前对话的 session_id，工具调用控制按它定位。
@@ -177,6 +183,98 @@ internal fun mergeHistory(
     history.isEmpty() -> live
     live.isEmpty() -> history
     else -> history + live
+}
+
+/**
+ * 重新进入对话时用哪一份历史。
+ *
+ * 服务端在对话运行期间只返回已经落库的那几轮，本轮的用户消息与正在生成的
+ * 正文都还不在历史里。这时只取服务端历史，用户刚发的那条消息就会消失，
+ * 于是「退出重进、切走再回来、刷新」都会滑到顶也看不到自己发的内容。
+ *
+ * 因此运行中把本地视图中超出服务端历史的那一段接回去，但只保留到最近一条
+ * 用户消息为止：之后的半截回复由重连流重新发送，留着旧副本会变成两份。
+ */
+internal fun historyOnReopen(
+    server: List<ChatMessage>,
+    local: List<ChatMessage>,
+    cached: List<ChatMessage>,
+    running: Boolean,
+): List<ChatMessage> {
+    val localView = local.ifEmpty { cached }
+    if (server.isEmpty()) return trimPartial(localView, running)
+    // 对话已结束：服务端历史就是权威版本。
+    if (!running) return server
+    val tail = tailAfterServer(server, localView)
+    return server + trimPartial(tail, running = true)
+}
+
+/**
+ * 切换对话时交给 [historyOnReopen] 的本地视图。
+ *
+ * 只有重新进入**同一个**对话才用当前视图；切到别的对话时它属于上一个对话，
+ * 带进去会被当成新对话的历史。手动新建对话时必须让 `previousId` 保持旧对话，
+ * 否则界面会把上一个对话的内容当作新对话的本地视图显示出来。
+ */
+internal fun localViewForSwitch(
+    previousId: String?,
+    chatId: String,
+    previous: List<ChatMessage>,
+): List<ChatMessage> = if (previousId == chatId) previous else emptyList()
+
+/**
+ * 运行中只保留到最近一条用户消息为止。
+ *
+ * 重连流会从头重发当前这条回复，因此本地留着的半截正文是重复内容；
+ * 没有用户消息的尾部则整段丢弃，避免把上一轮残留的片段拼进来。
+ */
+internal fun trimPartial(messages: List<ChatMessage>, running: Boolean): List<ChatMessage> {
+    if (!running) return messages
+    val lastUser = messages.indexOfLast { it.role == Role.USER }
+    return if (lastUser < 0) emptyList() else messages.take(lastUser + 1)
+}
+
+/**
+ * [local] 中超出 [server] 的那一段。
+ *
+ * 运行期间服务端历史是本地视图的前缀，按位置切即可。只要有一处对不上，
+ * 就说明两份数据不同源，此时宁可不追加，也不要拼出重复气泡。
+ */
+private fun tailAfterServer(
+    server: List<ChatMessage>,
+    local: List<ChatMessage>,
+): List<ChatMessage> {
+    if (local.size <= server.size) return emptyList()
+    for (index in server.indices) {
+        val a = server[index]
+        val b = local[index]
+        if (a.role != b.role || a.kind != b.kind || a.text != b.text) return emptyList()
+    }
+    return local.drop(server.size)
+}
+
+/**
+ * 把 [incoming] 覆盖到 [base] 上，同 id 以 [incoming] 为准，位置沿用 [base]。
+ *
+ * 两个约束：
+ * - **顺序必须保持 [base] 的顺序**。流式增量按消息建立先后到达，直接拼在末尾会让
+ *   「思考 → 正文 → 工具」的先后被打乱，同一条历史消息还会跳位置。
+ * - **同 id 取新值**。历史是打开会话那一刻的快照，流式是之后的内容；反过来取旧值
+ *   会让正文冻结（见 [ChatViewModel.attachRunningStream] 的注释）。
+ *
+ * 只出现在 [base] 里没有的 id（本轮新产生的消息）才追加到末尾。
+ */
+internal fun overlayById(
+    base: List<ChatMessage>,
+    incoming: List<ChatMessage>,
+): List<ChatMessage> {
+    if (incoming.isEmpty()) return base
+    val fresh = incoming.associateBy { it.id }
+    val out = ArrayList<ChatMessage>(base.size + fresh.size)
+    base.forEach { message -> out += fresh[message.id] ?: message }
+    val known = base.mapTo(HashSet()) { it.id }
+    incoming.forEach { if (!known.contains(it.id)) out += it }
+    return out
 }
 
 /**
@@ -271,6 +369,16 @@ class ChatViewModel(
 
     private val _notifications = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val notifications: SharedFlow<String> = _notifications.asSharedFlow()
+
+    /**
+     * 发一条轻提示。
+     *
+     * 供 AppViewModel 复用同一条通道：Nav 层已经在订阅 [notifications] 并转成 Toast，
+     * 再开一条只为一个调用方服务会多出一处需要维护的订阅。
+     */
+    fun notify(message: String) {
+        _notifications.tryEmit(message)
+    }
 
     /**
      * 可撤销操作的提示。
@@ -653,6 +761,50 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 批量恢复已归档对话。
+     *
+     * 服务端会跳过运行中的会话并回填 `failed`，因此提示按实际成功数量写，
+     * 而不是「已恢复 N 个」——那样在部分失败时是在说假话。
+     *
+     * 成功后提供一次撤销：反向批量归档。归档是服务端少有的可撤销动作，
+     * 恢复同样可以撤回，两边的不对称会让用户不敢用多选。
+     */
+    fun batchUnarchive(chatIds: List<String>) {
+        val conn = currentConnection ?: return
+        if (chatIds.isEmpty()) return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.batchUnarchiveChats(conn, chatIds) } }
+                .onSuccess { result ->
+                    val okIds = result.succeeded.toSet()
+                    val restored = _state.value.archivedChats.filter { it.id in okIds }
+                    _state.update { s ->
+                        s.copy(
+                            archivedChats = s.archivedChats.filterNot { it.id in okIds },
+                            chats = orderChats(
+                                (restored.map { it.copy(archived = false) } + s.chats)
+                                    .distinctBy { it.id },
+                            ),
+                        )
+                    }
+                    val skipped = result.failed.size
+                    val msg = buildString {
+                        append("已恢复 ${okIds.size} 个对话")
+                        if (skipped > 0) append("，$skipped 个未能恢复")
+                    }
+                    _notifications.tryEmit(msg)
+                    if (okIds.isNotEmpty()) {
+                        _undoOffers.tryEmit(
+                            io.qwenpaw.node.ui.common.UndoOffer(
+                                "已恢复 ${okIds.size} 个对话",
+                            ) { batchArchive(okIds.toList()) },
+                        )
+                    }
+                }
+                .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
+        }
+    }
+
     /** 批量删除。 */
     fun batchDelete(chatIds: List<String>) {
         val conn = currentConnection ?: return
@@ -668,6 +820,8 @@ class ChatViewModel(
                     _state.update { s ->
                         s.copy(
                             chats = s.chats.filterNot { it.id in removed },
+                            // 归档页也走这条路径批量删除，因此两份列表都要清。
+                            archivedChats = s.archivedChats.filterNot { it.id in removed },
                             // 当前对话在被删之列就一起清空。
                             currentChatId = s.currentChatId?.takeUnless { it in removed },
                             messages = if (s.currentChatId in removed) emptyList() else s.messages,
@@ -819,6 +973,36 @@ class ChatViewModel(
                     refreshChats()
                 }
                 .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
+        }
+    }
+
+    /**
+     * 调整分组顺序：`delta` 为 -1 上移、+1 下移。
+     *
+     * 只在同权重的相邻分组之间交换，规则见 [ChatGrouping.moveGroup]。
+     * 先乐观更新再发请求：分组表头只有几行，等一次往返再动会让人以为没点上；
+     * 失败时按服务端列表回滚并提示。
+     */
+    fun moveGroup(groupId: String, delta: Int) {
+        val conn = currentConnection ?: return
+        val before = _state.value.groups
+        val order = ChatGrouping.moveGroup(before, groupId, delta)
+        if (order == before.map { it.id }) return
+        // 乐观更新：按新顺序重排本地列表，order 字段先按新下标填，
+        // 返回后会用服务端的真实值覆盖。
+        val byId = before.associateBy { it.id }
+        val optimistic = order.mapIndexedNotNull { index, id ->
+            byId[id]?.copy(order = index)
+        }
+        _state.update { it.copy(groups = optimistic) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.reorderChatGroups(conn, order) }
+            }
+                .onSuccess { fresh -> _state.update { it.copy(groups = fresh) } }
+                .onFailure { e ->
+                    _state.update { it.copy(groups = before, error = friendly(e)) }
+                }
         }
     }
 
@@ -1040,6 +1224,22 @@ class ChatViewModel(
     }
 
     /**
+     * 读取服务端后台策略。
+     *
+     * 只影响工具卡片的措辞，不需要覆盖错误：读不到时保持 null，
+     * 界面按「不会自动转后台」的说法展示，这比断言一个未确认的行为安全。
+     */
+    private fun refreshOffloadPolicy() {
+        val conn = currentConnection ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.offloadPolicy(conn) } }
+                .onSuccess { policy ->
+                    _state.update { it.copy(offloadAction = policy.defaultAction) }
+                }
+        }
+    }
+
+    /**
      * 打开对话。
      *
      * [reloadHistory] 为 false 时只同步标题与运行状态，不再重复拉历史，
@@ -1059,6 +1259,13 @@ class ChatViewModel(
             return
         }
         streamJob?.cancel()
+        // 重新进入前先把当前视图落一次盘。运行中的对话在服务端历史里是空的，
+        // 只靠 finishRun 写缓存的话，切到别的对话再返回就只剩服务端那份空历史。
+        //
+        // 写入放在下面的协程里、且在读缓存之前完成：两处都用 scope.launch 的话，
+        // 「写上一个对话」与「读这一对话」会竞争，切走再回来仍可能读到旧缓存。
+        val previousId = _state.value.currentChatId
+        val previousMessages = _state.value.messages
         val known = _state.value.chats.firstOrNull { it.id == chatId }
             ?: _state.value.archivedChats.firstOrNull { it.id == chatId }
         _state.update {
@@ -1073,6 +1280,9 @@ class ChatViewModel(
         }
 
         scope.launch {
+            if (!previousId.isNullOrBlank() && previousMessages.isNotEmpty()) {
+                persistMessages(previousId, previousMessages)
+            }
             if (chatId.isEmpty()) {
                 // 新对话：不请求历史，直接进入可输入状态。
                 accumulator = StreamAccumulator()
@@ -1094,22 +1304,46 @@ class ChatViewModel(
             val mapped = history.getOrNull()?.let { HistoryMapper.map(it.messages) }
             val status = history.getOrNull()?.status
             val name = known?.name.orEmpty()
+            val cachedMessages = withContext(Dispatchers.IO) { db.chatDao().messagesOnce(chatId) }
+                .map { entity ->
+                    ChatMessage(
+                        id = entity.id,
+                        role = io.qwenpaw.node.data.stream.Role.valueOf(entity.role),
+                        kind = ChatMessage.Kind.valueOf(entity.kind),
+                        text = entity.text,
+                        imageUrl = entity.payload?.takeIf {
+                            ChatMessage.Kind.valueOf(entity.kind) == ChatMessage.Kind.IMAGE
+                        },
+                    )
+                }
 
             if (mapped != null) {
+                // 服务端在对话运行期间不返回历史消息，此时不能把本地视图当成空会话。
+                // 否则刷新、切换对话再返回、进程被杀后重开，都只能看到后续增量，
+                // 用户自己发的那条消息与已经生成的内容会全部消失。
+                val localView = localViewForSwitch(previousId, chatId, previousMessages)
+                val initial = historyOnReopen(
+                    server = mapped,
+                    local = localView,
+                    cached = cachedMessages,
+                    running = status == "running",
+                )
                 accumulator = StreamAccumulator()
                 // 历史留在独立的前缀里，后续流式增量只追在它后面。
-                historyPrefix = mapped
+                historyPrefix = initial
                 updateLink(LinkState.ONLINE)
                 _state.update {
                     it.copy(
                         loading = false,
-                        messages = mapped,
+                        messages = initial,
                         currentChatName = name,
                         running = status == "running",
                     )
                 }
-                cacheMessages(chatId, mapped)
+                // 空历史不要写缓存：那是「服务端还没落库」，不是「用户删光了消息」。
+                if (initial.isNotEmpty()) cacheMessages(chatId, initial)
                 loadDraft(chatId)
+                refreshOffloadPolicy()
                 if (status == "running") {
                     attachRunningStream(chatId)
                 }
@@ -1124,18 +1358,6 @@ class ChatViewModel(
                     )
                 }
                 updateLink(LinkState.OFFLINE)
-                val cached = withContext(Dispatchers.IO) { db.chatDao().messagesOnce(chatId) }
-                val cachedMessages = cached.map { entity ->
-                    ChatMessage(
-                        id = entity.id,
-                        role = io.qwenpaw.node.data.stream.Role.valueOf(entity.role),
-                        kind = ChatMessage.Kind.valueOf(entity.kind),
-                        text = entity.text,
-                        imageUrl = entity.payload?.takeIf {
-                            ChatMessage.Kind.valueOf(entity.kind) == ChatMessage.Kind.IMAGE
-                        },
-                    )
-                }
                 // 缓存同样是「已有历史」，之后发消息不能把它冲掉。
                 historyPrefix = cachedMessages
                 _state.update {
@@ -1167,7 +1389,10 @@ class ChatViewModel(
             }
                 .onSuccess { chat ->
                     placeholderNames[chat.id] = NEW_CHAT_NAME
-                    _state.update { it.copy(chats = listOf(chat) + it.chats, currentChatId = chat.id) }
+                    // 不要在这里先把 currentChatId 改成新 id：openChat 靠它判断
+                    // 「上一份视图属于哪个对话」。提前改掉会让上一个对话的内容
+                    // 被当成新对话的本地视图，界面停在原对话上，缓存也被写脏。
+                    _state.update { it.copy(chats = listOf(chat) + it.chats) }
                     openChat(chat.id)
                 }
                 .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
@@ -1405,6 +1630,9 @@ class ChatViewModel(
         scope.launch {
             withContext(Dispatchers.IO) { db.chatDao().deleteDraft(instanceId, chatId) }
         }
+        // 运行中的对话在服务端不返回历史，这里必须先把含用户消息的视图落盘，
+        // 否则退出应用再回来时，服务端那份空历史会把这条消息冲掉。
+        cacheMessages(chatId, _state.value.messages)
         // 本轮开始后拉一次工具调用列表：卡片操作区只在服务端登记过时才出现。
         refreshToolCalls()
 
@@ -1635,12 +1863,14 @@ class ChatViewModel(
                     }
                     val appended = accumulator.snapshot()
                     if (appended.isNotEmpty()) {
-                        // 按 id 合并：同一 msg_id 的增量应替换而非叠加，
-                        // 重复 key 会让 LazyColumn 直接抛异常。
+                        // 按 id 合并且**新值优先**。
+                        //
+                        // 此前是 `(s.messages + appended).distinctBy { it.id }`：历史在前，
+                        // distinctBy 保留先出现的那个，于是同 msg_id 时永远留下历史里的旧副本，
+                        // 流式正文冻结在打开会话那一刻的内容上，后续增量全部被丢弃。
+                        // 界面表现为「重连后能收到少量更新，然后就不动了」。
                         _state.update { s ->
-                            val merged = (s.messages + appended)
-                                .distinctBy { it.id }
-                            s.copy(messages = HistoryMapper.uniqueIds(merged))
+                            s.copy(messages = HistoryMapper.uniqueIds(overlayById(s.messages, appended)))
                         }
                     }
                 }
@@ -1666,13 +1896,13 @@ class ChatViewModel(
             _state.update { s ->
                 // 收尾快照里带着统计与 turnEnd 标记，必须并回界面，
                 // 否则重连路径下这一轮的数字永远不显示。
-                val merged = if (finalized.isEmpty()) {
-                    s.messages.map { it.copy(streaming = false) }
-                } else {
-                    s.messages.map { it.copy(streaming = false) }
-                        .filterNot { old -> finalized.any { it.id == old.id } } + finalized
-                }
-                s.copy(running = false, messages = HistoryMapper.uniqueIds(merged))
+                // 合并方式与流内一致：同 id 取收尾快照，顺序沿用界面现有的。
+                s.copy(
+                    running = false,
+                    messages = HistoryMapper.uniqueIds(
+                        overlayById(s.messages.map { it.copy(streaming = false) }, finalized),
+                    ),
+                )
             }
             reconcileWithServer(conn, chatId)
             finishRun(conn, chatId)
@@ -1948,30 +2178,35 @@ class ChatViewModel(
 
     private fun cacheMessages(chatId: String, messages: List<ChatMessage>) {
         if (chatId.isBlank()) return
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                db.chatDao().saveMessages(
-                    messages.mapIndexed { index, message ->
-                        CachedMessageEntity(
-                            id = message.id,
-                            chatId = chatId,
-                            instanceId = instanceId,
-                            role = message.role.name,
-                            kind = message.kind.name,
-                            text = message.text,
-                            // 图片消息的 url 存在 payload 里，工具卡片沿用旧格式。
-                            payload = when {
-                                message.kind == ChatMessage.Kind.IMAGE -> message.imageUrl
-                                else -> message.tool?.let {
-                                    "${it.name}\u0000${it.arguments}\u0000${it.output.orEmpty()}"
-                                }
-                            },
-                            createdAt = System.currentTimeMillis(),
-                            position = index,
-                        )
-                    },
-                )
-            }
+        scope.launch { persistMessages(chatId, messages) }
+    }
+
+    /** 把一份消息整体写入缓存。调用方需要等待写入完成时直接调它。 */
+    private suspend fun persistMessages(chatId: String, messages: List<ChatMessage>) {
+        if (chatId.isBlank()) return
+        withContext(Dispatchers.IO) {
+            db.chatDao().replaceMessages(
+                chatId,
+                messages.mapIndexed { index, message ->
+                    CachedMessageEntity(
+                        id = message.id,
+                        chatId = chatId,
+                        instanceId = instanceId,
+                        role = message.role.name,
+                        kind = message.kind.name,
+                        text = message.text,
+                        // 图片消息的 url 存在 payload 里，工具卡片沿用旧格式。
+                        payload = when {
+                            message.kind == ChatMessage.Kind.IMAGE -> message.imageUrl
+                            else -> message.tool?.let {
+                                "${it.name}\u0000${it.arguments}\u0000${it.output.orEmpty()}"
+                            }
+                        },
+                        createdAt = System.currentTimeMillis(),
+                        position = index,
+                    )
+                },
+            )
         }
     }
 

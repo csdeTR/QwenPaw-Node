@@ -5,7 +5,9 @@ import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceStore
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.remote.ApiException
+import io.qwenpaw.node.data.remote.BasicAuth
 import io.qwenpaw.node.data.remote.Connection
+import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +23,22 @@ data class VerifyResult(
     val baseUrl: String,
     val version: String,
     val needsLogin: Boolean,
+    /**
+     * 该地址被反向代理的 HTTP Basic 拦住了。
+     *
+     * 这不是「验证失败」：地址是通的，只是缺一层凭据。界面应当就地展开
+     * 「反向代理验证」让它填，而不是把用户送回填地址那一步。
+     */
+    val proxyAuthRequired: Boolean = false,
+    /**
+     * 同一地址上配套插件（QwenPaw Node Bridge）的探测结论。
+     *
+     * 验证阶段还没有登录 token，因此开启了登录鉴权的服务端会返回 401，
+     * 此时记为 [io.qwenpaw.node.data.plugin.BridgeStatus.Unknown]，
+     * 不能据此判断「没有安装」。
+     */
+    val bridge: io.qwenpaw.node.data.plugin.BridgeStatus =
+        io.qwenpaw.node.data.plugin.BridgeStatus.Unknown,
 )
 
 /**
@@ -143,6 +161,40 @@ class InstanceRepository(
     }
 
     /**
+     * 用这组账号试登录一次，只回答「能不能登录」。
+     *
+     * 返回 null 表示通过，非 null 是给界面显示的原因。
+     *
+     * 引导页第 2 步在点「下一步」时调用：先前要等到第 3 步读智能体才登录，
+     * 账号写错的人会在第 3 步看到一个与账号无关的报错，还要退回去重填。
+     *
+     * 会顺带吊销这次登录换来的 token：token 由第 4 步的 [connect] 重新申请，
+     * 这里只做校验，不该在服务端留下一批用不到的凭据。
+     */
+    suspend fun checkLogin(
+        baseUrl: String,
+        username: String,
+        password: String,
+        basicAuth: BasicAuth? = null,
+    ): String? {
+        val normalized = runCatching { normalizeBaseUrl(baseUrl) }.getOrNull()
+            ?: return "地址格式不正确"
+        return runCatching {
+            val status = api.authStatus(normalized, basicAuth)
+            if (!loginRequired(status)) return@runCatching
+            val token = api.login(
+                normalized,
+                username,
+                password,
+                permanent = false,
+                basicAuth = basicAuth,
+            ).token
+            // 吊销失败不影响结论：账号确实是对的，留下一个会话 token 也不算错误。
+            runCatching { api.revokeToken(Connection(normalized, token, "default", basicAuth), token) }
+        }.exceptionOrNull()?.let { ErrorText.of(it) }
+    }
+
+    /**
      * 指定本次运行使用的地址。传 null 或列表外的地址都表示恢复自动。
      *
      * 不落盘：用户要的是「仅在本次打开生效」。
@@ -173,7 +225,7 @@ class InstanceRepository(
         if (order.isEmpty()) return null
         val hit = runCatching {
             AddressFallback.firstReachable(order) { url ->
-                api.versionWith(url, QwenPawApi.probeClient())
+                api.versionWith(url, QwenPawApi.probeClient(), instance.basicAuth)
             }
         }.getOrNull() ?: return null
         runtimeHit[bucketKey(instance.id)] = hit.first
@@ -186,7 +238,9 @@ class InstanceRepository(
     fun networkSsid(): String? = network?.current?.value?.ssid
 
     fun connection(instance: InstanceConfig? = active()): Connection? =
-        instance?.let { Connection(resolvedBaseUrl(it), it.token, it.agentId) }
+        instance?.let {
+            Connection(resolvedBaseUrl(it), it.token, it.agentId, it.basicAuth)
+        }
 
     /**
      * 按地址顺序尝试，命中的地址原样返回。
@@ -203,15 +257,17 @@ class InstanceRepository(
         agentId: String,
         /** 实例 id 用于记录本次运行命中的地址；不需要记忆时传 null。 */
         instanceId: String? = null,
+        /** 反代凭据；非空时随每个候选地址一起带上。 */
+        basicAuth: BasicAuth? = null,
         /** 每次尝试前回调，用于展示「正在验证 1/2」。 */
         onAttempt: (index: Int, total: Int, url: String) -> Unit = { _, _, _ -> },
         block: suspend (Connection) -> T,
     ): Pair<Connection, T> {
         val (url, result) = AddressFallback.firstReachable(baseUrls, onAttempt) { url ->
-            block(Connection(url, token, agentId))
+            block(Connection(url, token, agentId, basicAuth))
         }
         if (instanceId != null) runtimeHit[bucketKey(instanceId)] = url
-        return Connection(url, token, agentId) to result
+        return Connection(url, token, agentId, basicAuth) to result
     }
 
     /**
@@ -231,28 +287,91 @@ class InstanceRepository(
         baseUrls: List<String>,
         onAttempt: (index: Int, total: Int, url: String) -> Unit = { _, _, _ -> },
         instanceId: String? = null,
+        /** 反代凭据。给了就能验证到「反代之后」的真实状态。 */
+        basicAuth: BasicAuth? = null,
+        /**
+         * 已保存实例的 token。
+         *
+         * 开着登录的服务端只有带 token 才能读到配套插件版本；为 null 时
+         * 插件探测会得到 401，结果记「未能确认」。
+         */
+        token: String? = null,
     ): VerifyResult {
         val normalized = normalize(baseUrls)
-        val (conn, result) = withFallback(
-            baseUrls = normalized,
-            token = null,
-            agentId = "default",
-            onAttempt = onAttempt,
-            instanceId = instanceId,
-        ) { probe ->
-            val version = api.versionWith(probe.baseUrl, QwenPawApi.probeClient()).version
-            // 鉴权状态查不到不算失败：验证的核心结论是「地址通不通」，
-            // 拿不到 status 只影响「这一步之后是否要填账号」的预判。
-            val needsLogin = runCatching {
-                loginRequired(api.authStatus(probe.baseUrl))
-            }.getOrDefault(false)
-            VerifyResult(
-                baseUrl = probe.baseUrl,
-                version = version,
-                needsLogin = needsLogin,
-            )
+        // 反代拦下时不能按「地址不可达」处理：地址是通的，换下一个地址
+        // 同样会被拦。因此这里先单独探一次，把「缺凭据」与「连不上」分开。
+        val (conn, result) = try {
+            withFallback(
+                baseUrls = normalized,
+                token = token,
+                agentId = "default",
+                instanceId = instanceId,
+                basicAuth = basicAuth,
+                onAttempt = onAttempt,
+            ) { probe -> probeVersion(probe) }
+        } catch (e: ApiException) {
+            if (e.code == 401 &&
+                ErrorText.classify401(e.detail ?: e.message, e.wwwAuthenticate) ==
+                ErrorText.AuthFailure.PROXY_BASIC
+            ) {
+                // 已经填了反代凭据却仍被拦，说明这组账号密码不对。
+                // 此时「需要填写反向代理账号与密码」是错的——用户已经填了，
+                // 要说的是「填的不对」，否则他会去检查一个本来就填对了的字段。
+                if (basicAuth != null) {
+                    throw ApiException(
+                        code = 401,
+                        message = e.message,
+                        userHint = "反向代理拒绝了这组账号密码，请核对后重试",
+                        detail = e.detail,
+                        wwwAuthenticate = e.wwwAuthenticate,
+                        tokenSent = false,
+                    )
+                }
+                // 没填凭据：这不是「连不上」，也不需要换地址（同一台机器的反代配置相同）。
+                // 返回一个专门的标记，界面据此就地展开凭据输入，而不是报「验证失败」。
+                return VerifyResult(
+                    baseUrl = normalized.first(),
+                    version = "",
+                    needsLogin = false,
+                    proxyAuthRequired = true,
+                )
+            }
+            throw e
         }
         return result.copy(baseUrl = conn.baseUrl)
+    }
+
+    /** 用短超时探一个地址的版本与登录状态。 */
+    private suspend fun probeVersion(probe: Connection): VerifyResult {
+        val version = api.versionWith(
+            probe.baseUrl,
+            QwenPawApi.probeClient(),
+            probe.basicAuth,
+        ).version
+        // 鉴权状态查不到不算失败：验证的核心结论是「地址通不通」，
+        // 拿不到 status 只影响「这一步之后是否要填账号」的预判。
+        val needsLogin = runCatching {
+            loginRequired(api.authStatus(probe.baseUrl, probe.basicAuth))
+        }.getOrDefault(false)
+        // 配套插件顺带探一次：用户在同一屏就能确认「服务端通了、插件装没装」。
+        // 带 token 时能读到真实版本；新增实例这一阶段还没有 token，401 只能记为「待确认」。
+        val bridge = runCatching {
+            api.pluginBridgeInfo(probe)?.let {
+                io.qwenpaw.node.data.plugin.BridgeStatus.Ready(it)
+            } ?: io.qwenpaw.node.data.plugin.BridgeStatus.Absent
+        }.getOrElse { e ->
+            if (e is ApiException && (e.code == 401 || e.code == 403)) {
+                io.qwenpaw.node.data.plugin.BridgeStatus.Unknown
+            } else {
+                io.qwenpaw.node.data.plugin.BridgeStatus.Absent
+            }
+        }
+        return VerifyResult(
+            baseUrl = probe.baseUrl,
+            version = version,
+            needsLogin = needsLogin,
+            bridge = bridge,
+        )
     }
 
     /** 只探测地址是否可用并列出智能体，不写盘。连接页选智能体时用。 */
@@ -260,18 +379,28 @@ class InstanceRepository(
         baseUrls: List<String>,
         username: String?,
         password: String?,
+        basicAuth: BasicAuth? = null,
     ): List<AgentDto> {
         val normalized = normalize(baseUrls)
-        val (_, agents) = withFallback(normalized, null, "default") { probe ->
-            val status = api.authStatus(probe.baseUrl)
+        val (_, agents) = withFallback(normalized, null, "default", basicAuth = basicAuth) { probe ->
+            val status = api.authStatus(probe.baseUrl, probe.basicAuth)
             var token: String? = null
             if (loginRequired(status)) {
                 if (username.isNullOrBlank() || password.isNullOrBlank()) {
-                    throw ApiException(401, "该实例已开启登录鉴权，需要用户名和密码")
+                    // userHint 必须一起给：只写 message 的话，[ErrorText.of] 会落到
+                    // 401 的默认分支，把「还没填账号」说成「登录已失效」。
+                    val msg = "该实例已开启登录鉴权，需要用户名和密码"
+                    throw ApiException(401, msg, msg, tokenSent = false)
                 }
-                token = api.login(probe.baseUrl, username, password, permanent = true).token
+                token = api.login(
+                    probe.baseUrl,
+                    username,
+                    password,
+                    permanent = true,
+                    basicAuth = probe.basicAuth,
+                ).token
             }
-            api.agents(Connection(probe.baseUrl, token, "default"))
+            api.agents(Connection(probe.baseUrl, token, "default", probe.basicAuth))
         }
         return agents
     }
@@ -288,6 +417,7 @@ class InstanceRepository(
             instance.token,
             instance.agentId,
             instanceId = instance.id,
+            basicAuth = instance.basicAuth,
         ) { conn ->
             api.agents(conn)
         }
@@ -309,6 +439,8 @@ class InstanceRepository(
         password: String?,
         agentId: String,
         existingId: String? = null,
+        /** 反向代理的 HTTP Basic 凭据；两个字段都非空才带。 */
+        basicAuth: BasicAuth? = null,
     ): InstanceConfig {
         val entries = normalizeEntries(addresses)
         val normalized = entries.map { it.url }
@@ -316,19 +448,30 @@ class InstanceRepository(
         var resolvedUser: String? = null
         var version: String? = null
 
-        val (hit, agents) = withFallback(normalized, null, agentId) { probe ->
-            val status = api.authStatus(probe.baseUrl)
+        val (hit, agents) = withFallback(normalized, null, agentId, basicAuth = basicAuth) { probe ->
+            val status = api.authStatus(probe.baseUrl, probe.basicAuth)
             if (loginRequired(status)) {
                 if (username.isNullOrBlank() || password.isNullOrBlank()) {
-                    throw ApiException(401, "该实例已开启登录鉴权，需要用户名和密码")
+                    // 与 probeAgents 同一处理：userHint 里放同一句，否则会被映射成
+                    // 「登录已失效」——用户此时根本还没登录过。
+                    val msg = "该实例已开启登录鉴权，需要用户名和密码"
+                    throw ApiException(401, msg, msg, tokenSent = false)
                 }
-                val auth = api.login(probe.baseUrl, username, password, permanent = true)
+                val auth = api.login(
+                    probe.baseUrl,
+                    username,
+                    password,
+                    permanent = true,
+                    basicAuth = probe.basicAuth,
+                )
                 resolvedToken = auth.token
                 resolvedUser = auth.username ?: username
             }
-            version = runCatching { api.version(probe.baseUrl).version }.getOrNull()
+            version = runCatching {
+                api.version(probe.baseUrl, probe.basicAuth).version
+            }.getOrNull()
             // 校验 token 与 agent 是否可用，顺便拿到智能体列表。
-            api.agents(Connection(probe.baseUrl, resolvedToken, agentId))
+            api.agents(Connection(probe.baseUrl, resolvedToken, agentId, probe.basicAuth))
         }
         val resolvedAgent = when {
             agents.any { it.id == agentId } -> agentId
@@ -344,6 +487,8 @@ class InstanceRepository(
             serverVersion = version,
             token = resolvedToken,
             username = resolvedUser,
+            basicUser = basicAuth?.user,
+            basicPassword = basicAuth?.password,
         )
         val list = _instances.value.toMutableList()
         val index = list.indexOfFirst { it.id == config.id }
@@ -532,11 +677,29 @@ class InstanceRepository(
         internal fun defaultSchemeFor(host: String): String {
             val h = host.trim().lowercase().removeSurrounding("[", "]")
             if (h.isEmpty()) return "http"
-            if (h == "localhost" || h == "::1" || h.startsWith("127.")) return "http"
-            // 局域网段、链路本地段与组网段（easytier / tailscale 常用的 CGNAT）。
-            if (isPrivateIpv4(h)) return "http"
-            if (PRIVATE_SUFFIXES.any { h.endsWith(it) }) return "http"
+            if (isLocalHost(h)) return "http"
             return "https"
+        }
+
+        /**
+         * 这个主机名是不是「不会被公网访问到」。
+         *
+         * 三个来源合并成一处，是因为安全提示与协议默认值必须用同一套判据：
+         * 两边各写一份，一处加了网段另一处没加，就会出现「按 http 连内网、
+         * 同时又提示它暴露在广域网」这种自相矛盾的界面。
+         *
+         * 覆盖范围：localhost、回环地址、私有 IPv4 段、链路本地段、CGNAT
+         * （easytier / tailscale 常用），以及 `.local` `.lan` `.internal` `.home`
+         * 这类只在内网解析的后缀。空串按内网处理——没填地址时不该弹安全提示。
+         */
+        internal fun isLocalHost(rawHost: String): Boolean {
+            val h = rawHost.trim().lowercase().removeSurrounding("[", "]")
+            if (h.isEmpty()) return true
+            if (h == "localhost" || h == "::1") return true
+            if (h.startsWith("127.")) return true
+            if (isPrivateIpv4(h)) return true
+            if (PRIVATE_SUFFIXES.any { h.endsWith(it) }) return true
+            return false
         }
 
         /**

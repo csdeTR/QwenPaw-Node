@@ -131,7 +131,7 @@ internal fun CronSection(
             title = { Text("立即执行", style = MaterialTheme.typography.titleMedium) },
             text = {
                 Text(
-                    text = "确定要立即执行任务“${job.name.ifBlank { "未命名" }}”吗？",
+                    text = "确定要立即执行任务「${job.name.ifBlank { "未命名" }}」吗？",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
@@ -417,7 +417,7 @@ private fun statusText(job: CronJobSpecDto, state: CronJobStateDto?, serverTimez
     if (requiresReview(job)) return "需审核通过后才能启用或立即执行"
     if (!job.enabled) {
         val next = state?.nextRunAt?.let { formatIsoInZone(it, ZoneId.of(CRON_TIMEZONE)) }
-        return if (next == null) "已暂停" else "已暂停 · 启用后下次 $next"
+        return if (next == null) "已暂停" else "已暂停，启用后下次 $next"
     }
     if (state == null) return "状态未知"
     val next = state.nextRunAt?.let { formatIsoInZone(it, ZoneId.of(CRON_TIMEZONE)) }
@@ -449,7 +449,7 @@ private fun CronHistoryDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("执行记录 · $jobName", style = MaterialTheme.typography.titleMedium) },
+        title = { Text("执行记录：$jobName", style = MaterialTheme.typography.titleMedium) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 when {

@@ -34,7 +34,7 @@ internal fun OffloadPolicySection(
         Card {
             SwitchRow(
                 title = "转入后台继续执行",
-                subtitle = "关闭时超时的工具会被中止；开启后转到后台跑完，结果稍后送到",
+                subtitle = "关闭后，超时的工具会被中止；开启后，工具转到后台继续执行，结果稍后送达",
                 checked = action == OFFLOAD,
                 enabled = !loading,
                 onCheckedChange = { enabled ->

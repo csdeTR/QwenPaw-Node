@@ -10,14 +10,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -73,13 +78,29 @@ fun InstanceForm(
     /** 预填实例显示名，编辑已有实例时用。 */
     initialName: String = "",
     initialAgentId: String = "default",
+    /** 预填反向代理账号与密码，编辑已有实例时用。 */
+    initialBasicUser: String = "",
+    initialBasicPassword: String = "",
     /** 不显示「已保存的实例」区块时为 null。 */
     saved: List<InstanceConfig>? = null,
     onUseSaved: ((InstanceConfig) -> Unit)? = null,
     onConnect: (InstanceDraft) -> Unit,
-    onLoadAgents: suspend (hosts: List<String>, username: String, password: String) -> List<AgentDto>,
+    onLoadAgents: suspend (
+        hosts: List<String>,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<AgentDto>,
     /** 轻量验证地址（只查版本），成功返回命中的地址与版本描述。 */
-    onVerifyHosts: suspend (hosts: List<String>, onAttempt: (VerifyAttempt) -> Unit) -> io.qwenpaw.node.data.VerifyResult,
+    onVerifyHosts: suspend (
+        hosts: List<String>,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+        onAttempt: (VerifyAttempt) -> Unit,
+        /** 已保存实例的 token；编辑页传进来才能读到配套插件版本。 */
+        token: String?,
+    ) -> io.qwenpaw.node.data.VerifyResult,
+    /** 编辑页传入已保存实例的 token；新增实例时为 null。 */
+    verifyToken: String? = null,
     /** 已有凭据时优先用它拉列表（编辑已有实例）。 */
     loadAgentsWithToken: (suspend () -> List<AgentDto>)? = null,
     /** 当前网络，用于地址编辑区提示「这条现在会被优先使用」。 */
@@ -99,6 +120,14 @@ fun InstanceForm(
     var agentId by remember { mutableStateOf(initialAgentId) }
     var advanced by remember { mutableStateOf(false) }
     var fixedPunctuation by remember { mutableStateOf(false) }
+    // 反向代理的 HTTP Basic 凭据，收在「高级选项」里。
+    var basicUser by remember { mutableStateOf(initialBasicUser) }
+    var basicPassword by remember { mutableStateOf(initialBasicPassword) }
+
+    /** 反代凭据；两个都非空才生效。 */
+    fun proxyAuth(): io.qwenpaw.node.data.remote.BasicAuth? =
+        io.qwenpaw.node.data.remote.BasicAuth(basicUser.trim(), basicPassword)
+            .takeIf { basicUser.isNotBlank() && basicPassword.isNotBlank() }
 
     var agents by remember { mutableStateOf<List<AgentDto>>(emptyList()) }
     var loadingAgents by remember { mutableStateOf(false) }
@@ -112,6 +141,12 @@ fun InstanceForm(
     var verifyingAt by remember { mutableStateOf<VerifyAttempt?>(null) }
     var verifyMessage by remember { mutableStateOf<String?>(null) }
     var verifyFailed by remember { mutableStateOf(false) }
+    // 验证通过后检测到的安全风险。非空时弹窗，用户点「知道了」才清空。
+    // 与引导式添加共用同一个对话框：两条添加路径都要提示，否则用户只会
+    // 在恰好选了引导式的那一次看到提醒。
+    var securityNotice by remember {
+        mutableStateOf<io.qwenpaw.node.data.SecurityNotice?>(null)
+    }
 
     /** 有效地址：去掉空行。回退逻辑只关心这几个 URL。 */
     val effectiveUrls = addresses.map { it.url.trim() }.filter { it.isNotBlank() }
@@ -134,6 +169,8 @@ fun InstanceForm(
         verifyMessage = null
         verifyFailed = false
         verifyingAt = null
+        // 风险结论描述的是上一个地址。
+        securityNotice = null
     }
 
     /** 只验证地址可达，不拉智能体列表。多个地址时按顺序回退。 */
@@ -145,12 +182,20 @@ fun InstanceForm(
         verifyingAt = null
         scope.launch {
             runCatching {
-                onVerifyHosts(effectiveUrls) { attempt -> verifyingAt = attempt }
+                onVerifyHosts(effectiveUrls, proxyAuth(), { attempt -> verifyingAt = attempt }, verifyToken)
             }
                 .onSuccess { result ->
-                    hostVerified = true
+                    hostVerified = !result.proxyAuthRequired
                     verifyFailed = false
                     val version = result.version
+                    if (result.proxyAuthRequired) {
+                        // 被反代拦住不是「连不上」：地址是通的。展开高级选项让它就地填。
+                        advanced = true
+                        verifyMessage = "该地址由反向代理保护，请在高级选项里填写反向代理账号与密码"
+                        verifying = false
+                        verifyingAt = null
+                        return@launch
+                    }
                     // 比较前要统一规范化：effectiveUrls 是用户原文（可能缺协议），
                     // result.baseUrl 已补齐协议，直接比字符串会把「未回退」误报成「已回退」。
                     val primaryNormalized = runCatching {
@@ -161,11 +206,17 @@ fun InstanceForm(
                     verifyMessage = buildString {
                         append("连接正常")
                         if (version.isNotBlank()) append("，服务端 ").append(version)
+                        append("，").append(bridgeLabel(result.bridge))
                         // 命中的不是第一个地址时明确说出来，让用户知道回退生效了。
                         if (primaryNormalized != null && result.baseUrl != primaryNormalized) {
                             append("，已回退到 ").append(result.baseUrl)
                         }
                     }
+                    // 地址通了不代表可以放心用：公网地址不设防等于是把整台机器交出去。
+                    securityNotice = io.qwenpaw.node.data.assessSecurity(
+                        url = result.baseUrl,
+                        loginRequired = result.needsLogin,
+                    ).takeIf { it.any }
                 }
                 .onFailure { e ->
                     hostVerified = false
@@ -192,7 +243,7 @@ fun InstanceForm(
                 runCatching { loader() }.getOrNull()
             }
             val list = byToken?.takeIf { it.isNotEmpty() }
-                ?: runCatching { onLoadAgents(effectiveUrls, username, password) }
+                ?: runCatching { onLoadAgents(effectiveUrls, username, password, proxyAuth()) }
                     .onFailure { e -> agentError = io.qwenpaw.node.data.remote.ErrorText.of(e) }
                     .getOrDefault(emptyList())
             agents = list
@@ -368,7 +419,7 @@ fun InstanceForm(
                 progress != null && progress.total > 1 -> {
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        text = "正在尝试 ${progress.index}/${progress.total} · ${progress.url}",
+                        text = "正在尝试 ${progress.index}/${progress.total}，${progress.url}",
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                         maxLines = 1,
@@ -474,6 +525,70 @@ fun InstanceForm(
                 Text(
                     text = "仅在服务端开启 Web 登录认证（QWENPAW_AUTH_ENABLED=true）时需要填写；" +
                         "本机或局域网直连一般留空。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "反向代理账号",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "可选",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = basicUser,
+                    onValueChange = {
+                        basicUser = it
+                        // 凭据改了，之前的验证结论作废。
+                        hostVerified = false
+                        verifyMessage = null
+                        verifyFailed = false
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "反向代理密码",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "可选",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = basicPassword,
+                    onValueChange = {
+                        basicPassword = it
+                        hostVerified = false
+                        verifyMessage = null
+                        verifyFailed = false
+                    },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。",
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     modifier = Modifier.fillMaxWidth(),
@@ -654,6 +769,8 @@ fun InstanceForm(
                             username = username,
                             password = password,
                             agentId = agentId.ifBlank { "default" },
+                            basicUser = basicUser.trim(),
+                            basicPassword = basicPassword,
                         ),
                     )
                 }
@@ -701,6 +818,13 @@ fun InstanceForm(
         )
         Spacer(Modifier.height(16.dp))
     }
+
+    securityNotice?.let { notice ->
+        SecurityNoticeDialog(
+            notice = notice,
+            onDismiss = { securityNotice = null },
+        )
+    }
 }
 
 /**
@@ -715,10 +839,26 @@ fun ConnectScreen(
     connecting: Boolean,
     error: String?,
     onConnect: (InstanceDraft) -> Unit,
-    onLoadAgents: suspend (hosts: List<String>, username: String, password: String) -> List<AgentDto>,
-    onVerifyHosts: suspend (hosts: List<String>, onAttempt: (VerifyAttempt) -> Unit) -> io.qwenpaw.node.data.VerifyResult,
+    onLoadAgents: suspend (
+        hosts: List<String>,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<AgentDto>,
+    onVerifyHosts: suspend (
+        hosts: List<String>,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+        onAttempt: (VerifyAttempt) -> Unit,
+    ) -> io.qwenpaw.node.data.VerifyResult,
     /** 服务端是否要求登录。引导第 2 步据此决定要不要填账号。 */
     onCheckAuth: suspend (address: String) -> Boolean,
+    /** 试登录一次。返回 null 表示账号密码可用，否则是给用户看的原因。 */
+    onCheckLogin: suspend (
+        address: String,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> String?,
     saved: List<InstanceConfig>,
     onUseSaved: (InstanceConfig) -> Unit,
 ) {
@@ -730,7 +870,11 @@ fun ConnectScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
-            .navigationBarsPadding()
+            // 键盘弹出时要把底部让开，否则滚动到底也看不到正在填的输入框。
+            // 手势条与键盘取并集，避免两者高度相加后多出一段空白。
+            .windowInsetsPadding(
+                WindowInsets.navigationBars.union(WindowInsets.ime),
+            )
             .verticalScroll(rememberScrollState()),
     ) {
         Image(
@@ -764,6 +908,7 @@ fun ConnectScreen(
             error = error,
             onFinish = onConnect,
             onCheckAuth = onCheckAuth,
+            onCheckLogin = onCheckLogin,
             onLoadAgents = onLoadAgents,
             onVerifyHosts = onVerifyHosts,
             scrollable = false,
@@ -786,6 +931,19 @@ fun ConnectScreen(
         }
         Spacer(Modifier.height(24.dp))
     }
+}
+
+/**
+ * 验证结论里的配套插件一句。
+ *
+ * 401 记为 [io.qwenpaw.node.data.plugin.BridgeStatus.Unknown]，写「未能确认」：
+ * 开启了登录的服务端在验证阶段没有 token，这时说「未安装」是错的。
+ */
+internal fun bridgeLabel(status: io.qwenpaw.node.data.plugin.BridgeStatus): String = when (status) {
+    is io.qwenpaw.node.data.plugin.BridgeStatus.Ready ->
+        "QwenPaw Node Bridge v${status.info.pluginVersion}"
+    io.qwenpaw.node.data.plugin.BridgeStatus.Absent -> "未安装配套插件"
+    io.qwenpaw.node.data.plugin.BridgeStatus.Unknown -> "配套插件状态未能确认"
 }
 
 /**

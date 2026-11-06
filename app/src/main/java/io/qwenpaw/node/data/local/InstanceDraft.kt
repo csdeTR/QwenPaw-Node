@@ -18,6 +18,14 @@ data class InstanceDraft(
     val username: String = "",
     val password: String = "",
     val agentId: String = "default",
+    /**
+     * 反向代理的 HTTP Basic 凭据，与 [username] / [password] 是两套身份。
+     *
+     * 两者都非空才生效：只填账号说明用户还没填完，此时按「没开反代验证」处理，
+     * 让请求直接打到服务端，而不是拿半组凭据反复撞 401。
+     */
+    val basicUser: String = "",
+    val basicPassword: String = "",
 ) {
     /**
      * 落库用的名称。

@@ -176,6 +176,7 @@ private fun QwenPawNav(
                 app.instanceRepository.resolvedBaseUrl(it),
                 it.token,
                 it.agentId,
+                it.basicAuth,
             )
         }
     }
@@ -433,9 +434,16 @@ private fun QwenPawNav(
             onConnect = { draft ->
                 viewModel.connect(draft)
             },
-            onLoadAgents = { hosts, user, pass -> viewModel.loadAgents(hosts, user, pass) },
-            onVerifyHosts = { hosts, onAttempt -> viewModel.verifyHosts(hosts, onAttempt) },
+            onLoadAgents = { hosts, user, pass, basic ->
+                viewModel.loadAgents(hosts, user, pass, basic)
+            },
+            onVerifyHosts = { hosts, basic, onAttempt ->
+                viewModel.verifyHosts(hosts, onAttempt, basicAuth = basic)
+            },
             onCheckAuth = { address -> viewModel.authRequired(address) },
+            onCheckLogin = { address, user, pass, basic ->
+                viewModel.checkLogin(address, user, pass, basic)
+            },
             saved = instances,
             onUseSaved = { viewModel.useSaved(it) },
         )
@@ -581,6 +589,8 @@ private fun QwenPawNav(
                     },
                     onRenameGroup = chatVm::renameGroup,
                     onDeleteGroup = chatVm::deleteGroup,
+                    onReorderGroup = chatVm::moveGroup,
+                    onMoveChatToGroup = chatVm::setChatGroup,
                     iconStore = app.chatIconStore,
                     iconVersion = iconVersion,
                     onPickIconImage = { chatId ->
@@ -686,6 +696,8 @@ private fun QwenPawNav(
                     onDelete = { chatId ->
                         chatVm.deleteChat(chatId)
                     },
+                    onBatchUnarchive = { ids -> chatVm.batchUnarchive(ids) },
+                    onBatchDelete = { ids -> chatVm.batchDelete(ids) },
                 )
             }
 
@@ -733,12 +745,17 @@ private fun QwenPawNav(
                     onPickAgent = { pickingAgent = it },
                     addConnecting = appState.connecting,
                     addError = appState.connectError,
-                    onLoadAgents = { hosts, user, pass ->
-                        viewModel.loadAgents(hosts, user, pass)
+                    onLoadAgents = { hosts, user, pass, basic ->
+                        viewModel.loadAgents(hosts, user, pass, basic)
                     },
                     onLoadAgentsFor = { viewModel.loadAgentsFor(it) },
-                    onVerifyHosts = { hosts, onAttempt -> viewModel.verifyHosts(hosts, onAttempt) },
+                    onVerifyHosts = { hosts, basic, onAttempt, token ->
+                        viewModel.verifyHosts(hosts, onAttempt, basicAuth = basic, token = token)
+                    },
                     onCheckAuth = { address -> viewModel.authRequired(address) },
+                    onCheckLogin = { address, user, pass, basic ->
+                        viewModel.checkLogin(address, user, pass, basic)
+                    },
                     onChooseAddress = { id, url -> viewModel.chooseAddress(id, url) },
                     onChooseSessionAddress = { id, url ->
                         viewModel.chooseSessionAddress(id, url)
@@ -774,6 +791,13 @@ private fun QwenPawNav(
                     onUseMiSans = viewModel::setUseMiSans,
                     onCompactList = viewModel::setCompactList,
                     onKeepScreenOn = viewModel::setKeepScreenOn,
+                    securityHintsEnabled = appState.securityHintsEnabled,
+                    onSecurityHintsEnabled = viewModel::setSecurityHintsEnabled,
+                    bridgeStatus = appState.bridgeStatus,
+                    onRefreshBridge = viewModel::refreshBridgeStatus,
+                    bridgeFeaturesEnabled = appState.bridgeFeaturesEnabled,
+                    onBridgeFeaturesEnabled = viewModel::setBridgeFeaturesEnabled,
+                    onLogout = viewModel::logout,
                     voiceEnabled = appState.voiceEnabled,
                     onVoiceEnabled = { on ->
                         viewModel.setVoiceEnabled(on)
@@ -885,6 +909,17 @@ private fun QwenPawNav(
         )
     }
 
+    // 启动时检测到公网地址未设防：弹一次，读过即止。
+    //
+    // 放在 Nav 层而不是聊天页，是因为它描述的是「这台服务器」而不是「这个对话」，
+    // 用户切到列表或设置页时同样应该看到。
+    appState.securityNotice?.let { notice ->
+        io.qwenpaw.node.ui.settings.SecurityNoticeDialog(
+            notice = notice,
+            onDismiss = viewModel::dismissSecurityNotice,
+        )
+    }
+
     pickingAgent?.let { instance ->
         AgentPickerDialog(
             currentAgentId = instance.agentId,
@@ -958,6 +993,7 @@ private suspend fun uploadAttachment(
         app.instanceRepository.resolvedBaseUrl(instance),
         instance.token,
         instance.agentId,
+        instance.basicAuth,
     )
     val mime = context.contentResolver.getType(uri)
     val name = uploadFileName(context, uri, mime)

@@ -22,7 +22,7 @@ class CronTargetLabelTest {
     fun `name is used when available`() {
         val names = mapOf("1793496108871-abc" to "开启新的旅程")
         assertEquals("开启新的旅程", item.displayName(names))
-        assertEquals("开启新的旅程 · 1793496108871-abc", targetLabel(item, names))
+        assertEquals("开启新的旅程，1793496108871-abc", targetLabel(item, names))
     }
 
     @Test

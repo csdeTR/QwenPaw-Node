@@ -9,6 +9,7 @@ import io.qwenpaw.node.data.model.AuthStatusDto
 import io.qwenpaw.node.data.model.AuthTokenDto
 import io.qwenpaw.node.data.model.AvailableCommandsDto
 import io.qwenpaw.node.data.model.BatchChatResultDto
+import io.qwenpaw.node.data.model.BridgeInfoDto
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
@@ -64,7 +65,30 @@ data class Connection(
     val baseUrl: String,
     val token: String?,
     val agentId: String = "default",
+    /**
+     * 反向代理的 HTTP Basic 凭据。
+     *
+     * nginx / openresty 的 `auth_basic` 与 QwenPaw 自身的登录争用同一个
+     * `Authorization` 头，一个请求只能带一个。因此两者同时存在时把
+     * `Authorization` 让给 Basic，QwenPaw 的 token 改走 `?token=` 查询参数
+     * （服务端 `AuthMiddleware._extract_token` 支持这条路）。
+     */
+    val basicAuth: BasicAuth? = null,
 )
+
+/**
+ * 反向代理的 HTTP Basic 凭据。
+ *
+ * 只用于反代这一层，与 [Connection.token]、`InstanceConfig.username/password`
+ * 是两套完全不同的身份：前者证明「可以访问这台反代」，后者证明「可以操作这个
+ * QwenPaw 实例」。
+ */
+data class BasicAuth(val user: String, val password: String) {
+    /** `user:password` 的 Base64，即 `Authorization: Basic <value>` 的值。 */
+    val headerValue: String
+        get() = "Basic " + java.util.Base64.getEncoder()
+            .encodeToString("$user:$password".toByteArray(Charsets.UTF_8))
+}
 
 /** 服务端返回的非 2xx 错误。 */
 class ApiException(
@@ -78,6 +102,24 @@ class ApiException(
      * 这类场景由调用方就近给一句准确的话，[ErrorText.of] 优先用它。
      */
     val userHint: String? = null,
+    /**
+     * 服务端响应体里的 `detail` 原文。
+     *
+     * 与 [message] 的区别：[message] 可能被调用方改写成人话，只有原文才能用来
+     * 判断 401 的成因（`Invalid username or password` 与
+     * `Invalid or expired token` 是两种完全不同的处置）。
+     */
+    val detail: String? = null,
+    /**
+     * 响应头 `WWW-Authenticate`。
+     *
+     * nginx / openresty 的 `auth_basic` 会带 `Basic realm="..."`，
+     * 而 QwenPaw 服务端自身从不发这个头。有了它才能把「反代拦下」与
+     * 「服务端拒绝密码」分开，否则两者都表现为 401。
+     */
+    val wwwAuthenticate: String? = null,
+    /** 这次请求是否带了 token。用于区分「没登录」与「登录过期」。 */
+    val tokenSent: Boolean = false,
 ) : IOException(message)
 
 /**
@@ -98,30 +140,61 @@ class QwenPawApi(
 
     // ---------- 基础 ----------
 
-    fun version(baseUrl: String): VersionDto =
-        decode(request(Connection(baseUrl, null), "GET", "/api/version"), VersionDto.serializer())
+    fun version(baseUrl: String, basicAuth: BasicAuth? = null): VersionDto =
+        decode(
+            request(Connection(baseUrl, null, basicAuth = basicAuth), "GET", "/api/version"),
+            VersionDto.serializer(),
+        )
 
     /**
      * 用指定客户端查版本。
      *
      * 探测走 [probeClient] 的短超时，而不是主客户端的 10 分钟读超时。
      */
-    fun versionWith(baseUrl: String, probe: OkHttpClient): VersionDto {
+    fun versionWith(
+        baseUrl: String,
+        probe: OkHttpClient,
+        /** 反向代理的 Basic 凭据：`/api/version` 是公开路径，但反代可能先拦下它。 */
+        basicAuth: BasicAuth? = null,
+    ): VersionDto {
         val url = resolve(baseUrl, "/api/version")
-        val request = Request.Builder().url(url).get().build()
+        val request = Request.Builder().url(url).get().apply {
+            basicAuth?.let { header("Authorization", it.headerValue) }
+        }.build()
         return probe.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                throw ApiException(response.code, extractDetail(text, response.code))
+                throw failureOf(
+                    response.code,
+                    text,
+                    response.header("WWW-Authenticate"),
+                    basicAuth == null,
+                )
             }
             decode(text, VersionDto.serializer())
         }
     }
 
-    fun authStatus(baseUrl: String): AuthStatusDto =
-        decode(request(Connection(baseUrl, null), "GET", "/api/auth/status"), AuthStatusDto.serializer())
+    fun authStatus(baseUrl: String, basicAuth: BasicAuth? = null): AuthStatusDto =
+        decode(
+            request(Connection(baseUrl, null, basicAuth = basicAuth), "GET", "/api/auth/status"),
+            AuthStatusDto.serializer(),
+        )
 
-    fun login(baseUrl: String, username: String, password: String, permanent: Boolean): AuthTokenDto {
+    /**
+     * 登录换 token。
+     *
+     * [basicAuth] 必须跟着走：反向代理开启 `auth_basic` 时，`/api/auth/login`
+     * 与其他路径一样被反代先拦下。少带这一层，用户会看到「用户名或密码不正确」，
+     * 而实际上是请求根本没到服务端。
+     */
+    fun login(
+        baseUrl: String,
+        username: String,
+        password: String,
+        permanent: Boolean,
+        basicAuth: BasicAuth? = null,
+    ): AuthTokenDto {
         val body = buildJsonObject {
             put("username", username)
             put("password", password)
@@ -129,7 +202,7 @@ class QwenPawApi(
         }
         return try {
             decode(
-                request(Connection(baseUrl, null), "POST", "/api/auth/login", body),
+                request(Connection(baseUrl, null, basicAuth = basicAuth), "POST", "/api/auth/login", body),
                 AuthTokenDto.serializer(),
             )
         } catch (e: ApiException) {
@@ -137,8 +210,20 @@ class QwenPawApi(
             // 此时 404 的含义只能是「这个请求没落到登录端点」：最常见的原因是
             // 地址写成了 http，被反向代理 301 到 https——OkHttp 跟随 301 会把 POST
             // 改写成 GET 并丢掉请求体，登录端点于是不认识这个请求。
+            // 401 则是服务端在拒绝这组账号密码，**不是**「登录已失效」：
+            // 用户此时还没登录过，没有可失效的东西。
             if (e.code == 404) {
-                throw ApiException(404, e.message, LOGIN_NOT_REACHED)
+                throw ApiException(404, e.message, LOGIN_NOT_REACHED, e.detail)
+            }
+            if (e.code == 401) {
+                // 带 `WWW-Authenticate: Basic` 的是反向代理，不是服务端在核对账号：
+                // 说成「用户名或密码不正确」会让用户去改一个本来就对的密码。
+                if (ErrorText.classify401(e.detail ?: e.message, e.wwwAuthenticate, true) ==
+                    ErrorText.AuthFailure.PROXY_BASIC
+                ) {
+                    throw e
+                }
+                throw ApiException(401, e.message, BAD_CREDENTIALS, e.detail, e.wwwAuthenticate, false)
             }
             throw e
         }
@@ -154,6 +239,72 @@ class QwenPawApi(
             request(Connection(baseUrl, null), "POST", "/api/auth/register", body),
             AuthTokenDto.serializer(),
         )
+    }
+
+    /**
+     * 校验当前 token 是否仍有效。
+     *
+     * 用途是区分「token 失效」与「网络不通」：前者要重新登录，后者只需重试。
+     * 只发一个短超时的 `GET /api/auth/verify`，不碰业务端点。
+     *
+     * 返回 true 表示 token 有效；false 表示服务端明确拒绝（401）。
+     * 连不上时抛异常，由调用方按网络问题处理。
+     */
+    fun verifyToken(conn: Connection): Boolean {
+        val url = connUrl(conn, "/api/auth/verify")
+        val request = baseBuilder(conn, url).get().build()
+        return probeClient().newCall(request).execute().use { response ->
+            // 200 = 有效；401 = 失效。其余状态码（例如服务端未启用登录时的 403）
+            // 说明「这个断言无法回答」，按有效处理，避免把用户赶去重填密码。
+            response.code != 401
+        }
+    }
+
+    /**
+     * 吊销一个 token。传 null 表示吊销**当前**这一个（退出登录）。
+     *
+     * 服务端未启用登录时返回 403，调用方应按「该实例没开登录」提示，
+     * 而不是当成失败——本来就没有可吊销的东西。
+     */
+    fun revokeToken(conn: Connection, token: String? = null) {
+        val body = buildJsonObject {
+            token?.takeIf { it.isNotBlank() }?.let { put("token", it) }
+        }
+        request(conn, "POST", "/api/auth/revoke-token", body)
+    }
+
+    /** 吊销全部 token。会让**所有**设备上的登录立刻失效，属于破坏性操作。 */
+    fun revokeAllTokens(conn: Connection) {
+        request(conn, "POST", "/api/auth/revoke-all-tokens", buildJsonObject { })
+    }
+
+    // ---------- 配套插件 ----------
+
+    /**
+     * 探测配套插件是否已安装。
+     *
+     * 只打插件自己的端点，不查核心的 `/api/plugins` 列表：那条列表在 loader 未初始化时
+     * 走磁盘扫描，会把「装了但没加载」报成 `enabled=true, loaded=false`，还需要额外
+     * 一条判定规则；而 `/info` 能返回 200，本身就证明插件路由已经挂上了。
+     *
+     * 返回值语义：
+     * - `null` 表示**未检测到**（404）或连不上；
+     * - `null` 也表示契约版本不兼容（`protocol_version != 1`），旧客户端不该继续使用；
+     * - 401 会抛出，调用方应记为「待重探」而不是「未安装」——插件路由不在鉴权公开
+     *   路径里，验证阶段还没有 token。
+     */
+    fun pluginBridgeInfo(conn: Connection): BridgeInfoDto? {
+        val url = connUrl(conn, BRIDGE_INFO_PATH)
+        val request = baseBuilder(conn, url).get().build()
+        return probeClient().newCall(request).execute().use { response ->
+            if (response.code == 404) return null
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw failureOf(response.code, text, response.header("WWW-Authenticate"), conn.token != null)
+            }
+            val info = decode(text, BridgeInfoDto.serializer())
+            info.takeIf { it.protocolVersion == BridgeInfoDto.PROTOCOL }
+        }
     }
 
     // ---------- 智能体 ----------
@@ -285,6 +436,24 @@ class QwenPawApi(
      */
     fun deleteChatGroup(conn: Connection, groupId: String) {
         request(conn, "DELETE", "/api/chats/groups/$groupId")
+    }
+
+    /**
+     * 重排分组。
+     *
+     * body 是 `{group_ids: [...]}`，**不是**数组本身——与批量删除的裸数组不同。
+     * 服务端按传入顺序回写 `order`，返回完整列表。内置分组（`default` / `cron` /
+     * `subagents`）同样要出现在数组里：漏掉哪个，服务端就把它当作「未提及」，
+     * 后续的相对位置会变得不可预测。
+     */
+    fun reorderChatGroups(conn: Connection, groupIds: List<String>): List<ChatGroupDto> {
+        val body = buildJsonObject {
+            putJsonArray("group_ids") { groupIds.forEach { add(it) } }
+        }
+        return decode(
+            request(conn, "PUT", "/api/chats/groups/order", body),
+            kotlinx.serialization.builtins.ListSerializer(ChatGroupDto.serializer()),
+        )
     }
 
     /** 设置会话所属分组。 */
@@ -718,7 +887,7 @@ class QwenPawApi(
 
     /** 实时输出的 SSE 请求。服务端不回放，晚订阅只能拿到结束帧。 */
     fun toolCallStreamRequest(conn: Connection, sessionId: String, toolCallId: String): Request =
-        baseBuilder(conn, resolve(conn.baseUrl, "/api/tool-calls/$sessionId/$toolCallId/stream"))
+        baseBuilder(conn, connUrl(conn, "/api/tool-calls/$sessionId/$toolCallId/stream"))
             .header("Accept", "text/event-stream")
             .build()
 
@@ -812,7 +981,7 @@ class QwenPawApi(
                 file.asRequestBody((mime ?: "application/octet-stream").toMediaType()),
             )
             .build()
-        val url = resolve(conn.baseUrl, "/api/console/upload")
+        val url = connUrl(conn, "/api/console/upload")
         val req = baseBuilder(conn, url).post(body).build()
         return decode(execute(req), UploadResultDto.serializer())
     }
@@ -874,7 +1043,7 @@ class QwenPawApi(
 
     /** 供流式客户端使用：构造 SSE 请求（不执行）。 */
     fun chatRequest(conn: Connection, body: String): Request =
-        baseBuilder(conn, resolve(conn.baseUrl, "/api/console/chat"))
+        baseBuilder(conn, connUrl(conn, "/api/console/chat"))
             .post(body.toRequestBody(JSON_MEDIA))
             .header("Accept", "text/event-stream")
             .build()
@@ -900,7 +1069,7 @@ class QwenPawApi(
         path: String,
         body: String? = null,
     ): String {
-        val url = resolve(conn.baseUrl, path)
+        val url = connUrl(conn, path)
         val builder = baseBuilder(conn, url)
         val requestBody = body?.toRequestBody(JSON_MEDIA)
         when (method) {
@@ -914,24 +1083,46 @@ class QwenPawApi(
         return execute(builder.build())
     }
 
+    /**
+     * 请求地址，必要时把 token 挪到查询参数上。
+     *
+     * 只有「反代 Basic 与 QwenPaw token 同时存在」时才改写：`Authorization`
+     * 一个请求只能有一个值，让给 Basic 之后 token 只能走 `?token=`。
+     * 服务端 `AuthMiddleware._extract_token` 在 Bearer 缺失时读这个参数，
+     * 因此是官方支持的通路。代价是 token 会出现在反代的 access log 里，
+     * 这一点写在 `docs/protocol.md` 第 1 节。
+     */
+    private fun connUrl(conn: Connection, path: String): HttpUrl {
+        val base = resolve(conn.baseUrl, path)
+        val token = conn.token?.takeIf { it.isNotBlank() }
+        if (conn.basicAuth == null || token == null) return base
+        return base.newBuilder().addQueryParameter("token", token).build()
+    }
+
     private fun baseBuilder(conn: Connection, url: HttpUrl): Request.Builder {
         val builder = Request.Builder().url(url).header("X-Agent-Id", conn.agentId)
-        conn.token?.takeIf { it.isNotBlank() }?.let { builder.header("Authorization", "Bearer $it") }
+        conn.basicAuth?.let { builder.header("Authorization", it.headerValue) }
+            ?: conn.token?.takeIf { it.isNotBlank() }
+                ?.let { builder.header("Authorization", "Bearer $it") }
         return builder
     }
 
     private fun execute(request: Request): String {
+        // 「带过凭据」指的是 QwenPaw 自己的凭据（Bearer 或 `token=`），
+        // 反代 Basic 不算：反代放行后服务端仍可能说没登录。
+        val tokenSent = request.header("Authorization")?.startsWith("Bearer ") == true ||
+            request.url.queryParameter("token") != null
         return client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                val detail = extractDetail(text, response.code)
                 // 拦截器只看到状态码，看不出服务端为什么拒绝；这里补上 detail。
+                val detail = extractDetail(text, response.code)
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.NETWORK,
                     "API",
                     "${request.method} ${request.url.encodedPath} → ${response.code} $detail",
                 )
-                throw ApiException(response.code, detail)
+                throw failureOf(response.code, text, response.header("WWW-Authenticate"), tokenSent)
             }
             text
         }
@@ -943,24 +1134,50 @@ class QwenPawApi(
      * 图片端点不能走字符串通道：`String` 解码会按字符集转换，二进制图会被破坏。
      */
     private fun requestBytes(conn: Connection, method: String, path: String): ByteArray {
-        val builder = baseBuilder(conn, resolve(conn.baseUrl, path))
+        val builder = baseBuilder(conn, connUrl(conn, path))
         when (method) {
             "GET" -> builder.get()
             else -> error("不支持的方法 $method")
         }
         return client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) {
-                val detail = extractDetail(response.body?.string().orEmpty(), response.code)
+                val body = response.body?.string().orEmpty()
+                val detail = extractDetail(body, response.code)
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.NETWORK,
                     "API",
                     "${method} ${response.request.url.encodedPath} → ${response.code} $detail",
                 )
-                throw ApiException(response.code, detail)
+                throw failureOf(
+                    response.code,
+                    body,
+                    response.header("WWW-Authenticate"),
+                    builder.build().header("Authorization")?.startsWith("Bearer ") == true,
+                )
             }
             response.body?.bytes() ?: ByteArray(0)
         }
     }
+
+    /**
+     * 构造一次失败。
+     *
+     * [detail] 与 [message] 分开传：`extractDetail` 会把原文截断并去掉引号，
+     * 而判定 401 成因需要原文里那两个固定短语。这里让 [ApiException.detail]
+     * 保留截断后的原文，足够做短语匹配。
+     */
+    private fun failureOf(
+        code: Int,
+        body: String,
+        wwwAuthenticate: String?,
+        tokenSent: Boolean,
+    ): ApiException = ApiException(
+        code = code,
+        message = extractDetail(body, code),
+        detail = extractDetail(body, code),
+        wwwAuthenticate = wwwAuthenticate,
+        tokenSent = tokenSent,
+    )
 
     private fun <T> decode(text: String, serializer: kotlinx.serialization.DeserializationStrategy<T>): T {
         if (text.isBlank()) throw ApiException(204, "服务端返回了空响应")
@@ -988,6 +1205,23 @@ class QwenPawApi(
         internal const val LOGIN_NOT_REACHED =
             "登录接口返回 404。若服务端只接受 https，http 上的登录请求会被跳转改写成 GET 并丢失请求体；" +
                 "请把服务器地址改为 https:// 开头"
+
+        /**
+         * 登录接口 401 的说明。
+         *
+         * 用户此时还没拿到过 token，说「登录已失效」会把人引向一个不存在的失效状态。
+         */
+        internal const val BAD_CREDENTIALS = "用户名或密码不正确"
+
+        /**
+         * 配套插件的自述端点。
+         *
+         * **不能**用 `/status` 或 `/files` 下任意子路径：核心的 `plugins.py` 已注册同前缀下的
+         * 这两条路由且先于插件 router 匹配，实测在未装插件的实例上会返回带参数化
+         * detail 的 404（`Plugin '…' not found.`），请求根本到不了插件。
+         * `/info`、`/search`、`/events` 是核心没有的子路径，可以安全使用。
+         */
+        const val BRIDGE_INFO_PATH = "/api/plugins/qwenpaw-node-bridge/info"
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             // 流式对话可能持续很久，读超时给足；其余请求单次不会超过这个值。
@@ -1019,6 +1253,11 @@ class QwenPawApi(
                 .callTimeout(8, TimeUnit.SECONDS)
                 // 探测要的是「这个地址现在通不通」，不要在内部重试掩盖问题。
                 .retryOnConnectionFailure(false)
+                // 也不复用连接：QwenPaw（uvicorn）的 keep-alive 只有 5 秒，
+                // 两次验证的间隔通常远超它，池里的连接早已被对端关闭。
+                // 复用它只会读到 EOF，把「地址是通的」误报成「网络中断」；
+                // 每次探测重新握手，一次失败就真的是失败。
+                .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
                 .addNetworkInterceptor(io.qwenpaw.node.log.LoggingInterceptor(io.qwenpaw.node.log.LogKind.NETWORK))
                 .build()
         }

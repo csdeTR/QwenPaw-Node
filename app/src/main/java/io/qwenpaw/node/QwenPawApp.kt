@@ -32,10 +32,13 @@ class QwenPawApp : Application() {
         private set
     lateinit var chatIconStore: io.qwenpaw.node.avatar.ChatIconStore
         private set
+    lateinit var pluginProbe: io.qwenpaw.node.data.plugin.PluginProbe
+        private set
 
     override fun onCreate() {
         super.onCreate()
         api = QwenPawApi()
+        pluginProbe = io.qwenpaw.node.data.plugin.PluginProbe(api)
         streamClient = ChatStreamClient(api, QwenPawApi.defaultClient())
         toolStreamClient = io.qwenpaw.node.data.stream.ToolStreamClient(
             api,

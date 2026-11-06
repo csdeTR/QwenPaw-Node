@@ -112,6 +112,10 @@ fun ChatListScreen(
     onRenameGroup: (groupId: String, name: String) -> Unit = { _, _ -> },
     /** 删除自定义分组。 */
     onDeleteGroup: (groupId: String) -> Unit = {},
+    /** 调整分组顺序：-1 上移、+1 下移。 */
+    onReorderGroup: (groupId: String, delta: Int) -> Unit = { _, _ -> },
+    /** 把某条对话移入分组。移回「未分组」要传服务端的默认分组 id。 */
+    onMoveChatToGroup: (chatId: String, groupId: String?) -> Unit = { _, _ -> },
     /** 对话图标存储。为 null 时只显示默认图标，也不提供「设置图标」入口。 */
     iconStore: io.qwenpaw.node.avatar.ChatIconStore? = null,
     /** 图标版本：变化时重读图片。 */
@@ -122,6 +126,8 @@ fun ChatListScreen(
     var renaming by remember { mutableStateOf<ChatSpecDto?>(null) }
     var deleting by remember { mutableStateOf<ChatSpecDto?>(null) }
     var archiving by remember { mutableStateOf<ChatSpecDto?>(null) }
+    // 长按菜单里的「移动到分组」。服务端没返回分组时不提供该入口。
+    var movingToGroup by remember { mutableStateOf<ChatSpecDto?>(null) }
     // 归档确认框里的「今日不再提示」。每次打开弹窗时重置为未勾选。
     var archiveTipChecked by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
@@ -393,6 +399,13 @@ fun ChatListScreen(
                                 // 只有传入了存储才提供入口；预览/测试环境没有存储，
                                 // 显示一个点了没反应的菜单项比不显示更糟。
                                 onSetIcon = iconStore?.let { { iconTarget = chat } },
+                                // 分组列表为空时同样不提供入口：没有可选目标，
+                                // 菜单项点开后只会是一个空对话框。
+                                onMoveToGroup = if (groups.any { it.kind != "default" }) {
+                                    { movingToGroup = chat }
+                                } else {
+                                    null
+                                },
                             )
                         }
                     }
@@ -440,6 +453,33 @@ fun ChatListScreen(
                 deleting = null
             },
             onDismiss = { deleting = null },
+        )
+    }
+
+    movingToGroup?.let { chat ->
+        OptionDialog(
+            title = "移动到分组",
+            items = groups.filter { it.kind != "default" }.map { group ->
+                OptionItem(
+                    key = group.id,
+                    label = groupTitle(group),
+                    selected = group.id == chat.groupId,
+                )
+            },
+            leading = OptionItem(
+                key = "",
+                label = "未分组",
+                // 服务端的默认分组 id 是 default，不是 null。
+                selected = chat.groupId.isNullOrBlank() || chat.groupId == "default",
+            ),
+            onPick = { key ->
+                movingToGroup = null
+                // 移回「未分组」要发默认分组的 id：服务端对 group_id=null 返回
+                // 400 `Unknown chat group: None`，静默失败会让用户以为没点中。
+                val target = key.ifBlank { ChatGrouping.defaultGroupId(groups) }
+                onMoveChatToGroup(chat.id, target)
+            },
+            onDismiss = { movingToGroup = null },
         )
     }
 
@@ -580,7 +620,38 @@ fun ChatListScreen(
         AlertDialog(
             onDismissRequest = { groupMenuFor = null },
             title = { Text(group.name.ifBlank { group.id }) },
-            text = { Text("可重命名或删除该分组；删除后组内对话将移回「未分组」。") },
+            text = {
+                Column {
+                    Text("可重命名、调整顺序或删除该分组；删除后组内对话将移回「未分组」。")
+                    Spacer(Modifier.height(10.dp))
+                    // 调整顺序只对自建分组开放：内置分组的相对位置由服务端固定，
+                    // 移了也不会生效，给入口反而像是坏了。
+                    val movable = group.kind == CUSTOM_KIND
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            enabled = movable,
+                            onClick = {
+                                onReorderGroup(group.id, -1)
+                                groupMenuFor = null
+                            },
+                        ) { Text("上移") }
+                        TextButton(
+                            enabled = movable,
+                            onClick = {
+                                onReorderGroup(group.id, 1)
+                                groupMenuFor = null
+                            },
+                        ) { Text("下移") }
+                    }
+                    if (!movable) {
+                        Text(
+                            text = "内置分组的顺序固定，不可调整",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1112,6 +1183,8 @@ private fun ChatRow(
     iconVersion: Long = 0L,
     /** 点「设置图标」。为 null 时菜单不显示该项。 */
     onSetIcon: (() -> Unit)? = null,
+    /** 点「移动到分组」。为 null 时菜单不显示该项。 */
+    onMoveToGroup: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     // 时间文案只在时间戳变化时重算，避免每次重组都解析日期。
@@ -1290,6 +1363,12 @@ private fun ChatRow(
                         action()
                     }
                 },
+                onMoveToGroup = onMoveToGroup?.let { action ->
+                    {
+                        menu = false
+                        action()
+                    }
+                },
             )
         }
         Box(
@@ -1382,6 +1461,8 @@ private fun ChatRowMenu(
     onArchive: () -> Unit,
     /** 为 null 时不显示「设置图标」。 */
     onSetIcon: (() -> Unit)? = null,
+    /** 为 null 时不显示「移动到分组」。 */
+    onMoveToGroup: (() -> Unit)? = null,
 ) {
     androidx.compose.material3.DropdownMenu(
         expanded = expanded,
@@ -1404,6 +1485,13 @@ private fun ChatRowMenu(
                 text = { Text("设置图标") },
                 leadingIcon = { MenuIcons.Leading(MenuAction.SET_ICON) },
                 onClick = onSetIcon,
+            )
+        }
+        if (onMoveToGroup != null) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("移动到分组") },
+                leadingIcon = { MenuIcons.Leading(MenuAction.GROUP) },
+                onClick = onMoveToGroup,
             )
         }
         androidx.compose.material3.DropdownMenuItem(

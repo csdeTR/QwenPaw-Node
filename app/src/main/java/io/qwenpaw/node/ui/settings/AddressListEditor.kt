@@ -180,8 +180,8 @@ fun AddressListEditor(
             )
         }
         Text(
-            text = "连接失败时，QwenPaw Node 默认依据列表顺序逐一尝试，" +
-                "便于外出时通过诸如 EasyTier 网络的方式访问 QwenPaw。",
+            text = "连接失败时，QwenPaw Node依次尝试各条地址，" +
+                "便于外出时通过可用链路（如EasyTier）访问",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp),

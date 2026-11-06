@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,6 +33,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,10 +83,28 @@ fun SettingsScreen(
     /** 添加实例时的连接中状态与错误，由外部 ViewModel 提供。 */
     addConnecting: Boolean = false,
     addError: String? = null,
-    onLoadAgents: suspend (hosts: List<String>, username: String, password: String) -> List<io.qwenpaw.node.data.model.AgentDto> = { _, _, _ -> emptyList() },
-    onVerifyHosts: suspend (hosts: List<String>, onAttempt: (VerifyAttempt) -> Unit) -> io.qwenpaw.node.data.VerifyResult,
+    onLoadAgents: suspend (
+        hosts: List<String>,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<io.qwenpaw.node.data.model.AgentDto> = { _, _, _, _ -> emptyList() },
+    onVerifyHosts: suspend (
+        hosts: List<String>,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+        onAttempt: (VerifyAttempt) -> Unit,
+        /** 已保存实例的 token；新增实例传 null。 */
+        token: String?,
+    ) -> io.qwenpaw.node.data.VerifyResult,
     /** 引导式添加时查服务端是否要求登录。 */
     onCheckAuth: suspend (address: String) -> Boolean = { false },
+    /** 引导式添加时试登录一次。返回 null 表示通过，否则是给用户看的原因。 */
+    onCheckLogin: suspend (
+        address: String,
+        username: String,
+        password: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> String? = { _, _, _, _ -> null },
     onLoadAgentsFor: suspend (InstanceConfig) -> List<io.qwenpaw.node.data.model.AgentDto> = { emptyList() },
     /** 手动指定实例优先使用的地址；传 null 表示恢复「按列表顺序」。写配置，长期有效。 */
     onChooseAddress: (instanceId: String, url: String?) -> Unit = { _, _ -> },
@@ -102,6 +123,9 @@ fun SettingsScreen(
     onUseMiSans: (Boolean) -> Unit,
     onCompactList: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
+    /** 是否在公网地址未设防时提醒。 */
+    securityHintsEnabled: Boolean = true,
+    onSecurityHintsEnabled: (Boolean) -> Unit = {},
     voiceEnabled: Boolean = false,
     onVoiceEnabled: (Boolean) -> Unit = {},
     voiceTrigger: VoiceTrigger = VoiceTrigger.TAP,
@@ -146,8 +170,22 @@ fun SettingsScreen(
     onActionStyle: (io.qwenpaw.node.ui.chat.ActionStyle) -> Unit = {},
     /** 工具、环境变量、后台策略与定时任务的状态与动作。为 null 时这些入口不显示。 */
     config: SettingsConfig? = null,
+    /** 配套插件的探测结论，显示在「服务端配置」的第一行。 */
+    bridgeStatus: io.qwenpaw.node.data.plugin.BridgeStatus =
+        io.qwenpaw.node.data.plugin.BridgeStatus.Unknown,
+    /** 重新探测配套插件。 */
+    onRefreshBridge: () -> Unit = {},
+    /** 依赖配套插件的功能总开关。 */
+    bridgeFeaturesEnabled: Boolean = false,
+    onBridgeFeaturesEnabled: (Boolean) -> Unit = {},
+    /** 退出登录：吊销服务端 token 并清本地凭据。 */
+    onLogout: (String) -> Unit = {},
 ) {
     var adding by remember { mutableStateOf(false) }
+    // 「安全提示」开关的关闭确认。
+    var confirmDisableHints by remember { mutableStateOf(false) }
+    // 待确认退出登录的实例。
+    var logoutFor by remember { mutableStateOf<InstanceConfig?>(null) }
     // 添加实例的两种方式：null 表示在方式选择页，否则是具体形态。
     var addMode by remember { mutableStateOf<AddMode?>(null) }
     var editing by remember { mutableStateOf<InstanceConfig?>(null) }
@@ -210,6 +248,29 @@ fun SettingsScreen(
         )
     }
 
+    // 退出登录的确认。吊销凭据是不可撤销的服务端动作，必须二次确认。
+    logoutFor?.let { instance ->
+        AlertDialog(
+            onDismissRequest = { logoutFor = null },
+            title = { Text("退出登录") },
+            text = {
+                Text(
+                    "将吊销服务端签发给你这台手机的凭据，并清除本机保存的 token。" +
+                        "实例与地址会保留，再次连接时需要重新输入账号密码。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    onLogout(instance.id)
+                    logoutFor = null
+                }) { Text("退出登录", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { logoutFor = null }) { Text("取消") }
+            },
+        )
+    }
+
     androidx.compose.animation.AnimatedContent(
         targetState = nav,
         transitionSpec = {
@@ -237,7 +298,10 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    // 添加实例的两种模式都要填表，键盘弹出时内容必须整体让开，
+                    // 否则表单下半部分始终被挡住。
+                    .imePadding(),
             ) {
                 SettingsTopBar(
                     onBack = {
@@ -245,8 +309,8 @@ fun SettingsScreen(
                     },
                     subtitle = when (current.addMode) {
                         null -> "添加实例"
-                        AddMode.FORM -> "添加实例 · 填表"
-                        AddMode.WIZARD -> "添加实例 · 引导式"
+                        AddMode.FORM -> "添加实例（填表）"
+                        AddMode.WIZARD -> "添加实例（引导式）"
                     },
                 )
                 // 读 current 而不是外部 addMode：退出中的旧槽位要保留它自己那一页的内容。
@@ -269,7 +333,10 @@ fun SettingsScreen(
                             }
                         },
                         onLoadAgents = onLoadAgents,
-                        onVerifyHosts = onVerifyHosts,
+                        // 新增实例还没有 token：插件探测只能得到「未能确认」。
+                        onVerifyHosts = { hosts, basic, attempt, _ ->
+                            onVerifyHosts(hosts, basic, attempt, null)
+                        },
                         currentNetKind = currentNetKind,
                         currentSsid = currentSsid,
                         submitLabel = "添加",
@@ -288,8 +355,12 @@ fun SettingsScreen(
                             }
                         },
                         onCheckAuth = onCheckAuth,
+                        onCheckLogin = onCheckLogin,
                         onLoadAgents = onLoadAgents,
-                        onVerifyHosts = onVerifyHosts,
+                        // 第 1 步只验地址，还没有登录，插件版本留给后面的页签确认。
+                        onVerifyHosts = { hosts, basic, attempt ->
+                            onVerifyHosts(hosts, basic, attempt, null)
+                        },
                     )
                 }
             }
@@ -312,20 +383,43 @@ fun SettingsScreen(
                     initialAddresses = instance.addresses,
                     initialName = instance.name,
                     initialAgentId = instance.agentId,
+                    initialBasicUser = instance.basicUser.orEmpty(),
+                    // 密码不回显：编辑页留空表示「不修改」，填了才覆盖。
+                    // 与「留空即清空」相比，这种做法不会因为用户没注意就丢掉配置。
+                    initialBasicPassword = "",
                     onConnect = { draft ->
                         // 这里只保存本地配置，不发网络请求：地址与名称都是用户手改的，
                         // 立即连通性验证交给设置主页的「验证」。
+                        //
+                        // 反代密码不回显，因此「留空」表示保留原值而不是清空：
+                        // 编辑页一进来密码框就是空的，若按留空即清空处理，
+                        // 用户只是想改实例名也会顺手把凭据抹掉。
+                        // 要清空凭据，把账号一起清掉即可。
+                        val typedPassword = draft.basicPassword
+                        val keptPassword = if (typedPassword.isNotBlank()) {
+                            typedPassword
+                        } else {
+                            instance.basicPassword
+                        }
+                        val user = draft.basicUser.trim()
+                        val hasProxy = user.isNotBlank() && !keptPassword.isNullOrBlank()
                         onEdit(
                             instance.copy(
                                 name = draft.resolvedName(),
                                 addresses = draft.addresses,
                                 agentId = draft.agentId,
+                                basicUser = user.takeIf { hasProxy },
+                                basicPassword = keptPassword?.takeIf { hasProxy },
                             ),
                         )
                         editing = null
                     },
-                    onLoadAgents = { _, _, _ -> emptyList() },
-                    onVerifyHosts = onVerifyHosts,
+                    onLoadAgents = { _, _, _, _ -> emptyList() },
+                    // 编辑已有实例：带上保存的 token，验证时才能读到配套插件版本。
+                    onVerifyHosts = { hosts, basic, attempt, token ->
+                        onVerifyHosts(hosts, basic, attempt, token)
+                    },
+                    verifyToken = instance.token,
                     loadAgentsWithToken = { onLoadAgentsFor(instance) },
                     currentNetKind = currentNetKind,
                     currentSsid = currentSsid,
@@ -382,22 +476,21 @@ fun SettingsScreen(
                         NavRow(
                             icon = QwenIcons.user,
                             title = "我的资料",
-                            subtitle = "$userName · 头像",
+                            subtitle = "昵称、我的头像与智能体头像",
                             onClick = { section = SettingsPage.PROFILE },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.palette,
                             title = "外观",
-                            subtitle = "${themeLabel(themeMode)} · 字号 ${percent(uiScale)}",
+                            subtitle = "深浅色、字号、MiSans 字体",
                             onClick = { section = SettingsPage.APPEARANCE },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.messageSquare,
                             title = "消息显示",
-                            subtitle = collapseLabel(assistantCollapse) +
-                                " · 用量${if (showMessageStats) "开" else "关"}",
+                            subtitle = "折叠方式、用量显示、操作行样式",
                             onClick = { section = SettingsPage.MESSAGES },
                         )
                     }
@@ -406,26 +499,21 @@ fun SettingsScreen(
                         NavRow(
                             icon = QwenIcons.mic,
                             title = "语音",
-                            subtitle = voiceSummary(voiceEnabled, modelState),
+                            subtitle = "语音按钮、触发方式、识别模型",
                             onClick = { section = SettingsPage.VOICE },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.bell,
                             title = "通知与行为",
-                            subtitle = "紧凑排版${if (compactList) "开" else "关"}" +
-                                " · 常亮${if (keepScreenOn) "开" else "关"}",
+                            subtitle = "紧凑排版、屏幕常亮、安全提示",
                             onClick = { section = SettingsPage.BEHAVIOR },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.receiptText,
                             title = "运行日志",
-                            subtitle = if (logEnabled) {
-                                "记录中 · ${logKinds.size} 类事件"
-                            } else {
-                                "已关闭"
-                            },
+                            subtitle = "记录开关、记录类型、查看与分享",
                             onClick = { section = SettingsPage.LOGS },
                         )
                     }
@@ -434,6 +522,58 @@ fun SettingsScreen(
                     if (config != null) {
                         SectionHeader("服务端配置")
                         Card {
+                            // 插件行放在最前：后续所有「需要插件」的功能都以它为前提，
+                            // 用户排查功能不可用时应先看到这一行。
+                            // 开关只在「已检测到」时可点：未安装时打开一个没有后端支撑的功能
+                            // 只会让用户以为已经生效。
+                            androidx.compose.foundation.layout.Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(onClick = onRefreshBridge)
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = QwenIcons.packageIcon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(22.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "配套插件",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                    Text(
+                                        text = buildString {
+                                            append(bridgeStatus.label)
+                                            // 状态另起一行：两者挤在一行时，行宽恰好落在
+                                            // 「关闭」两个字中间，换行后看起来像错字。
+                                            append("\n")
+                                            if (bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready) {
+                                                append("功能")
+                                                append(if (bridgeFeaturesEnabled) "已开启" else "已关闭")
+                                            } else {
+                                                append("未安装时不可开启")
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        // 不限制行数：这一行载有插件名与功能状态两段信息，
+                                        // 单行加省略号会把「功能已开启 / 已关闭」截掉，
+                                        // 而那正是用户要确认的部分。
+                                        softWrap = true,
+                                    )
+                                }
+                                Switch(
+                                    checked = bridgeFeaturesEnabled &&
+                                        bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready,
+                                    onCheckedChange = onBridgeFeaturesEnabled,
+                                    enabled = bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready,
+                                )
+                            }
+                            Divider()
                             NavRow(
                                 icon = QwenIcons.wrench,
                                 title = "工具",
@@ -518,6 +658,7 @@ fun SettingsScreen(
                             onChooseSessionAddress = { url -> onChooseSessionAddress(instance.id, url) },
                             sessionPick = sessionAddressOf(instance.id),
                             onVerifySingle = { url -> onVerifySingleAddress(instance.id, url) },
+                            onLogout = { logoutFor = instance },
                         )
                         if (index != instances.lastIndex) Divider()
                     }
@@ -648,7 +789,7 @@ fun SettingsScreen(
                     SettingLabel(
                         "消息操作行",
                         "只影响消息下方的「复制」「复制为 Markdown」「选择文本」三项；" +
-                            "图标档下三项图形接近，长按菜单始终保留文字",
+                            "选择图标显示时，三项的图形比较接近；长按菜单里始终显示文字",
                     )
                     ChipRow {
                         io.qwenpaw.node.ui.chat.ActionStyle.entries.forEach { style ->
@@ -679,6 +820,38 @@ fun SettingsScreen(
                         subtitle = "仅在生成回复期间生效",
                         checked = keepScreenOn,
                         onCheckedChange = onKeepScreenOn,
+                    )
+                    Divider()
+                    SwitchRow(
+                        title = "安全提示",
+                        subtitle = "服务器地址可从公网访问，且服务端未开启「Web登录认证」或未使用 HTTPS 时提醒",
+                        checked = securityHintsEnabled,
+                        onCheckedChange = { want ->
+                            // 关闭要二次确认：这是唯一会在用户不知情时保护他的提示，
+                            // 一次误触就永久静默，代价比多点一下高得多。
+                            if (want) onSecurityHintsEnabled(true) else confirmDisableHints = true
+                        },
+                    )
+                }
+                if (confirmDisableHints) {
+                    AlertDialog(
+                        onDismissRequest = { confirmDisableHints = false },
+                        title = { Text("关闭安全提示") },
+                        text = {
+                            Text(
+                                "关闭后，服务器地址可从公网访问，且服务端未开启「Web登录认证」或未使用 HTTPS 时，不再提醒。" +
+                                    "这不会改变服务端的实际状态。",
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                confirmDisableHints = false
+                                onSecurityHintsEnabled(false)
+                            }) { Text("仍然关闭") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmDisableHints = false }) { Text("取消") }
+                        },
                     )
                 }
                 }
@@ -889,6 +1062,13 @@ fun SettingsScreen(
                         onClick = { openUrl(context, io.qwenpaw.node.BuildConfig.REPO_URL) },
                     )
                     Divider()
+                    LinkRow(
+                        title = "配套插件仓库",
+                        subtitle = io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL,
+                        action = "前往",
+                        onClick = { openUrl(context, io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL) },
+                    )
+                    Divider()
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
                             text = "第三方资源",
@@ -1047,34 +1227,9 @@ private fun serverSummary(instances: List<InstanceConfig>, activeId: String?): S
     val active = instances.firstOrNull { it.id == activeId } ?: instances.firstOrNull()
         ?: return "尚未添加服务器"
     val host = active.addresses.firstOrNull()?.url?.let { compactUrl(it) } ?: "未设置地址"
-    // 名称留空时连接流程会用地址当名称，两者相同就只说一次，
-    // 否则副标题会变成「10.10.0.211:8088 · 10.10.0.211:8088」。
+    // 名称留空时连接流程会用地址当名称，两者相同就只说一次。
     val name = active.name.ifBlank { "" }
-    return if (name.isEmpty() || name == host) host else "$name · $host"
-}
-
-/** 主题的中文名。`ThemeSelector` 里用的是同一套措辞。 */
-private fun themeLabel(mode: ThemeMode): String = when (mode) {
-    ThemeMode.SYSTEM -> "跟随系统"
-    ThemeMode.LIGHT -> "浅色"
-    ThemeMode.DARK -> "深色"
-}
-
-/** 消息折叠策略的中文名，与「消息显示」页里的 Chip 一致。 */
-private fun collapseLabel(mode: io.qwenpaw.node.ui.chat.AssistantCollapse): String = when (mode) {
-    io.qwenpaw.node.ui.chat.AssistantCollapse.EXPANDED -> "全部展开"
-    io.qwenpaw.node.ui.chat.AssistantCollapse.PROCESS_COLLAPSED -> "折叠过程"
-    io.qwenpaw.node.ui.chat.AssistantCollapse.RESULT_COLLAPSED -> "折叠结果"
-}
-
-/** 语音入口的副标题：开关状态与模型状态各一句，与子页里看到的一致。 */
-private fun voiceSummary(enabled: Boolean, state: ModelState): String {
-    val model = when (state) {
-        is ModelState.Ready -> "模型已就绪"
-        is ModelState.Downloading -> "模型下载中"
-        else -> "模型未下载"
-    }
-    return "${if (enabled) "已开启" else "已关闭"} · $model"
+    return if (name.isEmpty() || name == host) host else "$name（$host）"
 }
 
 @Composable
@@ -1295,6 +1450,8 @@ private fun InstanceRow(
     sessionPick: String?,
     /** 只验证单条地址，结果通过 Toast 呈现。 */
     onVerifySingle: (String) -> Unit,
+    /** 退出登录：吊销服务端 token 并清本地凭据。 */
+    onLogout: () -> Unit = {},
 ) {
     // 显示顺序的取法必须与请求时的解析顺序一致，否则卡片说「走这条」、
     // 实际却在走另一条。临时选择优先级最高，其次是长期偏好，最后是列表第一个。
@@ -1347,7 +1504,7 @@ private fun InstanceRow(
                         val alias = instance.addresses
                             .firstOrNull { it.url == shown }?.alias
                         if (!alias.isNullOrBlank()) {
-                            append(alias).append(" · ")
+                            append(alias).append("，")
                         }
                         append(compactUrl(shown))
                         if (instance.backupCount > 0) {
@@ -1355,8 +1512,8 @@ private fun InstanceRow(
                         }
                         // 「临时」与「已保存」要分清楚：前者重启即失效，后者长期有效。
                         when {
-                            sessionPick != null && sessionPick == shown -> append(" · 本次指定")
-                            chosen != null && chosen == shown -> append(" · 已指定")
+                            sessionPick != null && sessionPick == shown -> append("（本次指定）")
+                            chosen != null && chosen == shown -> append("（已指定）")
                         }
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -1431,6 +1588,24 @@ private fun InstanceRow(
                 MiniButton("切换", onClick = onSwitch)
                 Spacer(Modifier.width(6.dp))
                 MiniButton("移除", onClick = onRemove, danger = true)
+            }
+        }
+        // 「退出登录」只在实例确实持有 token 时出现：没有 token 的实例上执行
+        // 吊销只会得到 403，把这个入口摆出来等于给用户一个点了没用的按钮。
+        if (instance.token != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "本机已保存登录凭据",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                )
+                Spacer(Modifier.weight(1f))
+                MiniButton("退出登录", onClick = onLogout, danger = true)
             }
         }
         // 展开后的地址清单。

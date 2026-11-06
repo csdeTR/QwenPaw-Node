@@ -73,6 +73,15 @@ internal fun groupTitle(group: ChatGroupDto): String = when (group.kind) {
 object ChatGrouping {
 
     /**
+     * 移回「未分组」时要发给服务端的 group_id。
+     *
+     * 服务端对 `group_id: null` 返回 400 `Unknown chat group: None`，必须给默认分组的 id。
+     * 默认分组正常会出现在分组列表里，没拉到时按 `default` 兜底。
+     */
+    internal fun defaultGroupId(groups: List<ChatGroupDto>): String =
+        groups.firstOrNull { it.kind == "default" }?.id ?: "default"
+
+    /**
      * 按时间分桶。
      *
      * 分界按**本地时区**的自然日计算：服务端给的是 UTC 时间，
@@ -124,6 +133,58 @@ object ChatGrouping {
     }
 
     /**
+     * 分组表的展示顺序。
+     *
+     * 权重顺序：置顶分组 → 自建分组 → 默认分组 → 其他内置 → 定时任务 → 子智能体。
+     * `order` 只在同一权重内生效，因此服务端调整 order 不会把定时任务顶到前面。
+     * order 相同时保持列表原顺序——否则同一份数据两次渲染的顺序可能不同，
+     * 用户会觉得列表在跳。
+     */
+    internal fun orderedGroups(groups: List<ChatGroupDto>): List<ChatGroupDto> =
+        groups.withIndex().sortedWith(
+            compareByDescending<IndexedValue<ChatGroupDto>> { it.value.pinned }
+                .thenBy { rankOf(it.value.kind) }
+                .thenBy { it.value.order }
+                .thenBy { it.index },
+        ).map { it.value }
+
+    /**
+     * 把 [groupId] 在**其所在的权重块内**上移或下移一位，返回新的完整 id 顺序。
+     *
+     * 三条规则：
+     * - 只在**同一展示块**内交换：块的判据是「置顶与否 + `rankOf(kind)`」。
+     *   跨块移动在界面上根本看不出来（展示顺序由这两个字段决定，交换 order 无效），
+     *   把自建分组「上移」到定时任务之后，它还是排在前面，用户只会觉得点不动。
+     * - 已在块内首/末位时原样返回，调用方据此判断「按钮该禁用」。
+     * - 返回的数组包含**全部**分组（含内置）：`PUT groups/order` 是按传入顺序回写，
+     *   漏掉一个就变成「未提及」，它的相对位置会变得不可预测。
+     */
+    internal fun moveGroup(
+        groups: List<ChatGroupDto>,
+        groupId: String,
+        delta: Int,
+        rank: (String?) -> Int = { rankOf(it) },
+    ): List<String> {
+        if (delta == 0) return groups.map { it.id }
+        // 起点是展示顺序而不是原始数组顺序：用户看到的相邻关系才是他要调整的那个。
+        val ordered = orderedGroups(groups)
+        val index = ordered.indexOfFirst { it.id == groupId }
+        if (index < 0) return ordered.map { it.id }
+        val target = index + delta
+        if (target !in ordered.indices) return ordered.map { it.id }
+        val moving = ordered[index]
+        val neighbour = ordered[target]
+        if (moving.pinned != neighbour.pinned || rank(moving.kind) != rank(neighbour.kind)) {
+            return ordered.map { it.id }
+        }
+        val swapped = ordered.toMutableList()
+        val tmp = swapped[index]
+        swapped[index] = swapped[target]
+        swapped[target] = tmp
+        return swapped.map { it.id }
+    }
+
+    /**
      * 按来源（对话分组）分桶。
      *
      * 分区顺序：置顶分组 → 自建分组 → 默认分组 → 其他内置 → 未分组 → 定时任务 → 子智能体。
@@ -151,12 +212,7 @@ object ChatGrouping {
 
         // 同一权重内按服务端 order 排；order 相同时保持列表原顺序，
         // 否则同一份数据两次渲染的顺序可能不同，用户会觉得列表在跳。
-        val ordered = groups.withIndex().sortedWith(
-            compareByDescending<IndexedValue<ChatGroupDto>> { it.value.pinned }
-                .thenBy { rankOf(it.value.kind) }
-                .thenBy { it.value.order }
-                .thenBy { it.index },
-        ).map { it.value }
+        val ordered = orderedGroups(groups)
 
         return buildList {
             if (pinned.isNotEmpty()) add(ChatSection(PINNED_KEY, PINNED_TITLE, pinned))

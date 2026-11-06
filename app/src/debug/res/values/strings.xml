@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 release 同机安装时靠名称区分；包名带 .debug 后缀，两者可以共存。 -->
+    <string name="app_name">[debug]QP Node</string>
+</resources>

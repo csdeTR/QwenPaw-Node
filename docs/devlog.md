@@ -59,6 +59,13 @@
 | [45](#45工具分组与环境变量三段2026-11-03) | 工具按官方静态表分组、emoji 换 lucide、环境变量三段常驻与二次确认 | 534 个单测；`category` 对内置工具为 `null`；catalog 17 项里只有 2 项可热改 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.16、[guide.md](guide.md) 第 2 节 |
 | [46](#46v020-定时任务与工具调用控制2026-11-04) | cron 列表与表单、聊天页工具控制、双时区对照 | 578 个单测；服务端把 `dow` 归一化成 `mon`…`sun`；`promote` 后顶层 `meta.safety` 仍是锁 | [protocol.md](protocol.md) 第 23 节、[ui-guidelines.md](ui-guidelines.md) 9.17、[guide.md](guide.md) 第 9 节 |
 | [47](#47v020-试用反馈会话选择器与自动展开2026-11-04) | 会话选择器补名称与搜索、隐藏 `console`、工具卡片 7.5 秒自动展开 | 582 个单测；`dispatch-targets` 不带会话名；自动展开须让位于用户手动切换 | [ui-guidelines.md](ui-guidelines.md) 9.17、[CHANGELOG.md](../CHANGELOG.md) |
+| [48](#48测试设备切换为-redroid-152026-11-04) | 测试设备由 AVD 换成 redroid 15，720×1600 | 内核无 binderfs 的绕法、netfilter 不可用、容器资源上限 3 GB | [AGENTS.md](../AGENTS.md) 第 1、3 节、[ui-guidelines.md](ui-guidelines.md) 1.5 |
+| [49](#49docker-与-lxc-网络连通2026-11-04) | redroid 容器到 LXC 服务端的连通 | 根因是 `nft_masq` 未加载，已固化自启；实测 HTTP 200 | [AGENTS.md](../AGENTS.md) 2.1、3.1 |
+| [50](#50设备按需启停与-avd-回退2026-11-04) | 容器按需启停、AVD 回退并改 720×1600 | AVD 原为 1080×2400/420dpi，改后 dp 视口与 redroid 一致 | [AGENTS.md](../AGENTS.md) 第 1、3 节 |
+| [51](#51v021连接安全流式回归与插件探测2026-11-06) | 401 分类、反代 Basic、首屏窗口、安全提示、插件探测、分组重排、批量恢复、登出 | 644 个单测；`?token=` 是两层鉴权的唯一通路；`plugin validate` 只认目录 | [protocol.md](protocol.md) 第 1、24 节、[ui-guidelines.md](ui-guidelines.md) 9.1、9.3 |
+| [52](#52v021-设备验收与设备端暴露的七处缺陷2026-11-06) | redroid 上跑第 7 节验收，修七处只有实机能暴露的问题 | 646 个单测；`Not authenticated` 是两种成因的同一句；反代下的登录同样要带 Basic | [protocol.md](protocol.md) 第 1 节、[ui-guidelines.md](ui-guidelines.md) 9.3 |
+| [53](#53v021-之后的一轮修复与设备验收2026-11-07) | 生成中刷新丢用户消息、移动到分组、输入法、倒计时、插件版本与 webp | 655 个单测；运行中的会话历史不含本轮消息；`group_id: null` 返回 400；keep-alive 5 秒导致探测误报 | [protocol.md](protocol.md) 第 25 节、[ui-guidelines.md](ui-guidelines.md) 9.17、9.19 |
+| [54](#54配套插件建仓与双包名等五项修复2026-11-07) | 插件独立仓库、后台时限收口、新建对话切不动、插件显示名、关于页链接、debug 双包名 | 657 个单测；插件首次提交 `ba64c77`；新建对话把旧视图写进新 id 的缓存 | [protocol.md](protocol.md) 第 19 节、[ui-guidelines.md](ui-guidelines.md) 9.17、[AGENTS.md](../AGENTS.md) 第 4 节 |
 
 ---
 
@@ -4129,6 +4136,710 @@ SSE 无重放与完成缓存 60 秒 → [protocol.md](protocol.md) 第 23 节；
 用户可见变化 → [CHANGELOG.md](../CHANGELOG.md)、[guide.md](guide.md) 第 9 节。
 
 ---
+
+## 48、测试设备切换为 redroid 15（2026-11-04）
+
+### 48.1 1080×2400 的来源与性能账
+
+`qp35` 的分辨率不是选出来的，是模板带进来的。`~/.android/avd/qp35.avd/config.ini` 里
+`hw.device.name = pixel_6`，`hw.lcd.width = 1080`、`hw.lcd.height = 2400`、
+`hw.lcd.density = 420`、`hw.cpu.ncore = 2` 全是 Pixel 6 模板的默认值。
+创建 AVD 时选的是「一台能跑的 Android 15 设备」，没有按渲染成本挑。
+
+真正的开销是三项相乘：`-gpu swiftshader_indirect` 的 CPU 软件光栅化、259 万像素、2 核。
+第 13 节已实测 swiftshader 下 GPU 项出现 4950 ms 量级。因此本轮改的是设备形态：
+720×1600、280dpi，像素数降到 115 万（少 55%），dp 视口保持 411×914 不变
+（720 / 280 × 160 = 411dp，1080 / 420 × 160 = 411dp）。按 dp 表述的布局结论不必重算，
+只有像素坐标要重取。
+
+### 48.2 最初没用 redroid 的原因，以及为什么不能用旧镜像
+
+第 2.1 节记录的阻断是镜像拉取失败：`docker.1ms.run`、`daocloud`、`1panel`、`rat.dev`
+全部无进度或返回 401。检查本机 `docker image ls` 发现 `redroid/redroid:12.0.0_64only-latest`
+早已在两个源上拉取成功（约 2.18 GB），说明这条路当时只是没继续走完。
+
+但旧镜像不能直接用：Android 12 上系统不强制边到边，第 14 节的结论与
+`ui-guidelines.md` 1.5 的基准全部是在 Android 15 上测的，在 12 上验收会得出相反结论。
+`docker manifest inspect` 确认 `15.0.0_64only-latest` 在 `docker.m.daocloud.io` 存在，
+拉取成功，digest `sha256:b51bde9cef80f7bd7581148192f2b2f4d41f23c6344cfe88eceeb8ddd67490ee`。
+
+官方镜像本身不带 GMS：`pm list packages | grep -ci "google|gms"` 为 0。
+GMS 要按官方文档用 Open GApps 另建镜像，本轮不引入。
+
+### 48.3 三个实测发现
+
+**内核没有 binderfs。** `grep CONFIG_ANDROID_BINDERFS /boot/config-$(uname -r)` 无输出
+（内核 `6.12.111+deb13-amd64`）。直接 `docker compose up` 时容器退出码 129，
+日志为 `Binder driver could not be opened`：镜像内 `/dev/binder` 指向
+`/dev/binderfs/binder`，binderfs 挂载失败后符号链接悬空，surfaceflinger 随即退出。
+绕法是把宿主 `binder_linux` 生成的节点映射到该路径，并 `chmod 666`——模块生成的节点是
+`0600`，容器内 surfaceflinger 不是 root。`modprobe binder_linux devices="binder,hwbinder,vndbinder"`
+之后才有这三个节点，宿主重启后不会自动加载。
+
+**镜像内 netfilter 不可用。** `iptables -L` 报
+`can't initialize iptables table 'filter': Table does not exist`，
+A6 原先的 `iptables` 方案在 redroid 上无效。改为容器 netns 内的路由黑洞：
+`ip route add blackhole 10.10.0.211/32`。实测 `ping 10.10.0.211` 100% 丢包，
+删除后恢复；不影响 5555 的 adb 连接，也不修改宿主网卡。
+
+**资源上限。** 容器首次运行没有上限，同日宿主机卡死并重启。现固定
+`mem_limit` / `memswap_limit` 3 GB、`cpus` 2、`pids_limit` 4096，
+`docker inspect` 核对 `Memory=3221225472`、`MemorySwap` 相同、
+`NanoCpus=2000000000`、`PidsLimit=4096`。空闲实测 1.0–1.3 GiB / 3 GiB，CPU 0.6%。
+`restart` 固定为 `"no"`：宿主重启后 binder 模块未加载，`unless-stopped`
+会让容器反复崩溃重启（实测 `RestartCount` 曾到 5）。
+
+### 48.4 验证
+
+- `wm size` → `Physical size: 720x1600`；`wm density` → `280`。
+- `ro.build.version.release` = 15、`ro.product.cpu.abi` = x86_64、
+  `ro.build.type` = userdebug，`adb shell id -u` 直接为 0，不需要 `adb root`。
+- `install -r app-x86_64-debug.apk` 成功，`am start -n io.qwenpaw.node/.MainActivity`
+  后截图正常渲染。
+- `/data` 初始 55 MB，装完 debug 包后 75 MB，位于仓库外 `~/redroid/qp15`；
+  compose 在 `scripts/redroid/docker-compose.yml`。
+- 宿主 `free -h`：available 9.7 GiB，swap 0 B。
+
+未完成的部分：`qp-test` 与 `qp-test-prerelease` 当时均为 STOPPED，
+容器内 `ping 10.10.0.211` 失败，端到端六场景没有重跑；
+`ui-guidelines.md` 1.5 的像素基准也未在 redroid 上重取。
+
+结论落点：[AGENTS.md](../AGENTS.md) 第 1、3 节与
+[ui-guidelines.md](ui-guidelines.md) 1.5；
+验收脚本的 A6 实现同步改为路由黑洞。
+
+---
+
+## 49、docker 与 LXC 网络连通（2026-11-04）
+
+第 48 节留下的未完成项之一是「redroid 容器访问不到 `10.10.0.211:8088`」。
+当时 `lxc start qp-test` 报 `Network "lxdbr0" unavailable on this server`，
+`lxc network list` 里 lxdbr0 停在 `UNAVAILABLE`，五个 LXC 容器全部 STOPPED。
+本节记录根因与修复。
+
+### 49.1 环境与现象
+
+- snap `lxd` 5.21.9（rev 41296），宿主内核 `6.12.111+deb13-amd64`，nftables v1.1.3。
+- `snap.lxd.daemon` 为 active，但 lxdbr0 的 `STATE` 是 `UNAVAILABLE`，
+  配置本身是 `10.10.0.1/24` 与 `fd42:f4ab:a59b:6ee2::1/64`。
+- journal 的报错落在 LXD 写 NAT 规则这一步：
+  `Failed adding outbound NAT rules … Failed apply nftables config …`
+  `Could not process rule: No such file or directory`，指向
+  `oifname != "lxdbr0" masquerade` 的 `masquerade` 处。
+
+### 49.2 被推翻的三个假设
+
+| 假设 | 尝试 | 结果 |
+| --- | --- | --- |
+| 桥接口不存在导致规则失败 | 手动 `ip link add lxdbr0 type bridge` + `ip addr add 10.10.0.1/24` + `ip link set up` | 桥仍是 DOWN；重启 LXD 后桥被删除，状态仍 `UNAVAILABLE` |
+| NAT 配置本身有问题 | `lxc network set lxdbr0 ipv4.nat false` / `ipv6.nat false` | 设置命令返回同一条 ENOENT，配置未生效；重启 LXD 仍失败 |
+| 规则只在接口缺失时才失败 | 对确实存在的 `enp3s0` 执行 `nft add rule ip nftprobe c 'oifname != "enp3s0" masquerade'` | 同样报 ENOENT，说明失败点是 `masquerade` 表达式本身 |
+
+第三条实验的结论是决定性的：与接口、桥、LXD 逻辑都无关。
+另有一条旁证：`nft list ruleset` 的 `table ip6 nat` 中，tailscale 的规则显示
+`# Warning: XT target MASQUERADE not found`，说明本机 nft 对 `MASQUERADE` 的解析确实存在问题。
+
+### 49.3 根因与修复
+
+**native `masquerade` 表达式由 `nft_masq.ko` 提供，该模块当时没有加载。**
+docker 的规则由 iptables-nft 翻译成 xt `MASQUERADE`（`xt_MASQUERADE` + `nft_compat`），
+所以长期没有触发 native 表达式，模块也一直没有被带起来。
+`/lib/modules/$(uname -r)/modules.alias` 里虽有 `alias nft-expr-masq nft_masq`，
+但这台机器上的自动加载没有发生，原因未深究。
+
+受控实验：在独立表中建 `type nat hook postrouting priority srcnat` 链，
+`masquerade` 规则报 ENOENT；执行 `sudo modprobe nft_masq` 后，同一条规则立即成功。
+
+固化方式：新增 `/etc/modules-load.d/lxd-nft-masq.conf`，内容只有 `nft_masq` 一行；
+`sudo systemctl restart systemd-modules-load` 退出码 0。
+之后 `sudo snap restart lxd`，lxdbr0 变 `CREATED`，`ip -br addr show lxdbr0`
+显示 `UP` 与 `10.10.0.1/24`。
+
+### 49.4 连通性验证
+
+- `lxc start qp-test` 前容器已在运行，IP 为 `10.10.0.211`；按 2.1 用 `screen -dmS` 启动服务，
+  `GET /api/version` 返回 `{"version":"2.2.2.post1"}`。
+- redroid 容器 `qp15` 的 eth0 为 `172.20.0.2/16`。容器内 `ping -c 3 10.10.0.211`
+  为 3/3 收到，ttl 63。
+- `sudo nsenter -t <qp15 pid> -n curl -s http://10.10.0.211:8088/api/version`
+  返回 HTTP 200 与 `2.2.2.post1`。镜像内没有 `curl`，toybox `netcat` 能建立 TCP 连接
+  但读不到响应体，因此改用宿主 curl 进入容器网络命名空间验证，路径与容器内一致。
+- qp-test 出网 `curl https://www.baidu.com` 返回 200，说明 LXD 的 masquerade 规则已生效。
+- `nft list ruleset` 中已有 `table inet lxd` 的 `pstrt.lxdbr0` 链（含
+  `ip saddr 10.10.0.0/24 … masquerade`）与 `fwd.lxdbr0` 链的双向 `accept`；
+  `table ip filter` 的 `DOCKER-USER` 链也保留了 `iifname "lxdbr0" accept` 与
+  `oifname "lxdbr0" ct state related,established accept` 两条规则，
+  来源是已 enabled 的 `lxd-forward-fix.service`。
+
+结论落点：[AGENTS.md](../AGENTS.md) 2.1 的 `nft_masq` 排查条目与
+3.1 的 docker→LXC 实测条目。
+
+---
+
+## 50、设备按需启停与 AVD 回退（2026-11-04）
+
+第 48 节把测试设备整体切到 redroid，并把 AVD 写成「已退役」。
+本轮用户提出两点修正：容器要按需启动、用完关闭；redroid 不可用时仍要回到原模拟器，
+且原模拟器的显示参数也要改成 720×1600、280dpi。第 48 节「已退役」的写法因此作废。
+
+### 50.1 按需启停
+
+第 1 节第 3 条「用完即关」的收尾清单原来只有 Gradle daemon、Kotlin daemon 与 redroid 容器。
+本轮补入两类：
+
+- LXC 测试容器：`lxc stop qp-test qp-test-prerelease`。只停容器，
+  LXD 服务与 `lxdbr0` 保留，下次 `lxc start` 即可；不必 `snap stop lxd`，
+  那样桥会被删除，恢复时还要重新拉起。
+- AVD：`adb -s emulator-5554 emu kill`。
+
+第 2 条「动手前先看内存」的判断口径同步改为「先关闭测试设备、测试容器与多余进程」。
+
+### 50.2 AVD 改为 720×1600、280dpi
+
+`~/.android/avd/qp35.avd/config.ini` 改前是模板带进来的 1080×2400/420dpi：
+
+```
+hw.lcd.width = 1080 → 720
+hw.lcd.height = 2400 → 1600
+hw.lcd.density = 420 → 280
+```
+
+改后 720 / 280 × 160 = 411dp 宽，1080 / 420 × 160 = 411dp 宽，dp 视口不变，
+与 redroid 容器一致，因此按 dp 表述的布局期望在两套设备上都成立。
+AVD 的其余参数未动：`abi.type = x86_64`、`hw.cpu.ncore = 2`、`hw.ramSize = 1536M`、
+`image.sysdir.1 = system-images/android-35/google_apis/x86_64/`、`PlayStore.enabled = no`。
+
+只改了配置文件，没有启动模拟器实测。按第 1 节的约束，构建与设备测试不连跑，
+本轮也不需要设备；真正的启动验证留到 redroid 不可用时再做。
+
+### 50.3 结构变化与一处丢失信息的补救
+
+第 3 节由「只使用 redroid」改为三级：
+
+- 3.1 redroid 容器（首选）
+- 3.2 AVD 回退（redroid 不可用时）
+- 3.3 通用
+
+第 48 节重写第 3 节时，第 44 节记录的 AVD 启动命令被一并删除，
+只剩「参数与踩坑记录留在 devlog 44」这一句。本轮写回 3.2，包含必须的
+`-feature -BluetoothEmulation`：不加时 QEMU 卡在 `QEMU2 CPU0 thread` 并以段错误退出。
+`docs/devlog.md` 44.5 与 44 节目录表里「AGENTS.md 第 3.1 节」的指向属于当时的记录，
+按 5.4 不做追溯改写；该命令现在位于 3.2。
+
+### 50.4 未验证项
+
+- AVD 启动后的实际分辨率与 dpi 未回读（配置文件已确认，`wm size` / `wm density` 未取）。
+- AVD 到 `10.10.0.211:8088` 的连通性未测。AVD 走 QEMU 用户态 NAT，
+  与 redroid 的 `172.20.0.0/16` 桥接路径不同；历史上模拟器测试用的是
+  `adb reverse` 指宿主实例，而宿主机实例不参与测试。
+- A6 断网未在 AVD 上重测，脚本的 `ip route add blackhole` 实现仍按 redroid 维护。
+
+结论落点：[AGENTS.md](../AGENTS.md) 第 1 节第 2、3 条与第 3 节。
+
+---
+
+## 51、v0.2.1：连接安全、流式回归与插件探测（2026-11-06）
+
+这一轮把五项试用反馈与 0.2.1 原定条目（插件探测、分组重排、已归档批量恢复、
+登出与吊销凭据）合并为一版，同时把插件仓库从空目录落到 v0.1.0 脚手架。
+五项反馈里有四项是「文案与判据写错」，一项是真实的滚动缺陷，结论如下。
+
+### 51.1 「登录已失效」误导用户：401 被当成一种错误
+
+全仓只有一处把 401 映射成「登录已失效，请重新登录」，而它此前只在
+`ApiException.userHint` 为空时生效。`QwenPawApi.login` 只给 404 补了 userHint，
+401 原样抛出，于是「用户名或密码打错」也被说成「登录已失效」——用户此时根本
+还没登录过，去找一个不存在的失效状态。
+
+`InstanceRepository` 在缺凭据时抛的是一个只有 message 的 401
+（`ApiException(401, "该实例已开启登录鉴权，需要用户名和密码")`），
+同样落到那条分支，把「还没填账号」说成「登录已失效」。
+
+改法是把 401 拆成四类，判据集中在 `ErrorText.classify401`：
+
+| 成因 | 判据 | 文案 |
+| --- | --- | --- |
+| 反代拦下 | 响应头 `WWW-Authenticate` 含 `Basic` | 该地址由反向代理保护，需要填写反向代理账号与密码 |
+| 密码不对 | detail 含 `Invalid username or password` | 用户名或密码不正确 |
+| token 失效 | detail 含 `Invalid or expired token` / `Not authenticated` | 登录已失效，请重新登录 |
+| 其它 | 以上都不匹配 | 服务端原文 |
+
+`WWW-Authenticate` 优先于 detail：这个头只有反代会加，服务端自身从不发，
+它出现时 detail 可能是反代的 HTML 或空串，按 detail 猜必然猜错。
+
+两处缺凭据的抛错补上 userHint 之后，文案变成它自己那句话，不再被覆盖。
+登录接口的 401 也在 `login` 里补了 `BAD_CREDENTIALS`。
+
+**一处顺带修掉的问题**：`ApiException` 之前只有 `message`，而 `execute` 会把
+服务端 detail 当作 message 传入，`versionWith` / 流式客户端同样如此。分类器读不到
+原文就只能落到「其它」。因此新增 `detail` 字段，网络层构造异常时同时填 detail 与
+message，分类器读 detail，`ErrorText.of` 在 detail 为空时回落到 message。
+
+### 51.2 反向代理 Basic 与 Bearer 争用同一个头
+
+nginx / openresty 的 `auth_basic` 从 `Authorization: Basic …` 取值，QwenPaw 自身
+读 `Authorization: Bearer …`，一个请求只能带一个。核对了服务端
+`AuthMiddleware._extract_token`：它先取 Bearer 前缀，取不到再读 `request.query_params["token"]`。
+**服务端支持 `?token=`，这是唯一能同时满足两层的通路**，没有 `X-` 形式的独立 token 头。
+
+因此规则定为：有反代凭据时把 `Authorization` 让给 Basic，QwenPaw token 走查询参数。
+代价是 token 会出现在反代的 access log 里，这一条写进了 `docs/protocol.md` 第 1 节。
+客户端日志不受影响：`RunLog` 本来就不记录 query。
+
+要改的地方有三处，漏一处的表现各不相同：
+
+- `QwenPawApi.baseBuilder`（REST 与两种 SSE 共用）→ 漏了就是发消息 401；
+- `ChatImageLoader.load`（自己拼 Header）→ 漏了就是「文字能出来、图片一直转圈」；
+- `InstanceRepository.probeAgents / connect / verify` 的探测请求 → 漏了就是验证阶段
+  看不到真实的登录状态。
+
+验证时特别处理了「反代拦住」这一种：它不是连不上，地址是通的，换下一个地址同样会被拦。
+`verify` 捕获到 Basic 401 时返回 `proxyAuthRequired = true`，界面就地展开凭据输入，
+而不是报「验证失败」。
+
+### 51.3 首屏窗口把用户自己的消息挤出可视范围
+
+问题现象是「智能体还在输出时退出，回来滑到顶部看不到我发的消息」。
+两条根因都在 `ChatScreen`：
+
+1. 首屏窗口固定取末尾 `PAGE_SIZE = 8` 个条目。一个回合里的「思考 + 工具 + 多段正文」
+   很容易超过 8 条，用户发的那条直接被裁到窗口之外。
+2. 补页守卫写成 `if (followTail.value || state.running) return`。流式期间停在顶部
+   既不补页，提示行还一直写着「向上滑动可查看更早的消息」——怎么滑都不加载。
+
+改法：新增纯函数 `timelineStartFor(items, pageSize)`，窗口起点取「最后一条用户消息」
+与「末尾一页」的较小值，保证本轮起点一定在窗口内；补页守卫去掉 `running`，
+只保留 `followTail`（它才是「用户想跟随底部」的真实意图）。
+
+`remember` 的键里补了 `loaded` 维度：进入会话时列表先是空的，此时算出的起点是 0；
+只按 chatId 记忆会让历史落地后仍是 0，等于整段历史一次铺开，长会话立刻掉帧。
+这个坑是在实现过程中发现的，不是事后补的。
+
+**同时修掉一个相邻缺陷**：重连路径用
+`(s.messages + appended).distinctBy { it.id }` 合并。`distinctBy` 保留先出现的那一份，
+历史在前 → 同 `msg_id` 时永远留下历史旧副本，流式正文冻结在打开会话那一刻的内容上。
+改为 `overlayById`：位置沿用原列表，同 id 以新值为准。这条与「重连后看不到更新」
+是同一现象的两侧。
+
+### 51.4 安全提示的判定复用同一套内网判据
+
+`InstanceRepository` 里本来就有 `defaultSchemeFor` 的内网判断（10 / 172.16-31 /
+192.168 / 169.254 / 100.64-127、`.local` `.lan` `.internal` `.home`、localhost、127.*、::1），
+但它是 `private`。如果安全提示另写一份，一处加了网段另一处没加，就会出现
+「按 http 连内网、同时又提示它暴露在广域网」这种自相矛盾的界面。
+
+因此把判据提成 `internal fun isLocalHost(host)`，`defaultSchemeFor` 改为调用它，
+`assessSecurity` 也调用它。三种风险合成一个 `SecurityNotice`：
+
+- `exposed` = 公网主机 && 未启用登录；
+- `noTls` = 公网主机 && 明文 http；
+- 两者同时成立时合成一个对话框，逐条给出处置（设 `QWENPAW_AUTH_ENABLED=true`、配 SSL）。
+
+**解析失败一律返回「无风险」。** 一次误报会让之后的真告警一起被忽略，
+这个代价比漏报高。
+
+向导里的提示挡在「下一步」之前（对话框未确认时按钮不可点），否则用户会直接点掉它。
+启动检测只在进程内做一次，结果写进 `AppState.securityNotice`。
+
+### 51.5 顶栏地址的两种写法不能合并
+
+设置页的 `compactUrl` 去掉 `http://`、**保留** `https://`，因为在那里用户要核对
+「这条到底是不是 https」。顶栏只需要回答「连的是哪台机器」，协议与默认端口都没有信息量，
+而且那一行右边还有上下文胶囊，宽度很紧。
+
+新增 `UrlDisplay.address`：协议一律不显示，`http` 的 80 与 `https` 的 443 一并省略，
+其余端口照写，IPv6 保留方括号。`connectedLabel` 内部改用它，
+但比较 `label == url` 仍用原串——别名与地址是否相同是配置里的事实，
+不能因为展示形式变了就误判成「有别名」。
+
+`compactUrl` 保持不动，两份实现各自在注释里写明差异，避免后来者合并。
+
+### 51.6 插件探测的三态与一次实测纠正
+
+插件仓库落到 v0.1.0：`plugin.json` + `backend/main.py` + `README.md`。
+`/info` 返回
+`{"plugin_version":"0.1.0","protocol_version":1,"server_version":"…","capabilities":["info"]}`。
+
+三条加载器约束都在源码里核对过：
+
+1. 后端入口必须导出名为 `plugin` 的对象并实现 `register(api)`
+   （`_load_backend_module` 读 `getattr(module, "plugin")`）；
+2. `register_http_router` 的 prefix 不能是 `/`，也不能与他人重复；
+3. **只用核心没有的子路径**。`/status` 与 `/files` 下的任意子路径已被核心
+   `plugins.py` 先注册，请求到不了插件，实测会返回 `Plugin '<id>' not found.`。
+
+`qwenpaw plugin validate` 的参数是**目录**而不是 zip（源码里 `manifest_path = plugin_path / "plugin.json"`），
+对 zip 执行会报 `plugin.json not found`。打包后的 zip 只能在安装时用。
+本地用一个 FakeApi 驱动 `register()` 再挂到 FastAPI 上验证过：`/info` 返回 200，
+响应形状与客户端 DTO 一致（`server_version` 为空串，因为测试环境导入不到 `qwenpaw.__version__`）。
+
+客户端侧的探测结果是三态而不是两态：401 记为「待重探」而不是「未安装」。
+插件路由不在鉴权公开路径里，开启登录的服务端上验证阶段必然 401；把它当成未安装，
+用户会永远看到「未检测到配套插件」。**禁用与未安装无法区分**（禁用是把目录改名，
+发现阶段直接跳过），因此没有第四态，界面上也不给「去启用」。
+
+### 51.7 分组重排的两个判据是测试逼出来的
+
+`moveGroup` 的实现先写成「只在同 `rankOf(kind)` 的相邻分组之间交换」，
+两条用例当场推翻：
+
+- 置顶与否也构成独立的一块。把非置顶的自建分组「上移」到置顶分组旁边，
+  界面上它还是排在置顶之后（展示顺序由 `pinned` 优先），点了看不出变化；
+- 起点必须是**展示顺序**而不是数组顺序。服务端返回的数组顺序与 `order`
+  可以不一致，按数组交换会得到用户看不出来的结果。
+
+最终判据是「`pinned` 相同且 `rankOf(kind)` 相同」，起点取 `orderedGroups`。
+返回值必须覆盖全部分组（含内置）：`PUT groups/order` 按传入顺序回写，
+漏掉一个就变成「未提及」。
+
+`orderedGroups` 从 `bySource` 里抽出来，成为展示顺序的唯一来源，
+排序逻辑不再有两份。
+
+### 51.8 登出的顺序不能反
+
+`logout` 必须**先吊销再清本地**。反过来的话本地没有 token 就发不出吊销请求，
+服务端那张凭据会一直有效，等于「手机上登出了，但票还能用」。
+
+服务端未启用登录时吊销接口返回 403，按成功处理并给一句说明——本来就没有可吊销的东西。
+网络失败也不阻塞登出：本地凭据必须清掉，否则用户「退不出去」，提示里写明吊销失败。
+
+轻提示复用 `ChatViewModel.notifications` 这一条通道（Nav 层已经在订阅并转 Toast），
+新增的 `notify()` 只转发，不再开第二条需要单独维护的订阅。
+
+### 51.9 数字
+
+- 单测 **644 个**（`test-results` 实际执行 644，全部通过；上一版是 582）。
+- `assembleRelease` 产出四个 ABI 包：arm64-v8a 24773723 B、armeabi-v7a 17544543 B、
+  x86_64 27720013 B、x86 38725222 B，`apksigner verify` 通过（签名生效）。
+- 未新增任何依赖。
+
+### 51.10 未做与未验证
+
+- **设备验收未执行。** 本轮只跑了单测与 release 构建；A3 重连、nginx Basic 四件事
+  （版本、对话、图片、SSE）、安全提示三种地址、插件装卸与分组顺序持久都留待设备上验。
+  按第 1 节约束，构建与设备测试不连跑，启动 redroid 需要另外一轮。
+- 插件未在 LXC 容器里实际安装：本轮只做了目录校验与 FakeApi 驱动的端点验证。
+- `revokeAllTokens` 已接入 API 层，但界面上没有入口（吊销全部会让所有设备一起掉线，
+  属于需要单独设计的破坏性操作）。
+
+结论落点：[protocol.md](protocol.md) 第 1、24 节、[ui-guidelines.md](ui-guidelines.md) 9.1、9.3、
+[guide.md](guide.md) 第 1 节、[CHANGELOG.md](../CHANGELOG.md)。
+
+---
+
+## 52、v0.2.1 设备验收与设备端暴露的七处缺陷（2026-11-06）
+
+第 51 节的实现在 JVM 单测与 release 构建上都通过，但放到 redroid
+（Android 15、720×1600、280dpi）上跑计划第 7 节的验收清单时，出现七处偏差。
+这批偏差有一个共同点：**判据本身写对了，取值或参数传递写错了**。
+单测只覆盖判据（`assessSecurity`、`classify401`），覆盖不到「界面把哪个值传进去」，
+因此只有实机能暴露。
+
+### 52.1 通过的项
+
+- T2：连接 `10.10.0.211:8088`，顶栏显示「已通过 10.10.0.211:8088 连接至 QwenPaw」，无协议前缀。
+- T3 负例：内网地址验证后不弹安全提示。
+- T3 启动检测：把实例地址改成 `http://chat.example.com:8088`（设备 hosts 指向 211）后冷启动，弹出提示。
+- T3 开关：设置里关闭「安全提示」有二次确认「关闭后……不再提醒」，冷启动不再弹。
+- T6：未装插件时显示「未检测到配套插件」；把插件拷进 `~/.qwenpaw/plugins/qwenpaw-node-bridge`
+  并重启服务端后显示「已检测到 配套插件 v0.1.0」。
+- T5：生成过程中 `am force-stop`，立即重开；顶栏显示「正在生成」、底部出现「停止」，
+  说明流被重新接上；上滑到顶能看到本轮自己发的消息，更早内容可继续加载。
+- T8：已归档页进入选择模式后，「已选 1 个」、批量恢复、空态「还没有归档的对话」与
+  「已恢复 1 个对话 / 撤销」均正常。
+
+### 52.2 七处缺陷
+
+**一、安全提示的判定条件取反。** `InstanceWizard` 传 `authEnabled = !result.needsLogin`，
+而 `assessSecurity` 内部是 `authDisabled = !authEnabled`。一台**没开登录**的公网服务器
+因此只弹出 TLS 那一段，「任何人都能操作这台机器」这条最严重的提示反而不出现。
+实测：`qp-test` 关着登录、地址 `http://chat.example.com:8088`，弹窗只有明文 http 一段。
+修法是把参数改为 `loginRequired = result.needsLogin`，并把参数名从 `authEnabled` 改掉：
+`QWENPAW_AUTH_ENABLED` 只是开关，没有注册用户时服务端仍不要求登录，两个概念混用就会写反。
+
+**二、没带 token 的 401 被说成「登录已失效」。** `classify401` 原先写
+`!tokenSent -> TOKEN_EXPIRED`，文案正是「登录已失效，请重新登录」。
+服务端对「没带 token」与「token 已被吊销」返回的 detail 都是 `Not authenticated`，
+只能靠这次请求是否带过 token 区分。实测：切到一个从未保存凭据的实例，聊天页横幅就是
+「登录已失效」。新增 `AuthFailure.LOGIN_REQUIRED`，文案为
+「服务器要求登录，请到「设置 → 服务器」填写账号与密码」。
+判定顺序上，「Invalid or expired token」优先于 `!tokenSent`，因为服务端只有真的核对过
+token 才会这么说。
+
+**三、反代后面的登录请求不带 Basic。** `QwenPawApi.login` 构造的是
+`Connection(baseUrl, null)`，没有 `basicAuth`。nginx 开启 `auth_basic` 时，
+`POST /api/auth/login` 在 nginx 就被拒绝，access log 表现为
+`10.10.0.1 - - "POST /api/auth/login HTTP/1.1" 401 172`（`-` 表示这次请求没有通过 Basic），
+客户端再把这次 401 映射成 BAD_CREDENTIALS，界面显示「用户名或密码不正确」。
+用户会去改一个本来就对的密码。修法是给 `login` 增加 `basicAuth` 并让两处调用
+（`connect`、`probeAgents`）传入 `probe.basicAuth`；401 分支先看
+`WWW-Authenticate: Basic`，是反代就原样抛出。
+同一处还发现 `connect` 里的 `api.version(...)` 也没带凭据，反代后面拿不到版本号，一并修。
+
+**四、引导式添加在第 2 步之前就判错了「要不要登录」。** 第 2 步的 `LaunchedEffect`
+调 `authRequired(url)`，内部 `api.authStatus(normalized)` 不带 Basic，反代后面必然 401，
+`runCatching` 吞掉后得到 `needsLogin = false`，于是第 2 步被跳过、直接进第 3 步，
+再报「该实例已开启登录鉴权，需要用户名和密码」。
+验证阶段（`probeVersion`）本来就带着凭据查过 `/api/auth/status`，
+改为直接把 `result.needsLogin` 写进第 2 步的状态，不再重复查一次；
+地址或凭据一改就清空该结论。
+
+**五、「填表添加」完全不检查安全风险。** 只有引导式那条路会弹提示。
+用户走默认的填表页时，公网地址不设防也不会收到任何提醒。
+修法是在 `InstanceForm` 验证成功后同样调用 `assessSecurity` 并复用 `SecurityNoticeDialog`。
+
+**六、冷启动重复探测插件。** `init` 里 `bind()` 末尾已经调过 `refreshBridgeStatus()`，
+`init` 又调一次；实测冷启动时 `/api/plugins/qwenpaw-node-bridge/info` 发了两次。
+删掉 `init` 里的那次。
+
+**七、插件的 `server_version` 返回模块的 repr。** 2.2.2.post1 的 `qwenpaw.__version__`
+是一个模块，`str()` 得到 `<module 'qwenpaw.__version__' from '.../__version__.py'>`。
+改读 `importlib.metadata.version("qwenpaw")`，实测返回 `2.2.2.post1`。
+
+### 52.3 数字与证据
+
+- 单测：646 个，全通过。
+- release 四个包：arm64-v8a 24,773,723 字节、armeabi-v7a 17,544,543 字节、
+  x86_64 27,720,013 字节、x86 38,725,222 字节；`apksigner verify` 显示
+  `CN=QwenPaw Node`，签名生效。
+- 反代下客户端全部请求都带 `proxyuser`，token 走查询串，实测：
+  `GET /api/chats?token=…` 200、`POST /api/console/chat?token=…` 200、
+  `POST /api/auth/login` 200。
+
+### 52.4 记下但没有改的
+
+- **用户名密码错时，向导会跳到第 3 步再报错。** 第 2 步「下一步」直接进第 3 步，
+  由 `loadAgents` 用这组账号试拉列表；失败时红字出现在第 3 步顶部，下方是「重试」与「上一步」。
+  文案与动作都正确，但步骤条停在第 3 步容易让人以为走错了地方。改为 401 时退回第 2 步
+  属于交互调整，留到下一轮。
+- **一次「网络中断：请检查网络后重试」无法复现。** 出现在点击「验证连接」的个别情况下，
+  服务端没有收到对应请求；随后同样的操作连续多次正常。怀疑是点击落在键盘收起的重排过程中，
+  未取到复现证据，暂不按缺陷处理。
+- **T7 分组重排未在设备上验证。** 只有自建分组才出现「上移 / 下移」，内置分组按设计不可移，
+  本轮只跑了 `GroupReorderTest`。
+
+结论落在 [protocol.md](protocol.md) 第 1 节（401 的四类成因与反代下的登录）、
+[ui-guidelines.md](ui-guidelines.md) 9.3（安全提示的触发时机）与
+[CHANGELOG.md](../CHANGELOG.md) 的 v0.2.1 一节。
+
+## 53、v0.2.1 之后的一轮修复与设备验收（2026-11-07）
+
+这一轮从用户报的「生成中刷新看不到自己发的消息」开始，最后变成八项问题加一轮设备验收。
+版本号没有动，仍是 0.2.1。
+
+### 53.1 生成中刷新丢失用户消息：三个原因叠在一起
+
+**原因一：服务端历史不完整。** 生成过程中 `GET /api/chats/{id}` 只返回已落库的轮次，
+本轮用户消息与正在生成的正文都不在 `messages` 里，`status` 是 `running`。
+客户端原先在服务端历史非空时直接采用它，等于主动丢掉了本轮的问句。
+实测与字段细节记在 [protocol.md](protocol.md) 25.1。
+
+**原因二：本地缓存同一条消息存了三份。** 查设备上的 Room 库时，同一个 chat 的同一个
+`position` 出现三条重复行。`saveMessages` 只按 id 覆盖，而一条消息从 SSE、历史接口、
+缓存回读三个来源拿到的 id 并不相同，于是「按 position 排」的列表里叠了三层。
+改为 `AppDatabase.replaceMessages`：同一个 `@Transaction` 里先 `clearMessages` 再写入，
+整块替换而不是按 id 合并。
+
+**原因三：切走再返回存在写读竞争。** `openChat` 切到新对话前会 `cacheMessages`，
+原来的实现是 `scope.launch` 后就返回，随后的读缓存与这次写入并发，读到的是旧行。
+改为在 `openChat` 的协程内先 `await` 写入，再读。
+
+**合并规则收口在 `historyOnReopen`：**
+
+- 服务端历史为空 → 用本地视图，运行中时截到最近一条用户消息；
+- 服务端历史非空、本轮已结束 → 直接用服务端历史；
+- 服务端历史非空、仍在运行 → 服务端历史 + 本地尾部，尾部只有在与历史前缀逐项
+  （role、kind、text）一致时才拼接，否则丢弃，避免把两段不相干的内容接在一起；
+  运行中的尾部截到最近一条用户消息，半截回复由重连流重新生成。
+
+**设备验证的三条路径都过了一遍：** 右上角「刷新对话」、`am force-stop` 后重开、
+切到别的对话再返回。三条路径下当轮用户消息都停在「处理中」上方，Room 里没有重复行。
+
+### 53.2 移动到分组与默认分组
+
+需求本身只是加一个菜单项，实际卡在服务端语义上。
+
+- 服务端 `GET /api/chats/groups` 已经返回 `kind == "default"` 的默认分组（`id` 为 `default`，
+  `name` 为 `Uncategorized`），客户端再合成一个前置「未分组」会让对话框出现两个；
+- 选「未分组」时原实现发 `{"group_id": null}`，服务端返回 **400 `Unknown chat group: None`**，
+  错误被 `runCatching` 吞掉，表现为「点了没反应」。改为传默认分组的 id，
+  取不到时才退回字面量 `default`。
+
+细节与请求示例记在 [protocol.md](protocol.md) 25.2，取值函数
+`ChatGrouping.defaultGroupId` 补了两条单测。设备上实测一次移入「分组A」、
+一次移回「未分组」，按来源分组时表头归属正确。
+
+### 53.3 「验证连接」偶发网络中断的真因
+
+52.4 记过一次无法复现的「网络中断：请检查网络后重试」，当时怀疑是点击落在
+键盘收起的重排过程中。那个猜测是错的。
+
+这一轮在编辑实例页连续四次遇到同一现象，随后一次成功。查下去发现探测客户端
+启用了连接池，而服务端 keep-alive 很短。用同一个 TCP 连接实测：
+
+| 空闲 | 结果 |
+| --- | --- |
+| 2 秒 | 200 |
+| 4 秒 | 200 |
+| 8 秒 | `RemoteDisconnected` |
+
+QwenPaw 是 uvicorn，默认 `--timeout-keep-alive 5`。两次「验证连接」的间隔通常远超 5 秒，
+池里的连接早已被对端关闭；探测客户端又设了 `retryOnConnectionFailure(false)`，
+于是一次读到 EOF 的失败被直接报成「网络中断」。主客户端一直在轮询、连接是热的，
+所以聊天页看不出任何异常。
+
+修复：探测客户端不保留连接（`ConnectionPool(0, 1, TimeUnit.NANOSECONDS)`），
+每次重新握手。修复后同一实例间隔 60 秒连续验证两次，都返回
+「连接正常，服务端 2.2.2.post1，配套插件 v0.1.0」。测量数据记在
+[protocol.md](protocol.md) 25.4。
+
+### 53.4 其余六项
+
+- **向导第 2 步先验证账号密码。** 原来「下一步」直接进第 3 步，由 `loadAgents`
+  用这组账号试拉列表，失败后红字出现在第 3 步顶部。改为在第 2 步点「下一步」时先登录一次，
+  成功才进第 3 步；失败弹「无法登录」说明原因并留在第 2 步。这次登录只为核对，
+  换到 token 后立即 `revoke`，不写进实例。
+- **验证连接同时显示配套插件版本。** 编辑已有实例时带上保存的 token，
+  能读到 `plugin_version`（实测 `v0.1.0`）；新增实例这一阶段还没有 token，
+  401 只能显示「配套插件状态未能确认」，保存后由设置页「配套插件」行给出。
+  见 [protocol.md](protocol.md) 25.5。
+- **倒计时措辞。** 转入后台与执行超时是两个独立的时限。自动转后台的剩余时间写
+  「N 秒后自动转入后台」，执行超时写「M 秒后中止」，两个都在时
+  「N 秒后自动转入后台（M 秒后中止）」。设备上把测试服务端的
+  `offload-policy` 临时改成 `offload`，实测显示「9 秒后自动转入后台（79 秒后中止）」，
+  `keep_foreground` 时只剩「94 秒后中止」。见 [ui-guidelines.md](ui-guidelines.md) 9.17。
+- **输入法适配。** 首次启动页给 `navigationBars ∪ ime` 留白，设置页子页在根 `Column` 上
+  `imePadding()`，表单自己滚动。键盘弹出时地址框完整可见，滚到底部按钮也在键盘上方。
+  见 [ui-guidelines.md](ui-guidelines.md) 9.19。
+- **界面文案 26 条逐条确认。** 包括「语音识别内容实时填入对话框」「它与「Web登录认证」无关」
+  「QwenPaw Node与QwenPaw通信内容将明文传输，存在安全风险」「正在录音，随停顿自动结束」，
+  以及审批模式四条说明对齐上游。规则沉淀进 [AGENTS.md](../AGENTS.md) 5.5 第 5–8 条。
+- **webp 卡片。** `send_file_to_user` 对 webp 返回 `source.type="url"`，只有服务端本地路径，
+  没有内联字节；客户端把 `file://` 路径换成 `/api/files/preview/{path}` 才能出缩略图，
+  且不能按 `media_type` 判图片（webp 会被标成 `application/octet-stream`）。
+  见 [protocol.md](protocol.md) 25.3。
+
+### 53.5 数字
+
+- 单测 655 个，全通过（新增 `defaultGroupId` 两条用例，`historyOnReopen` 用例改为带 `running` 参数）。
+- 安装包只验了 debug（x86_64），release 本轮没有改动依赖与构建配置，未重跑。
+- 版本号保持 `0.2.1`、`versionCode 6`，是否升版由用户决定，本轮不做。
+- 设备为 redroid 15（720×1600），服务端为 `qp-test` 2.2.2.post1。验收结束后
+  设备、容器、服务端均已关闭，`free -h` 恢复。
+
+结论落在 [protocol.md](protocol.md) 第 25 节、[ui-guidelines.md](ui-guidelines.md) 9.17 与 9.19、
+[guide.md](guide.md) 第 1、2 节、[AGENTS.md](../AGENTS.md) 5.5。
+
+## 54、配套插件建仓与双包名等五项修复（2026-11-07）
+
+本轮没有新增功能，做的是把配套插件独立出去，并修四处界面与交互问题。
+版本号仍为 `0.2.1` / `versionCode 6`，是否升版由用户决定。
+
+### 54.1 插件独立仓库与「当前状态」声明
+
+插件代码此前只是一个普通目录，没有版本管理，也容易让人以为它与客户端版本绑定。
+实际上两端只有「端点路径 + 响应形状」一层契约，版本号各自编号（插件从 `0.1.0` 起，
+客户端已在 `0.2.1`）。据此把插件迁到独立仓库 `csdeTR/QwenPaw-Node-Bridge`，
+公开可见，与客户端仓库一致。
+
+README 增加一节「当前状态」，写明 **v0.1.0 只提供 `GET /info`，作用是让客户端检测
+「已安装、契约兼容」，对话、文件、推送仍然全部走核心 API**。不写这一句，
+版本能力表里的 `/search`、`/events`、`/portability/*` 会被误读成已经有了。
+
+首次提交 `ba64c77`。`.gitignore` 排除 `__pycache__/`、`*.pyc`、`*.zip`：
+`qwenpaw-node-bridge-0.1.0.zip` 是安装产物，入库只会造成两份副本。
+
+**踩坑：`gh repo create --push` 在本机不可用。** 它默认走 HTTPS，43 秒后
+`Could not connect to server`（本机 443 出站被阻断）。改为先 `git remote add origin`
+指向 `git@github.com:csdeTR/QwenPaw-Node-Bridge.git`，再用
+`GIT_SSH_COMMAND="ssh -o ConnectTimeout=15" git push -u origin master` 推送。
+与主仓库同一条通路，不需要额外配置。
+
+### 54.2 后台时限只在「自动转入后台」时显示
+
+倒计时一行的两个时限来自 `offload_remaining` 与 `kill_remaining`，两者相互独立：
+前者到期后工具转到后台继续跑，后者到期后工具被中止。策略是 `keep_foreground` 时
+服务端不会接管工具，此时再显示「N 秒后到达后台时限」，读者会以为工具马上要被转走。
+
+改为 `toolDeadlineLabel` 接收 `autoOffload`：为 false 时把 offload 剩余时间置空，
+只保留执行超时。`keep_foreground` 下卡片只剩「N 秒后中止」。
+
+策略由对话页通过 `LocalAutoOffload` 下发，避免把布尔值逐层传进每个工具卡片。
+单测新增一条 `offload deadline is hidden unless auto offload is on`，
+原有用例补 `autoOffload = true` 以保持两种形态各自的断言。
+
+### 54.3 新建对话切不动：把旧视图写进了新对话的缓存
+
+现象是「新对话能建出来，返回聊天页仍是原对话，从列表切换也切不动」。
+
+根因在 `createChat` 的 `onSuccess`：它先把 `currentChatId` 改成新 id，再调 `openChat`。
+而 `openChat` 靠 `currentChatId` 判断「上一份视图属于哪个对话」，此时两者已经相等，
+于是把旧对话的 `messages` 当成新对话的本地视图交给 `historyOnReopen`；
+服务端此时还没有新对话的历史，合并结果就是旧内容。随后 `persistMessages` 又把这份
+内容写进新 id 的 Room 缓存，重开应用也仍然看得到。
+
+两处一起改：`createChat` 不再提前写 `currentChatId`；切换判定抽成纯函数
+`localViewForSwitch(previousId, chatId, previous)`，只有 id 相同才沿用当前视图。
+新增用例 `switch to another chat drops the previous view`。
+
+设备上验了三条路径：新建后停在欢迎页；列表切到旧对话再切回新对话仍为空；
+`am force-stop` 重开后新对话还是空的。旧版本写脏的缓存随 debug 包更换包名而消失，
+不需要迁移。
+
+### 54.4 插件显示名与关于页链接
+
+界面上的灰字原本是「配套插件 v0.x.x」，读者无法从这行文字判断装的是哪个插件。
+改为「已检测到 QwenPaw Node Bridge v0.1.0」。设置页「配套插件」这个行标题保留，
+因为它是功能名，不是产品名。
+
+关于页在「项目仓库」下方加「配套插件仓库」，地址由 `buildConfigField` 生成
+`BRIDGE_REPO_URL`，避免在 Compose 源码里再写一遍 URL。设备实测点击可打开
+`https://github.com/csdeTR/QwenPaw-Node-Bridge`。
+
+### 54.5 debug 与 release 用不同包名
+
+每次测 debug 都要先卸载 release，登录状态与缓存一起丢掉。改为
+`debug { applicationIdSuffix = ".debug" }`，并在 `src/debug/res/values/strings.xml`
+覆盖 `app_name` 为「[debug]QP Node」；release 仍是 `io.qwenpaw.node` / `QwenPaw Node`。
+
+影响面有三处，都已核对：
+
+- `scripts/e2e_acceptance.sh` 的 `PKG` 默认值改为 `io.qwenpaw.node.debug`，
+  保留 `ADB_PKG` 覆盖；
+- `atrace -a` 必须写对应包名，release 与 debug 不同；
+- 设备上的 `pm` / `am` 命令要按实际安装的那个包执行。
+
+记录进 [AGENTS.md](../AGENTS.md) 第 4 节，验收脚本一条在 3.3 另补一句。
+
+**踩坑：`aapt2 dump badging` 在新包上无输出**，无法用它核对应用名。改用界面证据：
+首次启动的通知权限弹窗标题为 `Allow [debug]QP Node to send you notifications?`，
+说明 `app_name` 覆盖生效；`dumpsys package` 确认 `versionName 0.2.1`、`versionCode 6`。
+
+### 54.6 设置页插件副标题改为两行
+
+显示名改长之后，「配套插件」这一行的副标题被截成
+「已检测到 QwenPaw Node Bridge v0.1.0，功能已…」，恰好丢掉功能开关状态。
+原写法是 `maxLines = 1, overflow = TextOverflow.Ellipsis`。
+
+先去掉行数限制。实测自然换行会把「关闭」拆成两行（第一行末尾「已关」，第二行只剩「闭」），
+虽然不再丢信息，读起来却像错字。因此改为在插件名与状态之间显式 `\n`：
+第一行是 `BridgeStatus.label`，第二行「功能已开启 / 功能已关闭 / 未安装时不可开启」。
+
+redroid 上实测两行完整显示，`uiautomator dump` 中该文本 bounds 为 56px 高，
+`Switch` 仍与文字块垂直居中。
+
+### 54.7 数字
+
+- 单测 657 个，全部通过。`ToolDeadlineLabelTest` 与 `MergeHistoryTest` 各增一条用例，
+  `PluginProbeTest` 的两处断言随显示名改写。
+- debug 包（x86_64）装到 redroid 15 验收；release 本轮没有改依赖与构建配置，未重跑。
+- 插件仓库首次提交 `ba64c77`，`gh repo view` 显示 `PUBLIC`。
+- 服务端 `qp-test` 2.2.2.post1。验收中曾把 `offload-policy` 临时改为 `offload`，
+结束时已 `PUT` 还原为 `keep_foreground` 并核对返回值。
+- 验收结束后设备、容器、服务端均已关闭。
+
+结论落在 [protocol.md](protocol.md) 第 19 节、[ui-guidelines.md](ui-guidelines.md) 9.17、
+[AGENTS.md](../AGENTS.md) 第 3.3、4 节。
 
 ## 附录：几条反复起作用的原则
 

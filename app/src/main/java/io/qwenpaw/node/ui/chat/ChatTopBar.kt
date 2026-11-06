@@ -436,6 +436,11 @@ internal fun connectedLabel(
     val url = boundUrl.trim()
     val label = boundLabel.trim()
     val server = serverName.trim()
+    // 地址按「只说主机与端口」的写法显示：协议与默认端口对「连的是哪台机器」
+    // 没有信息量，而这一行右边还有上下文胶囊，宽度很紧。
+    // 比较 `label == url` 仍用原串：别名与地址相同是配置里的事实，
+    // 不能因为展示形式变了就误判成「有别名」。
+    val shownUrl = io.qwenpaw.node.data.displayAddress(url)
     // 空名字回落到产品名。调用方（AppViewModel）已经用
     // InstanceConfig.serverDisplayName 过滤掉「名字其实就是地址」的情况，
     // 这里只处理「没起名字」这一种。
@@ -448,7 +453,7 @@ internal fun connectedLabel(
         label.isEmpty() && url.isEmpty() ->
             if (named) "已连接至$target" else "已连接"
 
-        label.isEmpty() || label == url -> "已通过 $url 连接至$target"
+        label.isEmpty() || label == url -> "已通过 $shownUrl 连接至$target"
         else -> "已通过「$label」连接至$target"
     }
 }
@@ -476,15 +481,15 @@ internal fun thinkingLevelLabel(level: String?): String = when (level) {
 internal data class ApprovalOption(val code: String, val label: String, val hint: String)
 
 internal val APPROVAL_OPTIONS = listOf(
-    ApprovalOption("STRICT", "严格", "每一步工具调用均需批准"),
-    ApprovalOption("SMART", "智能", "低风险操作自动放行，风险较高的操作才需询问"),
-    ApprovalOption("AUTO", "自动", "仅受保护的工具需要批准"),
-    ApprovalOption("OFF", "关闭防护", "不再询问，工具调用直接执行"),
+    ApprovalOption("STRICT", "严格", "每次工具调用和外部文件访问前均需审批"),
+    ApprovalOption("SMART", "智能", "低风险工具调用和外部文件访问操作自动执行，中高风险需审批"),
+    ApprovalOption("AUTO", "自动", "仅命中工具和文件审批规则的操作需审批（默认）"),
+    ApprovalOption("OFF", "关闭防护", "关闭工具和文件审批"),
 )
 
 /** 审批模式的中文标签。 */
 internal fun approvalLabel(level: String?): String =
-    APPROVAL_OPTIONS.firstOrNull { it.code == level }?.label ?: "未读取"
+    APPROVAL_OPTIONS.firstOrNull { it.code == level }?.label ?: "未知"
 
 /** 把分组 id 换成展示名。 */
 private fun groupLabel(

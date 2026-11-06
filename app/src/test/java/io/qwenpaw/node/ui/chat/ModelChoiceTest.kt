@@ -81,9 +81,9 @@ class ModelChoiceTest {
 
     @Test
     fun `unknown approval level falls back to placeholder`() {
-        assertEquals("未读取", approvalLabel(null))
-        assertEquals("未读取", approvalLabel(""))
-        assertEquals("未读取", approvalLabel("SOMETHING_NEW"))
+        assertEquals("未知", approvalLabel(null))
+        assertEquals("未知", approvalLabel(""))
+        assertEquals("未知", approvalLabel("SOMETHING_NEW"))
     }
 
     /** 四个档位与 qwenpaw web 页一致，改动会直接影响用户对风险的预期。 */

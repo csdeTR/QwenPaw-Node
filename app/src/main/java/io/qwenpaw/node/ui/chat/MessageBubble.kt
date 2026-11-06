@@ -196,11 +196,11 @@ private fun StepsHeader(
                 append(
                     when {
                         running -> "处理中"
-                        stepCount > 0 -> "处理完成 · $stepCount 步"
+                        stepCount > 0 -> "处理完成，$stepCount 步"
                         else -> "处理完成"
                     },
                 )
-                if (!expanded && latest != null) append(" · ").append(latest)
+                if (!expanded && latest != null) append("，").append(latest)
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -251,7 +251,7 @@ private fun ProcessReasoningRow(step: ChatMessage, defaultOpen: Boolean = false)
             .padding(start = 9.dp, top = 1.dp, bottom = 1.dp, end = 4.dp),
     ) {
         Text(
-            text = if (open) "思考过程" else "思考 · $preview",
+            text = if (open) "思考过程" else "思考：$preview",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -343,12 +343,14 @@ private fun ProcessToolRow(
             tick++
         }
     }
-    val deadline = remember(info, tick) {
+    val autoOffload = LocalAutoOffload.current
+    val deadline = remember(info, tick, autoOffload) {
         info?.let {
             toolDeadlineLabel(
                 it.offloadRemaining,
                 it.killRemaining,
                 SystemClock.elapsedRealtime() - fetchedAt,
+                autoOffload = autoOffload,
             )
         }
     }
@@ -695,7 +697,7 @@ private fun TextBubble(
                     selectionMode = true
                     Toast.makeText(
                         context,
-                        "已进入选择态；「完成选择」在这条消息下方",
+                        "已进入选择模式，「完成选择」按钮在这条消息下方",
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
@@ -1050,7 +1052,7 @@ private fun MessageStatsLine(stats: io.qwenpaw.node.data.stream.TurnStats) {
         stats.model?.takeIf { it.isNotBlank() }?.let { add(it) }
     }
     Text(
-        text = parts.joinToString(" · ") + " tokens",
+        text = parts.joinToString("，") + " tokens",
         style = MaterialTheme.typography.labelSmall,
         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
     )

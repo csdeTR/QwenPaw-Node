@@ -30,20 +30,24 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 
 2. **动手前先看内存。** 执行 `free -h`，「可用内存」与「swap 已用」两项都要看。
    可用内存低于 3 GB，或 swap 已用超过总量的一半（4 GB）时，
-   应先关闭模拟器与多余进程，再开始构建。
+   应先关闭测试设备、测试容器与多余进程，再开始构建。
    只看 available 不够：swap 被占到一半以上说明系统已经在换页，
    此时再叠加构建任务，就是那次卡死的直接前兆。
 
-3. **用完即关，不要保留常驻进程。**
+3. **用完即关，不要保留常驻进程。** 测试设备与测试服务端都按需启动，用完立即关闭，
+   不因为「下次还要用」而挂在后台。
    - Gradle daemon：`./gradlew --stop`
    - Kotlin daemon：`pkill -f KotlinCompileDaemon`
-   - 模拟器：`adb emu kill`
+   - redroid 容器：`docker compose -f scripts/redroid/docker-compose.yml down`
+   - LXC 测试容器：`lxc stop qp-test qp-test-prerelease`
+     （只停容器，LXD 服务与 `lxdbr0` 保留，下次直接 `lxc start`）
+   - AVD：`~/Android/Sdk/platform-tools/adb -s emulator-5554 emu kill`
 
    忘记收尾会导致下一次构建时内存基线偏高，进而挤占桌面环境。
 
-4. **模拟器内存固定 2048 MB，不要调高。**
-   完整启动命令见 3.1，其中的参数一律不得修改。
-   调高内存会直接压缩宿主可用内存，与构建任务叠加时风险显著上升。
+4. **redroid 容器的资源上限固定在 compose 里，不要调高。**
+   `mem_limit` / `memswap_limit` 3 GB、`cpus` 2、`pids_limit` 4096，见 3.1。
+   实测空闲占用 1.0–1.3 GiB；不设上限时容器曾把 swap 吃满，宿主机随即卡死。
 
 5. **优先增量构建。**
    只编译并装包时用 `./gradlew installDebug`；只跑单测时用 `./gradlew testDebugUnitTest`。
@@ -57,7 +61,7 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 
 8. **设备验收一次只跑一个场景。**
    `scripts/e2e_acceptance.sh` 使用 `--only A4` 形式的单场景参数，跑完检查 `free -h`。
-   不要整轮跑完再统一收尾，因为模拟器与构建同时运行极易拖垮桌面环境。
+   不要整轮跑完再统一收尾，因为测试容器与构建同时运行极易拖垮桌面环境。
 
 ## 2、QwenPaw 服务端
 
@@ -89,6 +93,14 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 - 停止服务后要确认端口已释放：`ss -ltnp | grep 8088` 应无输出。
   直接 `pkill -f "qwenpaw app"` 在容器里会因权限失败，需加 `-u csdetr`，
   或从 `screen` 会话退出。
+- **`lxdbr0` 停在 `UNAVAILABLE` 时先查 `nft_masq` 模块。** LXD 5.21 建托管桥时写入
+  `ip saddr 10.10.0.0/24 ... oifname != "lxdbr0" masquerade`，该表达式由 `nft_masq.ko` 提供；
+  模块缺失时 nf_tables 返回 ENOENT，journal 表现为
+  `Failed adding outbound NAT rules … Could not process rule: No such file or directory`，
+  `lxc network list` 中桥停在 `UNAVAILABLE`，所有容器无法启动。本机已由
+  `/etc/modules-load.d/lxd-nft-masq.conf` 固化该模块；仍未生效时执行
+  `sudo modprobe nft_masq` 后 `sudo snap restart lxd`。
+  docker 走的是 iptables-nft 的 xt `MASQUERADE`，因此该模块不会被 docker 带起来。
 
 ### 2.2 两个版本的端点差异（实测，2026-11-01）
 
@@ -137,55 +149,99 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 
 ## 3、测试设备
 
-**只使用模拟器测试。真机测试已停用，不要再尝试连接真机。**
+**真机测试已停用，不要再尝试连接真机。** 首选 redroid 容器（3.1）；
+redroid 不可用时回退到 AVD `qp35`（3.2）。两者的显示参数一致：720×1600、280dpi。
+设备一律按需启动、用完关闭，见第 1 节第 3 条。
 
-### 3.1 模拟器
+### 3.1 redroid 容器（首选）
 
-- AVD 名 `qp35`（Android 15，x86_64，1080x2400）。完整启动命令：
+- 镜像 `docker.m.daocloud.io/redroid/redroid:15.0.0_64only-latest`：Android 15、x86_64、userdebug。
+  与 `targetSdk 35` 对齐，边到边行为与验收基准一致。**不要换回 Android 12 的镜像**：
+  Android 15 起系统强制边到边，旧版本会得出相反结论。
+- 官方镜像**不含 GMS**，也不需要 GMS。GMS 要自行用 Open GApps 另建镜像，不要引入。
+  实测 `pm list packages | grep -ci "google|gms"` 结果为 0。
+- compose 在 `scripts/redroid/docker-compose.yml`，入版本管理；`/data` 分区在仓库外，
+  默认 `~/redroid/qp15`，可用 `REDROID_DATA` 覆盖。实测初始约 55 MB，
+  装完 debug 包后 75 MB，会继续随使用增长到数 GB，**不要**放进仓库。
+- 启动步骤（宿主每次重启后都要重做，`binder_linux` 不会自动加载）：
 
   ```bash
-  $HOME/Android/Sdk/emulator/emulator -avd qp35 \
-      -memory 2048 -no-window -gpu swiftshader_indirect -feature -BluetoothEmulation
+  sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"
+  sudo chmod 666 /dev/binder /dev/hwbinder /dev/vndbinder
+  docker compose -f scripts/redroid/docker-compose.yml up -d
+  ~/Android/Sdk/platform-tools/adb connect localhost:5555
   ```
 
-  内存固定 2048 MB，其余参数同样不得修改。
-  **`-feature -BluetoothEmulation` 不是可选项。** 2026-11-03 起，不带该参数时
-  模拟器会卡在 QEMU 初始化：日志报 `detected a hanging thread 'QEMU2 CPU0 thread'`
-  （约 19 秒无响应），进程随后以段错误退出，`adb devices` 先是 `offline` 后为空。
-  此时 `lsmod` 里 `kvm` 的引用计数为 0，`-accel off`（纯软件模拟）同样卡住，
-  可排除 KVM 与 AVD 损坏；根因是蓝牙模拟器（netsim）在启动阶段阻塞——
-  日志末尾的 `Unable to connect to packet streamer` 与 `netsim_stderr.log` 的
-  `DeviceActor: Startup timeout` 是线索。带上该参数后 59 秒内 boot 完成。
-  **不要因为这个现象去擦除 AVD 数据**：擦除后同样卡住，只会白丢一次冷启动。
-  `adb` 在 `$HOME/Android/Sdk/platform-tools/adb`。
-- **启动前确认 `/dev/kvm` 存在。** x86_64 模拟必须有硬件加速，缺失时报
-  `x86_64 emulation currently requires hardware acceleration`。
-  本机曾出现内核模块未加载的情况，用 `ls -l /dev/kvm` 检查，
-  不存在时执行 `sudo modprobe kvm && sudo modprobe kvm_intel`（AMD 用 `kvm_amd`）。
-  CPU 是否支持可以先看 `grep -c -E "vmx|svm" /proc/cpuinfo`。
-- **模拟器是 x86_64 架构。** `splits.abi` 已覆盖 `arm64-v8a` / `armeabi-v7a` / `x86` / `x86_64`
-  四个架构且 `isUniversalApk = false`，装 x86_64 那一份即可，**不需要临时改 ABI 配置**。
-  验收脚本会读 `ro.product.cpu.abi` 自动挑选对应 split，找不到时退回单包产物。
-  若本地把 `include()` 收窄过，记得还原，否则模拟器会报 `INSTALL_FAILED_NO_MATCHING_ABIS`。
-- 冷启动时 System UI 偶发 `Application Not Responding` 弹窗，
-  点 `Wait` 即可，不是应用崩溃。`uiautomator dump` 看到
-  `package="android"` 且只有 `Close app` / `Wait` 两行文字时，就是这个弹窗。
-- 可执行 `adb root`。断网场景用 `iptables`，因为 `svc wifi disable` 与飞行模式
-  在模拟器里不起作用。**用完必须删除 iptables 规则**，否则后续调试全部连不上。
-- 模拟器访问服务端改用 LXC 容器地址：`10.10.0.211:8088`（稳定版）或
-  `10.10.0.220:8088`（预发布版）。容器走 `lxcbr0` 桥接，模拟器可直接访问，
-  **不再使用** `10.0.2.2:8088`（那指向宿主机，而宿主机实例已不参与测试）。
-- 内存紧张时，模拟器与 Gradle 同时运行极易拖垮桌面。开模拟器前先 `free -h`，
-  构建与模拟器不要长时间并行。
+- **为什么必须 `chmod 666`。** 本机内核 `6.12.111+deb13-amd64` 没有开
+  `CONFIG_ANDROID_BINDERFS`（`grep CONFIG_ANDROID_BINDERFS /boot/config-$(uname -r)`
+  无输出），镜像内 `/dev/binder` 是指向 `/dev/binderfs/binder` 的符号链接，挂载失败后悬空，
+  surfaceflinger 以 `Binder driver could not be opened` 退出（实测退出码 129）。
+  compose 已把宿主设备节点映射到符号链接的目标位置，但模块生成的节点权限是 `0600`，
+  容器内非 root 进程打不开，因此要放开权限。
+- 显示参数写死在 compose：**720×1600、280dpi**。
+  像素数 1.15M，相比 AVD 的 1080×2400（2.59M）少 55%；dp 视口不变
+  （720/280×160 = 411dp 宽，1080/420×160 = 411dp 宽），因此布局层面的既有结论仍然有效。
+  `androidboot.use_memfd=1` 替代已在 6.x 内核移除的 ashmem；
+  `androidboot.redroid_gpu_mode=guest` 是软件渲染，本机容器内没有可用 GPU。
+- 容器内是 userdebug，`adb shell` 默认 `uid=0`，**不需要 `adb root`**。
+- **A6 断网不要用 iptables。** 镜像内 `iptables -L` 报
+  `can't initialize iptables table 'filter': Table does not exist`，netfilter 表不可用。
+  改用路由黑洞，在容器自己的网络命名空间内执行，不修改宿主网卡，也不影响 5555 的 adb 连接：
 
-### 3.2 通用
+  ```bash
+  adb shell ip route add blackhole 10.10.0.211/32   # 换成实际服务端 IP
+  adb shell ip route del blackhole 10.10.0.211/32
+  ```
+
+- 容器访问服务端仍走 LXC 容器地址：`10.10.0.211:8088`（稳定版）或 `10.10.0.220:8088`
+  （预发布版）。**测试前确认 LXC 容器已启动**，否则 `ping 10.10.0.211` 会 100% 丢包。
+  不要使用 `10.0.2.2:8088`，那指向宿主机，而宿主机实例不参与测试。
+- **docker 到 LXC 的路径是通的，已实测。** redroid 容器 eth0 为 `172.20.0.2/16`，
+  从该网络命名空间请求 `http://10.10.0.211:8088/api/version` 返回 HTTP 200
+  （`2.2.2.post1`），容器内 `ping` 3/3 收到。这条路径依赖两件事：`ip_forward=1`，
+  以及 `lxd-forward-fix.service` 在 `DOCKER-USER` 链放行 `iifname lxdbr0` 与
+  `oifname lxdbr0` 的回程流量。镜像内没有 `curl`，toybox `netcat` 只能建连、读不到响应体，
+  验证用宿主侧的 `nsenter -t <qp15 pid> -n curl ...`，路径与容器内完全一致。
+- 宿主机重启后 `docker compose up` 之前必须先 `modprobe`，否则容器会因 binder 节点缺失
+  反复崩溃。因此 compose 里 `restart` 固定为 `"no"`，不要改成 `unless-stopped`。
+
+### 3.2 AVD 回退（redroid 不可用时）
+
+只在 redroid 无法启动时使用。AVD 走 QEMU 用户态 NAT，与容器的桥接网络不是同一条路径，
+服务端连通性要现场确认，不能照搬 3.1 的结论。
+
+- AVD 名 `qp35`，Android 15（`system-images/android-35/google_apis/x86_64`）、x86_64、
+  2 核、`hw.ramSize` 1536M、`PlayStore.enabled = no`。
+- 显示参数已与 redroid 对齐：`~/.android/avd/qp35.avd/config.ini` 中
+  `hw.lcd.width = 720`、`hw.lcd.height = 1600`、`hw.lcd.density = 280`。
+  dp 视口仍是 411×914，与 redroid 相同，因此 `docs/ui-guidelines.md` 1.5 的布局期望通用；
+  像素值按 720×1600 重取，不要沿用 1080×2400 的数字。
+- **启动必须带 `-feature -BluetoothEmulation`。** 不加时 QEMU 卡在
+  `detected a hanging thread 'QEMU2 CPU0 thread'` 并以段错误退出；
+  `-accel off`、`-gpu off`、`-no-snapshot`、`-wipe-data` 都不能绕过，
+  其中 `-accel off` 同样卡住可以排除 KVM。依据见 `docs/devlog.md` 44.5。
+
+  ```bash
+  ~/Android/Sdk/emulator/emulator -avd qp35 -feature -BluetoothEmulation &
+  ~/Android/Sdk/platform-tools/adb wait-for-device
+  ```
+
+- 设备序列号是 `emulator-5554`，验收脚本用 `ADB_SERIAL=emulator-5554`。
+- 服务端地址：历史上模拟器测试用 `adb reverse tcp:8088 tcp:8088` 指向宿主实例，
+  而宿主机实例不参与测试（2.1）。回退时先确认 AVD 到 `10.10.0.211:8088` 是否可达，
+  再用脚本，不要假设这条路径与 3.1 相同。
+- A6 断网未在 AVD 上重测。脚本当前的 `ip route add blackhole` 实现是按 redroid 写的。
+- 收尾：`~/Android/Sdk/platform-tools/adb -s emulator-5554 emu kill`。
+
+### 3.3 通用
 
 - 操作界面时坐标一律从 `uiautomator dump` 动态获取，不要凭截图目测。
   截图是缩放的，按截图坐标点击会落空。
 - `adb shell input text` 不支持中文，空格用 `%s`。
-- 验收脚本：`ADB_SERIAL=<serial> ./scripts/e2e_acceptance.sh --only <A1..A6>`。
-  A6 断网场景用 `iptables`（模拟器可 `adb root`）。
-  **脚本已移除真机分支**，只按模拟器维护；`su -c` 免密提权一类的手段不再保留。
+- 验收脚本：`ADB_SERIAL=localhost:5555 ./scripts/e2e_acceptance.sh --only <A1..A6>`。
+  脚本默认操作 debug 包 `io.qwenpaw.node.debug`（见第 4 节），可用 `ADB_PKG` 覆盖。
+  A6 断网场景走 3.1 的路由黑洞。
+  **脚本已移除真机分支**，只按 redroid 维护；`su -c` 免密提权一类的手段不再保留。
 - **截图与像素采样**：验证配色（如深色模式文字对比度）时，从 `adb exec-out screencap -p`
   取 PNG 后自行解码采样；环境里没有 PIL，需要手写 PNG 解码。
 
@@ -220,6 +276,13 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
   推 `v*` tag 触发 `.github/workflows/release.yml`，细节见 `docs/release.md` 5.3。
 - **在这台机器上执行 `git push` 时加 `GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0`。**
   Trae 注入的 askpass 脚本在没有交互终端时会永久等待，表现为命令超时而非报错。
+- **debug 与 release 用不同包名，可同机共存。** debug 的 applicationId 为
+  `io.qwenpaw.node.debug`，应用名为 `[debug]QP Node`（由
+  `app/src/debug/res/values/strings.xml` 覆盖 `app_name`）；release 仍为
+  `io.qwenpaw.node` / `QwenPaw Node`。装 debug 不再需要先卸载 release，
+  两者的登录状态与缓存互不影响。
+  设备侧的 `pm`、`am` 命令与 `scripts/e2e_acceptance.sh` 默认按 debug 包名执行，
+  脚本可用 `ADB_PKG` 覆盖。
 - 相关文档：协议细节与已知坑见 `docs/protocol.md`；UI、边到边与性能测量口径见
   `docs/ui-guidelines.md`；目录与数据流见 `docs/architecture.md`；
   发版流程见 `docs/release.md`。
@@ -365,6 +428,16 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 2. 不使用「请」以外的敬辞，不用网络口语与语气词。
 3. 错误提示必须说明**发生了什么**与**可以做什么**，不能只写「操作失败」。
 4. 状态词保持单一写法：同一状态在列表、顶栏、气泡里用同一个词，不做同义替换。
+5. **不用比喻与形象化的说法。** 「是两回事」「暴露在广域网」这类句子看似生动，
+   实际要读者自己补出含义；应直接写清两者分别在什么条件下发生、后果是什么。
+   例：「它与「Web登录认证」无关」「关闭后，服务器地址可从公网访问，且服务端未开启
+   「Web登录认证」或未使用 HTTPS 时，不再提醒。」
+6. **「·」不用来连接并列成分。** 「我·头像」「跟随系统·字号 100%」一律改成
+   「我的头像」「跟随系统与字号」「跟随系统，字号 100%」这类正常写法。
+   「·」只保留在时间、版本号等本身需要分隔符的地方。
+7. 中文引号统一用「」。不要在「」里再套英文引号，也不要出现落单或错位的引号。
+8. 产品名与端点名保留原写法（QwenPaw、QwenPaw Node、QwenPaw Node bridge），
+   直接放进句子，不做中文意译，也不改写大小写。
 
 **文案当前硬编码在 Compose 源码里，这是已知状态。** `strings.xml` 只有 5 条通知文案，
 `app/src/main/java` 下约 45 个文件、662 处中文字面量，`stringResource` 调用数为 0。

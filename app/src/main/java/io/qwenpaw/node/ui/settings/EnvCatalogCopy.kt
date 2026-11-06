@@ -43,7 +43,7 @@ internal val ENV_SPEC_COPY: Map<String, EnvSpecCopy> = mapOf(
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_MAX_CONCURRENT" to EnvSpecCopy(
-        description = "同时在途的模型调用上限，超出部分排队等待。",
+        description = "同时进行的模型调用数量上限，超出的请求排队等待。",
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_MAX_QPM" to EnvSpecCopy(
@@ -55,7 +55,7 @@ internal val ENV_SPEC_COPY: Map<String, EnvSpecCopy> = mapOf(
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_RATE_LIMIT_JITTER" to EnvSpecCopy(
-        description = "暂停时长上额外叠加的随机等待范围，用于错开并发请求的唤醒时间。",
+        description = "在暂停时长之外再加一段随机等待，让同时发出的请求不会在同一刻恢复。",
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_ACQUIRE_TIMEOUT" to EnvSpecCopy(

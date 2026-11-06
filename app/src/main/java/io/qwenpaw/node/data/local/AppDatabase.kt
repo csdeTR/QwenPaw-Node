@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 /** 本地草稿。每个 (实例, 会话) 一条，用于断网或退出后恢复输入。 */
@@ -58,6 +59,18 @@ interface ChatDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveMessages(messages: List<CachedMessageEntity>)
+
+    /**
+     * 用这一份消息整体替换某个对话的缓存。
+     *
+     * [saveMessages] 只能按主键覆盖：同一条消息在本地与历史里 id 可能不同，
+     * 直接追加会让退出重进后的列表出现重复气泡。
+     */
+    @Transaction
+    suspend fun replaceMessages(chatId: String, messages: List<CachedMessageEntity>) {
+        clearMessages(chatId)
+        saveMessages(messages)
+    }
 
     @Query("DELETE FROM cached_messages WHERE chatId = :chatId")
     suspend fun clearMessages(chatId: String)
