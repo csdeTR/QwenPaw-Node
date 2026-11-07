@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -441,23 +442,39 @@ fun InstanceWizard(
 /**
  * 公网地址的安全风险提示。
  *
- * 两条风险合成一个对话框：它们同时出现时是同一件事的两面（公网 + 没设防），
- * 拆成两次弹窗只会让用户连点两下「知道了」，反而记不住内容。
+ * 两条风险分成两个对话框，按严重程度依次出现：先「未启用登录」，关掉之后才是
+ * 「通信内容未加密」。两者的处置不同（一条去服务端开启登录认证，一条配证书或
+ * 反向代理），合在一个长对话框里时，用户往往只看前半段就点掉。
  *
- * 按钮只有「知道了」：这里不提供「一键去设置」，因为 `QWENPAW_AUTH_ENABLED`
- * 与 SSL 证书都在服务端，客户端改不了，给一个点了也没用的入口更糟。
+ * 「文档」只在登录这一条上出现：官方文档的该锚点讲的是 Web 登录认证，
+ * 与证书配置不是同一篇内容，挂在 TLS 那条上会把人带到错误的位置。
  */
 @Composable
 internal fun SecurityNoticeDialog(
     notice: io.qwenpaw.node.data.SecurityNotice,
     onDismiss: () -> Unit,
 ) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("这个地址可能可以从公网访问") },
-        text = {
-            Column {
-                if (notice.exposed) {
+    var stage by remember(notice) {
+        mutableStateOf(if (notice.exposed) SecurityStage.AUTH else SecurityStage.TLS)
+    }
+    // 关掉登录这一条后，如果还存在明文传输，接着弹第二条；否则退出。
+    val advance = {
+        if (stage == SecurityStage.AUTH && notice.noTls) {
+            stage = SecurityStage.TLS
+        } else {
+            onDismiss()
+        }
+    }
+    val uriHandler = LocalUriHandler.current
+    val docUrl = "https://qwenpaw.agentscope.io/docs/security" +
+        "#Web-%E7%99%BB%E5%BD%95%E8%AE%A4%E8%AF%81"
+
+    when (stage) {
+        SecurityStage.AUTH -> androidx.compose.material3.AlertDialog(
+            onDismissRequest = advance,
+            title = { Text("这个地址可能可以从公网访问") },
+            text = {
+                Column {
                     Text(
                         text = "未检测到登录验证。任何能访问到 ${notice.host} 的人" +
                             "都可以操作这台机器上的智能体、读取对话记录。",
@@ -465,33 +482,53 @@ internal fun SecurityNoticeDialog(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "建议在服务端设置环境变量 QWENPAW_AUTH_ENABLED=true，" +
-                            "并注册一个账号后再连接。",
+                        text = "当前状态无异于将设备向全世界公开，为确保安全，" +
+                            "请尽快开启QwenPaw「Web登录认证」，保护控制台免受未授权访问",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (notice.exposed && notice.noTls) Spacer(Modifier.height(12.dp))
-                if (notice.noTls) {
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = advance) { Text("知道了") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        runCatching { uriHandler.openUri(docUrl) }
+                        advance()
+                    },
+                ) { Text("文档") }
+            },
+        )
+
+        SecurityStage.TLS -> androidx.compose.material3.AlertDialog(
+            onDismissRequest = advance,
+            title = { Text("通信内容未加密") },
+            text = {
+                Column {
                     Text(
-                        text = "QwenPaw Node与QwenPaw通信内容将明文传输，存在安全风险",
+                        text = "QwenPaw Node 与 QwenPaw 之间的通信内容将明文传输，" +
+                            "存在被窃听的风险。",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "建议为服务端配置 SSL 证书，并把地址改成 https:// 开头；" +
-                            "也可以在前面加一层带证书的反向代理。",
+                        text = "建议为访问地址启用HTTPS与TLS加密。你可以直接为该地址配置SSL证书，" +
+                            "或在前方部署带证书的反向代理。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("知道了") }
-        },
-    )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = advance) { Text("知道了") }
+            },
+        )
+    }
 }
+
+private enum class SecurityStage { AUTH, TLS }
 
 /**
  * 点「上一步」时应当回到的步骤。

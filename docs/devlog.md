@@ -66,6 +66,7 @@
 | [52](#52v021-设备验收与设备端暴露的七处缺陷2026-11-06) | redroid 上跑第 7 节验收，修七处只有实机能暴露的问题 | 646 个单测；`Not authenticated` 是两种成因的同一句；反代下的登录同样要带 Basic | [protocol.md](protocol.md) 第 1 节、[ui-guidelines.md](ui-guidelines.md) 9.3 |
 | [53](#53v021-之后的一轮修复与设备验收2026-11-07) | 生成中刷新丢用户消息、移动到分组、输入法、倒计时、插件版本与 webp | 655 个单测；运行中的会话历史不含本轮消息；`group_id: null` 返回 400；keep-alive 5 秒导致探测误报 | [protocol.md](protocol.md) 第 25 节、[ui-guidelines.md](ui-guidelines.md) 9.17、9.19 |
 | [54](#54配套插件建仓与双包名等五项修复2026-11-07) | 插件独立仓库、后台时限收口、新建对话切不动、插件显示名、关于页链接、debug 双包名 | 657 个单测；插件首次提交 `ba64c77`；新建对话把旧视图写进新 id 的缓存 | [protocol.md](protocol.md) 第 19 节、[ui-guidelines.md](ui-guidelines.md) 9.17、[AGENTS.md](../AGENTS.md) 第 4 节 |
+| [55](#55安全提示拆成两个弹窗2026-11-07) | 公网安全提示拆成「未登录」与「未加密」两个弹窗，补「文档」入口 | 657 个单测；公网地址用 203.0.113.10 别名 + 转发验证；`lo` 上的别名会被 `route_localnet` 挡住 | [ui-guidelines.md](ui-guidelines.md) 9.18 |
 
 ---
 
@@ -4840,6 +4841,71 @@ redroid 上实测两行完整显示，`uiautomator dump` 中该文本 bounds 为
 
 结论落在 [protocol.md](protocol.md) 第 19 节、[ui-guidelines.md](ui-guidelines.md) 9.17、
 [AGENTS.md](../AGENTS.md) 第 3.3、4 节。
+
+## 55、安全提示拆成两个弹窗（2026-11-07）
+
+### 55.1 为什么拆
+
+原来的 `SecurityNoticeDialog` 把两条风险写在一个对话框里：先讲「未检测到登录验证」，
+再讲「通信内容将明文传输」。两条的处置完全不同——一条要求去服务端开启 Web 登录认证，
+一条要求配证书或部署反向代理——合在一起后对话框变长，用户往往读完前半段就点掉。
+
+改为两个独立的对话框，按严重程度先后出现：先「未启用登录」，关掉后如果地址仍是
+明文 http，再弹「通信内容未加密」。顺序状态收在 `SecurityNoticeDialog` 内部，
+`InstanceWizard` 与 `ConnectScreen` 两个调用点不需要改。
+
+登录那条的处置原文案「建议在服务端设置环境变量 QWENPAW_AUTH_ENABLED=true」讲的是
+实现细节，用户未必知道这个变量在哪配。改为直接指向界面上的「Web登录认证」，
+并补一个「文档」按钮，打开官方文档的对应锚点。证书那条的处置也改成先说做法
+（直接配 SSL 证书，或在前方部署带证书的反向代理），不再提「把地址改成 https:// 开头」——
+地址是用户已经填好的，改地址并不解决服务端的证书问题。
+
+### 55.2 设备上如何造出「公网 + 未登录 + 明文」
+
+`assessSecurity` 把 10/8、172.16/12、192.168/16 与 localhost 都算内网，测试容器
+`10.10.0.211` 与 `10.10.0.220` 因此永远不触发提示。要让提示出现，地址必须看起来在公网。
+
+试过的方向与结论：
+
+| 方向 | 结果 |
+| --- | --- |
+| 改设备 `/etc/hosts` 把公网域名指到 LXC | 写不进去。SELinux 已是 Disabled，仍报 Permission denied；`adb root` 后 `remount` 返回 `Device must be bootloader unlocked`。redroid 镜像没有 overlayfs 可写层 |
+| 用 `10.0.2.2` 一类特殊地址 | 判据按网段分类，仍是内网 |
+| 在宿主机加公网地址别名并转发 | 可行 |
+
+具体做法（测试后已全部还原）：
+
+1. 宿主机把 `203.0.113.10/32` 加到 **docker 桥接网卡**（`br-9166e8bc5702`）；
+2. 一个 Python TCP 转发监听 `203.0.113.10:8090`，转到 `10.10.0.220:8088`
+   （预发布容器，`/api/auth/status` 为 `{"enabled":false,"has_users":false}`，
+   正好同时满足「未登录」与「明文」）；
+3. 引导式添加里填 `http://203.0.113.10:8090`，验证成功后两个弹窗依次出现。
+
+**第一个坑：别名加在 `lo` 上不通。** 容器内 `ping` 有回应，但 TCP 连接超时。
+`203.0.113.10` 属于回环上的地址，从 `eth0` 进来的包默认被 `route_localnet=0` 丢弃；
+改加到桥接网卡后 ping 与 `/dev/tcp` 都能通。
+
+**第二个坑：后台代理会被会话回收。** 用 `python3 ... &` 启动的转发进程在 Shell 命令结束后
+消失，界面报「无法连接服务器」。改 `setsid nohup` 才留住。
+
+**第三个坑：容器里没有可用的 `nc`。** 验证 TCP 只能在宿主侧用
+`nsenter -t <qp15 pid> -n bash` 走 `/dev/tcp`，`ping` 只能说明路由通，说明不了端口。
+
+### 55.3 验收
+
+- 单测 657 个通过（本次只改 Compose 层，无新增用例；弹窗顺序是 Compose 状态，
+  现有 JVM 单测覆盖不到）。
+- redroid 上 `uiautomator dump` 依次看到：
+  「这个地址可能可以从公网访问 / 未检测到登录验证…/ 当前状态无异于将设备向全世界公开… /
+  文档 知道了」，点「知道了」后出现「通信内容未加密 / …明文传输 / 建议为访问地址启用HTTPS与TLS加密…」。
+- 点「文档」后 `topResumedActivity` 为 `org.chromium.webview_shell/.WebViewBrowserActivity`，
+  地址栏是 `https://qwenpaw.agentscope.io/docs/security#Web-%E7%99%BB%E5%BD%95%E8%AE%A4%E8%AF%81`。
+- 两个弹窗都关掉后回到向导第 1 步，未提交这个实例。
+
+**「文档」放在 `dismissButton` 槽位**，Material 3 会把它排在「知道了」左侧。
+点击后与「知道了」走同一个推进逻辑：关闭当前这条并继续下一条，不停在当前弹窗上等第二次点击。
+
+结论落在 [ui-guidelines.md](ui-guidelines.md) 9.18。
 
 ## 附录：几条反复起作用的原则
 
