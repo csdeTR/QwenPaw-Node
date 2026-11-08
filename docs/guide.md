@@ -39,6 +39,15 @@
 结果里同时写明服务端版本与 QwenPaw Node Bridge 的版本。插件未安装时写「未安装」；
 服务端开启了登录而这一步还没有凭据时写「未能确认」，保存后可在设置页的「配套插件」行查看。
 
+QwenPaw Node Bridge 是配套插件，提供全文检索与事件推送。安装时在 QwenPaw Web 控制台的
+「插件」页粘贴下面这条地址，或在那台机器上执行 `~/.qwenpaw/bin/qwenpaw plugin install <同一地址>`：
+
+```
+https://github.com/csdeTR/QwenPaw-Node-Bridge/releases/latest/download/qwenpaw-node-bridge.zip
+```
+
+这条地址始终指向最新版。插件在服务端运行时热加载，加载需要数秒，安装后立刻请求可能仍显示未安装。
+
 有两类地址不能添加：源于 AgentScope Platform 的实例，以及通过魔搭创空间创建的实例。
 这类地址填写后点击「验证连接」，界面会说明原因并建议使用私有化部署方案，
 「下一步」保持不可点。它们的访问依赖平台自己的登录与转发，无法按自建实例的方式连接。
