@@ -237,6 +237,21 @@ SSE 连接断开后，服务端仍会继续把这一轮跑完。这一点决定�
 正确的做法是把收尾逻辑放进一个新启动的协程（例如 `CoroutineScope(Dispatchers.Main).launch`
 或注入的独立作用域），由它负责复位状态。
 
+### 「无法连接服务器，显示本地缓存」的三种成因
+
+这条提示只在 `GET /api/chats/{id}` 抛出异常时出现，可能来自三类完全不同的原因：
+
+| 原因 | 表现 | 判别 |
+| --- | --- | --- |
+| 网络或地址不可达、超时 | 任何对话都失败 | 用 `/api/version` 探测，失败即网络问题 |
+| 响应解析失败 | 特定对话失败，其它正常 | 服务端日志正常，curl 能拿到 200 |
+| 对话 id 不匹配（404） | 打开后落到空对话并提示断线 | 请求的 id 不是 `/api/chats` 的 `id` |
+
+实测「杂谈」（`ba703f01-646e-4e3c-a565-e3892b367b52`，231 条消息、928 KB、
+响应约 1.7 s）在 2.2.2.post1 上正常返回并能在客户端完整渲染，说明大响应本身不是诱因；
+该对话的 221 个 usage 对象里 `cache_hit_rate` 都是数值而非 `null`。
+排查同类问题应先区分上表三类，再看 `GET /api/chats/{id}` 的实际状态码。
+
 ---
 
 ## 5、并发与错误
@@ -582,6 +597,17 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
 - `by_date{...}`
 
 客户端的「用量统计」页做只读展示。
+
+### `cache_hit_rate` 是百分数，且可以是 `null`
+
+`cache_hit_rate` 在 OpenAPI 里声明为 `number | null`：无缓存命中时返回 `null`，
+有命中时返回 **0–100 的百分数**（实测对话里有 `1.709`、`45.54`），不是 0–1 的比例。
+客户端按比例渲染会把 45.54 显示成 4554%，按百分比渲染才对。
+
+`null` 这一形状只在干净实例上出现。客户端 DTO 若把它声明为非空 `Double`，
+kotlinx.serialization 会抛 `SerializationException`；该异常若与「连不上」共用一条
+`runCatching` 分支，就会被误报成「无法连接服务器」。解析失败与请求失败必须分开处理：
+前者说明服务端在线但响应形状超出预期，后者才是网络或地址问题。
 
 ---
 
@@ -1126,6 +1152,37 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 
 `limit` 默认 50、上限 500；`offset` 最小 0。
 
+### 来源类型与筛选语义
+
+`source_type` 只有五个取值，与 web 控制台「推送消息」页的选项一致：
+
+| source_type | 写入位置 | 说明 |
+| --- | --- | --- |
+| `cron` | `app/crons/manager.py` | 定时任务结果、超时、投递失败 |
+| `heartbeat` | `app/crons/heartbeat.py` | 心跳任务结果与超时 |
+| `memory` | `agents/memory/reme_inbox.py` | 自动记忆写入 |
+| `skill_autoupdate` | `app/routers/skills.py` | 技能自动更新，`agent_id` 固定为 `default` |
+| `mail` | `app/mail/monitor.py` | 邮件自动处理 |
+
+审批事件走 `/api/console/push-messages`，不写这五个来源。
+
+**筛选后的计数。** `total` 与 `unread_count` 都是应用 `agent_id`、`status`、
+`source_type(s)` 之后的数字；`unread_only=true` 只影响 `events`，`unread_count` 不变。
+因此筛选生效时，顶栏的未读数是「筛选范围内的未读」，不是全局未读；
+插件 SSE 推来的全局计数此时不能直接覆盖它。
+
+**标记已读不分范围。** `POST /api/console/inbox/read` 带 `all: true` 会清除整库未读，
+不接受来源或智能体条件。客户端因此在筛选生效时隐藏「全部已读」。
+
+**定时任务不是自动全量写入。** `append_event(source_type="cron", event_type="cron_result")`
+只在 `job.save_result_to_inbox` 为 true 时执行；该字段为 `null` 时按
+`not (task_type == "text" and schedule.type == "cron")` 解析，即消息内容类周期任务默认不存。
+普通执行失败不写事件，只有超时（`cron_timeout`）与投递失败（`cron_delivery_failed_fallback`）会写。
+
+2026-11-08 在 `qp-test`（2.2.2.post1）实测：`source_type=memory` 得 3 条、
+`source_type=cron` 得 1 条、`agent_id` 指向不存在的智能体得 0 条，
+`total` 与 `unread_count` 随筛选同步变化。2.3.0b2 的参数一致性尚未回归。
+
 ### 响应形状
 
 ```json
@@ -1389,7 +1446,7 @@ promotion`）与状态冲突。前者要展示「需先确认」并给「审核�
 
 ## 24、配套插件端点
 
-配套插件（`QwenPaw-Node-Plugin` 仓库，id `qwenpaw-node-bridge`）只补核心没有的能力。
+配套插件（`QwenPaw-Node-Bridge` 仓库，id `qwenpaw-node-bridge`）只补核心没有的能力。
 两端之间只有「路径 + 响应形状」这一层契约，版本号各自编号。
 
 ### 自述端点
@@ -1399,12 +1456,75 @@ GET /api/plugins/qwenpaw-node-bridge/info
 ```
 
 ```json
-{"plugin_version":"0.1.0","protocol_version":1,
- "server_version":"2.2.2.post1","capabilities":["info"]}
+{"plugin_version":"0.1.3","protocol_version":1,
+ "server_version":"2.2.2.post1","capabilities":["info","search","sse"]}
 ```
 
 未安装返回 **404**；服务端开启登录而请求没带 token 返回 **401**。
 两者含义完全不同：前者是「没装」，后者是「现在问不了」。
+
+### 会话全文检索端点
+
+```
+GET /api/plugins/qwenpaw-node-bridge/search?q=<关键词>&limit=20&cursor=<偏移量>
+```
+
+```json
+{"items":[{"session_id":"mobile-70d0c538","msg_id":"0b1f485e…","role":"assistant",
+  "created_at":"2026-11-01T01:21:49","snippet":"…[sleep]…","score":-3.42}],
+ "next_cursor":20,"total":31}
+```
+
+`q` 为空白时返回 **400**；`limit` 默认 20、上限 100；`cursor` 是**偏移量**而不是记录 id，
+因为 `seq` 只在单个 `history.db` 内唯一。
+
+两条取值规则都由实测确定，都与直觉相反：
+
+1. **`session_id` 是 `history.db` 的 `session_id` 列，不是 `/api/chats` 的对话 `id`。**
+   两者在 `mobile-*` 形态下恰好一一对应，但 Web 端的历史会话会出现一个
+   `session_id` 挂多个对话（实测 `1793496108871-ciozfnb` 对应三个对话）。
+   拿它直接请求 `/api/chats/{id}` 会返回 404 并让客户端误判为断线，必须先到对话列表换出 `id`。
+2. **`msg_id` 取 `dedup_key`（即消息对象的 `metadata.original_id`），不能用消息 `id`。**
+   `GET /api/chats/{id}` 每次请求都会重新生成消息 `id`，同一段内容两次请求拿到的值不同，
+   只有 `original_id` 稳定。滚动定位按它匹配。
+
+检索走两路：含 CJK 的查询用 `LIKE` 并在插件侧截取片段，其余用 FTS5 的 `snippet()` 与
+`bm25()`（`bm25` 返回负值，插件取负后作为 `score`）。
+`conversation_history_fts` 的 `tokenize='porter unicode61'` 不支持中文分词，
+连续汉字会被当作单个 token，FTS 对中文查询无效。
+
+消息范围限定 `kind in ('context_msg','model_turn')`。`history.db` 的 `kind` 只有
+`context_msg`（用户消息）、`model_turn`（助手正文）、`tool_result`（工具输出）三种，
+**没有 `kind='message'`**——那是 API 响应里的 `type` 字段值，照它写条件一条也查不到。
+`tool_result` 体积大且检索价值低，排除。
+
+命中片段用 `[` `]` 包裹，客户端把方括号渲染成高亮色，不原样显示。
+
+### 事件流端点
+
+```
+GET /api/plugins/qwenpaw-node-bridge/events
+Accept: text/event-stream
+```
+
+```
+event: ready
+data: {"protocol_version":1}
+
+event: inbox
+data: {"unread_count":3}
+
+event: approval
+data: {"pending":1}
+```
+
+连接建立后先发 `ready`，随后各发一次 `inbox` 与 `approval` 的当前值，此后只在数值变化时推送。
+插件每 2.5 秒在连接内部轮询一次 `inbox_store.query_events(limit=1)` 的未读数与
+`approvals.get_approval_service()._pending` 的条数，客户端断开即退出生成器。
+
+**只推这两类，不含 `cron`。** 定时任务的 `CronManager` 按 workspace 隔离，
+取摘要需要请求上下文里的智能体标识，而插件的事件生成器里没有 `Request`，
+拿不到当前 workspace。客户端因此保留原有的定时任务轮询，事件流只覆盖收件箱与审批。
 
 ### 客户端判定的三态
 

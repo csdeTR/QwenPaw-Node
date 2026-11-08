@@ -122,6 +122,11 @@ fun ChatListScreen(
     iconVersion: Long = 0L,
     /** 从相册为某对话选图标图片。参数是对话 id。 */
     onPickIconImage: ((String) -> Unit)? = null,
+    /**
+     * 打开全文检索页。为 null 表示不可用：未装配套插件，或用户关掉了
+     * 「依赖配套插件的功能」。此时入口置灰，并在说明行写「需要配套插件」。
+     */
+    onOpenGlobalSearch: (() -> Unit)? = null,
 ) {
     var renaming by remember { mutableStateOf<ChatSpecDto?>(null) }
     var deleting by remember { mutableStateOf<ChatSpecDto?>(null) }
@@ -220,6 +225,7 @@ fun ChatListScreen(
                 showChannelFilter = showChannelFilter,
                 channel = channel,
                 onChannel = { channel = it },
+                onOpenGlobalSearch = onOpenGlobalSearch,
                 onCreateGroup = {
                     groupNameText = ""
                     creatingGroup = true
@@ -835,6 +841,8 @@ private fun ListHeader(
     /** 当前选中的频道，null 表示全部。 */
     channel: String? = null,
     onChannel: (String?) -> Unit = {},
+    /** 全文检索入口。null 表示不可用，按钮置灰并显示说明行。 */
+    onOpenGlobalSearch: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -1051,6 +1059,55 @@ private fun ListHeader(
                             color = MaterialTheme.colorScheme.secondary,
                         )
                     }
+                }
+            }
+            // 全文检索入口。不可用时保留按钮并置灰，比整个隐藏更容易让人知道
+            // 「这个能力存在，但需要插件」，也不必再找一个地方解释它。
+            val globalSearch = onOpenGlobalSearch
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (globalSearch != null) MaterialTheme.colorScheme.surfaceVariant
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        )
+                        .then(
+                            if (globalSearch != null) Modifier.clickable(onClick = globalSearch)
+                            else Modifier
+                        )
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = QwenIcons.search,
+                            contentDescription = null,
+                            tint = if (globalSearch != null) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = "全文检索",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (globalSearch != null) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+                if (globalSearch == null) {
+                    Text(
+                        text = "需要配套插件",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
                 }
             }
             // 频道筛选只在候选多于一个时出现：只有一个渠道的实例上这一行不该占位置。

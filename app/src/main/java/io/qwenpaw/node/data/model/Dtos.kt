@@ -92,7 +92,15 @@ data class TurnUsageStatsDto(
     @SerialName("prompt_tokens") val promptTokens: Long = 0,
     @SerialName("completion_tokens") val completionTokens: Long = 0,
     @SerialName("cache_read_tokens") val cacheReadTokens: Long = 0,
-    @SerialName("cache_hit_rate") val cacheHitRate: Double = 0.0,
+    /**
+     * 缓存命中率（百分数）。
+     *
+     * 该轮没有可观测的缓存命中时（服务端 `cache_observed=false`、
+     * `cache_eligible_input_tokens=0`），服务端返回 `null` 而不是 0。
+     * 不能声明成非空类型：非空字段收到显式 null 时序列化库直接抛异常，
+     * 整份历史响应都会解析失败。
+     */
+    @SerialName("cache_hit_rate") val cacheHitRate: Double? = null,
     @SerialName("context_size") val contextSize: Long = 0,
 )
 
@@ -236,6 +244,39 @@ data class BridgeInfoDto(
         const val PROTOCOL = 1
     }
 }
+
+/**
+ * 一条全文检索命中，对应配套插件 `GET …/qwenpaw-node-bridge/search` 的 `items[]`。
+ *
+ * [sessionId] 是 `history.db` 的 `session_id`，**不是** `/api/chats` 里的对话 `id`。
+ * `mobile-*` 形态下两者一一对应，Web 端的历史会话会出现多个对话共用一个
+ * `session_id`，因此要先到对话列表里换出对话 `id` 再打开，
+ * 见 [io.qwenpaw.node.ui.chat.ChatViewModel.openChatAtMessage]。
+ *
+ * [msgId] 是 `history.db` 的 `dedup_key`，也是服务端消息对象
+ * `metadata.original_id` 的值。**不能用消息的 `id`**：历史接口每次请求都会重新生成
+ * `id`，同一段内容两次请求拿到的 `id` 不同，只有 `original_id` 稳定。
+ */
+@Serializable
+data class SearchHitDto(
+    @SerialName("session_id") val sessionId: String = "",
+    @SerialName("msg_id") val msgId: String = "",
+    val role: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+    /** 命中片段，命中词用 `[` `]` 包裹，由界面转成高亮。 */
+    val snippet: String = "",
+    val score: Double = 0.0,
+)
+
+/** `/search` 的一页结果。 */
+@Serializable
+data class SearchPageDto(
+    val items: List<SearchHitDto> = emptyList(),
+    /** 下一页的偏移量；`null` 表示没有更多。 */
+    @SerialName("next_cursor") val nextCursor: Int? = null,
+    /** 同条件命中总数，可能大于本页条数。 */
+    val total: Int = 0,
+)
 
 /** 附件上传结果，对应 `POST /api/console/upload`。 */
 @Serializable

@@ -245,4 +245,27 @@ class TurnStatsTest {
         assertEquals(0.75, stats.cacheHitRate, 0.001)
         assertTrue(!stats.cacheHitRate.isNaN())
     }
+
+    /**
+     * 实测：服务端在没有可观测缓存命中时（`cache_observed=false`、
+     * `cache_eligible_input_tokens=0`）给 `cache_hit_rate` 返回 **null**，不是 0。
+     *
+     * 该字段曾声明成非空 `Double`，一整份历史在这里解码失败，
+     * 界面上被报成「无法连接服务器，显示本地缓存」。
+     */
+    @Test
+    fun `null cache hit rate does not break decoding`() {
+        val raw = """
+            [{"id":"m1","type":"message","role":"assistant",
+              "content":[{"type":"text","text":"x"}],
+              "metadata":{"metadata":{"qwenpaw_turn_usage":{"usage":{
+                  "provider_id":"a2a","model_name":"deepseek-v4.1-flash",
+                  "prompt_tokens":13753,"completion_tokens":73,
+                  "cache_read_tokens":0,"cache_hit_rate":null,
+                  "context_size":13815}}}}}]
+        """.trimIndent()
+        val stats = HistoryMapper.map(parse(raw)).single().stats!!
+        assertEquals(0.0, stats.cacheHitRate, 1e-9)
+        assertEquals(13753L, stats.promptTokens)
+    }
 }

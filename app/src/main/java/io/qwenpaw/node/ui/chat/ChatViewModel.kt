@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerializationException
 import java.util.UUID
 
 /** 聊天页的可变状态。 */
@@ -102,6 +103,13 @@ data class ChatUiState(
      * 工具卡片的倒计时文案据此措辞：只有策略为 `offload` 时，到期才会自动转入后台。
      */
     val offloadAction: String? = null,
+    /**
+     * 待滚动定位的消息 `original_id`。
+     *
+     * 全文检索点进某条命中时写入，聊天页滚到对应气泡后调 `clearPendingScroll()` 清空。
+     * 用 `original_id` 而不是消息 `id`：后者每次请求历史都会变。
+     */
+    val pendingScrollMessageId: String? = null,
 ) {
     /**
      * 当前对话的 session_id，工具调用控制按它定位。
@@ -114,6 +122,23 @@ data class ChatUiState(
             chats.firstOrNull { it.id == id }?.sessionId ?: id
         }.orEmpty()
 }
+
+/**
+ * 全文检索的界面状态，与对话页的 [ChatUiState] 独立。
+ *
+ * 单独一条状态流：检索页可以从会话列表进入，此时对话页可能根本没打开过；
+ * 塞进 [ChatUiState] 会让检索结果随切换对话一起被重置。
+ */
+data class SearchUiState(
+    val query: String = "",
+    val items: List<io.qwenpaw.node.data.model.SearchHitDto> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null,
+    /** 下一页游标；`null` 表示没有更多。 */
+    val nextCursor: Int? = null,
+    /** 同条件命中总数。 */
+    val total: Int = 0,
+)
 
 /**
  * 链路状态。
@@ -363,6 +388,10 @@ class ChatViewModel(
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
+
+    private val _search = MutableStateFlow(SearchUiState())
+    val search: StateFlow<SearchUiState> = _search.asStateFlow()
+    private var searchJob: Job? = null
 
     /** 预览缓存的刷新戳，key 为 chatId，值为生成预览时的 `updated_at`。 */
     private val _previewStamps = mutableMapOf<String, String?>()
@@ -1240,6 +1269,91 @@ class ChatViewModel(
     }
 
     /**
+     * 发起一次全文检索，从第一页开始。
+     *
+     * 空白关键词直接清空结果，不请求服务端：插件对空 `q` 返回 400，
+     * 那不是用户需要看到的错误。
+     */
+    fun search(q: String) {
+        val keyword = q.trim()
+        searchJob?.cancel()
+        if (keyword.isEmpty()) {
+            _search.value = SearchUiState()
+            return
+        }
+        _search.value = SearchUiState(query = keyword, loading = true, nextCursor = 0)
+        searchJob = scope.launch { runSearch(keyword, 0, append = false) }
+    }
+
+    /** 追加下一页。游标为 `null` 或正在加载时不重复请求。 */
+    fun loadMoreSearch() {
+        val current = _search.value
+        val cursor = current.nextCursor ?: return
+        if (current.loading || current.query.isEmpty()) return
+        searchJob?.cancel()
+        _search.update { it.copy(loading = true, error = null) }
+        searchJob = scope.launch { runSearch(current.query, cursor, append = true) }
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        _search.value = SearchUiState()
+    }
+
+    private suspend fun runSearch(keyword: String, cursor: Int, append: Boolean) {
+        val conn = currentConnection
+        if (conn == null) {
+            _search.update { it.copy(loading = false, error = "未连接到服务器") }
+            return
+        }
+        val result = runCatching {
+            withContext(Dispatchers.IO) { api.pluginSearch(conn, keyword, SEARCH_PAGE_SIZE, cursor) }
+        }
+        result.onSuccess { page ->
+            _search.update { state ->
+                state.copy(
+                    loading = false,
+                    error = null,
+                    items = if (append) state.items + page.items else page.items,
+                    nextCursor = page.nextCursor,
+                    total = page.total,
+                )
+            }
+        }.onFailure { failure ->
+            _search.update {
+                it.copy(
+                    loading = false,
+                    error = "检索失败：${failure.message ?: failure.javaClass.simpleName}",
+                )
+            }
+        }
+    }
+
+    /**
+     * 从检索结果打开对话，并要求滚动到命中的那条消息。
+     *
+     * [sessionId] 是插件返回的 `history.db` 会话标识，不是对话 `id`，先在这里换成
+     * 对话 `id`。一个 `session_id` 可能对应多个对话（Web 端历史），此时取列表里
+     * 最新的那个：`history.db` 本身不含对话分支信息，无法再细分。
+     *
+     * [msgId] 是 `original_id`，不是消息 `id`。定位由聊天页在历史加载完成后执行，
+     * 定位完调 [clearPendingScroll]。
+     */
+    fun openChatAtMessage(sessionId: String, msgId: String) {
+        val chats = _state.value.chats + _state.value.archivedChats
+        val chatId = chats.firstOrNull { it.id == sessionId }?.id
+            ?: chats.firstOrNull { it.sessionId == sessionId }?.id
+            ?: sessionId
+        _state.update { it.copy(pendingScrollMessageId = msgId) }
+        openChat(chatId)
+    }
+
+    fun clearPendingScroll() {
+        if (_state.value.pendingScrollMessageId == null) return
+        _state.update { it.copy(pendingScrollMessageId = null) }
+    }
+
+    /**
      * 打开对话。
      *
      * [reloadHistory] 为 false 时只同步标题与运行状态，不再重复拉历史，
@@ -1349,15 +1463,19 @@ class ChatViewModel(
                 }
             } else {
                 // 离线：回退到本地缓存。
-                history.exceptionOrNull()?.let {
+                val failure = history.exceptionOrNull()
+                // 解析失败不等于连不上。服务端返回了 200，只是响应形状与本端不一致；
+                // 把它当成「无法连接服务器」会把排查方向引到网络上。
+                val decodeFailure = failure is SerializationException
+                failure?.let {
                     io.qwenpaw.node.log.RunLog.e(
                         io.qwenpaw.node.log.LogKind.NETWORK,
                         "ChatVM",
                         it,
-                        "拉取历史失败 chat=$chatId",
+                        if (decodeFailure) "解析历史失败 chat=$chatId" else "拉取历史失败 chat=$chatId",
                     )
                 }
-                updateLink(LinkState.OFFLINE)
+                if (!decodeFailure) updateLink(LinkState.OFFLINE)
                 // 缓存同样是「已有历史」，之后发消息不能把它冲掉。
                 historyPrefix = cachedMessages
                 _state.update {
@@ -1365,7 +1483,11 @@ class ChatViewModel(
                         loading = false,
                         messages = cachedMessages,
                         currentChatName = name,
-                        error = "无法连接服务器，显示本地缓存",
+                        error = if (decodeFailure) {
+                            "服务端返回的历史数据无法解析，显示本地缓存"
+                        } else {
+                            "无法连接服务器，显示本地缓存"
+                        },
                     )
                 }
                 loadDraft(chatId)
@@ -2225,6 +2347,9 @@ class ChatViewModel(
 
     companion object {
         private const val POLL_INTERVAL_MS = 2500L
+
+        /** 一页检索结果的条数。插件侧上限 50，这里取 20 配合「加载更多」。 */
+        internal const val SEARCH_PAGE_SIZE = 20
 
         /**
          * 手动新建对话时的占位名。

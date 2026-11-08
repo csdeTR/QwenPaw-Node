@@ -10,6 +10,7 @@ import io.qwenpaw.node.data.model.AuthTokenDto
 import io.qwenpaw.node.data.model.AvailableCommandsDto
 import io.qwenpaw.node.data.model.BatchChatResultDto
 import io.qwenpaw.node.data.model.BridgeInfoDto
+import io.qwenpaw.node.data.model.SearchPageDto
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
@@ -307,8 +308,44 @@ class QwenPawApi(
         }
     }
 
-    // ---------- 智能体 ----------
+    /**
+     * 插件事件流的请求对象。
+     *
+     * 执行时必须用 [streamClient]：SSE 是长连接，`probeClientShared` 的
+     * `readTimeout` 与 `callTimeout` 只有几秒，空闲期没有任何字节，
+     * 会被误判成失败掐掉。
+     */
+    fun bridgeEventsRequest(conn: Connection): Request =
+        baseBuilder(conn, connUrl(conn, BRIDGE_EVENTS_PATH))
+            .header("Accept", "text/event-stream")
+            .get()
+            .build()
 
+    /**
+     * 会话全文检索，走配套插件 `GET …/qwenpaw-node-bridge/search`。
+     *
+     * 与 [pluginBridgeInfo] 一样用 `probeClient()`：这个端点的耗时是几十到几百毫秒，
+     * 不该拖住主客户端的连接池。404 返回空页——插件没装时这就是终态，不是错误；
+     * 401/403 原样抛给上层，由调用方按「待重探」处理。
+     */
+    fun pluginSearch(conn: Connection, q: String, limit: Int, cursor: Int): SearchPageDto {
+        val url = connUrl(conn, BRIDGE_SEARCH_PATH).newBuilder()
+            .addQueryParameter("q", q)
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("cursor", cursor.toString())
+            .build()
+        val request = baseBuilder(conn, url).get().build()
+        return probeClient().newCall(request).execute().use { response ->
+            if (response.code == 404) return SearchPageDto()
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw failureOf(response.code, text, response.header("WWW-Authenticate"), conn.token != null)
+            }
+            decode(text, SearchPageDto.serializer())
+        }
+    }
+
+    // ---------- 智能体 ----------
     fun agents(conn: Connection): List<AgentDto> =
         decode(request(conn, "GET", "/api/agents"), AgentListDto.serializer()).agents
 
@@ -592,23 +629,52 @@ class QwenPawApi(
      * 收件箱事件一页。
      *
      * 响应没有 `has_more`，只有 `total`；分页结束判定交给 `PagedList.ofOffset`。
+     *
+     * `agentId` 与 `sourceType` 对应服务端的 `agent_id` / `source_type`。
+     * 两者都由服务端过滤后再统计 `total` 与 `unread_count`，因此筛选生效时
+     * 未读数只覆盖筛选范围，不是全局未读。
      */
     fun inboxEvents(
         conn: Connection,
         limit: Int = 50,
         offset: Int = 0,
         unreadOnly: Boolean = false,
+        agentId: String? = null,
+        sourceType: String? = null,
     ): InboxPageDto {
-        val query = buildList {
-            add("limit=$limit")
-            add("offset=$offset")
-            if (unreadOnly) add("unread_only=true")
-        }.joinToString("&")
-        return decode(
-            request(conn, "GET", "/api/console/inbox/events?$query"),
-            InboxPageDto.serializer(),
+        val url = inboxEventsUrl(
+            connUrl(conn, INBOX_EVENTS_PATH),
+            limit = limit,
+            offset = offset,
+            unreadOnly = unreadOnly,
+            agentId = agentId,
+            sourceType = sourceType,
         )
+        return decode(execute(baseBuilder(conn, url).get().build()), InboxPageDto.serializer())
     }
+
+    /**
+     * 收件箱查询的 URL 构造。
+     *
+     * 单独成函数是为了能直接单测参数拼装：空值不加参数，编码交给 OkHttp
+     * （智能体 id 里可能出现空格或中文）。
+     */
+    internal fun inboxEventsUrl(
+        base: HttpUrl,
+        limit: Int,
+        offset: Int,
+        unreadOnly: Boolean,
+        agentId: String?,
+        sourceType: String?,
+    ): HttpUrl = base.newBuilder()
+        .addQueryParameter("limit", limit.toString())
+        .addQueryParameter("offset", offset.toString())
+        .apply {
+            if (unreadOnly) addQueryParameter("unread_only", "true")
+            agentId?.takeIf { it.isNotBlank() }?.let { addQueryParameter("agent_id", it) }
+            sourceType?.takeIf { it.isNotBlank() }?.let { addQueryParameter("source_type", it) }
+        }
+        .build()
 
     /**
      * 标记已读。
@@ -1196,6 +1262,9 @@ class QwenPawApi(
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_BODY = ByteArray(0).toRequestBody(JSON_MEDIA)
 
+        /** 收件箱事件列表端点。 */
+        private const val INBOX_EVENTS_PATH = "/api/console/inbox/events"
+
         /**
          * 登录接口 404 的说明。
          *
@@ -1222,6 +1291,12 @@ class QwenPawApi(
          * `/info`、`/search`、`/events` 是核心没有的子路径，可以安全使用。
          */
         const val BRIDGE_INFO_PATH = "/api/plugins/qwenpaw-node-bridge/info"
+
+        /** 插件全文检索端点。中文查询由插件侧走 `LIKE`，英文走 FTS5。 */
+        const val BRIDGE_SEARCH_PATH = "/api/plugins/qwenpaw-node-bridge/search"
+
+        /** 插件事件流端点（SSE）。 */
+        const val BRIDGE_EVENTS_PATH = "/api/plugins/qwenpaw-node-bridge/events"
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             // 流式对话可能持续很久，读超时给足；其余请求单次不会超过这个值。
@@ -1263,6 +1338,21 @@ class QwenPawApi(
         }
 
         fun probeClient(): OkHttpClient = probeClientShared
+
+        /**
+         * 事件流专用客户端。
+         *
+         * 在 [probeClientShared] 基础上关掉两个超时：SSE 空闲期不产生任何字节，
+         * 5 秒读超时与 8 秒总超时都会把正常连接当失败终止。
+         */
+        private val streamClientShared: OkHttpClient by lazy {
+            probeClientShared.newBuilder()
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .callTimeout(0, TimeUnit.MILLISECONDS)
+                .build()
+        }
+
+        fun streamClient(): OkHttpClient = streamClientShared
 
         /** 把用户填写的 baseUrl 与路径拼成完整的 HttpUrl。 */
         fun resolve(baseUrl: String, path: String): HttpUrl {

@@ -55,6 +55,18 @@ sealed interface ChatItem {
     }
 }
 
+/**
+ * 条目里是否包含指定 `original_id` 的消息。
+ *
+ * 全文检索的 `msg_id` 就是 `original_id`。一个「处理过程」条目可能包含几十条消息，
+ * 命中任何一条都算这个条目被命中。
+ */
+fun ChatItem.containsOriginalId(originalId: String): Boolean = when (this) {
+    is ChatItem.Single -> message.originalId == originalId
+    is ChatItem.Steps -> steps.any { it.originalId == originalId }
+    is ChatItem.Files -> false
+}
+
 /** 过程里的一步：思考或工具调用。正文不算步骤，与官方计数口径一致。 */
 private fun ChatMessage.isStep(): Boolean =
     kind == ChatMessage.Kind.REASONING || kind == ChatMessage.Kind.TOOL

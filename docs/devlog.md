@@ -67,6 +67,8 @@
 | [53](#53v021-之后的一轮修复与设备验收2026-11-07) | 生成中刷新丢用户消息、移动到分组、输入法、倒计时、插件版本与 webp | 655 个单测；运行中的会话历史不含本轮消息；`group_id: null` 返回 400；keep-alive 5 秒导致探测误报 | [protocol.md](protocol.md) 第 25 节、[ui-guidelines.md](ui-guidelines.md) 9.17、9.19 |
 | [54](#54配套插件建仓与双包名等五项修复2026-11-07) | 插件独立仓库、后台时限收口、新建对话切不动、插件显示名、关于页链接、debug 双包名 | 657 个单测；插件首次提交 `ba64c77`；新建对话把旧视图写进新 id 的缓存 | [protocol.md](protocol.md) 第 19 节、[ui-guidelines.md](ui-guidelines.md) 9.17、[AGENTS.md](../AGENTS.md) 第 4 节 |
 | [55](#55安全提示拆成两个弹窗2026-11-07) | 公网安全提示拆成「未登录」与「未加密」两个弹窗，补「文档」入口 | 657 个单测；公网地址用 203.0.113.10 别名 + 转发验证；`lo` 上的别名会被 `route_localnet` 挡住 | [ui-guidelines.md](ui-guidelines.md) 9.18 |
+| [56](#56v022插件能力接入与四项体验改动2026-11-08) | 全文检索、事件流、思考强度滑块、字号预览、解码缺陷 | 681 个单测；`kind` 没有 `message`；API 消息 id 不稳定；插件 `chat_id` 实为 `session_id` | [protocol.md](protocol.md) 第 4、10、24 节、[ui-guidelines.md](ui-guidelines.md) 6.1、9.5.1 |
+| [57](#57收件箱筛选与定时任务写入条件2026-11-08) | 收件箱按来源与智能体筛选；核查定时任务写入条件 | 687 个单测；`save_result_to_inbox` 默认规则；筛选态未读数与「全部已读」的范围问题 | [protocol.md](protocol.md) 第 21 节、[ui-guidelines.md](ui-guidelines.md) 9.20 |
 
 ---
 
@@ -3444,7 +3446,7 @@ MiMark 在本仓库不存在，逐项核查如下。结论：那条横幅不是�
 
 用户问两件事：插件工程放在哪、从哪个版本开始做；以及客户端要能检测配套插件，
 装没装决定功能是禁用还是换实现。第一节已定在客户端仓库之外，
-目录现名为 `QwenPaw-Node-Plugin`，与客户端 `QwenPaw-Node` 平级。
+目录现名为 `QwenPaw-Node-Plugin`（该目录已更名为 `QwenPaw-Node-Bridge`），与客户端 `QwenPaw-Node` 平级。
 
 ### 41.1 为什么是 0.2.1，而不是 0.1.x 或最后
 
@@ -4906,6 +4908,162 @@ redroid 上实测两行完整显示，`uiautomator dump` 中该文本 bounds 为
 点击后与「知道了」走同一个推进逻辑：关闭当前这条并继续下一条，不停在当前弹窗上等第二次点击。
 
 结论落在 [ui-guidelines.md](ui-guidelines.md) 9.18。
+
+## 56、v0.2.2：插件能力接入与四项体验改动（2026-11-08）
+
+本轮范围由四条用户需求合一次交付：思考强度滑块、字号预览页、插件仓库名修正、
+「无法连接服务器」缺陷，再加上计划内的全文检索与事件流。
+
+### 56.1 计划里的三处错误假设
+
+计划阶段依据 API 文档推演了三处实现细节，开工后全部被实测推翻。
+
+**一、`history.db` 没有 `kind='message'`。** 计划照 API 响应的 `type=message`
+写了检索条件，实际执行时一条也查不到。两个容器（2.2.2.post1 与 2.3.0b2）的
+`conversation_history.kind` 只有三种取值：`context_msg`（用户消息）、
+`model_turn`（助手正文）、`tool_result`（助手工具输出）。`message` 是 API 层的
+`type` 字段，与库里的 `kind` 不是同一套枚举。
+
+**二、消息 `id` 不稳定。** 对同一对话连续两次 `GET /api/chats/{id}`，
+第一条消息的 `id` 分别是 `12994a2b…` 与 `5a333bf4…`，但两次的
+`metadata.original_id` 都是 `0b1f485e…`。因此滚动定位只能用 `original_id`
+（等于库里的 `dedup_key`），客户端为此在 `ChatMessage` 上加了 `originalId`。
+
+**三、插件的 `chat_id` 其实是 `session_id`。** 设备验收点检索结果时打开的是空对话，
+并弹出「无法连接服务器」。直接请求 `/api/chats/mobile-70d0c538` 返回
+404 `Chat not found`；`/api/chats` 里该对话的 `id` 是 `254d9239-…`，
+`session_id` 才是 `mobile-70d0c538`。两者在 `mobile-*` 形态下一一对应，
+但 Web 端的历史会话会出现一个 `session_id` 挂三个对话。处理方式是把插件字段
+改名为 `session_id`（v0.1.3），客户端先换成对话 `id` 再打开。
+
+这三条都写进了 [protocol.md](protocol.md) 第 24 节，避免后续按文档臆测。
+
+### 56.2 中文检索不能走 FTS
+
+`conversation_history_fts` 用 `tokenize='porter unicode61'`，不支持中文分词，
+连续汉字被当作单个 token。用中文关键词查 FTS 命中率极低。
+因此插件按查询是否含 CJK 分流：含 CJK 用 `LIKE` 并在插件侧截取片段，
+其余走 FTS5 的 `snippet()` 与 `bm25()`。实测 `bm25` 返回负值，插件取负后作为 `score`。
+
+`tool_result` 被排除在检索范围外：它体积大（一条工具输出可能上万字），
+且检索价值低于正文。
+
+### 56.3 事件流只推两类
+
+计划写的是 `?topics=inbox,cron,approval`。实测 `CronManager` 按 workspace 隔离，
+取摘要需要请求上下文里的智能体标识，而插件的事件生成器里没有 `Request`。
+因此范围裁到能拿到的两类：收件箱未读数与待审批条数。
+定时任务保留客户端原有轮询，事件流作为增强而不是替换。
+
+实现上没有用 `register_startup_hook` 起后台线程，而是在 SSE 生成器内部轮询
+（2.5 秒一次，客户端断开即退出）。理由是 startup hook 的生命周期与多订阅者
+没有明确契约，容易泄漏。
+
+### 56.4 思考强度：滑块初值取 `effective`
+
+对齐官方 Web 端后两种模型统一用滑块。设备验收发现一个只有真实数据才会暴露的问题：
+Qwen3.8-Flash 的 `budget_min = 1`、`budget_max = 262144`、
+`effective.budget_tokens = 131072`。初值取 `budget_min` 时对话框显示
+「1 tokens · 轻量思考」且滑块在最左端，与「跟随默认」的实际含义相反。
+改为优先取 `effective`（其次 `budget_default`、最后中点）后，
+对话框显示「131072 tokens · 均衡思考」，滑块居中。
+
+这条规则写进 [ui-guidelines.md](ui-guidelines.md) 9.5.1 第 2 条，
+单测 `inherit starts from effective budget instead of minimum` 覆盖。
+
+### 56.5 「无法连接服务器」的复验
+
+用户报告「杂谈」（`ba703f01-646e-4e3c-a565-e3892b367b52`）显示缓存提示而服务端正常。
+复验方式与结论：
+
+- 从 redroid 容器的网络命名空间（与 App 同一出口）连续 3 次请求该对话，
+  均为 200、928 KB、约 1.7 s，说明大响应与小/大对话无关；
+- 把响应落盘后交给 `ChatHistoryDto` 的 JVM 解析器，231 条消息全部解析成功；
+- 设备上打开该对话，历史正常渲染，无提示条。
+
+该对话的 221 个 usage 对象里 `cache_hit_rate` 都是 0–100 的百分数（`1.709`、`45.54`），
+不是 `null`。`null` 只在干净实例上出现，正是本轮修复的触发条件。
+单位与可空性写进 [protocol.md](protocol.md) 第 10 节，触发面判别写进第 4 节。
+
+### 56.6 验收
+
+- 单测 681 个通过（新增检索 DTO、事件解析、思考滑块三组用例）。
+- `assembleRelease` 四个 ABI 产出，`apksigner verify` 通过。
+- redroid（720×1600、280dpi）上逐项确认：思考强度在 `effort` 与 `budget` 两型模型下
+  都出现；字号预览页滑块可调且气泡实时缩放；检索 `sleep` 得到 26 条命中、
+  高亮正常、点命中打开对应对话；「杂谈」正常加载。
+
+结论落在 [protocol.md](protocol.md) 第 4、10、24 节、
+[ui-guidelines.md](ui-guidelines.md) 6.1 与 9.5.1、
+[guide.md](guide.md) 第 2、5 节。
+
+## 57、收件箱筛选与定时任务写入条件（2026-11-08）
+
+### 57.1 起因
+
+用户提出两个问题：定时任务为什么不进收件箱；能不能把 web 控制台的
+「按智能体筛选」「按来源筛选」加到 QP Node。前者是疑问，后者是难度评估。
+
+### 57.2 定时任务本来就会写收件箱
+
+结论是功能早已存在，缺的只是开关。`crons/manager.py` 在任务成功执行后调用
+`append_inbox_event(source_type="cron", event_type="cron_result")`，条件是
+`job.save_result_to_inbox` 为 true。该字段为 `null` 时，`crons/models.py` 的校验器按
+`not (task_type == "text" and schedule.type == "cron")` 解析，也就是**消息内容类 +
+周期任务默认不存，其余组合默认存**。这一条容易被误读成「自动就是一律存」，
+实际相反。
+
+另一处容易误判的是失败路径：普通异常只写任务历史，不写收件箱；
+只有超时（`cron_timeout`）与投递失败（`cron_delivery_failed_fallback`）才会产生事件。
+用户看到的「定时任务没进收件箱」因此有两种成因，查之前要先区分任务类型与执行结果。
+
+客户端当时已有三档开关（「自动 / 存入 / 不存」），本轮按用户选择**不改代码**，
+只把规则写进 [guide.md](guide.md) 第 9 节与 [protocol.md](protocol.md) 第 21 节。
+
+### 57.3 筛选的改动面
+
+服务端与 DTO 都不需要改：`/api/console/inbox/events` 早已接受 `agent_id`、
+`source_type`、`source_types`、`status`、`unread_only`，`InboxEventDto` 也带着
+`agentId` 与 `sourceType`。缺口全在客户端：查询参数、筛选状态、筛选条。
+
+本轮做单选而不是多选。服务端的 `source_types` 支持多值，但 411dp 宽度下多选选中态
+难辨认，web 控制台也是单选。来源用横向滚动 Chip，智能体入口放在行尾并用居中对话框
+（规范写进 [ui-guidelines.md](ui-guidelines.md) 9.20）。
+
+关于「agent 筛选是否值得做」，评估时的判断是价值低，理由是一个实例只绑定一个智能体。
+实测推翻了这一判断：`qp-test` 的 `/api/agents` 返回三项（`Default` 与 `QA Agent` 等），
+切换智能体后收件箱里会累积多个 `agent_id` 的事件，筛选因此有实际用途。
+这也说明**不要在实例上看一项配置就下结论，先请求一次列表**。
+
+### 57.4 三个语义坑
+
+1. **未读数是筛选范围内的。** `query_events` 在应用 `agent_id` / `status` / `source_type`
+   之后才统计 `unread_count`，`unread_only` 反而不影响它。插件 SSE 推的是全局计数，
+   筛选生效时必须短路，否则角标会在筛选过程中跳回全局值。
+2. **「全部已读」不分范围。** `mark_all_read` 清整库，不接受来源与智能体条件。
+   服务端没有按范围清已读的能力，客户端只能隐藏入口；做成「看起来能筛着清」
+   反而会误删范围外的未读。
+3. **本地过滤会失真。** 只筛已加载的 30 条时，`total` 与未读数都不对，
+   所以筛选必须重建分页并重新请求第一页。
+
+### 57.5 竞态
+
+切换筛选会重建 `PagedList`。旧请求晚于新请求返回时会把上一组筛选的数据覆盖上去，
+表现为「点了心跳却出现记忆的记录」。处理办法是给每次重建一个代次号，
+结果回来时对不上就丢弃；`loadMore` 同样在开始时记下代次，回来时不一致只复位加载态。
+
+### 57.6 验收
+
+- `testDebugUnitTest` 共 687 个通过，新增两组用例（收件箱查询参数 5 个、来源标签 3 个）。
+- 服务端在 `qp-test` 实测：`source_type=memory` 3 条、`source_type=cron` 1 条、
+  不存在的 `agent_id` 0 条，`total` 与 `unread_count` 随筛选同步变化。
+- redroid（720×1600、280dpi）逐项确认：选「记忆」得 3 条、选「定时任务」得 1 条、
+  选「心跳」显示「没有符合条件的记录」；智能体选 `Default` 得 4 条、选 `QA Agent` 得 0 条；
+  筛选生效时「全部已读」不显示，清除筛选后恢复；行末来源显示为「记忆」「定时任务」。
+- 验收用的 cron 事件写入测试实例后已删除，收件箱恢复到 3 条记忆事件。
+
+结论落在 [protocol.md](protocol.md) 第 21 节、[ui-guidelines.md](ui-guidelines.md) 9.20、
+[guide.md](guide.md) 第 2、9 节。
 
 ## 附录：几条反复起作用的原则
 

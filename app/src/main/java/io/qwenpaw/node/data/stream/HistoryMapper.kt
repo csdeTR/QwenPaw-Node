@@ -49,6 +49,14 @@ data class ChatMessage(
     val finishedAt: String? = null,
     /** 发送者名称。`metadata.original_name`：用户侧多为 `user`，助手侧是智能体名。 */
     val senderName: String? = null,
+    /**
+     * 服务端消息的稳定标识，取自 `metadata.original_id`，与 `history.db` 的
+     * `dedup_key` 相同。
+     *
+     * 不能拿 [id] 当稳定标识：历史接口每次请求都会重新生成 `id`，同一段内容两次
+     * 请求的 `id` 不同。全文检索的 `msg_id` 就是这个字段，据此可以滚动定位。
+     */
+    val originalId: String? = null,
     /** 本轮用量统计，只在该轮最后一条 assistant 消息上有值。 */
     val stats: TurnStats? = null,
     /**
@@ -245,6 +253,7 @@ object HistoryMapper {
                         timestamp = meta?.timestamp,
                         finishedAt = meta?.finishedAt,
                         senderName = meta?.originalName,
+                        originalId = meta?.originalId,
                         stats = stats,
                     )
                 }
@@ -307,7 +316,8 @@ object HistoryMapper {
             completionTokens = usage.completionTokens,
             cacheReadTokens = usage.cacheReadTokens,
             // 服务端给百分数（实测 74.99 表示 75%），折成 0..1 小数。
-            cacheHitRate = usage.cacheHitRate / 100.0,
+            // null 表示该轮没有可观测的缓存命中，按 0 显示。
+            cacheHitRate = (usage.cacheHitRate ?: 0.0) / 100.0,
             model = usage.modelName,
             providerId = usage.providerId,
         )

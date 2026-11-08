@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.inbox
 
+import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.InboxEventDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
@@ -28,7 +29,17 @@ data class InboxUiState(
     val hasMore: Boolean = true,
     val error: String? = null,
     val loaded: Boolean = false,
-)
+    /** 来源筛选，取值见 [INBOX_SOURCE_FILTERS]；null 表示全部。 */
+    val sourceFilter: String? = null,
+    /** 智能体筛选，null 表示全部。 */
+    val agentFilter: String? = null,
+    /** 智能体筛选项。加载失败时为空，下拉只剩「全部智能体」。 */
+    val agentOptions: List<AgentDto> = emptyList(),
+    val agentsLoaded: Boolean = false,
+) {
+    /** 是否处于任一筛选下。筛选生效时未读数只覆盖筛选范围。 */
+    val filtered: Boolean get() = sourceFilter != null || agentFilter != null
+}
 
 /**
  * 收件箱。
@@ -39,10 +50,16 @@ data class InboxUiState(
  *
  * 未读数由服务端在每次查询时一并返回，客户端不在本地推算：
  * 未读的定义（过滤条件、状态）在服务端，本地算容易与角标对不上。
+ * 代价是**筛选生效时未读数只统计筛选范围**，与全局未读不同。
+ *
+ * 来源与智能体筛选都由服务端完成，切换筛选时重建 [PagedList] 而不是在本地过滤：
+ * 本地过滤只能筛出已加载的 30 条，`total` 与未读数都会失真。
  */
 class InboxViewModel(
     private val api: QwenPawApi,
     private val connection: () -> Connection?,
+    /** 智能体筛选项的来源。失败时返回空列表，筛选项退化为「全部智能体」。 */
+    private val loadAgents: suspend () -> List<AgentDto> = { emptyList() },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -60,25 +77,100 @@ class InboxViewModel(
     private var fetchedUnread: Int = 0
     private var fetchedTotal: Int = 0
 
-    private suspend fun fetchPage(conn: Connection, offset: Int): OffsetPage<InboxEventDto> {
-        val page = withContext(Dispatchers.IO) { api.inboxEvents(conn, PAGE_SIZE, offset) }
+    /**
+     * 加载代次。
+     *
+     * 切换筛选会重建列表；旧请求晚于新请求返回时，代次对不上就丢弃结果，
+     * 否则列表会被上一组筛选的数据覆盖。
+     */
+    private var loadGeneration: Int = 0
+
+    private suspend fun fetchPage(
+        conn: Connection,
+        offset: Int,
+        sourceType: String?,
+        agentId: String?,
+    ): OffsetPage<InboxEventDto> {
+        val page = withContext(Dispatchers.IO) {
+            api.inboxEvents(conn, PAGE_SIZE, offset, agentId = agentId, sourceType = sourceType)
+        }
         fetchedUnread = page.unreadCount
         fetchedTotal = page.total
         return OffsetPage(page.events, page.total)
     }
 
+    /**
+     * 插件事件流推来的未读数。
+     *
+     * 只改角标，不动已加载的列表：事件流不携带条目内容，重新拉列表是进入页面时
+     * 的事。数字不变时直接返回，避免每次心跳都触发一次重组。
+     *
+     * 事件流推的是**全局**未读，与筛选范围内的数字不同源；筛选生效时直接忽略，
+     * 否则角标会在筛选过程中跳回全局值。
+     */
+    fun applyUnreadCount(count: Int) {
+        if (_state.value.filtered) return
+        if (_state.value.unreadCount == count) return
+        _state.update { it.copy(unreadCount = count) }
+    }
+
     /** 首次进入或手动刷新：清空重来。 */
-    fun refresh() {
-        val conn = connection() ?: return
-        if (_state.value.loading) return
-        _state.update { it.copy(loading = true, error = null) }
+    fun refresh() = reload()
+
+    /** 切换来源筛选。值未变时直接返回，避免无谓重载。 */
+    fun setSourceFilter(sourceType: String?) {
+        if (_state.value.sourceFilter == sourceType) return
+        _state.update { it.copy(sourceFilter = sourceType) }
+        reload()
+    }
+
+    /** 切换智能体筛选。值未变时直接返回。 */
+    fun setAgentFilter(agentId: String?) {
+        if (_state.value.agentFilter == agentId) return
+        _state.update { it.copy(agentFilter = agentId) }
+        reload()
+    }
+
+    /**
+     * 拉取智能体筛选项。
+     *
+     * 只在首次进入收件箱时拉一次；失败静默，`agentsLoaded` 置 true 后不再重试，
+     * 下拉仍可用「全部智能体」。筛选不是主流程，不该为它弹错误。
+     */
+    fun loadAgentOptions() {
+        if (_state.value.agentsLoaded) return
+        _state.update { it.copy(agentsLoaded = true) }
         scope.launch {
-            val list = PagedList.ofOffset<InboxEventDto>(limit = PAGE_SIZE) { offset ->
-                fetchPage(conn, offset)
-            }
-            paged = list
+            val agents = runCatching { withContext(Dispatchers.IO) { loadAgents() } }
+                .getOrDefault(emptyList())
+            _state.update { it.copy(agentOptions = agents) }
+        }
+    }
+
+    private fun reload() {
+        val conn = connection() ?: return
+        val generation = ++loadGeneration
+        val sourceType = _state.value.sourceFilter
+        val agentId = _state.value.agentFilter
+        val list = PagedList.ofOffset<InboxEventDto>(limit = PAGE_SIZE) { offset ->
+            fetchPage(conn, offset, sourceType, agentId)
+        }
+        paged = list
+        _state.update {
+            it.copy(
+                events = emptyList(),
+                hasMore = true,
+                total = 0,
+                unreadCount = 0,
+                loading = true,
+                loaded = false,
+                error = null,
+            )
+        }
+        scope.launch {
             runCatching { list.refresh() }
                 .onSuccess { result ->
+                    if (generation != loadGeneration) return@onSuccess
                     _state.update {
                         it.copy(
                             events = list.items,
@@ -91,6 +183,7 @@ class InboxViewModel(
                     }
                 }
                 .onFailure { e ->
+                    if (generation != loadGeneration) return@onFailure
                     _state.update { it.copy(loading = false, loaded = true, error = ErrorText.of(e)) }
                 }
         }
@@ -98,13 +191,17 @@ class InboxViewModel(
 
     /** 触底加载下一页。没有更多或正在加载时直接返回。 */
     fun loadMore() {
-        val conn = connection() ?: return
         val list = paged ?: return
         if (!_state.value.hasMore || _state.value.loadingMore) return
+        val generation = loadGeneration
         _state.update { it.copy(loadingMore = true) }
         scope.launch {
             runCatching { list.loadNext() }
                 .onSuccess { result ->
+                    if (generation != loadGeneration) {
+                        _state.update { it.copy(loadingMore = false) }
+                        return@onSuccess
+                    }
                     _state.update {
                         it.copy(
                             events = list.items,
@@ -116,6 +213,10 @@ class InboxViewModel(
                     }
                 }
                 .onFailure { e ->
+                    if (generation != loadGeneration) {
+                        _state.update { it.copy(loadingMore = false) }
+                        return@onFailure
+                    }
                     _state.update { it.copy(loadingMore = false, error = ErrorText.of(e)) }
                 }
         }
@@ -176,8 +277,9 @@ class InboxViewModel(
 
     fun dismissError() = _state.update { it.copy(error = null) }
 
-    /** 换实例或换智能体时清空：旧事件归属上一个智能体，留着会误导。 */
+    /** 换实例或换智能体时清空：旧事件归属上一个智能体，留着会误导。筛选一并清空。 */
     fun clear() {
+        loadGeneration++
         paged = null
         fetchedUnread = 0
         fetchedTotal = 0

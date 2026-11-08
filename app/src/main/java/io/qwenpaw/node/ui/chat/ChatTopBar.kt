@@ -78,7 +78,8 @@ fun ChatTopBar(
     onExport: () -> Unit = {},
     onRefresh: () -> Unit = {},
     onContextClick: () -> Unit = {},
-    onSetThinking: (String) -> Unit = {},
+    /** 设置思考强度。离散档位只传 level，数值预算传 `level="budget"` 与实际 token 数。 */
+    onSetThinking: (level: String, budgetTokens: Long?) -> Unit = { _, _ -> },
     onSetGroup: (String?) -> Unit = {},
     onPickModel: (providerId: String?, model: String?) -> Unit = { _, _ -> },
     onPickApproval: (String) -> Unit = {},
@@ -89,13 +90,14 @@ fun ChatTopBar(
     onOpenApprovalDialog: () -> Unit = {},
     /** 打开「移动到分组」对话框。 */
     onOpenGroupDialog: () -> Unit = {},
+    /** 打开「思考强度」对话框。 */
+    onOpenThinkingDialog: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
-    var thinkingMenu by remember { mutableStateOf(false) }
-    // 模型支持的思考档位；空表示不可调节，此时不显示入口。
-    val efforts = thinking?.control?.efforts.orEmpty()
-    val canAdjustThinking = efforts.isNotEmpty() || thinking?.control?.supportsOff == true
+    // 服务端只在切换模型后才带回能力描述：effort 型给档位，budget 型给 token 区间。
+    // 两种都要能进滑块，因此判据交给 ThinkingScale，而不是只看 efforts。
+    val thinkingScale = remember(thinking) { ThinkingScale.of(thinking?.control) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -280,16 +282,19 @@ fun ChatTopBar(
                         },
                     )
 
-                    // 思考模式：只在模型明确支持调节时给出可选项。
-                    if (canAdjustThinking) {
+                    // 思考强度：effort 型与 budget 型都走同一条滑块，与官方 Web 端一致。
+                    if (thinkingScale != null) {
                         DropdownMenuItem(
                             text = {
-                                Text("思考模式：${thinkingLevelLabel(thinking?.value?.level)}")
+                                Text(
+                                    "思考强度：${thinkingScale.label(thinking?.value)}",
+                                )
                             },
                             leadingIcon = { MenuIcons.Leading(MenuAction.THINKING) },
+                            enabled = thinkingScale.adjustable,
                             onClick = {
                                 menu = false
-                                thinkingMenu = true
+                                onOpenThinkingDialog()
                             },
                         )
                     }
@@ -330,36 +335,9 @@ fun ChatTopBar(
                         },
                     )
                 }
-                DropdownMenu(expanded = thinkingMenu, onDismissRequest = { thinkingMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("跟随模型默认") },
-                        onClick = {
-                            thinkingMenu = false
-                            onSetThinking("inherit")
-                        },
-                    )
-                    if (thinking?.control?.supportsOff == true) {
-                        DropdownMenuItem(
-                            text = { Text("关闭思考") },
-                            onClick = {
-                                thinkingMenu = false
-                                onSetThinking("off")
-                            },
-                        )
-                    }
-                    efforts.forEach { effort ->
-                        DropdownMenuItem(
-                            text = { Text(thinkingLevelLabel(effort)) },
-                            onClick = {
-                                thinkingMenu = false
-                                onSetThinking(effort)
-                            },
-                        )
-                    }
-                }
-                // 模型 / 审批 / 分组三项的二级选择改由外层渲染成居中对话框：
-                // 下拉菜单贴着这个小图标展开，长列表会顶到屏幕边缘且不好滚。
-                // 这里保留思考模式的二级菜单——它最多五六项，下拉反而更快。
+                // 模型 / 审批 / 分组 / 思考强度四项的二级选择都改由外层渲染成居中对话框：
+                // 下拉菜单贴着这个小图标展开，长列表会顶到屏幕边缘且不好滚；
+                // 思考强度是一条滑块，本来也放不进菜单项。
             }
         }
         Box(
@@ -458,11 +436,11 @@ internal fun connectedLabel(
     }
 }
 
-/** 思考档位的中文标签。 */
+/** 思考档位的中文标签。措辞与官方 Web 端一致。 */
 internal fun thinkingLevelLabel(level: String?): String = when (level) {
-    null, "", "inherit" -> "跟随模型"
-    "off" -> "关闭"
-    "minimal" -> "最低"
+    null, "", "inherit" -> "跟随默认"
+    "off" -> "关闭思考"
+    "minimal" -> "极低"
     "low" -> "低"
     "medium" -> "中"
     "high" -> "高"

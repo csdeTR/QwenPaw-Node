@@ -3,6 +3,7 @@ package io.qwenpaw.node.ui.inbox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,13 +20,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.InboxEventDto
 import io.qwenpaw.node.ui.TimeLabels
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
@@ -63,9 +68,15 @@ fun InboxScreen(
     onMarkRead: (String) -> Unit,
     onDelete: (String) -> Unit,
     onDismissError: () -> Unit,
+    onSourceFilter: (String?) -> Unit,
+    onAgentFilter: (String?) -> Unit,
+    onLoadAgents: () -> Unit,
 ) {
     var deleting by remember { mutableStateOf<InboxEventDto?>(null) }
+    var pickingAgent by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    LaunchedEffect(Unit) { onLoadAgents() }
 
     // 触底加载下一页：提前两屏开始取，滚动时不易看到空白。
     LaunchedEffect(listState, state.events.size, state.hasMore) {
@@ -121,7 +132,7 @@ fun InboxScreen(
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    if (state.unreadCount > 0) {
+                    if (state.unreadCount > 0 && !state.filtered) {
                         Text(
                             text = "全部已读",
                             style = MaterialTheme.typography.labelMedium,
@@ -133,6 +144,16 @@ fun InboxScreen(
                         )
                     }
                 }
+                InboxFilterRow(
+                    sourceFilter = state.sourceFilter,
+                    agentFilter = state.agentFilter,
+                    agentLabel = state.agentOptions
+                        .firstOrNull { it.id == state.agentFilter }
+                        ?.let { it.name.ifBlank { it.id } }
+                        ?: state.agentFilter,
+                    onSourceFilter = onSourceFilter,
+                    onPickAgent = { pickingAgent = true },
+                )
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -160,11 +181,15 @@ fun InboxScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = if (state.loaded) "收件箱是空的" else "正在加载",
+                        text = when {
+                            !state.loaded -> "正在加载"
+                            state.filtered -> "没有符合条件的记录"
+                            else -> "收件箱是空的"
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    if (state.loaded) {
+                    if (state.loaded && !state.filtered) {
                         Spacer(Modifier.height(6.dp))
                         Text(
                             text = "定时任务与记忆写入的结果会出现在这里",
@@ -218,6 +243,18 @@ fun InboxScreen(
                 deleting = null
             },
             onDismiss = { deleting = null },
+        )
+    }
+
+    if (pickingAgent) {
+        AgentFilterDialog(
+            options = state.agentOptions,
+            selectedId = state.agentFilter,
+            onSelect = {
+                pickingAgent = false
+                onAgentFilter(it)
+            },
+            onDismiss = { pickingAgent = false },
         )
     }
 }
@@ -280,7 +317,7 @@ private fun InboxEventRow(
             Spacer(Modifier.height(4.dp))
             Text(
                 text = buildString {
-                    append(event.sourceType)
+                    append(inboxSourceLabel(event.sourceType))
                     if (event.status.isNotBlank()) append("，").append(event.status)
                 },
                 style = MaterialTheme.typography.labelSmall,
@@ -296,6 +333,140 @@ private fun severityColor(severity: String) = when (severity) {
     "error", "critical", "warning" -> MaterialTheme.colorScheme.error
     "success" -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.secondary
+}
+
+/**
+ * 筛选条：来源单选 + 智能体入口。
+ *
+ * 来源用横向滚动的 Chip 而不是下拉：五个来源在 411dp 宽度下一行放不下，
+ * 但滚动条比弹出菜单少一层操作，切换筛选是高频动作。
+ */
+@Composable
+private fun InboxFilterRow(
+    sourceFilter: String?,
+    agentFilter: String?,
+    agentLabel: String?,
+    onSourceFilter: (String?) -> Unit,
+    onPickAgent: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FilterChip(label = "全部", selected = sourceFilter == null, onClick = { onSourceFilter(null) })
+        INBOX_SOURCE_FILTERS.forEach { type ->
+            FilterChip(
+                label = inboxSourceLabel(type),
+                selected = sourceFilter == type,
+                onClick = { onSourceFilter(type) },
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        FilterChip(
+            label = agentLabel ?: "全部智能体",
+            selected = agentFilter != null,
+            onClick = onPickAgent,
+        )
+    }
+}
+
+@Composable
+private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (selected) {
+            MaterialTheme.colorScheme.onPrimary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    )
+}
+
+/**
+ * 智能体选择。首项固定为「全部智能体」，用于清除筛选。
+ *
+ * 选项来自 `GET /api/agents`。一个实例通常只绑定一个智能体，因此列表往往只有一项；
+ * 这里仍按完整列表提供，避免在服务端切换过智能体后筛不到历史事件。
+ */
+@Composable
+private fun AgentFilterDialog(
+    options: List<AgentDto>,
+    selectedId: String?,
+    onSelect: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "筛选智能体",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        text = {
+            Column {
+                AgentOptionRow(
+                    label = "全部智能体",
+                    selected = selectedId == null,
+                    onClick = { onSelect(null) },
+                )
+                options.forEach { agent ->
+                    AgentOptionRow(
+                        label = agent.name.ifBlank { agent.id },
+                        selected = selectedId == agent.id,
+                        onClick = { onSelect(agent.id) },
+                    )
+                }
+                if (options.isEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "未能读取智能体列表",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+    )
+}
+
+@Composable
+private fun AgentOptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        color = if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+    )
 }
 
 @Composable

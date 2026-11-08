@@ -224,6 +224,7 @@ fun SettingsScreen(
             SettingsPage.ADD_FORM, SettingsPage.ADD_WIZARD -> addMode = null
             SettingsPage.ADD_MODE -> adding = false
             SettingsPage.EDIT -> editing = null
+            SettingsPage.APPEARANCE_PREVIEW -> section = SettingsPage.APPEARANCE
             else -> section = SettingsPage.MAIN
         }
     }
@@ -446,7 +447,14 @@ fun SettingsScreen(
                 .padding(padding),
         ) {
             SettingsTopBar(
-                onBack = { if (page == SettingsPage.MAIN) onBack() else section = SettingsPage.MAIN },
+                // 字号预览是外观页的下一级，返回要回到外观，不能一键跳回一级列表。
+                onBack = {
+                    when (page) {
+                        SettingsPage.MAIN -> onBack()
+                        SettingsPage.APPEARANCE_PREVIEW -> section = SettingsPage.APPEARANCE
+                        else -> section = SettingsPage.MAIN
+                    }
+                },
                 subtitle = if (page == SettingsPage.MAIN) {
                     "QwenPaw Node 版本 $appVersion"
                 } else {
@@ -456,7 +464,14 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(scrollState)
+                    .then(
+                        // 预览页的滑块必须钉在底部，这一页不能整页滚动。
+                        if (page == SettingsPage.APPEARANCE_PREVIEW) {
+                            Modifier
+                        } else {
+                            Modifier.verticalScroll(scrollState)
+                        },
+                    )
                     .padding(bottom = 24.dp),
             ) {
                 when (page) {
@@ -692,6 +707,7 @@ fun SettingsScreen(
                         min = io.qwenpaw.node.ui.theme.FontScaling.CHAT_MIN,
                         max = io.qwenpaw.node.ui.theme.FontScaling.CHAT_MAX,
                         onValueChange = onChatScale,
+                        onPreview = { section = SettingsPage.APPEARANCE_PREVIEW },
                     )
                     Divider()
                     // MiSans 与字号同属「字怎么显示」，放在外观组而不是通知组。
@@ -716,6 +732,14 @@ fun SettingsScreen(
                         },
                     )
                 }
+                }
+
+                SettingsPage.APPEARANCE_PREVIEW -> {
+                    ChatFontPreview(
+                        chatScale = chatScale,
+                        onChatScale = onChatScale,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
 
                 SettingsPage.PROFILE -> {
@@ -1136,6 +1160,8 @@ internal enum class SettingsPage {
     SERVER,
     PROFILE,
     APPEARANCE,
+    /** 聊天字号预览页，外观页的下一级。 */
+    APPEARANCE_PREVIEW,
     MESSAGES,
     VOICE,
     BEHAVIOR,
@@ -1169,6 +1195,7 @@ private fun sectionTitle(section: SettingsPage): String = when (section) {
     SettingsPage.SERVER -> "服务器"
     SettingsPage.PROFILE -> "我的资料"
     SettingsPage.APPEARANCE -> "外观"
+    SettingsPage.APPEARANCE_PREVIEW -> "字号预览"
     SettingsPage.MESSAGES -> "消息显示"
     SettingsPage.VOICE -> "语音"
     SettingsPage.BEHAVIOR -> "通知与行为"
@@ -1931,6 +1958,8 @@ private fun ScaleSlider(
     min: Float,
     max: Float,
     onValueChange: (Float) -> Unit,
+    /** 非空时在「重置」左侧多一个「预览」入口，目前只有聊天字号用到。 */
+    onPreview: (() -> Unit)? = null,
 ) {
     Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1940,6 +1969,17 @@ private fun ScaleSlider(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (onPreview != null) {
+                Text(
+                    text = "预览",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(onClick = onPreview)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
             Text(

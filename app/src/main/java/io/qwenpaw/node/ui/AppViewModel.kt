@@ -7,6 +7,7 @@ import io.qwenpaw.node.data.InstanceRepository
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceDraft
 import io.qwenpaw.node.data.model.AgentDto
+import io.qwenpaw.node.data.plugin.bridgeEventStream
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.ui.chat.ChatViewModel
 import io.qwenpaw.node.ui.theme.FontScaling
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -164,6 +166,9 @@ class AppViewModel(
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** 插件事件流的长连接。切实例、关开关或重探时取消，避免旧连接继续推数。 */
+    private var eventsJob: kotlinx.coroutines.Job? = null
     private val _state = MutableStateFlow(
         AppState(
             connected = repository.active() != null,
@@ -733,6 +738,8 @@ class AppViewModel(
     fun setBridgeFeaturesEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_BRIDGE_FEATURES, enabled).apply()
         _state.update { it.copy(bridgeFeaturesEnabled = enabled) }
+        // 开启时先连上事件流；关闭时立即断开，不等下一次重探。
+        if (enabled) refreshBridgeStatus() else stopBridgeEvents()
     }
 
     /**
@@ -807,7 +814,56 @@ class AppViewModel(
                 probe.probe(instance.id, conn)
             }
             _state.update { it.copy(bridgeStatus = status) }
+            restartBridgeEvents(status, conn)
         }
+    }
+
+    /**
+     * 按插件能力与总开关决定事件流要不要连。
+     *
+     * 每次重探都先取消旧连接：插件版本可能变了（比如从 0.1.1 升到 0.1.2 才有
+     * `sse`），旧连接的语义不一定还成立。
+     */
+    private fun restartBridgeEvents(
+        status: io.qwenpaw.node.data.plugin.BridgeStatus,
+        conn: Connection,
+    ) {
+        eventsJob?.cancel()
+        eventsJob = null
+        if (!_state.value.bridgeFeaturesEnabled) return
+        val info = (status as? io.qwenpaw.node.data.plugin.BridgeStatus.Ready)?.info ?: return
+        if (!info.supports("sse")) return
+        eventsJob = scope.launch {
+            runCatching {
+                api.bridgeEventStream(conn).collect { event ->
+                    when (event) {
+                        io.qwenpaw.node.data.plugin.BridgeEvent.Ready -> Unit
+                        is io.qwenpaw.node.data.plugin.BridgeEvent.Unread ->
+                            inbox.applyUnreadCount(event.unreadCount)
+                        // 待审批数由对话页的 `push-messages` 轮询负责，那里还要拿
+                        // 审批内容本身；这里只更新角标没有意义。
+                        is io.qwenpaw.node.data.plugin.BridgeEvent.PendingApproval -> Unit
+                    }
+                }
+            }.onFailure { failure ->
+                // 主动取消（切实例、关开关）不是故障，不写日志。
+                if (failure is kotlinx.coroutines.CancellationException) return@onFailure
+                // 长连接断了就回到「进入页面时刷新」，不自动重连：反复重连只会在
+                // 服务端不可用时刷满日志，而用户能感知的差异只有角标延迟。
+                io.qwenpaw.node.log.RunLog.e(
+                    io.qwenpaw.node.log.LogKind.NETWORK,
+                    "BridgeEvents",
+                    failure,
+                    "事件流结束，回落到按需刷新",
+                )
+            }
+        }
+    }
+
+    /** 关掉事件流。总开关关闭或退出登录时调用。 */
+    private fun stopBridgeEvents() {
+        eventsJob?.cancel()
+        eventsJob = null
     }
 
     fun setVoiceEnabled(enabled: Boolean) {
@@ -958,6 +1014,10 @@ class AppViewModel(
         get() = inboxHolder ?: io.qwenpaw.node.ui.inbox.InboxViewModel(
             api = api,
             connection = ::activeConnection,
+            // 智能体筛选的选项。失败时 InboxViewModel 会静默退化为「全部智能体」，不阻塞列表。
+            loadAgents = {
+                repository.active()?.let { repository.agentsFor(it) } ?: emptyList()
+            },
         ).also { inboxHolder = it }
 
     /** 工具、环境变量与后台策略共用同一个连接来源。 */

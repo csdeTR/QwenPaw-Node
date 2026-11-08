@@ -89,7 +89,8 @@ fun ChatScreen(
     onExport: () -> Unit = {},
     /** 重新载入当前对话：断网恢复后的主要入口。 */
     onRefresh: () -> Unit = {},
-    onSetThinking: (String) -> Unit = {},
+    /** 设置思考强度。离散档位只传 level，数值预算传 `level="budget"` 与实际 token 数。 */
+    onSetThinking: (level: String, budgetTokens: Long?) -> Unit = { _, _ -> },
     onSetGroup: (String?) -> Unit = {},
     onPickModel: (providerId: String?, model: String?) -> Unit = { _, _ -> },
     onPickApproval: (String) -> Unit = {},
@@ -114,6 +115,8 @@ fun ChatScreen(
     onCancelTool: (String) -> Unit = {},
     onOffloadTool: (String) -> Unit = {},
     onExtendTool: (id: String, seconds: Double?, target: String) -> Unit = { _, _, _ -> },
+    /** 全文检索定位滚动完成后调用，用于清空 `pendingScrollMessageId`。 */
+    onPendingScrollHandled: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -123,10 +126,11 @@ fun ChatScreen(
     var viewingImage by remember { mutableStateOf<String?>(null) }
     var showContext by remember { mutableStateOf(false) }
     var showProjectDir by remember { mutableStateOf(false) }
-    // 三处二级选择统一放在这里，避免继续膨胀 ChatTopBar 的菜单 flag。
+    // 四处二级选择统一放在这里，避免继续膨胀 ChatTopBar 的菜单 flag。
     var showModelDialog by remember { mutableStateOf(false) }
     var showApprovalDialog by remember { mutableStateOf(false) }
     var showGroupDialog by remember { mutableStateOf(false) }
+    var showThinkingDialog by remember { mutableStateOf(false) }
 
     // 首屏只渲染最近的一页，向上滚动时再往前补。
     // 560+ 条的历史一次铺开会明显掉帧，尤其在低端机上。
@@ -152,6 +156,28 @@ fun ChatScreen(
     val windowStart = rawStart.coerceAtMost(maxStart)
     val timeline = remember(allItems, windowStart) { buildTimeline(allItems, windowStart) }
     val hasMore = windowStart > 0
+
+    // 全文检索点进来的定位。
+    //
+    // 目标条目可能早于当前窗口（窗口只渲染最近一页），所以分两步：先把窗口往前挪，
+    // 让目标进入 timeline，再滚动。直接找 timeline 会找不到，而且不挪窗口就永远滚不过去。
+    val pendingScrollId = state.pendingScrollMessageId
+    LaunchedEffect(pendingScrollId) {
+        val id = pendingScrollId ?: return@LaunchedEffect
+        if (state.loading) return@LaunchedEffect
+        val itemIndex = allItems.indexOfFirst { it.containsOriginalId(id) }
+        if (itemIndex >= 0 && itemIndex < windowStart) {
+            rawStart = (itemIndex - 2).coerceAtLeast(0)
+        }
+    }
+    LaunchedEffect(pendingScrollId, timeline, hasMore) {
+        val id = pendingScrollId ?: return@LaunchedEffect
+        val index = timeline.indexOfFirst { it.containsOriginalId(id) }
+        if (index >= 0) {
+            listState.animateScrollToItem(index + if (hasMore) 1 else 0)
+            onPendingScrollHandled()
+        }
+    }
 
     // 已经发出、但智能体还没吐出第一条内容。
     //
@@ -387,6 +413,7 @@ fun ChatScreen(
                 onOpenModelDialog = { showModelDialog = true },
                 onOpenApprovalDialog = { showApprovalDialog = true },
                 onOpenGroupDialog = { showGroupDialog = true },
+                onOpenThinkingDialog = { showThinkingDialog = true },
             )
         },
         bottomBar = {
@@ -697,6 +724,21 @@ fun ChatScreen(
                 onSetGroup(key.ifBlank { null })
             },
             onDismiss = { showGroupDialog = false },
+        )
+    }
+
+    // 思考强度：effort 型与 budget 型共用一条滑块。
+    val thinkingControl = state.thinking?.control
+    if (showThinkingDialog && thinkingControl != null) {
+        ThinkingDialog(
+            control = thinkingControl,
+            value = state.thinking?.value,
+            effective = state.thinking?.effective,
+            onSet = { level, budget ->
+                showThinkingDialog = false
+                onSetThinking(level, budget)
+            },
+            onDismiss = { showThinkingDialog = false },
         )
     }
 }

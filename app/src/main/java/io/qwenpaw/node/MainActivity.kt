@@ -41,6 +41,7 @@ import io.qwenpaw.node.ui.AppViewModel
 import io.qwenpaw.node.ui.chat.ChatListScreen
 import io.qwenpaw.node.ui.chat.ChatScreen
 import io.qwenpaw.node.ui.chat.ChatUiState
+import io.qwenpaw.node.ui.chat.SearchScreen
 import io.qwenpaw.node.ui.settings.AgentPickerDialog
 import io.qwenpaw.node.ui.settings.ConnectScreen
 import io.qwenpaw.node.ui.settings.SettingsScreen
@@ -122,7 +123,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH }
 
 @Composable
 private fun QwenPawNav(
@@ -185,6 +186,8 @@ private fun QwenPawNav(
     val tokenUsageLoading by viewModel.tokenUsageLoading.collectAsState()
     val tokenUsageError by viewModel.tokenUsageError.collectAsState()
     val inboxState by viewModel.inbox.state.collectAsState()
+    // 全文检索状态单独一条流，与对话页状态无关。
+    val searchState by chatVm.search.collectAsState()
     val inboxUnread = inboxState.unreadCount
     val toolsState by viewModel.settingsConfig.tools.collectAsState()
     val envsState by viewModel.settingsConfig.envs.collectAsState()
@@ -599,6 +602,34 @@ private fun QwenPawNav(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
                     },
+                    onOpenGlobalSearch = run {
+                        // 判定标准集中在这里：既要总开关打开，也要插件在 info 里声明 search。
+                        val supportsSearch =
+                            (appState.bridgeStatus as? io.qwenpaw.node.data.plugin.BridgeStatus.Ready)
+                                ?.info?.supports("search") == true
+                        if (appState.bridgeFeaturesEnabled && supportsSearch) {
+                            { screen = Screen.SEARCH }
+                        } else {
+                            null
+                        }
+                    },
+                )
+            }
+
+            Screen.SEARCH -> {
+                SearchScreen(
+                    state = searchState,
+                    // 命中带的是 history.db 的 session_id，与对话 id 不是同一个值，
+                    // 两种键都放进映射表，命中才能显示对话名。
+                    chatNames = chatVmState.chats.associate { it.id to it.name } +
+                        chatVmState.chats.associate { it.sessionId to it.name },
+                    onBack = { screen = Screen.LIST },
+                    onSearch = chatVm::search,
+                    onLoadMore = chatVm::loadMoreSearch,
+                    onOpenHit = { hit ->
+                        chatVm.openChatAtMessage(hit.sessionId, hit.msgId)
+                        screen = Screen.CHAT
+                    },
                 )
             }
 
@@ -648,7 +679,7 @@ private fun QwenPawNav(
                         val name = chatVmState.currentChatName.ifBlank { "对话" }.take(40)
                         shareText(context, "$name.md", chatVm.exportMarkdown())
                     },
-                    onSetThinking = { level -> chatVm.setThinking(level) },
+                    onSetThinking = { level, budget -> chatVm.setThinking(level, budget) },
                     onSetGroup = { groupId ->
                         chatVmState.currentChatId?.let { chatVm.setChatGroup(it, groupId) }
                     },
@@ -673,6 +704,7 @@ private fun QwenPawNav(
                     onCancelTool = { id -> chatVm.cancelTool(id) },
                     onOffloadTool = chatVm::offloadTool,
                     onExtendTool = chatVm::extendTool,
+                    onPendingScrollHandled = chatVm::clearPendingScroll,
                     onOpenSource = { text ->
                         sourceText = text
                         screen = Screen.MESSAGE_SOURCE
@@ -721,6 +753,9 @@ private fun QwenPawNav(
                     onMarkRead = viewModel.inbox::markRead,
                     onDelete = viewModel.inbox::delete,
                     onDismissError = viewModel.inbox::dismissError,
+                    onSourceFilter = viewModel.inbox::setSourceFilter,
+                    onAgentFilter = viewModel.inbox::setAgentFilter,
+                    onLoadAgents = viewModel.inbox::loadAgentOptions,
                 )
             }
 
@@ -1046,7 +1081,7 @@ private fun shareText(context: android.content.Context, subject: String, text: S
 private fun parentOf(screen: Screen): Screen? = when (screen) {
     Screen.CHAT -> null
     Screen.LIST -> Screen.CHAT
-    Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE, Screen.INBOX -> Screen.LIST
+    Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE, Screen.INBOX, Screen.SEARCH -> Screen.LIST
     Screen.RUN_LOG -> Screen.SETTINGS
     // 原文页从聊天页的气泡进入，返回也回聊天页。
     Screen.MESSAGE_SOURCE -> Screen.CHAT
