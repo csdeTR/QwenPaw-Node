@@ -1646,8 +1646,9 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 
 ## 26、工作区文件
 
-四个读端点、一个目录浏览端点与一个下载端点。2026-11-10 在 2.2.2.post1 与 2.3.0b2 上逐条实测，
-两版形状一致，客户端因此不做运行时版本分支（`browse-dirs` 只在 2.2.2.post1 上验过）。
+四个读端点、一个目录浏览端点、一个下载端点，以及保存、上传与上传上限三个写侧端点。
+2026-11-10 在 2.2.2.post1 与 2.3.0b2 上逐条实测，两版形状一致，
+客户端因此不做运行时版本分支（`browse-dirs` 只在 2.2.2.post1 上验过）。
 
 ### 26.1 目录
 
@@ -1726,3 +1727,44 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 - **不要依赖 `Range`。** 响应头带 `accept-ranges: bytes`，但请求带 `Range` 仍返回
   200 + 完整内容，不会返回 206。因此客户端不做续传，中断后整文件重下。
 - 目录整包下载由客户端逐文件调用本端点完成，不使用整包接口。
+
+### 26.6 保存
+
+`PUT /api/workspace/file-content?root=...&path=...`
+
+请求体 `{"content": "..."}`，`content` 是整篇文本，不支持按区间写回。
+
+| 头 | 说明 |
+| --- | --- |
+| `If-Match: <etag>` | 与 26.2 取到的 `etag` 做**字符串全等**比较，`W/` 前缀与引号都要原样回传 |
+| 不带 `If-Match` | 跳过并发校验，直接覆盖，用于「强制覆盖」 |
+
+响应：
+
+- 200：`{etag, path, size}`，`etag` 是写入后的新版本，下一次保存要用它。
+- 409：`{"detail":"File changed on disk"}`，文件已被外部改写。
+- 422：`content` 不是字符串。
+
+两条限制来自端点形状而非客户端取舍：写入是整篇覆盖，所以只能在 `eof == true`
+之后编辑，否则写回会把未加载的部分截断；记忆根没有本端点，固定只读。
+
+### 26.7 上传
+
+`POST /api/workspace/file-upload?root=...&path=...&conflict=overwrite|skip`
+
+- 请求是 `multipart/form-data`，字段名 `files`。服务端声明为 `list[UploadFile]`，
+  客户端每个请求只放一个文件，按文件逐个上报进度。
+- 落到服务端的文件名取 multipart 的 `filename`，与本地暂存文件的名字无关；
+  暂存文件在 `cacheDir` 里是随机名，不能拿它的名字直接上传。
+- `conflict` 不传时同名文件返回 409，`detail` 是**对象**而非字符串：
+  `{"code":"upload_conflict","files":["a.txt"]}`。
+- 200：`{"files":[{name,path,size,status}]}`，`status` 为 `uploaded` 或 `skipped`；
+  `conflict=skip` 时同名文件计入 `skipped`。
+- 目录不存在：404 `Upload directory not found`。
+
+### 26.8 上传上限
+
+`GET /api/settings/upload-limit` → `{"upload_max_size_mb": null|number}`。
+
+`null` 表示不限制。服务端**不据此拦截**上传，这个值只供客户端提前提示与跳过，
+因此取值失败时不阻断上传。
