@@ -188,6 +188,21 @@ object QwenIcons {
         icon("folder", "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z")
     }
 
+    /** lucide `maximize-2`。 */
+    val maximize: ImageVector by lazy {
+        icon("maximize", "M15 3h6v6", "m21 3-7 7", "M9 21H3v-6", "m3 21 7-7")
+    }
+
+    /** lucide `download`。 */
+    val download: ImageVector by lazy {
+        icon(
+            "download",
+            "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
+            "M7 10l5 5 5-5",
+            "M12 15V3",
+        )
+    }
+
     /** lucide `bot`。 */
     val bot: ImageVector by lazy {
         icon("bot", "M12 8V4H8", "M6 8H18A2 2 0 0 1 20 10V18A2 2 0 0 1 18 20H6A2 2 0 0 1 4 18V10A2 2 0 0 1 6 8Z", "M2 14h2", "M20 14h2", "M15 13v2", "M9 13v2")

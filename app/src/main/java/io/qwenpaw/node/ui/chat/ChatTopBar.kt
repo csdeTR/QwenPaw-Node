@@ -45,17 +45,7 @@ fun ChatTopBar(
     running: Boolean,
     contextUsage: Double,
     pinned: Boolean = false,
-    thinking: io.qwenpaw.node.data.model.ThinkingViewDto? = null,
     groups: List<io.qwenpaw.node.data.model.ChatGroupDto> = emptyList(),
-    currentGroupId: String? = null,
-    /** 可切换的模型，已扁平化。 */
-    modelChoices: List<ModelChoice> = emptyList(),
-    /** 当前模型显示名，用于菜单里标出「当前」。 */
-    currentModelLabel: String? = null,
-    /** 智能体当前审批模式：STRICT / SMART / AUTO / OFF。 */
-    approvalLevel: String? = null,
-    /** 当前工作区目录名；null 表示尚未拉取到。 */
-    projectDirName: String? = null,
     /**
      * 与服务端的链路状态。
      *
@@ -78,26 +68,12 @@ fun ChatTopBar(
     onExport: () -> Unit = {},
     onRefresh: () -> Unit = {},
     onContextClick: () -> Unit = {},
-    /** 设置思考强度。离散档位只传 level，数值预算传 `level="budget"` 与实际 token 数。 */
-    onSetThinking: (level: String, budgetTokens: Long?) -> Unit = { _, _ -> },
     onSetGroup: (String?) -> Unit = {},
-    onPickModel: (providerId: String?, model: String?) -> Unit = { _, _ -> },
-    onPickApproval: (String) -> Unit = {},
-    onOpenProjectDir: () -> Unit = {},
-    /** 打开「切换模型」对话框。二级选择由外层渲染，这里只负责发信号。 */
-    onOpenModelDialog: () -> Unit = {},
-    /** 打开「审批模式」对话框。 */
-    onOpenApprovalDialog: () -> Unit = {},
     /** 打开「移动到分组」对话框。 */
     onOpenGroupDialog: () -> Unit = {},
-    /** 打开「思考强度」对话框。 */
-    onOpenThinkingDialog: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
-    // 服务端只在切换模型后才带回能力描述：effort 型给档位，budget 型给 token 区间。
-    // 两种都要能进滑块，因此判据交给 ThinkingScale，而不是只看 efforts。
-    val thinkingScale = remember(thinking) { ThinkingScale.of(thinking?.control) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -251,58 +227,12 @@ fun ChatTopBar(
                         },
                     )
 
-                    // 模型 / 审批 / 工作区三项都作用于「接下来这一轮怎么跑」，
-                    // 与上面的对话操作分开一组。
-                    DropdownMenuItem(
-                        text = {
-                            Text("切换模型：${currentModelLabel ?: "跟随智能体默认"}")
-                        },
-                        leadingIcon = { MenuIcons.Leading(MenuAction.MODEL) },
-                        enabled = modelChoices.isNotEmpty(),
-                        onClick = {
-                            menu = false
-                            onOpenModelDialog()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("审批模式：${approvalLabel(approvalLevel)}") },
-                        leadingIcon = { MenuIcons.Leading(MenuAction.APPROVAL) },
-                        enabled = approvalLevel != null,
-                        onClick = {
-                            menu = false
-                            onOpenApprovalDialog()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("工作区目录：${projectDirName ?: "未读取"}") },
-                        leadingIcon = { MenuIcons.Leading(MenuAction.PROJECT_DIR) },
-                        onClick = {
-                            menu = false
-                            onOpenProjectDir()
-                        },
-                    )
-
-                    // 思考强度：effort 型与 budget 型都走同一条滑块，与官方 Web 端一致。
-                    if (thinkingScale != null) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    "思考强度：${thinkingScale.label(thinking?.value)}",
-                                )
-                            },
-                            leadingIcon = { MenuIcons.Leading(MenuAction.THINKING) },
-                            enabled = thinkingScale.adjustable,
-                            onClick = {
-                                menu = false
-                                onOpenThinkingDialog()
-                            },
-                        )
-                    }
+                    // 模型、思考强度、审批模式、工作区目录都收进了输入条：
+                    // 它们都作用于「接下来这一轮怎么跑」，放在发送键旁边更顺手，
+                    // 菜单里只留对话本身的动作。
                     if (groups.isNotEmpty()) {
                         DropdownMenuItem(
-                            text = {
-                                Text("移动到分组：${groupLabel(groups, currentGroupId)}")
-                            },
+                            text = { Text("移动到分组") },
                             leadingIcon = { MenuIcons.Leading(MenuAction.GROUP) },
                             onClick = {
                                 menu = false
@@ -468,14 +398,3 @@ internal val APPROVAL_OPTIONS = listOf(
 /** 审批模式的中文标签。 */
 internal fun approvalLabel(level: String?): String =
     APPROVAL_OPTIONS.firstOrNull { it.code == level }?.label ?: "未知"
-
-/** 把分组 id 换成展示名。 */
-private fun groupLabel(
-    groups: List<io.qwenpaw.node.data.model.ChatGroupDto>,
-    currentGroupId: String?,
-): String {
-    val id = currentGroupId ?: return "未分组"
-    val group = groups.firstOrNull { it.id == id } ?: return id
-    // 内置分组的服务端名称是英文，这里与列表表头用同一套中文名。
-    return groupTitle(group)
-}

@@ -2,7 +2,7 @@
 # QwenPaw Node redroid 验收脚本。
 #
 # 用法：
-#   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A6）
+#   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A7）
 #   ./scripts/e2e_acceptance.sh --keep       # 保留当前应用数据
 #   ./scripts/e2e_acceptance.sh --only A4    # 只跑某个场景
 #
@@ -25,6 +25,7 @@
 #   A4 停止       —— 生成中停止，服务端回 idle
 #   A5 多实例     —— 第二个实例的会话列表与第一个隔离
 #   A6 断网/409   —— 断网提示中文、草稿保留、失败气泡可重试
+#   A7 工作区     —— 设置入口可达、三个根可切换、记忆根列出 Markdown
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -179,8 +180,8 @@ open_chat_list() {
   if screen_has 'content-desc="批量管理"'; then
     return 0
   fi
-  if screen_has 'content-desc="会话列表"'; then
-    tap_text 'content-desc="会话列表"' || return 1
+  if screen_has 'content-desc="对话列表"'; then
+    tap_text 'content-desc="对话列表"' || return 1
     sleep 3
     return 0
   fi
@@ -188,7 +189,7 @@ open_chat_list() {
   "${ADB[@]}" shell input keyevent 4
   sleep 3
   if ! screen_has 'content-desc="批量管理"'; then
-    tap_text 'content-desc="会话列表"' || return 1
+    tap_text 'content-desc="对话列表"' || return 1
     sleep 3
   fi
   screen_has 'content-desc="批量管理"'
@@ -240,7 +241,7 @@ unblock_port
 
 echo "== 启动应用 =="
 "${ADB[@]}" shell am force-stop "$PKG"
-"${ADB[@]}" shell am start -n "$PKG/.MainActivity" >/dev/null
+"${ADB[@]}" shell am start -n "$PKG/io.qwenpaw.node.MainActivity" >/dev/null
 sleep 6
 # Android 13+ 首次启动会弹通知权限对话框，它是系统窗口，会挡住后面所有点击。
 # `pm grant` 在部分情况下不生效（pm clear 之后重新申请、或安装时权限被重置），
@@ -308,7 +309,14 @@ print(rows[0][0], rows[0][1]) if rows else sys.exit(1)
 }
 
 echo "== 进入一条会话 =="
-open_first_chat || exit 1
+# A7 只验设置里的工作区入口，不需要已有会话；其余场景必须有会话可打开。
+if ! open_first_chat; then
+  if want A7; then
+    echo "  [提示] 没有可打开的会话，A7 不依赖会话，继续"
+  else
+    exit 1
+  fi
+fi
 shot 03-chat-opened
 
 # ---------------------------------------------------------------- A4 停止
@@ -373,7 +381,7 @@ if want A3; then
   echo "  杀 App 前服务端 running：$before"
   "${ADB[@]}" shell am force-stop "$PKG"
   sleep 3
-  "${ADB[@]}" shell am start -n "$PKG/.MainActivity" >/dev/null
+  "${ADB[@]}" shell am start -n "$PKG/io.qwenpaw.node.MainActivity" >/dev/null
   sleep 6
   open_first_chat || true
   sleep 6
@@ -478,6 +486,47 @@ if want A2; then
     echo "         可用：curl -s $API/api/chats/<id> | python3 -m json.tool | grep '\"type\"'"
   else
     echo "  [跳过] 未找到附件按钮"
+  fi
+fi
+
+# ---------------------------------------------------------------- A7 工作区
+
+if want A7; then
+  echo "== A7 工作区文件 =="
+  # 前面的会话步骤可能把 App 留在任意页面，这里先回前台再回列表页。
+  "${ADB[@]}" shell am start -n "$PKG/io.qwenpaw.node.MainActivity" >/dev/null 2>&1 || true
+  sleep 5
+  open_chat_list >/dev/null 2>&1 || true
+  if tap_text 'content-desc="设置"'; then
+    sleep 3
+    # 「工作区文件」在服务端配置卡片靠下，先滚动到可见。
+    for _ in 1 2 3 4 5 6; do
+      screen_has 'text="工作区文件"' && break
+      "${ADB[@]}" shell input swipe 360 1300 360 600 300 >/dev/null 2>&1 || true
+      sleep 1
+    done
+    if tap_text 'text="工作区文件"'; then
+      sleep 6
+      shot 13-a7-workspace-list
+      if screen_has 'text="记忆"' && screen_has 'text="项目目录"'; then
+        echo "  [通过] 三个根切换可见"
+      else
+        echo "  [警告] 未找到根切换控件"
+      fi
+      if tap_text 'text="记忆"'; then
+        sleep 5
+        shot 14-a7-memory
+        if screen_has '.md"'; then
+          echo "  [通过] 记忆根列出 Markdown"
+        else
+          echo "  [提示] 记忆根为空或没有 Markdown"
+        fi
+      fi
+    else
+      echo "  [失败] 无法打开工作区文件"
+    fi
+  else
+    echo "  [跳过] 未找到设置入口"
   fi
 fi
 

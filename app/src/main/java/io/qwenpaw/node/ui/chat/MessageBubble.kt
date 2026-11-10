@@ -58,6 +58,8 @@ import kotlinx.coroutines.delay
 fun StepsGroup(
     steps: List<ChatMessage>,
     modifier: Modifier = Modifier,
+    /** 是否按 Markdown / LaTeX 渲染组内的中间正文。 */
+    renderMarkdown: Boolean = true,
     /** 服务端登记的工具调用，key 为 `tool_call_id`。缺项表示不可控制。 */
     toolCalls: Map<String, io.qwenpaw.node.data.model.ToolCallInfoDto> = emptyMap(),
     /** 实时输出，key 为 `tool_call_id`。 */
@@ -98,6 +100,7 @@ fun StepsGroup(
                 StepRow(
                     step = step,
                     defaultOpen = false,
+                    renderMarkdown = renderMarkdown,
                     toolCalls = toolCalls,
                     toolLive = toolLive,
                     onCancelTool = onCancelTool,
@@ -123,6 +126,8 @@ fun StepsGroup(
 internal fun StepRow(
     step: ChatMessage,
     defaultOpen: Boolean = false,
+    /** 是否按 Markdown / LaTeX 渲染中间正文。跟随智能体消息的渲染开关。 */
+    renderMarkdown: Boolean = true,
     toolCalls: Map<String, io.qwenpaw.node.data.model.ToolCallInfoDto> = emptyMap(),
     toolLive: Map<String, String> = emptyMap(),
     onCancelTool: (String) -> Unit = {},
@@ -149,7 +154,7 @@ internal fun StepRow(
             onToolDeadline = onToolDeadline,
         )
         // 中间正文折进组里也要能展开看到，否则用户会以为回答被吞了。
-        ChatMessage.Kind.TEXT -> FoldedTextRow(step)
+        ChatMessage.Kind.TEXT -> FoldedTextRow(step, renderMarkdown)
         else -> Unit
     }
 }
@@ -220,12 +225,20 @@ private fun StepsHeader(
 
 /** 折进步骤组的中间正文：展开后按正文样式显示，不加气泡底色。 */
 @Composable
-private fun FoldedTextRow(step: ChatMessage) {
+private fun FoldedTextRow(step: ChatMessage, renderMarkdown: Boolean) {
     SelectionContainer {
-        MarkdownText(
-            markdown = step.text,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (renderMarkdown) {
+            MarkdownText(
+                markdown = step.text,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                text = step.text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -537,6 +550,8 @@ fun MessageBubble(
     onRetry: (ChatMessage) -> Unit = {},
     /** 消息外观参数：头像、显示名、时间与统计开关。 */
     appearance: MessageAppearance = MessageAppearance(),
+    /** 是否按 Markdown / LaTeX 渲染正文。关闭后按原文显示。 */
+    renderMarkdown: Boolean = true,
     /** 点「选择文本」对话框里选「显示」时，把这条消息的原始 Markdown 交给上层打开原文页。 */
     onOpenSource: (String) -> Unit = {},
 ) {
@@ -545,7 +560,7 @@ fun MessageBubble(
         // 这里兜住单独出现的情况（如「全部展开」档），默认把内容摊开。
         ChatMessage.Kind.REASONING,
         ChatMessage.Kind.TOOL,
-        -> Box(modifier) { StepRow(message, defaultOpen = true) }
+        -> Box(modifier) { StepRow(message, defaultOpen = true, renderMarkdown = renderMarkdown) }
 
         ChatMessage.Kind.IMAGE -> ImageBubble(
             message = message,
@@ -556,7 +571,14 @@ fun MessageBubble(
             appearance = appearance,
         )
 
-        ChatMessage.Kind.TEXT -> TextBubble(message, modifier, onRetry, appearance, onOpenSource)
+        ChatMessage.Kind.TEXT -> TextBubble(
+            message = message,
+            modifier = modifier,
+            onRetry = onRetry,
+            appearance = appearance,
+            renderMarkdown = renderMarkdown,
+            onOpenSource = onOpenSource,
+        )
     }
 }
 
@@ -645,6 +667,7 @@ private fun TextBubble(
     modifier: Modifier,
     onRetry: (ChatMessage) -> Unit,
     appearance: MessageAppearance,
+    renderMarkdown: Boolean = true,
     onOpenSource: (String) -> Unit = {},
 ) {
     val isUser = message.role == Role.USER
@@ -773,14 +796,28 @@ private fun TextBubble(
                     )
                 } else {
                     val body: @Composable () -> Unit = {
-                        MarkdownText(
-                            markdown = if (message.streaming && message.text.isEmpty()) {
-                                "…"
-                            } else {
-                                shownText
-                            },
-                            color = contentColor,
-                        )
+                        // 关掉渲染时按原文显示：LaTeX 与 Markdown 标记原样露出，
+                        // 适合只需要一侧排版、另一侧看原始输入的场景。
+                        if (!renderMarkdown) {
+                            Text(
+                                text = if (message.streaming && message.text.isEmpty()) {
+                                    "…"
+                                } else {
+                                    shownText
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = contentColor,
+                            )
+                        } else {
+                            MarkdownText(
+                                markdown = if (message.streaming && message.text.isEmpty()) {
+                                    "…"
+                                } else {
+                                    shownText
+                                },
+                                color = contentColor,
+                            )
+                        }
                     }
                     if (selectionMode) {
                         SelectionContainer { body() }

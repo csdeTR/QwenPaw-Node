@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE }
 
 @Composable
 private fun QwenPawNav(
@@ -193,6 +193,8 @@ private fun QwenPawNav(
     val envsState by viewModel.settingsConfig.envs.collectAsState()
     val offloadState by viewModel.settingsConfig.offload.collectAsState()
     val cronState by viewModel.cron.state.collectAsState()
+    // 工作区文件的状态单独一条流，与设置页无关。
+    val workspaceState by viewModel.workspace.state.collectAsState()
     val fontState by viewModel.fontState.collectAsState()
     // 当前网络类型与 WiFi 名称：地址编辑区据此提示「这条现在会被优先使用」。
     val netSnapshot by app.networkMonitor.current.collectAsState()
@@ -449,6 +451,8 @@ private fun QwenPawNav(
             },
             saved = instances,
             onUseSaved = { viewModel.useSaved(it) },
+            // 受信任的主机不再弹地址安全提示。
+            isTrustedHost = viewModel::isTrustedHost,
         )
         return
     }
@@ -633,6 +637,29 @@ private fun QwenPawNav(
                 )
             }
 
+            Screen.WORKSPACE -> {
+                LaunchedEffect(Unit) { viewModel.workspace.ensureLoaded() }
+                io.qwenpaw.node.ui.workspace.WorkspaceScreen(
+                    state = workspaceState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onRefresh = viewModel.workspace::refresh,
+                    onLoadMore = viewModel.workspace::loadMore,
+                    onOpenRoot = viewModel.workspace::openRoot,
+                    onEnter = viewModel.workspace::enter,
+                    onUp = viewModel.workspace::up,
+                    onOpenFile = viewModel.workspace::openFile,
+                    onClosePreview = viewModel.workspace::closePreview,
+                    onLoadMoreContent = viewModel.workspace::loadMoreContent,
+                    onRequestDownload = viewModel.workspace::requestDownload,
+                    onRequestDirectoryDownload = viewModel.workspace::requestDirectoryDownload,
+                    onPlanCancel = viewModel.workspace::cancelPlan,
+                    onStartDownload = viewModel.workspace::startDownload,
+                    onStartDirectoryDownload = viewModel.workspace::startDirectoryDownload,
+                    onCancelDownload = viewModel.workspace::cancelDownload,
+                    onDismissDownload = viewModel.workspace::dismissDownload,
+                )
+            }
+
             Screen.CHAT -> {
                 ChatScreen(
                     state = chatVmState,
@@ -695,6 +722,9 @@ private fun QwenPawNav(
                     // 顶栏「连接中断，点击重连」走这条：重绑地址 + 重载当前对话。
                     onRefresh = { viewModel.refreshAll() },
                     appearance = messageAppearance,
+                    renderUserMarkdown = appState.renderUserMarkdown,
+                    renderAssistantMarkdown = appState.renderAssistantMarkdown,
+                    onBrowseDirs = { path -> chatVm.browseProjectDirs(path) },
                     onToolOpen = { id ->
                         chatVm.refreshToolCalls()
                         chatVm.openToolStream(id)
@@ -771,10 +801,8 @@ private fun QwenPawNav(
                     keepScreenOn = appState.keepScreenOn,
                     appVersion = BuildConfig.VERSION_NAME,
                     onBack = { screen = Screen.LIST },
-                    onSwitch = { id ->
-                        viewModel.switchTo(id)
-                        screen = Screen.CHAT
-                    },
+                    onOpenWorkspace = { screen = Screen.WORKSPACE },
+                    onSwitch = { id -> viewModel.switchTo(id) },
                     onRemove = viewModel::remove,
                     onEdit = viewModel::editInstance,
                     onPickAgent = { pickingAgent = it },
@@ -828,6 +856,10 @@ private fun QwenPawNav(
                     onKeepScreenOn = viewModel::setKeepScreenOn,
                     securityHintsEnabled = appState.securityHintsEnabled,
                     onSecurityHintsEnabled = viewModel::setSecurityHintsEnabled,
+                    trustedHosts = appState.trustedHosts,
+                    onAddTrustedHost = viewModel::addTrustedHost,
+                    onRemoveTrustedHost = viewModel::removeTrustedHost,
+                    isTrustedHost = viewModel::isTrustedHost,
                     bridgeStatus = appState.bridgeStatus,
                     onRefreshBridge = viewModel::refreshBridgeStatus,
                     bridgeFeaturesEnabled = appState.bridgeFeaturesEnabled,
@@ -885,6 +917,10 @@ private fun QwenPawNav(
                     onRefreshServerAvatar = viewModel::refreshServerAvatar,
                     actionStyle = appState.actionStyle,
                     onActionStyle = viewModel::setActionStyle,
+                    renderUserMarkdown = appState.renderUserMarkdown,
+                    onRenderUserMarkdown = viewModel::setRenderUserMarkdown,
+                    renderAssistantMarkdown = appState.renderAssistantMarkdown,
+                    onRenderAssistantMarkdown = viewModel::setRenderAssistantMarkdown,
                     config = io.qwenpaw.node.ui.settings.SettingsConfig(
                         tools = toolsState,
                         envs = envsState,
@@ -1083,6 +1119,8 @@ private fun parentOf(screen: Screen): Screen? = when (screen) {
     Screen.LIST -> Screen.CHAT
     Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE, Screen.INBOX, Screen.SEARCH -> Screen.LIST
     Screen.RUN_LOG -> Screen.SETTINGS
+    // 工作区文件从设置页进入，返回也回设置页。
+    Screen.WORKSPACE -> Screen.SETTINGS
     // 原文页从聊天页的气泡进入，返回也回聊天页。
     Screen.MESSAGE_SOURCE -> Screen.CHAT
 }

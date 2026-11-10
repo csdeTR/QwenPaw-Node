@@ -75,6 +75,40 @@ internal data class ThinkingScale(
     }
 
     /**
+     * 脑图的填充比例，0..1。规则对齐官方 Web 端 `ThinkingIndicator`：
+     * 关闭 / 跟随默认不填充；离散档位按在档位序列里的序号均分；预算按区间比例。
+     * 未知档位落到 0。
+     */
+    fun fillRatio(value: ThinkingValueDto?): Float {
+        if (value == null) return 0f
+        val level = value.level
+        if (level.isBlank() || level == "inherit" || level == "off") return 0f
+        val ratio = when {
+            isEffort -> {
+                // 关闭档不参与序号计算，否则三档模型会变成 0.33 / 0.66 / 1。
+                val levels = stops.filter { it != "off" && it != "inherit" }
+                val index = levels.indexOf(level)
+                when {
+                    index < 0 -> 0f
+                    levels.size <= 1 -> 1f
+                    else -> index.toFloat() / (levels.size - 1)
+                }
+            }
+            isBudget && level == "budget" -> {
+                val span = budgetMax - budgetMin
+                if (span <= 0L) {
+                    1f
+                } else {
+                    val tokens = value.budgetTokens ?: budgetDefault ?: budgetMin
+                    ((tokens - budgetMin).toDouble() / span).toFloat()
+                }
+            }
+            else -> 0f
+        }
+        return ratio.coerceIn(0f, 1f)
+    }
+
+    /**
      * 滑块初值。
      *
      * 优先用已显式设过的值；没有设过时用服务端算出的 `effective`——用户打开对话框

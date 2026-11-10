@@ -1174,6 +1174,19 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 浏览服务端上的目录。
+     *
+     * 失败返回 null 而不是写全局错误：这里的调用发生在弹窗里，
+     * 提示放在弹窗内更合适，也不该把输入条上方的错误条拉出来。
+     */
+    suspend fun browseProjectDirs(path: String): io.qwenpaw.node.data.model.BrowseDirsDto? {
+        val conn = currentConnection ?: return null
+        return runCatching {
+            withContext(Dispatchers.IO) { api.browseDirs(conn, path) }
+        }.getOrNull()
+    }
+
     /** 切换工作区目录。`path` 为 null 时恢复工作区默认目录。 */
     fun setProjectDir(path: String?) {
         val conn = currentConnection ?: return

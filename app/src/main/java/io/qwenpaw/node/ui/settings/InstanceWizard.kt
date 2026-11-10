@@ -98,6 +98,8 @@ fun InstanceWizard(
      * 这里再套一层会两层抢手势；设置页的子页面则只有这一层，必须自己滚。
      */
     scrollable: Boolean = true,
+    /** 该主机已在「受信任的连接」里时返回 true，此时不弹安全提示。 */
+    isTrustedHost: (String) -> Boolean = { false },
 ) {
     var step by remember { mutableStateOf(1) }
 
@@ -190,7 +192,7 @@ fun InstanceWizard(
                         io.qwenpaw.node.data.assessSecurity(
                             url = result.baseUrl,
                             loginRequired = result.needsLogin,
-                        ).takeIf { it.any }
+                        ).takeIf { it.any && !isTrustedHost(it.host) }
                     }
                 }
                 .onFailure { e ->
@@ -487,6 +489,7 @@ internal fun SecurityNoticeDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    TrustedHostHint()
                 }
             },
             confirmButton = {
@@ -519,6 +522,7 @@ internal fun SecurityNoticeDialog(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    TrustedHostHint()
                 }
             },
             confirmButton = {
@@ -529,6 +533,23 @@ internal fun SecurityNoticeDialog(
 }
 
 private enum class SecurityStage { AUTH, TLS }
+
+/**
+ * 安全弹窗底部的「受信任的连接」去处。
+ *
+ * 两个阶段都要给这一句：无论用户是被哪条风险拦下的，只要这台服务器是自己的，
+ * 处置方式就是同一条。不做成可点击跳转——弹窗可能在连接前出现，此时设置页不可达。
+ */
+@Composable
+private fun TrustedHostHint() {
+    Spacer(Modifier.height(10.dp))
+    Text(
+        text = "如果这台服务器是你自己的，可以在「设置 → 服务器 → 受信任的连接」里" +
+            "添加该地址，之后不再弹出本条提示。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
 
 /**
  * 点「上一步」时应当回到的步骤。

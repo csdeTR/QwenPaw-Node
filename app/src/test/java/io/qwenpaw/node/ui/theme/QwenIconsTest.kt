@@ -52,6 +52,7 @@ class QwenIconsTest {
         "share" to QwenIcons.share,
         "refresh" to QwenIcons.refresh,
         "folder" to QwenIcons.folder,
+        "download" to QwenIcons.download,
         "bot" to QwenIcons.bot,
         "brain" to QwenIcons.brain,
         "shieldCheck" to QwenIcons.shieldCheck,

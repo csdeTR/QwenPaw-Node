@@ -45,6 +45,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +73,8 @@ fun SettingsScreen(
     keepScreenOn: Boolean,
     appVersion: String,
     onBack: () -> Unit,
+    /** 打开设置页下的「工作区文件」。默认空实现，预览与测试不受影响。 */
+    onOpenWorkspace: () -> Unit = {},
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
     onEdit: (InstanceConfig) -> Unit,
@@ -126,6 +130,13 @@ fun SettingsScreen(
     /** 是否在公网地址未设防时提醒。 */
     securityHintsEnabled: Boolean = true,
     onSecurityHintsEnabled: (Boolean) -> Unit = {},
+    /** 已归一化的受信任主机；命中后地址检查不再弹提示。 */
+    trustedHosts: Set<String> = emptySet(),
+    /** 添加一条受信任的地址，返回是否被接受。 */
+    onAddTrustedHost: (String) -> Boolean = { false },
+    onRemoveTrustedHost: (String) -> Unit = {},
+    /** 该主机是否已在受信任集合里。地址校验完成后据此过滤提示。 */
+    isTrustedHost: (String) -> Boolean = { false },
     voiceEnabled: Boolean = false,
     onVoiceEnabled: (Boolean) -> Unit = {},
     voiceTrigger: VoiceTrigger = VoiceTrigger.TAP,
@@ -168,6 +179,12 @@ fun SettingsScreen(
     /** 消息底部操作行样式。 */
     actionStyle: io.qwenpaw.node.ui.chat.ActionStyle = io.qwenpaw.node.ui.chat.ActionStyle.TEXT,
     onActionStyle: (io.qwenpaw.node.ui.chat.ActionStyle) -> Unit = {},
+    /** 用户消息是否按 Markdown / LaTeX 渲染。 */
+    renderUserMarkdown: Boolean = true,
+    onRenderUserMarkdown: (Boolean) -> Unit = {},
+    /** 智能体消息是否按 Markdown / LaTeX 渲染。 */
+    renderAssistantMarkdown: Boolean = true,
+    onRenderAssistantMarkdown: (Boolean) -> Unit = {},
     /** 工具、环境变量、后台策略与定时任务的状态与动作。为 null 时这些入口不显示。 */
     config: SettingsConfig? = null,
     /** 配套插件的探测结论，显示在「服务端配置」的第一行。 */
@@ -225,6 +242,8 @@ fun SettingsScreen(
             SettingsPage.ADD_MODE -> adding = false
             SettingsPage.EDIT -> editing = null
             SettingsPage.APPEARANCE_PREVIEW -> section = SettingsPage.APPEARANCE
+            // 受信任的连接是服务器页的下一级，返回时回到服务器而不是一级列表。
+            SettingsPage.TRUSTED -> section = SettingsPage.SERVER
             else -> section = SettingsPage.MAIN
         }
     }
@@ -341,6 +360,7 @@ fun SettingsScreen(
                         currentNetKind = currentNetKind,
                         currentSsid = currentSsid,
                         submitLabel = "添加",
+                        isTrustedHost = isTrustedHost,
                         onCancel = { addMode = null },
                     )
 
@@ -362,6 +382,7 @@ fun SettingsScreen(
                         onVerifyHosts = { hosts, basic, attempt ->
                             onVerifyHosts(hosts, basic, attempt, null)
                         },
+                        isTrustedHost = isTrustedHost,
                     )
                 }
             }
@@ -425,6 +446,7 @@ fun SettingsScreen(
                     currentNetKind = currentNetKind,
                     currentSsid = currentSsid,
                     submitLabel = "保存",
+                    isTrustedHost = isTrustedHost,
                     onCancel = { editing = null },
                 )
             }
@@ -452,6 +474,7 @@ fun SettingsScreen(
                     when (page) {
                         SettingsPage.MAIN -> onBack()
                         SettingsPage.APPEARANCE_PREVIEW -> section = SettingsPage.APPEARANCE
+                        SettingsPage.TRUSTED -> section = SettingsPage.SERVER
                         else -> section = SettingsPage.MAIN
                     }
                 },
@@ -632,6 +655,13 @@ fun SettingsScreen(
                             )
                             Divider()
                             NavRow(
+                                icon = QwenIcons.folder,
+                                title = "工作区文件",
+                                subtitle = "浏览、预览与下载服务端文件",
+                                onClick = onOpenWorkspace,
+                            )
+                            Divider()
+                            NavRow(
                                 icon = QwenIcons.clock,
                                 title = "后台策略",
                                 subtitle = if (config.offload.action == OFFLOAD) {
@@ -678,8 +708,24 @@ fun SettingsScreen(
                         if (index != instances.lastIndex) Divider()
                     }
                     if (instances.isNotEmpty()) Divider()
+                    // 受信任的连接紧挨实例清单：它记的正是这些实例的地址。
+                    NavRow(
+                        icon = QwenIcons.shieldCheck,
+                        title = "受信任的连接",
+                        subtitle = "${trustedHosts.size} 个地址不会触发安全提示",
+                        onClick = { section = SettingsPage.TRUSTED },
+                    )
+                    Divider()
                     ActionRow(text = "添加实例", onClick = { adding = true })
                 }
+                }
+
+                SettingsPage.TRUSTED -> {
+                    TrustedHostsPage(
+                        hosts = trustedHosts,
+                        onAdd = onAddTrustedHost,
+                        onRemove = onRemoveTrustedHost,
+                    )
                 }
 
                 SettingsPage.APPEARANCE -> {
@@ -808,6 +854,20 @@ fun SettingsScreen(
                         subtitle = "显示本轮回复的输入输出 token、所用模型与完成时间",
                         checked = showMessageStats,
                         onCheckedChange = onShowMessageStats,
+                    )
+                    Divider()
+                    SwitchRow(
+                        title = "用户消息渲染 Markdown",
+                        subtitle = "关闭后按原文显示，数学公式不参与排版",
+                        checked = renderUserMarkdown,
+                        onCheckedChange = onRenderUserMarkdown,
+                    )
+                    Divider()
+                    SwitchRow(
+                        title = "智能体消息渲染 Markdown",
+                        subtitle = "关闭后按原文显示，数学公式不参与排版",
+                        checked = renderAssistantMarkdown,
+                        onCheckedChange = onRenderAssistantMarkdown,
                     )
                     Divider()
                     SettingLabel(
@@ -1158,6 +1218,8 @@ fun SettingsScreen(
 internal enum class SettingsPage {
     MAIN,
     SERVER,
+    /** 受信任的连接：命中这些主机的地址不再弹安全提示。 */
+    TRUSTED,
     PROFILE,
     APPEARANCE,
     /** 聊天字号预览页，外观页的下一级。 */
@@ -1193,6 +1255,7 @@ private data class SettingsNav(
 /** 子页标题。与一级列表的入口文案保持一致，避免同一个页有两个名字。 */
 private fun sectionTitle(section: SettingsPage): String = when (section) {
     SettingsPage.SERVER -> "服务器"
+    SettingsPage.TRUSTED -> "受信任的连接"
     SettingsPage.PROFILE -> "我的资料"
     SettingsPage.APPEARANCE -> "外观"
     SettingsPage.APPEARANCE_PREVIEW -> "字号预览"
@@ -1801,6 +1864,133 @@ internal fun ActionRow(text: String, onClick: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.secondary,
         )
+    }
+}
+
+/**
+ * 受信任的连接：一组不再触发地址安全提示的主机。
+ *
+ * 只影响提示，不影响连接与鉴权——加进来之后用户仍会照常被要求登录。
+ * 输入接受整条地址，入库前由 ViewModel 归一化成 host；这里先判断「能否识别」，
+ * 用按钮可用性与一行错误提示表达，而不是等用户点完才知道输入无效。
+ */
+@Composable
+private fun TrustedHostsPage(
+    hosts: Set<String>,
+    onAdd: (String) -> Boolean,
+    onRemove: (String) -> Unit,
+) {
+    var input by rememberSaveable { mutableStateOf("") }
+    // 与 ViewModel 共用同一个归一化函数：这里认为能识别时，添加一定会成功。
+    val recognized = io.qwenpaw.node.data.normalizeTrustedHost(input) != null
+    // 只有「填了却认不出来」才提示。空输入不报错：刚进页面就顶一行红字，
+    // 会让人以为自己做错了什么，而按钮已经用禁用色表达了「还不能添加」。
+    val errorText = if (input.isNotBlank() && !recognized) {
+        "无法识别这个地址，请填写主机名或 IP"
+    } else {
+        null
+    }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+
+    Column {
+        Text(
+            text = "这些地址不会弹出安全提示。仅在你确认服务器属于自己的时候添加。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                placeholder = { Text("例如 192.168.1.5 或 example.com") },
+                singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "添加",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (recognized) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (recognized) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.16f)
+                        },
+                    )
+                    .clickable(enabled = recognized) {
+                        if (onAdd(input)) {
+                            input = ""
+                            // 收起键盘，让刚添加的条目和下面的列表露出来。
+                            focus.clearFocus()
+                            keyboard?.hide()
+                        }
+                    }
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+        }
+        if (errorText != null) {
+            Text(
+                text = errorText,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            )
+        }
+        SectionHeader("已添加", "${hosts.size} 个")
+        Card {
+            val sorted = hosts.sorted()
+            if (sorted.isEmpty()) {
+                Text(
+                    text = "还没有添加任何地址",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+                )
+            } else {
+                sorted.forEachIndexed { index, host ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = host,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "移除",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onRemove(host) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                    if (index != sorted.lastIndex) Divider()
+                }
+            }
+        }
     }
 }
 

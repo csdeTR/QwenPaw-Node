@@ -23,6 +23,15 @@ class InboxLabelsTest {
     }
 
     @Test
+    fun `筛选按钮的来源文案`() {
+        assertEquals("全部", sourceFilterLabel(null))
+        assertEquals("全部", sourceFilterLabel(""))
+        assertEquals("定时任务", sourceFilterLabel("cron"))
+        assertEquals("技能更新", sourceFilterLabel("skill_autoupdate"))
+        assertEquals("tool_guard", sourceFilterLabel("tool_guard"))
+    }
+
+    @Test
     fun `未知来源回退原值`() {
         assertEquals("tool_guard", inboxSourceLabel("tool_guard"))
         assertEquals("", inboxSourceLabel(""))

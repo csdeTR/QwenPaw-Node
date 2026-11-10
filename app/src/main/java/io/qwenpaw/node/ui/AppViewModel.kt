@@ -103,6 +103,15 @@ data class AppState(
     val actionStyle: io.qwenpaw.node.ui.chat.ActionStyle =
         io.qwenpaw.node.ui.chat.ActionStyle.TEXT,
     /**
+     * 用户消息是否按 Markdown / LaTeX 渲染。
+     *
+     * 与智能体消息分开：有时自己发的是一段原始文本或公式源码，需要看原文，
+     * 而回复仍然想要排版后的样子。关闭后按纯文本显示。
+     */
+    val renderUserMarkdown: Boolean = true,
+    /** 智能体消息是否按 Markdown / LaTeX 渲染。 */
+    val renderAssistantMarkdown: Boolean = true,
+    /**
      * 会话列表的分组方式。
      *
      * 默认按时间，与 QwenPaw 网页版一致；选择会记住，下次进入沿用。
@@ -128,6 +137,14 @@ data class AppState(
      * 只在进程启动时填一次：把它做成持续状态会让用户每切一次页面就被弹一次。
      */
     val securityNotice: io.qwenpaw.node.data.SecurityNotice? = null,
+    /**
+     * 受信任的主机名集合，命中后不再弹地址安全提示。
+     *
+     * 存归一化后的 host（无协议、无端口、无方括号），与
+     * [io.qwenpaw.node.data.normalizeTrustedHost] 的输出同构。
+     * 它只影响提示，不影响连接、鉴权与请求本身。
+     */
+    val trustedHosts: Set<String> = emptySet(),
     /**
      * 配套插件（QwenPaw Node Bridge）的探测结论。
      *
@@ -163,6 +180,8 @@ class AppViewModel(
     private val serverAvatarClient: io.qwenpaw.node.data.remote.ServerAvatarClient? = null,
     /** 配套插件探测。为 null 时（测试、预览）插件行固定显示「尚未检测」。 */
     private val pluginProbe: io.qwenpaw.node.data.plugin.PluginProbe? = null,
+    /** 大文件下载通道。为 null 时（测试、预览）工作区页面不创建。 */
+    private val downloadClient: io.qwenpaw.node.data.remote.DownloadClient? = null,
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -215,7 +234,11 @@ class AppViewModel(
                 )
             }.getOrDefault(io.qwenpaw.node.ui.chat.GroupMode.TIME),
             collapsedGroups = readCollapsedGroups(),
+            // 两个渲染开关默认都开：关掉是用户为了看原文的显式选择。
+            renderUserMarkdown = prefs.getBoolean(KEY_RENDER_USER_MD, true),
+            renderAssistantMarkdown = prefs.getBoolean(KEY_RENDER_ASSISTANT_MD, true),
             securityHintsEnabled = prefs.getBoolean(KEY_SECURITY_HINTS, true),
+            trustedHosts = readTrustedHosts(),
             bridgeFeaturesEnabled = prefs.getBoolean(KEY_BRIDGE_FEATURES, false),
         ),
     )
@@ -766,6 +789,43 @@ class AppViewModel(
     }
 
     /**
+     * 添加一条受信任的连接。返回是否添加成功。
+     *
+     * 输入按 [io.qwenpaw.node.data.normalizeTrustedHost] 归一化后入库，
+     * 因此「粘贴整条地址」与「只填主机名」得到同一条记录；无法识别时返回 false，
+     * 由界面给出提示，不写入任何配置。
+     *
+     * 当前弹窗若正是这个地址触发的，顺手关掉：用户刚表达「这台机器是我的」，
+     * 再把同一条提示留在屏幕上只会显得设置没有生效。
+     */
+    fun addTrustedHost(raw: String): Boolean {
+        val host = io.qwenpaw.node.data.normalizeTrustedHost(raw) ?: return false
+        val next = _state.value.trustedHosts + host
+        prefs.edit().putStringSet(KEY_TRUSTED_HOSTS, next).apply()
+        _state.update { s ->
+            s.copy(
+                trustedHosts = next,
+                securityNotice = s.securityNotice?.takeUnless {
+                    io.qwenpaw.node.data.isTrustedHost(it.host, next)
+                },
+            )
+        }
+        return true
+    }
+
+    /** 移除一条受信任的连接。输入会先归一化，与添加时的存储形态一致。 */
+    fun removeTrustedHost(host: String) {
+        val target = io.qwenpaw.node.data.normalizeTrustedHost(host) ?: return
+        val next = _state.value.trustedHosts - target
+        prefs.edit().putStringSet(KEY_TRUSTED_HOSTS, next).apply()
+        _state.update { it.copy(trustedHosts = next) }
+    }
+
+    /** 该主机是否在受信任集合里。界面用它过滤地址安全提示。 */
+    fun isTrustedHost(host: String): Boolean =
+        io.qwenpaw.node.data.isTrustedHost(host, _state.value.trustedHosts)
+
+    /**
      * 启动时检查一次当前地址的安全风险。
      *
      * 只查 `GET /api/auth/status`（公开路径，带反代凭据即可），不拉业务数据：
@@ -792,6 +852,10 @@ class AppViewModel(
                 loginRequired = needsLogin ?: false,
             )
             if (!notice.any) return@launch
+            // 受信任的主机不再提示：用户已经确认过这台服务器属于自己。
+            if (io.qwenpaw.node.data.isTrustedHost(notice.host, _state.value.trustedHosts)) {
+                return@launch
+            }
             if (!_state.value.securityHintsEnabled) return@launch
             _state.update { it.copy(securityNotice = notice) }
         }
@@ -969,6 +1033,18 @@ class AppViewModel(
         _state.update { it.copy(actionStyle = style) }
     }
 
+    /** 开关用户消息的 Markdown / LaTeX 渲染。 */
+    fun setRenderUserMarkdown(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_RENDER_USER_MD, enabled).apply()
+        _state.update { it.copy(renderUserMarkdown = enabled) }
+    }
+
+    /** 开关智能体消息的 Markdown / LaTeX 渲染。 */
+    fun setRenderAssistantMarkdown(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_RENDER_ASSISTANT_MD, enabled).apply()
+        _state.update { it.copy(renderAssistantMarkdown = enabled) }
+    }
+
     /** 切换会话列表分组方式。单击循环切换，与网页版一致。 */
     fun setGroupMode(mode: io.qwenpaw.node.ui.chat.GroupMode) {
         prefs.edit().putString(KEY_GROUP_MODE, mode.name).apply()
@@ -991,6 +1067,19 @@ class AppViewModel(
     /** 读折叠集合。首次启动没有记录，返回空集即全部展开。 */
     private fun readCollapsedGroups(): Set<String> =
         prefs.getStringSet(KEY_COLLAPSED_GROUPS, null)?.toSet().orEmpty()
+
+    /**
+     * 读受信任的主机集合。
+     *
+     * 逐项归一化并丢弃无法识别的项：旧版本或手工改过的配置里可能残留整条地址，
+     * 留着不归一化的值会让匹配时好时坏。首次启动没有记录，返回空集，
+     * 提示行为与未引入该功能时完全一致。
+     */
+    private fun readTrustedHosts(): Set<String> =
+        prefs.getStringSet(KEY_TRUSTED_HOSTS, null)
+            .orEmpty()
+            .mapNotNull { io.qwenpaw.node.data.normalizeTrustedHost(it) }
+            .toSet()
 
     /** 从 prefs 读类别集合。缺失或全部无效时回退为全部类别。 */
     private fun readLogKinds(): Set<io.qwenpaw.node.log.LogKind> {
@@ -1037,6 +1126,20 @@ class AppViewModel(
             api = api,
             connection = ::activeConnection,
         ).also { cronHolder = it }
+
+    /** 工作区文件浏览与下载。连接在调用时现取，切换实例后重新绑定。 */
+    private var workspaceHolder: io.qwenpaw.node.ui.workspace.WorkspaceViewModel? = null
+
+    val workspace: io.qwenpaw.node.ui.workspace.WorkspaceViewModel
+        get() = workspaceHolder ?: io.qwenpaw.node.ui.workspace.WorkspaceViewModel(
+            api = api,
+            connection = ::activeConnection,
+            downloadClient = downloadClient
+                ?: io.qwenpaw.node.data.remote.DownloadClient(
+                    io.qwenpaw.node.data.remote.QwenPawApi.defaultClient(),
+                ),
+            network = network,
+        ).also { workspaceHolder = it }
 
     private fun activeConnection(): io.qwenpaw.node.data.remote.Connection? =
         repository.active()?.let { instance ->
@@ -1103,6 +1206,7 @@ class AppViewModel(
             inboxHolder?.clear()
             configHolder?.clear()
             cronHolder?.clear()
+            workspaceHolder?.clear()
         }
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。
@@ -1132,6 +1236,8 @@ class AppViewModel(
         private const val KEY_ARCHIVE_TIP_DATE = "archive_tip_hidden_date"
         /** 是否启用公网地址的安全提示。默认开启。 */
         private const val KEY_SECURITY_HINTS = "security_hints_enabled"
+        /** 受信任的主机名集合，命中后不再提示地址风险。 */
+        private const val KEY_TRUSTED_HOSTS = "trusted_hosts"
         /** 是否启用依赖配套插件的功能。默认关闭。 */
         private const val KEY_BRIDGE_FEATURES = "bridge_features_enabled"
         private const val KEY_ASSISTANT_COLLAPSE = "assistant_collapse"
@@ -1148,6 +1254,10 @@ class AppViewModel(
         private const val KEY_SERVER_AVATAR = "use_server_avatar"
         /** 消息底部操作行样式。 */
         private const val KEY_ACTION_STYLE = "message_action_style"
+        /** 用户消息是否渲染 Markdown / LaTeX。 */
+        private const val KEY_RENDER_USER_MD = "render_user_markdown"
+        /** 智能体消息是否渲染 Markdown / LaTeX。 */
+        private const val KEY_RENDER_ASSISTANT_MD = "render_assistant_markdown"
         /** 会话列表分组方式。 */
         private const val KEY_GROUP_MODE = "group_mode"
         /** 已折叠的分区 key 集合。 */
@@ -1176,6 +1286,7 @@ class AppViewModel(
                         network = app.networkMonitor,
                         serverAvatarClient = app.serverAvatar,
                         pluginProbe = app.pluginProbe,
+                        downloadClient = app.downloadClient,
                     ) as T
                 }
             }

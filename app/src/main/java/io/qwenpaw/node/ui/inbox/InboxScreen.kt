@@ -3,7 +3,6 @@ package io.qwenpaw.node.ui.inbox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -43,7 +44,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.InboxEventDto
 import io.qwenpaw.node.ui.TimeLabels
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
@@ -73,7 +73,7 @@ fun InboxScreen(
     onLoadAgents: () -> Unit,
 ) {
     var deleting by remember { mutableStateOf<InboxEventDto?>(null) }
-    var pickingAgent by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf<InboxFilterKind?>(null) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) { onLoadAgents() }
@@ -151,8 +151,12 @@ fun InboxScreen(
                         .firstOrNull { it.id == state.agentFilter }
                         ?.let { it.name.ifBlank { it.id } }
                         ?: state.agentFilter,
-                    onSourceFilter = onSourceFilter,
-                    onPickAgent = { pickingAgent = true },
+                    onPickSource = { picking = InboxFilterKind.Source },
+                    onPickAgent = { picking = InboxFilterKind.Agent },
+                    onClear = {
+                        onSourceFilter(null)
+                        onAgentFilter(null)
+                    },
                 )
                 Box(
                     modifier = Modifier
@@ -246,16 +250,33 @@ fun InboxScreen(
         )
     }
 
-    if (pickingAgent) {
-        AgentFilterDialog(
-            options = state.agentOptions,
-            selectedId = state.agentFilter,
+    when (picking) {
+        InboxFilterKind.Source -> InboxFilterDialog(
+            title = "筛选来源",
+            options = listOf(InboxFilterOption(null, "全部")) +
+                INBOX_SOURCE_FILTERS.map { InboxFilterOption(it, inboxSourceLabel(it)) },
+            selected = state.sourceFilter,
             onSelect = {
-                pickingAgent = false
+                picking = null
+                onSourceFilter(it)
+            },
+            onDismiss = { picking = null },
+        )
+
+        InboxFilterKind.Agent -> InboxFilterDialog(
+            title = "筛选智能体",
+            options = listOf(InboxFilterOption(null, "全部")) +
+                state.agentOptions.map { InboxFilterOption(it.id, it.name.ifBlank { it.id }) },
+            selected = state.agentFilter,
+            onSelect = {
+                picking = null
                 onAgentFilter(it)
             },
-            onDismiss = { pickingAgent = false },
+            onDismiss = { picking = null },
+            emptyHint = if (state.agentOptions.isEmpty()) "未能读取智能体列表" else null,
         )
+
+        null -> Unit
     }
 }
 
@@ -335,106 +356,133 @@ private fun severityColor(severity: String) = when (severity) {
     else -> MaterialTheme.colorScheme.secondary
 }
 
+/** 收件箱的两个筛选维度，决定打开哪个对话框。 */
+private enum class InboxFilterKind { Source, Agent }
+
+/** 对话框选项：`value` 为 null 表示该维度的「全部」。 */
+private data class InboxFilterOption(val value: String?, val label: String)
+
 /**
- * 筛选条：来源单选 + 智能体入口。
+ * 筛选条：来源与智能体各一个下拉入口，右侧在有筛选时出现「清除」。
  *
- * 来源用横向滚动的 Chip 而不是下拉：五个来源在 411dp 宽度下一行放不下，
- * 但滚动条比弹出菜单少一层操作，切换筛选是高频动作。
+ * 两个维度都收进对话框：来源含「全部」共六项，平铺成 Chip 在 411dp 上放不下，
+ * 而且与智能体按钮同排时看不出它们属于两个维度。
  */
 @Composable
 private fun InboxFilterRow(
     sourceFilter: String?,
     agentFilter: String?,
     agentLabel: String?,
-    onSourceFilter: (String?) -> Unit,
+    onPickSource: () -> Unit,
     onPickAgent: () -> Unit,
+    onClear: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FilterChip(label = "全部", selected = sourceFilter == null, onClick = { onSourceFilter(null) })
-        INBOX_SOURCE_FILTERS.forEach { type ->
-            FilterChip(
-                label = inboxSourceLabel(type),
-                selected = sourceFilter == type,
-                onClick = { onSourceFilter(type) },
+        // 左侧一组占满剩余宽度，智能体名过长时被压缩到省略号，不把「清除」挤出屏幕。
+        Row(modifier = Modifier.weight(1f)) {
+            FilterButton(
+                text = "来源 · " + sourceFilterLabel(sourceFilter),
+                onClick = onPickSource,
+            )
+            Spacer(Modifier.width(12.dp))
+            FilterButton(
+                text = "智能体 · " + (agentLabel ?: "全部"),
+                onClick = onPickAgent,
+                modifier = Modifier.weight(1f, fill = false),
             )
         }
-        Spacer(Modifier.width(4.dp))
-        FilterChip(
-            label = agentLabel ?: "全部智能体",
-            selected = agentFilter != null,
-            onClick = onPickAgent,
+        if (sourceFilter != null || agentFilter != null) {
+            Text(
+                text = "清除",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+/** 无边框筛选按钮：维度与当前值加一个下拉箭头，点击打开选择对话框。 */
+@Composable
+private fun FilterButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(2.dp))
+        Icon(
+            imageVector = QwenIcons.chevronDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(12.dp),
         )
     }
 }
 
-@Composable
-private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        color = if (selected) {
-            MaterialTheme.colorScheme.onPrimary
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        maxLines = 1,
-        modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    )
-}
-
 /**
- * 智能体选择。首项固定为「全部智能体」，用于清除筛选。
+ * 来源与智能体共用的选择对话框。
  *
- * 选项来自 `GET /api/agents`。一个实例通常只绑定一个智能体，因此列表往往只有一项；
- * 这里仍按完整列表提供，避免在服务端切换过智能体后筛不到历史事件。
+ * 首项固定是「全部」，用于清除单个维度；选中项右侧打勾。智能体列表可能很长，
+ * 因此限制最大高度并在内部纵向滚动，不把对话框撑出屏幕。
  */
 @Composable
-private fun AgentFilterDialog(
-    options: List<AgentDto>,
-    selectedId: String?,
+private fun InboxFilterDialog(
+    title: String,
+    options: List<InboxFilterOption>,
+    selected: String?,
     onSelect: (String?) -> Unit,
     onDismiss: () -> Unit,
+    emptyHint: String? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "筛选智能体",
+                text = title,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         },
         text = {
-            Column {
-                AgentOptionRow(
-                    label = "全部智能体",
-                    selected = selectedId == null,
-                    onClick = { onSelect(null) },
-                )
-                options.forEach { agent ->
-                    AgentOptionRow(
-                        label = agent.name.ifBlank { agent.id },
-                        selected = selectedId == agent.id,
-                        onClick = { onSelect(agent.id) },
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                options.forEach { option ->
+                    InboxFilterOptionRow(
+                        label = option.label,
+                        selected = selected == option.value,
+                        onClick = { onSelect(option.value) },
                     )
                 }
-                if (options.isEmpty()) {
+                emptyHint?.let { hint ->
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "未能读取智能体列表",
+                        text = hint,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -449,24 +497,39 @@ private fun AgentFilterDialog(
 }
 
 @Composable
-private fun AgentOptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        color = if (selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        },
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
+private fun InboxFilterOptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 10.dp),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = QwenIcons.check,
+                contentDescription = "已选中",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
 }
 
 @Composable

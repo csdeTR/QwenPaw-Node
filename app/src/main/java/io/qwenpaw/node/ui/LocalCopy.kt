@@ -84,6 +84,67 @@ internal object CommandCopy {
 
     fun description(name: String): String? = descriptions[name]
 
+    /**
+     * 命令名 → 一行用法示例，显示在「魔法命令」的长按详情里。
+     *
+     * 只收面向用户的命令，参数写法取自官方命令文档；插件与技能注册的命令没有固定形态，
+     * 这里不编造，详情里回退成 `/命令名`。
+     */
+    private val examples = mapOf(
+        "approval" to "/approval list --all",
+        "approve" to "/approve",
+        "checkpoint" to "/checkpoint snapshot before-refactor",
+        "clear" to "/clear",
+        "compact" to "/compact 保留需求与待办，去掉调试日志",
+        "deny" to "/deny",
+        "goal" to "/goal 补全输入区单元测试",
+        "mission" to "/mission 修复登录失败",
+        "model" to "/model openai:gpt-4o",
+        "new" to "/new",
+        "plan" to "/plan 把构建脚本迁到 Gradle 8",
+        "reme" to "/reme search query=\"项目决策\" limit=5",
+        "skills" to "/skills",
+        "status" to "/status",
+        "stop" to "/stop",
+        "tool-bg" to "/tool-bg",
+        "tool-cancel" to "/tool-cancel",
+        "tools" to "/tools",
+    )
+
+    /**
+     * 命令名 → 比列表灰字更具体的一句说明，只用在长按详情里。
+     *
+     * 与 [descriptions] 的差别在粒度：列表那行要能一眼扫过，这里可以补上
+     * 「不写子命令会怎样」「有哪些子命令」「有什么副作用」这类信息。
+     */
+    private val details = mapOf(
+        "approval" to "列出待审批的工具调用，并按编号批准、拒绝或取消。不写子命令时列出可用用法。",
+        "approve" to "批准排队中的工具调用。有多条待审时用 /approval approve <编号> 指定其中一条。",
+        "checkpoint" to "按快照、时间线、恢复、清理、重置等子命令管理检查点；不带子命令时列出可用子命令。",
+        "clear" to "清空当前对话的历史与摘要，不写入长期记忆。该操作不可撤销。",
+        "compact" to "立即压缩上下文并重写接续摘要，可附带一句说明要保留的内容。",
+        "deny" to "拒绝排队中的工具调用，可附一句理由，智能体会据此调整做法。",
+        "goal" to "把一段描述设为持续目标，智能体循环执行直到声明完成或失败。",
+        "mission" to "按 master、worker、verifier 三层流水线拆解并验证复杂任务，适合有明确验收方式的工作。",
+        "model" to "不带参数时显示当前模型与来源；带 <供应商>:<模型> 时切换默认模型，另有 list、info、reset 子命令。",
+        "new" to "结束当前对话并新建一条，旧内容转为长期记忆。",
+        "plan" to "把任务拆成结构化计划并逐步执行，适合步骤较多的改动。",
+        "reme" to "调用聊天中允许的 ReMe 记忆动作，例如用 search 按关键词检索记忆。",
+        "skills" to "列出当前对话可用的技能。技能名本身也能作为命令直接调用。",
+        "status" to "查看服务端健康状态、运行配置与记忆管理器状态。",
+        "stop" to "立即终止当前对话中正在运行的任务。",
+        "tool-bg" to "把正在执行的工具调用转入后台继续运行，先让对话往下走。",
+        "tool-cancel" to "取消正在执行的工具调用，已经产生的输出会被丢弃。",
+        "tools" to "列出当前对话中正在运行的工具调用及其进度。",
+    )
+
+    fun example(name: String): String? = examples[name]
+
+    fun detail(name: String): String? = details[name]
+
+    /** 面向用户的命令名，按字典序。供「魔法命令」的完整性测试逐条核对。 */
+    fun userFacingNames(): List<String> = descriptions.keys.filter { isUserFacing(it) }.sorted()
+
     /** 内部命令不参与补全。未知命令（插件 / 技能注册）保留。 */
     fun isUserFacing(name: String): Boolean = name !in internal
 

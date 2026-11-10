@@ -429,6 +429,27 @@ data class ProjectDirDto(
 )
 
 /**
+ * `GET /api/workspace/project-directory/browse-dirs`。
+ *
+ * 只列目录、不列文件。`show_hidden` 必须为 true：实测在 2.2.2.post1 上，
+ * 不传该参数时 `dirs` 可能为空，看起来像「这个目录下什么都没有」。
+ * [parent] 在根目录处为 null。
+ */
+@Serializable
+data class BrowseDirsDto(
+    val current: String = "",
+    val parent: String? = null,
+    val dirs: List<BrowseDirDto> = emptyList(),
+)
+
+/** 一个可进入的子目录。 */
+@Serializable
+data class BrowseDirDto(
+    val name: String = "",
+    val path: String = "",
+)
+
+/**
  * token 用量汇总，对应 `GET /api/token-usage`。
  *
  * `cache_hit_rate` 必须可空：服务端在没有任何调用时返回 `null`
@@ -775,4 +796,72 @@ data class ToolCallOutputDto(
     @SerialName("is_closed") val isClosed: Boolean = false,
     @SerialName("final_state") val finalState: String? = null,
     val content: JsonArray = JsonArray(emptyList()),
+)
+
+// ---------------- 工作区文件 ----------------
+
+/**
+ * `GET /api/workspace/tree` 的条目。
+ *
+ * `previewKind` 由服务端判定（`directory` / `text` / `binary` / `image`），
+ * 界面据此决定能否预览，不要用扩展名另判一套——实测 `history.db` 的
+ * `file-content` 会返回带 NUL 的字符串，按扩展名猜会把数据库当文本渲染。
+ */
+@Serializable
+data class WorkspaceEntryDto(
+    val name: String = "",
+    val path: String = "",
+    val kind: String = "",
+    @SerialName("preview_kind") val previewKind: String? = null,
+    val size: Long? = null,
+    @SerialName("modified_at") val modifiedAt: String? = null,
+)
+
+/** `GET /api/workspace/tree`。游标原样回传给 `cursor`，`has_more=false` 即到底。 */
+@Serializable
+data class WorkspaceTreeDto(
+    val directory: String = "",
+    val entries: List<WorkspaceEntryDto> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean = false,
+    @SerialName("next_cursor") val nextCursor: String? = null,
+)
+
+/**
+ * `GET /api/workspace/file-content`。
+ *
+ * `limit` 是字节上限，服务端会把 [nextOffset] 落到 UTF-8 边界，因此它可能略大于
+ * 请求的 `limit`。分块内容可直接拼接，实测中文不会在边界处损坏。
+ */
+@Serializable
+data class WorkspaceFileContentDto(
+    val content: String = "",
+    val encoding: String? = null,
+    val eof: Boolean = false,
+    val etag: String? = null,
+    val limit: Long = 0,
+    @SerialName("next_offset") val nextOffset: Long = 0,
+    val offset: Long = 0,
+    val path: String = "",
+    val truncated: Boolean = false,
+)
+
+/**
+ * `GET /api/workspace/memory` 的元素。
+ *
+ * `path` 是服务端绝对路径，只用于展示或排错；读取时用 [filename]（相对记忆根，
+ * 可含子目录）拼到 `/api/workspace/memory/` 后面。
+ */
+@Serializable
+data class WorkspaceMemoryFileDto(
+    val filename: String = "",
+    val path: String = "",
+    val size: Long? = null,
+    @SerialName("created_time") val createdTime: String? = null,
+    @SerialName("modified_time") val modifiedTime: String? = null,
+)
+
+/** `GET /api/workspace/memory/{md_path}`。 */
+@Serializable
+data class WorkspaceMemoryContentDto(
+    val content: String = "",
 )

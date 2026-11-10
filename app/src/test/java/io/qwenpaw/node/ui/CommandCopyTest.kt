@@ -59,6 +59,29 @@ class CommandCopyTest {
     fun `unknown commands are kept`() {
         assertTrue(CommandCopy.isUserFacing("some-skill-command"))
         assertNull(CommandCopy.description("some-skill-command"))
+        assertNull(CommandCopy.example("some-skill-command"))
+        assertNull(CommandCopy.detail("some-skill-command"))
+    }
+
+    /**
+     * 「魔法命令」的详情依赖这两张表。缺一条就会在长按后只剩命令名，
+     * 因此按 [CommandCopy.userFacingNames] 逐条核对，新增命令时这条用例会直接报出名字。
+     */
+    @Test
+    fun `every user facing command has an example and a detail`() {
+        val names = CommandCopy.userFacingNames()
+        assertEquals(18, names.size)
+        names.forEach { name ->
+            val example = CommandCopy.example(name)
+            assertNotNull("缺少示例：$name", example)
+            assertTrue("示例应以 /$name 开头：$example", example!!.startsWith("/$name"))
+
+            val detail = CommandCopy.detail(name)
+            assertNotNull("缺少详情：$name", detail)
+            assertTrue("详情不是中文：$name -> $detail", detail!!.any { it.code in 0x4e00..0x9fff })
+            // 详情要给出比列表灰字更多的信息，不能把同一句抄两遍。
+            assertTrue("详情与列表说明重复：$name", detail != CommandCopy.description(name))
+        }
     }
 
     /**

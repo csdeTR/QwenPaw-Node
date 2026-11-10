@@ -34,6 +34,8 @@ class QwenPawApp : Application() {
         private set
     lateinit var pluginProbe: io.qwenpaw.node.data.plugin.PluginProbe
         private set
+    lateinit var downloadClient: io.qwenpaw.node.data.remote.DownloadClient
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -45,6 +47,8 @@ class QwenPawApp : Application() {
             QwenPawApi.defaultClient(),
         )
         database = AppDatabase.build(this)
+        // 下载走独立的流式通道：与聊天、工具流互不影响，也不受 JSON 解码路径限制。
+        downloadClient = io.qwenpaw.node.data.remote.DownloadClient(QwenPawApi.defaultClient())
         networkMonitor = NetworkMonitor(this)
         chatIconStore = io.qwenpaw.node.avatar.ChatIconStore(
             this,

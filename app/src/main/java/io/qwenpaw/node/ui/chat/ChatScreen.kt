@@ -104,6 +104,12 @@ fun ChatScreen(
     assistantCollapse: AssistantCollapse = AssistantCollapse.RESULT_COLLAPSED,
     /** 消息外观：头像、显示名与用量开关。 */
     appearance: MessageAppearance = MessageAppearance(),
+    /** 用户消息是否按 Markdown / LaTeX 渲染。关闭后按原文显示。 */
+    renderUserMarkdown: Boolean = true,
+    /** 智能体消息是否按 Markdown / LaTeX 渲染。 */
+    renderAssistantMarkdown: Boolean = true,
+    /** 浏览服务端目录，供「智能体工作区」弹窗使用。失败返回 null。 */
+    onBrowseDirs: suspend (String) -> io.qwenpaw.node.data.model.BrowseDirsDto? = { null },
     /** 「选择文本」里选「显示」时，把这条消息的原始 Markdown 交给上层打开原文页。 */
     onOpenSource: (String) -> Unit = {},
     /** 可补全的斜杠命令；空列表时不显示候选。 */
@@ -131,6 +137,8 @@ fun ChatScreen(
     var showApprovalDialog by remember { mutableStateOf(false) }
     var showGroupDialog by remember { mutableStateOf(false) }
     var showThinkingDialog by remember { mutableStateOf(false) }
+    var showFullscreenInput by remember { mutableStateOf(false) }
+    var showCommands by remember { mutableStateOf(false) }
 
     // 首屏只渲染最近的一页，向上滚动时再往前补。
     // 560+ 条的历史一次铺开会明显掉帧，尤其在低端机上。
@@ -375,6 +383,27 @@ fun ChatScreen(
         }
     }
 
+    // 输入条脑图的填充比例与文案都从同一份思考视图算出；
+    // 顶栏的思考入口与它共享同一个对话框状态。
+    val thinkingScale = remember(state.thinking) { ThinkingScale.of(state.thinking?.control) }
+    val thinkingRatio = thinkingScale?.fillRatio(state.thinking?.value)
+    val thinkingLabel = thinkingScale?.label(state.thinking?.value)
+
+    // 全屏输入整页接管聊天页：比包成 Dialog 可靠，键盘让位跟随宿主 Activity。
+    if (showFullscreenInput) {
+        FullscreenInput(
+            draft = state.draft,
+            attachments = state.attachments,
+            onDraftChange = onDraftChange,
+            onSend = {
+                showFullscreenInput = false
+                onSend()
+            },
+            onDismiss = { showFullscreenInput = false },
+        )
+        return
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -383,13 +412,7 @@ fun ChatScreen(
                 running = state.running,
                 contextUsage = state.contextUsage,
                 pinned = state.currentChatPinned,
-                thinking = state.thinking,
                 groups = state.groups,
-                currentGroupId = state.currentChatGroupId,
-                modelChoices = state.modelChoices,
-                currentModelLabel = state.currentModelLabel,
-                approvalLevel = state.approvalLevel,
-                projectDirName = state.projectDir?.name?.takeIf { it.isNotBlank() },
                 link = state.link,
                 boundUrl = state.boundUrl,
                 boundLabel = state.boundLabel,
@@ -405,15 +428,8 @@ fun ChatScreen(
                 onExport = onExport,
                 onRefresh = onRefresh,
                 onContextClick = { showContext = true },
-                onSetThinking = onSetThinking,
                 onSetGroup = onSetGroup,
-                onPickModel = onPickModel,
-                onPickApproval = onPickApproval,
-                onOpenProjectDir = { showProjectDir = true },
-                onOpenModelDialog = { showModelDialog = true },
-                onOpenApprovalDialog = { showApprovalDialog = true },
                 onOpenGroupDialog = { showGroupDialog = true },
-                onOpenThinkingDialog = { showThinkingDialog = true },
             )
         },
         bottomBar = {
@@ -462,6 +478,22 @@ fun ChatScreen(
                     // 胶囊本身就是「当前模型」的显示，点它是改模型的自然入口，
                     // 比让用户去右上角「...」里翻更直接。
                     onModelClick = { showModelDialog = true },
+                    thinkingRatio = thinkingRatio,
+                    thinkingLabel = thinkingLabel,
+                    onThinkingClick = { showThinkingDialog = true },
+                    // 服务端没给审批档位时传 null，「+」菜单里不留这一项。
+                    approvalLabel = state.approvalLevel?.let { level ->
+                        APPROVAL_OPTIONS.firstOrNull { it.code == level }?.label
+                    },
+                    onApprovalClick = { showApprovalDialog = true },
+                    onCommandsClick = { showCommands = true },
+                    // 全屏输入、工作区与魔法命令都从「+」进入，与附件、审批放在同一处。
+                    onFullscreenInput = { showFullscreenInput = true },
+                    onWorkspaceClick = { showProjectDir = true },
+                    workspaceLabel = state.projectDir?.let { dir ->
+                        dir.name.takeIf { it.isNotBlank() }
+                            ?: dir.path.takeIf { it.isNotBlank() }?.substringAfterLast('/')
+                    },
                     commands = commands,
                     // 底部留白交给输入条自己处理：它需要把留白加在 Surface 内部，
                     // 这样底色能一直铺到屏幕底边，不会在系统栏处露出一条页面底色。
@@ -523,11 +555,19 @@ fun ChatScreen(
                                     onImageClick = { viewingImage = it },
                                     onRetry = onRetry,
                                     appearance = appearance,
+                                    renderMarkdown = if (item.message.role ==
+                                        io.qwenpaw.node.data.stream.Role.USER
+                                    ) {
+                                        renderUserMarkdown
+                                    } else {
+                                        renderAssistantMarkdown
+                                    },
                                     onOpenSource = onOpenSource,
                                 )
 
                                 is ChatItem.Steps -> StepsGroup(
                                     steps = item.steps,
+                                    renderMarkdown = renderAssistantMarkdown,
                                     toolCalls = state.toolCalls,
                                     toolLive = state.toolLive,
                                     onCancelTool = onCancelTool,
@@ -636,6 +676,7 @@ fun ChatScreen(
     if (showProjectDir) {
         ProjectDirDialog(
             current = state.projectDir,
+            onBrowse = onBrowseDirs,
             onDismiss = { showProjectDir = false },
             onSave = { path ->
                 showProjectDir = false
@@ -701,6 +742,20 @@ fun ChatScreen(
         )
     }
 
+    // 魔法命令：与输入框里打「/」的补全同源，区别是一次列全、能看用法。
+    if (showCommands) {
+        MagicCommandsDialog(
+            commands = commands,
+            onPick = { command ->
+                showCommands = false
+                // 与输入框补全一致：整条草稿换成「/name 」，接着输入参数即可发送。
+                // 草稿里原有的文字会被替换——命令必须位于整条消息开头，拼在后面不会被执行。
+                onDraftChange(commandInsertion(command))
+            },
+            onDismiss = { showCommands = false },
+        )
+    }
+
     // 分组：首项固定「未分组」。此前下拉菜单里没有这一项，
     // 对话一旦进了某个分组就无法移回去，只能重新建一个对话。
     if (showGroupDialog) {
@@ -735,7 +790,8 @@ fun ChatScreen(
             value = state.thinking?.value,
             effective = state.thinking?.effective,
             onSet = { level, budget ->
-                showThinkingDialog = false
+                // 只提交值，不关闭对话框：滑一下就被弹窗关掉会打断连续调整，
+                // 关闭交给对话框自己的按钮与返回键。
                 onSetThinking(level, budget)
             },
             onDismiss = { showThinkingDialog = false },

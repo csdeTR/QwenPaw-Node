@@ -107,6 +107,8 @@ fun InstanceForm(
     currentNetKind: String = NetworkMonitor.Snapshot.KIND_OTHER,
     currentSsid: String? = null,
     submitLabel: String = "连接",
+    /** 该主机已在「受信任的连接」里时返回 true，此时不弹安全提示。 */
+    isTrustedHost: (String) -> Boolean = { false },
     onCancel: (() -> Unit)? = null,
 ) {
     // 至少保留一行输入框，否则用户没有地方填地址。
@@ -213,10 +215,11 @@ fun InstanceForm(
                         }
                     }
                     // 地址通了不代表可以放心用：公网地址不设防等于是把整台机器交出去。
+                    // 受信任的主机除外：用户已经确认过这台服务器属于自己。
                     securityNotice = io.qwenpaw.node.data.assessSecurity(
                         url = result.baseUrl,
                         loginRequired = result.needsLogin,
-                    ).takeIf { it.any }
+                    ).takeIf { it.any && !isTrustedHost(it.host) }
                 }
                 .onFailure { e ->
                     hostVerified = false
@@ -861,6 +864,8 @@ fun ConnectScreen(
     ) -> String?,
     saved: List<InstanceConfig>,
     onUseSaved: (InstanceConfig) -> Unit,
+    /** 该主机已在「受信任的连接」里时返回 true，此时不弹安全提示。 */
+    isTrustedHost: (String) -> Boolean = { false },
 ) {
     // 连接页是裸页面（没有 Scaffold 帮忙处理系统栏），自己让开状态栏与手势条。
     // 引导组件也被设置页复用，那边包在 Scaffold 里、已由 Scaffold 注入留白，
@@ -912,6 +917,7 @@ fun ConnectScreen(
             onLoadAgents = onLoadAgents,
             onVerifyHosts = onVerifyHosts,
             scrollable = false,
+            isTrustedHost = isTrustedHost,
         )
 
         if (saved.isNotEmpty()) {

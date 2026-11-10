@@ -17,6 +17,14 @@ internal val INBOX_SOURCE_FILTERS: List<String> = listOf(
     "mail",
 )
 
+/**
+ * 筛选按钮上的来源文案。
+ *
+ * `null` 与空白都表示不做来源筛选，统一显示「全部」，与首项选项一致。
+ */
+internal fun sourceFilterLabel(source: String?): String =
+    if (source.isNullOrBlank()) "全部" else inboxSourceLabel(source)
+
 /** 来源的中文标签。 */
 internal fun inboxSourceLabel(sourceType: String): String = when (sourceType) {
     "cron" -> "定时任务"

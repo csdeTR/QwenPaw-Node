@@ -10,6 +10,7 @@ import io.qwenpaw.node.data.model.AuthTokenDto
 import io.qwenpaw.node.data.model.AvailableCommandsDto
 import io.qwenpaw.node.data.model.BatchChatResultDto
 import io.qwenpaw.node.data.model.BridgeInfoDto
+import io.qwenpaw.node.data.model.BrowseDirsDto
 import io.qwenpaw.node.data.model.SearchPageDto
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
@@ -40,6 +41,11 @@ import io.qwenpaw.node.data.model.ToolDto
 import io.qwenpaw.node.data.model.UploadResultDto
 import io.qwenpaw.node.data.model.UserTimezoneDto
 import io.qwenpaw.node.data.model.VersionDto
+import io.qwenpaw.node.data.model.WorkspaceFileContentDto
+import io.qwenpaw.node.data.model.WorkspaceMemoryContentDto
+import io.qwenpaw.node.data.model.WorkspaceMemoryFileDto
+import io.qwenpaw.node.data.model.WorkspaceTreeDto
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -602,6 +608,33 @@ class QwenPawApi(
     }
 
     /**
+     * 浏览服务端上的目录，用于「智能体工作区」弹窗按目录逐层选择。
+     *
+     * `show_hidden` 固定为 true：不传时服务端返回的 `dirs` 可能是空的，
+     * 用户会看到「这个目录没有子目录」而不是真正的列表。
+     */
+    fun browseDirs(
+        conn: Connection,
+        path: String,
+        showHidden: Boolean = true,
+    ): BrowseDirsDto = decode(
+        execute(
+            baseBuilder(
+                conn,
+                workspaceUrl(
+                    conn,
+                    "/api/workspace/project-directory/browse-dirs",
+                    mapOf(
+                        "path" to path,
+                        "show_hidden" to showHidden.toString(),
+                    ),
+                ),
+            ).get().build(),
+        ),
+        BrowseDirsDto.serializer(),
+    )
+
+    /**
      * 当前智能体可用的斜杠命令。
      *
      * 命令注册表挂在智能体上，端点走 `X-Agent-Id` 归属（`baseBuilder` 已统一注入）。
@@ -1114,6 +1147,100 @@ class QwenPawApi(
             .header("Accept", "text/event-stream")
             .build()
 
+    // ---------- 工作区文件 ----------
+
+    /**
+     * `GET /api/workspace/tree`。
+     *
+     * `root` 只接受 `workspace` / `project` / `project:<path>`。未绑定项目目录时
+     * 服务端回落到默认工作区，不返回错误（2.2.2.post1 与 2.3.0b2 实测一致）。
+     * `cursor` 原样回传，`has_more=false` 即到底。
+     */
+    fun workspaceTree(
+        conn: Connection,
+        root: String,
+        path: String? = null,
+        cursor: String? = null,
+        limit: Int = WORKSPACE_TREE_LIMIT,
+    ): WorkspaceTreeDto = decode(
+        execute(
+            baseBuilder(
+                conn,
+                workspaceUrl(
+                    conn,
+                    "/api/workspace/tree",
+                    mapOf(
+                        "root" to root,
+                        "path" to path?.takeIf { it.isNotBlank() },
+                        "cursor" to cursor,
+                        "limit" to limit.toString(),
+                    ),
+                ),
+            ).get().build(),
+        ),
+        WorkspaceTreeDto.serializer(),
+    )
+
+    /**
+     * `GET /api/workspace/file-content`。
+     *
+     * `limit` 是字节上限，服务端会把 `next_offset` 落到 UTF-8 边界；返回值可能略大于
+     * 请求值，因此续读必须用响应里的 `next_offset`，不要自己加 `limit`。
+     */
+    fun workspaceFileContent(
+        conn: Connection,
+        root: String,
+        path: String,
+        offset: Long,
+        limit: Int = WORKSPACE_CONTENT_LIMIT,
+    ): WorkspaceFileContentDto = decode(
+        execute(
+            baseBuilder(
+                conn,
+                workspaceUrl(
+                    conn,
+                    "/api/workspace/file-content",
+                    mapOf(
+                        "root" to root,
+                        "path" to path,
+                        "offset" to offset.toString(),
+                        "limit" to limit.toString(),
+                    ),
+                ),
+            ).get().build(),
+        ),
+        WorkspaceFileContentDto.serializer(),
+    )
+
+    /** `GET /api/workspace/memory`。响应是裸数组，不是 `{items: []}`。 */
+    fun workspaceMemory(conn: Connection): List<WorkspaceMemoryFileDto> = decode(
+        request(conn, "GET", "/api/workspace/memory"),
+        ListSerializer(WorkspaceMemoryFileDto.serializer()),
+    )
+
+    /**
+     * `GET /api/workspace/memory/{md_path}`。
+     *
+     * [mdPath] 是列表里的 `filename`，可含子目录；按路径段编码，避免文件名里的
+     * `?`、`#` 被当成查询或片段。
+     */
+    fun workspaceMemoryFile(conn: Connection, mdPath: String): String = decode(
+        execute(baseBuilder(conn, memoryUrl(conn, mdPath)).get().build()),
+        WorkspaceMemoryContentDto.serializer(),
+    ).content
+
+    /**
+     * 构造单文件下载请求（不执行）。
+     *
+     * 服务端会回 `Accept-Ranges: bytes`，但带 `Range` 仍返回 200 与完整内容，
+     * 因此调用方不能做续传；中断后只能整文件重下。
+     */
+    fun workspaceFileDownloadRequest(conn: Connection, root: String, path: String): Request =
+        baseBuilder(
+            conn,
+            workspaceUrl(conn, "/api/workspace/file-download", mapOf("root" to root, "path" to path)),
+        ).get().build()
+
     // ---------- 内部实现 ----------
 
     private fun request(
@@ -1158,11 +1285,35 @@ class QwenPawApi(
      * 因此是官方支持的通路。代价是 token 会出现在反代的 access log 里，
      * 这一点写在 `docs/protocol.md` 第 1 节。
      */
-    private fun connUrl(conn: Connection, path: String): HttpUrl {
-        val base = resolve(conn.baseUrl, path)
+    private fun connUrl(conn: Connection, path: String): HttpUrl =
+        applyToken(conn, resolve(conn.baseUrl, path))
+
+    /** 带查询参数的地址。值为 null 的参数不下发，避免产生 `path=` 这类空值。 */
+    private fun workspaceUrl(conn: Connection, path: String, params: Map<String, String?>): HttpUrl {
+        val builder = resolve(conn.baseUrl, path).newBuilder()
+        params.forEach { (key, value) -> if (value != null) builder.addQueryParameter(key, value) }
+        return applyToken(conn, builder.build())
+    }
+
+    /** 记忆端点把相对路径放在 path 段上，逐段编码。 */
+    private fun memoryUrl(conn: Connection, mdPath: String): HttpUrl {
+        val builder = resolve(conn.baseUrl, "/api/workspace/memory").newBuilder()
+        mdPath.split('/').filter { it.isNotEmpty() }.forEach { builder.addPathSegment(it) }
+        return applyToken(conn, builder.build())
+    }
+
+    /**
+     * 反代 Basic 与 QwenPaw token 同时存在时，把 token 挪到查询参数上。
+     *
+     * `Authorization` 一个请求只能有一个值，让给 Basic 之后 token 只能走 `?token=`。
+     * 服务端 `AuthMiddleware._extract_token` 在 Bearer 缺失时读这个参数，
+     * 因此是官方支持的通路。代价是 token 会出现在反代的 access log 里，
+     * 这一点写在 `docs/protocol.md` 第 1 节。
+     */
+    private fun applyToken(conn: Connection, url: HttpUrl): HttpUrl {
         val token = conn.token?.takeIf { it.isNotBlank() }
-        if (conn.basicAuth == null || token == null) return base
-        return base.newBuilder().addQueryParameter("token", token).build()
+        if (conn.basicAuth == null || token == null) return url
+        return url.newBuilder().addQueryParameter("token", token).build()
     }
 
     private fun baseBuilder(conn: Connection, url: HttpUrl): Request.Builder {
@@ -1264,6 +1415,12 @@ class QwenPawApi(
 
         /** 收件箱事件列表端点。 */
         private const val INBOX_EVENTS_PATH = "/api/console/inbox/events"
+
+        /** 工作区目录每页条数。服务端没有上限说明，200 与实测一致。 */
+        private const val WORKSPACE_TREE_LIMIT = 200
+
+        /** 文本预览单次读取的字节上限；服务端会按 UTF-8 边界微调。 */
+        private const val WORKSPACE_CONTENT_LIMIT = 64 * 1024
 
         /**
          * 登录接口 404 的说明。

@@ -138,4 +138,62 @@ class ThinkingScaleTest {
         assertEquals("极低", thinkingLevelLabel("minimal"))
         assertEquals("最高", thinkingLevelLabel("max"))
     }
+
+    /** 三档 effort 均分成 0 / 0.5 / 1，对应脑图的空、半满、满。 */
+    @Test
+    fun `fill ratio spaces effort stops evenly`() {
+        val scale = ThinkingScale.of(effort("low", "medium", "high"))!!
+        assertEquals(0f, scale.fillRatio(ThinkingValueDto(level = "low")), 0.001f)
+        assertEquals(0.5f, scale.fillRatio(ThinkingValueDto(level = "medium")), 0.001f)
+        assertEquals(1f, scale.fillRatio(ThinkingValueDto(level = "high")), 0.001f)
+    }
+
+    /** 关闭档不参与序号计算：加入 off 之后低 / 中 / 高仍是 0 / 0.5 / 1。 */
+    @Test
+    fun `fill ratio ignores the off stop when indexing efforts`() {
+        val scale = ThinkingScale.of(effort("low", "medium", "high", off = true))!!
+        assertEquals(0f, scale.fillRatio(ThinkingValueDto(level = "low")), 0.001f)
+        assertEquals(0.5f, scale.fillRatio(ThinkingValueDto(level = "medium")), 0.001f)
+        assertEquals(1f, scale.fillRatio(ThinkingValueDto(level = "high")), 0.001f)
+    }
+
+    @Test
+    fun `fill ratio is zero when thinking is off or unset`() {
+        val scale = ThinkingScale.of(effort("low", "high", off = true))!!
+        assertEquals(0f, scale.fillRatio(null), 0.001f)
+        assertEquals(0f, scale.fillRatio(ThinkingValueDto(level = "inherit")), 0.001f)
+        assertEquals(0f, scale.fillRatio(ThinkingValueDto(level = "off")), 0.001f)
+    }
+
+    @Test
+    fun `fill ratio of budget is the position inside the range`() {
+        val scale = ThinkingScale.of(budget(0, 1000))!!
+        assertEquals(0f, scale.fillRatio(ThinkingValueDto(level = "budget", budgetTokens = 0)), 0.001f)
+        assertEquals(0.5f, scale.fillRatio(ThinkingValueDto(level = "budget", budgetTokens = 500)), 0.001f)
+        // 超出上限时按满格算。
+        assertEquals(1f, scale.fillRatio(ThinkingValueDto(level = "budget", budgetTokens = 99999)), 0.001f)
+    }
+
+    @Test
+    fun `fill ratio of an unknown effort level is zero`() {
+        val scale = ThinkingScale.of(effort("low", "high"))!!
+        assertEquals(0f, scale.fillRatio(ThinkingValueDto(level = "turbo")), 0.001f)
+    }
+
+    /**
+     * 单档 effort 不可调，[ThinkingScale.of] 会返回 null；这里直接构造，
+     * 唯一那一档按满格处理。
+     */
+    @Test
+    fun `single effort stop fills the whole brain`() {
+        val scale = ThinkingScale(
+            kind = "effort",
+            stops = listOf("high"),
+            budgetMin = 0,
+            budgetMax = 0,
+            budgetDefault = null,
+            supportsOff = false,
+        )
+        assertEquals(1f, scale.fillRatio(ThinkingValueDto(level = "high")), 0.001f)
+    }
 }

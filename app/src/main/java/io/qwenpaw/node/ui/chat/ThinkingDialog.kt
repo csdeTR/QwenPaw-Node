@@ -102,7 +102,7 @@ internal fun ThinkingDialog(
             }
 
             if (scale.isEffort) {
-                EffortSlider(scale, value, onSet)
+                EffortSlider(scale, value, effective, onSet)
             } else {
                 BudgetSlider(scale, value, effective, onSet)
             }
@@ -125,10 +125,14 @@ internal fun ThinkingDialog(
 private fun EffortSlider(
     scale: ThinkingScale,
     value: ThinkingValueDto?,
+    effective: ThinkingValueDto?,
     onSet: (String, Long?) -> Unit,
 ) {
-    var index by remember(scale, value) {
-        mutableIntStateOf(scale.indexOf(value?.level))
+    // 「跟随默认」时滑块停在服务端算出的实际档位，与 budget 侧同一处理；
+    // 否则一打开就停在最右一格，看起来像已经设成了最高档。
+    val shown = value?.takeIf { it.level.isNotBlank() && it.level != "inherit" } ?: effective
+    var index by remember(scale, shown?.level) {
+        mutableIntStateOf(scale.indexOf(shown?.level))
     }
     val level = scale.stops.getOrElse(index) { "" }
     Text(
@@ -143,7 +147,10 @@ private fun EffortSlider(
         valueRange = 0f..scale.stops.lastIndex.toFloat(),
         steps = (scale.stops.size - 2).coerceAtLeast(0),
         onValueChangeFinished = {
-            onSet(level, null)
+            // 必须在这里读 index，不能读组合期算好的 level：快速拖到目标档再松手时，
+            // 松手回调可能早于这一帧的重组，闭包里的 level 还是上一档，
+            // 请求就会按调整前的强度发出去。
+            onSet(scale.stops.getOrElse(index) { "" }, null)
         },
         modifier = Modifier.padding(horizontal = 12.dp),
     )
