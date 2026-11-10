@@ -21,6 +21,9 @@
 -keep class * extends androidx.room.RoomDatabase { <init>(); }
 -dontwarn androidx.room.paging.**
 
+# SAF 目录树：DocumentFile 按文档 Uri 反射取实现类
+-keep class androidx.documentfile.provider.** { *; }
+
 # OkHttp / Okio 的可选依赖
 -dontwarn okhttp3.internal.platform.**
 -dontwarn org.conscrypt.**

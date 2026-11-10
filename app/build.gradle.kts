@@ -31,8 +31,8 @@ android {
         applicationId = "io.qwenpaw.node"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.2.2"
+        versionCode = 9
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 「关于」页里展示的仓库地址，单独抽成 BuildConfig 字段，
@@ -124,6 +124,8 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
+    // 工作区目录下载需要在 SAF 授权目录里逐级建子目录与文件
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
