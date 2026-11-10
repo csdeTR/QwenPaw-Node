@@ -1641,3 +1641,88 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 - **编辑已有实例**时，验证连接带上已保存的 `token`，能读到 `plugin_version`（实测 `v0.1.0`）；
 - **新增实例**（填表添加、引导式第 1 步）此时还没有 token，401 只能显示「配套插件状态未能确认」；
   安装情况在保存后由设置页「配套插件」行给出。
+
+---
+
+## 26、工作区文件
+
+四个读端点、一个目录浏览端点与一个下载端点。2026-11-10 在 2.2.2.post1 与 2.3.0b2 上逐条实测，
+两版形状一致，客户端因此不做运行时版本分支（`browse-dirs` 只在 2.2.2.post1 上验过）。
+
+### 26.1 目录
+
+`GET /api/workspace/tree`
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `root` | 是 | `workspace` / `project` / `project:<digest>` / `memory`；`.` 返回 400 |
+| `path` | 否 | 相对根的目录路径；空表示根 |
+| `limit` | 否 | 默认 200 |
+| `cursor` | 否 | 上一页的 `next_cursor` |
+
+响应 `{directory, entries[], has_more, next_cursor}`，条目字段：
+
+- `kind`：`directory` / `file`
+- `preview_kind`：`directory` / `text` / `binary` / `image`
+- `size`、`modified_at`、`name`、`path`
+
+三条要点：
+
+1. `preview_kind` 是「能否按文本渲染」的唯一依据，不要按扩展名猜。
+   二进制文件被当作文本读取会得到一段乱码，而不是报错。
+2. `path` 是相对根的路径，可直接回传给 `file-content` 与 `file-download`。
+3. 未绑定项目目录时 `root=project` **不报错**，会回落为默认工作区；
+   只有 `root=project:<digest>` 才返回 403 `Not a bound project directory`。
+   客户端因此无法区分「已绑定」与「回落」，界面上不显示「未配置项目目录」的错误态。
+
+### 26.2 文本片段
+
+`GET /api/workspace/file-content?root=...&path=...&offset=...&limit=...`
+
+响应 `{content, encoding, eof, etag, limit, next_offset, offset, path, truncated}`。
+
+- `limit` 是**字节**上限，不是字符数。
+- 服务端会把 `next_offset` 对齐到 UTF-8 字符边界，可能略大于请求的 `limit`；
+  按 `next_offset` 继续取并直接拼接是无损的。
+- 读到 `eof == true` 才算结束，不能按「本页短于 limit」判断。
+
+### 26.3 记忆
+
+- `GET /api/workspace/memory`：响应是**裸数组**，没有外层对象。
+  元素字段为 `filename`（相对记忆根，可含子目录）、`path`（绝对路径）、
+  `size`、`created_time`、`modified_time`。这一版没有分页参数。
+- `GET /api/workspace/memory/{md_path}`：响应 `{content}`，一次给出全文。
+  `md_path` 需要逐段 URL 编码。
+
+记忆根没有可逐级浏览的目录结构，客户端把它呈现为平铺列表，也不提供下载：
+下载端点没有对应的记忆根依据。
+
+### 26.4 目录浏览
+
+`GET /api/workspace/project-directory/browse-dirs?path=...&show_hidden=true`
+
+给「智能体工作区」弹窗用：按**服务端绝对路径**列出下一级目录，与 26.1 的相对根浏览是两套接口。
+
+响应：
+
+```json
+{"current": "/home/user", "parent": "/home", "dirs": [{"name": "work", "path": "/home/user/work"}]}
+```
+
+- `current` 是本次实际读取的目录（`~` 会被展开成家目录）；`parent` 到达根时为 `null`。
+- `dirs` 只含子目录，不含文件；`path` 是绝对路径，可直接回传给本端点。
+- **`show_hidden=true` 必须固定传。** 不带这一项时服务端会过滤掉以点开头的目录，
+  而某些工作区目录本身就在隐藏路径下，结果是 `dirs` 为空，界面上看起来像「这个目录下没有子目录」。
+  带上之后两种情况的返回才与用户预期一致。
+- 路径不存在或没有权限时返回非 200，客户端按失败处理，不改写输入框里的路径。
+- 不能复用 26.1 的 `tree`：`root=project:/tmp` 这种把绝对路径塞进 `root` 的写法返回 403。
+
+### 26.5 下载
+
+`GET /api/workspace/file-download?root=...&path=...`
+
+- 成功时 200 + `application/octet-stream`，长度由 `content-length` 给出。
+- 失败时返回 JSON `{detail}`，路径不存在是 404。
+- **不要依赖 `Range`。** 响应头带 `accept-ranges: bytes`，但请求带 `Range` 仍返回
+  200 + 完整内容，不会返回 206。因此客户端不做续传，中断后整文件重下。
+- 目录整包下载由客户端逐文件调用本端点完成，不使用整包接口。

@@ -36,7 +36,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 | --- | --- | --- |
 | `data/local/` | Room 数据库（草稿、离线消息缓存）与 `InstanceStore`（实例配置与 token 的加密存储） | 需要新增本地持久化字段，或改动凭据存储方式时 |
 | `data/model/` | 服务端 DTO，使用 `kotlinx.serialization` | 服务端字段增删，或新增接口需要新模型时 |
-| `data/remote/` | `QwenPawApi`（全部 HTTP 端点）、`ChatStreamClient`（SSE 连接）、`ServerAvatarClient`（服务端头像缓存） | 接入新端点，或调整请求头、超时、重试策略时 |
+| `data/remote/` | `QwenPawApi`（全部 HTTP 端点）、`ChatStreamClient`（SSE 连接）、`ServerAvatarClient`（服务端头像缓存）、`DownloadClient`（流式下载到 `OutputStream`） | 接入新端点，或调整请求头、超时、重试策略时 |
 | `data/stream/` | SSE 解析链路：`SseReader` → `ChatEventParser` → `StreamAccumulator`；`HistoryMapper` 负责把历史接口的返回映射为渲染单元 | 服务端帧格式变化，或发现某类内容没有被正确归类时 |
 | `data/`（根） | `NetworkMonitor`（网络类型与连通性）、`InstanceRepository`（多实例与地址解析）、`AddressFallback`（多地址回退判定） | 改动地址优先级、回退策略或网络感知时 |
 | `avatar/` | `AvatarStore`（头像文件）、`AvatarIntake`（GIF 判定与 EXIF 纠正）、`CropGeometry`（裁剪换算）、`AvatarCropScreen`（裁剪页）、`ChatIconStore`（会话图标） | 调整头像规格、裁剪交互或图片处理方式时 |
@@ -45,6 +45,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 | `ui/settings/` | 实例连接表单、地址管理、设置页、智能体选择 | 设置项增删，或连接流程变化时 |
 | `ui/theme/` | 配色、字号缩放、MiSans 字体接入 | 调整视觉 token 或字号体系时 |
 | `ui/log/` | 运行日志页 | 调整日志展示形态时 |
+| `ui/workspace/` | 工作区文件：目录浏览、文本与图片预览、下载计划与进度、SAF 落盘（`SafDownloads`） | 调整文件浏览交互或下载落盘方式时 |
 | `voice/` | sherpa-onnx 流式识别、模型下载解压、重采样 | 更换识别引擎或调整采集参数时 |
 | `font/` | MiSans 运行时下载与校验 | 调整字体下载策略时 |
 | `notify/` | 本地通知。项目没有推送通道，只在前台丢失时提醒 | 调整通知触发条件时 |

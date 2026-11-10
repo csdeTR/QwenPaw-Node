@@ -47,6 +47,32 @@ release 开启了 R8（混淆与优化）与资源压缩。
 混淆规则在 `app/proguard-rules.pro`，覆盖 kotlinx.serialization、Room、
 OkHttp 的可选依赖以及 Tink 的相关注解。
 
+### 1.5 本机与 CI 的差异
+
+三处差异都曾经造成过「本地通过、runner 失败」或「命令超时而非报错」。
+
+**镜像仓库按环境切换。** `settings.gradle.kts` 在 `CI=true` 时跳过阿里云镜像，
+只使用 `google()`、`mavenCentral()` 与 `gradlePluginPortal()`，
+因为镜像在 GitHub Actions 的 runner 上不可达（见 5.3）。
+Trae 的 shell 也带 `CI=true`，在其中构建走的是官方仓库，与用户自己的终端不同；
+需要在本机复现 runner 的解析行为时，写 `CI=true ./gradlew <task>`。
+
+**涉及时间与时区的单测必须显式固定时区。** runner 是 UTC，本机是 `Asia/Shanghai`，
+断言里隐含默认时区就会本地通过、CI 失败。写法参照 `TimeLabelsTest`：
+
+```kotlin
+TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+// 断言中显式写 ZoneId.of("Asia/Shanghai")，不读运行环境的默认值
+```
+
+**在这台机器上执行 `git push` 要加两个环境变量。**
+
+```bash
+GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0 git push
+```
+
+Trae 注入的 askpass 脚本在没有交互终端时会永久等待，表现为命令超时而非报错。
+
 ---
 
 ## 2、签名
@@ -114,6 +140,13 @@ adb install app/build/outputs/apk/release/app-x86_64-release.apk      # x86_64 �
 容易误判为 APK 损坏。装错架构则报 `INSTALL_FAILED_NO_MATCHING_ABIS`，
 可用 `adb shell getprop ro.product.cpu.abi` 确认设备架构。
 
+**debug 与 release 用不同包名，可同机共存。** debug 的 applicationId 为
+`io.qwenpaw.node.debug`，应用名为 `[debug]QP Node`（由
+`app/src/debug/res/values/strings.xml` 覆盖 `app_name`）；release 仍为
+`io.qwenpaw.node` / `QwenPaw Node`。装了 debug 也就不需要先卸载 release，
+两者的登录状态与缓存互不影响。设备侧的 `pm`、`am` 命令与
+`scripts/e2e_acceptance.sh` 默认按 debug 包名执行，脚本可用 `ADB_PKG` 覆盖。
+
 ### 4.2 流畅度必须用 release 包验证
 
 debug 变体 `isMinifyEnabled = false`：没有 R8 内联与优化，没有 AOT，
@@ -132,11 +165,11 @@ Compose 内部还会走 debug 断言路径。实测对话页滚动的主线程�
 ./scripts/e2e_acceptance.sh --only A4     # 只跑单个场景，推荐
 ```
 
-运行前提：设备已连接、宿主机上运行着 `qwenpaw app --host 0.0.0.0`、
+运行前提：设备已连接、LXC 测试容器已启动（见 [.agents/test-env.md](../.agents/test-env.md) 第 1 节）、
 且已执行过 `./gradlew :app:assembleDebug`。
 
-宿主机上的 `qwenpaw` 只在交互式 shell 的 PATH 中（见 [AGENTS.md](../AGENTS.md) 第 2 节），
-脚本外的命令一律写全路径 `/home/csdetr/.qwenpaw/bin/qwenpaw`。
+容器内的 `qwenpaw` 只在交互式 shell 的 PATH 中（见 [test-env.md](../.agents/test-env.md) 1.1），
+`lxc exec` 之外的命令一律写全路径 `/home/csdetr/.qwenpaw/bin/qwenpaw`。
 
 | 场景 | 内容 | 额外要求与常见失败原因 |
 | --- | --- | --- |
@@ -145,14 +178,15 @@ Compose 内部还会走 debug 断言路径。实测对话页滚动的主线程�
 | A3 | 重连：长任务中杀掉 App，重开后接回输出 | 若任务在杀进程前已经结束，就测不到重连路径 |
 | A4 | 停止：生成中停止，服务端回 idle | 生成过快时可能来不及点停止 |
 | A5 | 多实例：第二个实例的会话列表与第一个隔离 | 需要第二个实例运行在 `:8099`，否则连接阶段就失败 |
-| A6 | 断网 / 409 | 需要 `adb root` 配置 iptables。模拟器可 `adb root`，因此该场景可完整执行 |
+| A6 | 断网 / 409 | 在 redroid 容器内加黑洞路由断网（见 [test-env.md](../.agents/test-env.md) 2.4）；本机容器无 netfilter 表，不能改用 iptables |
 
 **一次只跑一个场景**（例如 `--only A4`），跑完检查 `free -h`。
 不要整轮跑完再一起收尾：模拟器与构建同时运行极易拖垮桌面环境。
 
-A6 的实现细节需要注意：脚本通过 `adb root` 提权（模拟器可用，本项目已不再支持真机），
-并依据 `HOST` 中的端口来封闭网络，不再写死 8088。
-封闭的目标端口是服务端端口，**不是 adb 使用的 5555**；误封 5555 会直接断开 adb 连接。
+A6 的实现细节需要注意：脚本从 `HOST` 中取出服务端 IP，加一条
+`ip route add blackhole <ip>/32`，封的是地址而不是端口；`run_root` 只是 `adb shell`，
+redroid 是 userdebug，`adb shell` 默认 `uid=0`，不需要 `adb root`。
+封闭的目标是服务端 IP，**不是 adb 使用的 5555**；误封 5555 会直接断开 adb 连接。
 
 ---
 

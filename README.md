@@ -159,7 +159,8 @@ ARM 设备上，x86 模拟器装不上。
 
 构建、签名、发版与验收的完整流程见 [docs/release.md](docs/release.md)。
 开始修改代码之前，建议先阅读 [AGENTS.md](AGENTS.md)，
-其中记录了本机的资源约束与测试约定。
+其中记录了本机的资源硬约束、服务端与设备的使用判据、提交门禁；
+具体的环境操作步骤见 [.agents/test-env.md](.agents/test-env.md)。
 
 ### 文档
 
