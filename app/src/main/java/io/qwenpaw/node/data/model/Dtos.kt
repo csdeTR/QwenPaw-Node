@@ -846,6 +846,40 @@ data class WorkspaceFileContentDto(
 )
 
 /**
+ * `PUT /api/workspace/file-content` 的响应。
+ *
+ * 保存成功后服务端返回新的 [etag]；下一次保存必须用它，否则会 409。
+ */
+@Serializable
+data class WorkspaceSaveResultDto(
+    val etag: String = "",
+    val path: String = "",
+    val size: Long = 0,
+)
+
+/** `POST /api/workspace/file-upload` 响应里的单个文件。 */
+@Serializable
+data class WorkspaceUploadedFileDto(
+    val name: String = "",
+    val path: String = "",
+    val size: Long? = null,
+    /** `uploaded` 或 `skipped`（服务端按 `conflict=skip` 跳过同名文件）。 */
+    val status: String = "",
+)
+
+/** `POST /api/workspace/file-upload`。本轮每个请求只带一个文件，列表通常只有一条。 */
+@Serializable
+data class WorkspaceUploadResultDto(
+    val files: List<WorkspaceUploadedFileDto> = emptyList(),
+)
+
+/** `GET /api/settings/upload-limit`。值为 null 表示服务端不限制。 */
+@Serializable
+data class UploadLimitDto(
+    @SerialName("upload_max_size_mb") val uploadMaxSizeMb: Long? = null,
+)
+
+/**
  * `GET /api/workspace/memory` 的元素。
  *
  * `path` 是服务端绝对路径，只用于展示或排错；读取时用 [filename]（相对记忆根，

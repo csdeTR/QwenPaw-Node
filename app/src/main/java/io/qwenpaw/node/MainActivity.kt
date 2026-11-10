@@ -657,6 +657,20 @@ private fun QwenPawNav(
                     onStartDirectoryDownload = viewModel.workspace::startDirectoryDownload,
                     onCancelDownload = viewModel.workspace::cancelDownload,
                     onDismissDownload = viewModel.workspace::dismissDownload,
+                    write = io.qwenpaw.node.ui.workspace.WorkspaceWriteActions(
+                        beginEdit = viewModel.workspace::beginEdit,
+                        updateDraft = viewModel.workspace::updateDraft,
+                        saveEdit = viewModel.workspace::saveEdit,
+                        cancelEdit = viewModel.workspace::cancelEdit,
+                        reloadConflict = viewModel.workspace::reloadAfterConflict,
+                        forceOverwrite = viewModel.workspace::forceOverwrite,
+                        dismissConflict = viewModel.workspace::dismissConflict,
+                        beginUpload = viewModel.workspace::beginUpload,
+                        upload = viewModel.workspace::upload,
+                        resolveUploadConflict = viewModel.workspace::resolveUploadConflict,
+                        cancelUpload = viewModel.workspace::cancelUpload,
+                        dismissUpload = viewModel.workspace::dismissUpload,
+                    ),
                 )
             }
 
@@ -1067,7 +1081,7 @@ private suspend fun uploadAttachment(
         instance.basicAuth,
     )
     val mime = context.contentResolver.getType(uri)
-    val name = uploadFileName(context, uri, mime)
+    val name = io.qwenpaw.node.ui.common.uploadFileName(context, uri)
     val temp = File(context.cacheDir, name.take(80))
     runCatching {
         context.contentResolver.openInputStream(uri)?.use { input ->
@@ -1075,21 +1089,6 @@ private suspend fun uploadAttachment(
         }
         app.api.upload(conn, temp, mime).url
     }.getOrNull().also { temp.delete() }
-}
-
-/** 上传时使用的文件名，尽量保证带扩展名。 */
-private fun uploadFileName(context: android.content.Context, uri: Uri, mime: String?): String {
-    val display = runCatching {
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
-        }
-    }.getOrNull()
-    return io.qwenpaw.node.data.remote.UploadNames.resolve(
-        displayName = display,
-        uriLastSegment = uri.lastPathSegment,
-        mime = mime,
-    )
 }
 
 /** 轻量提示，避免为一次性反馈引入 Snackbar 状态机。 */

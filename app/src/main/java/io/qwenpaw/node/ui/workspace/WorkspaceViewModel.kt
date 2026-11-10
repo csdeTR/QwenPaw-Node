@@ -11,6 +11,8 @@ import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.PageLoad
 import io.qwenpaw.node.data.remote.PagedList
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.data.remote.UploadConflictException
+import io.qwenpaw.node.data.remote.UploadConflictPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -122,6 +124,9 @@ data class DownloadState(
     val message: String? = null,
 )
 
+/** 可编辑文本的体积上限（字符数）。超过这个量输入框会明显卡顿，改在服务端编辑。 */
+internal const val EDIT_MAX_CHARS = 2 * 1024 * 1024
+
 data class WorkspaceUiState(
     val root: WorkspaceRoot = WorkspaceRoot.WORKSPACE,
     val path: String = "",
@@ -135,11 +140,85 @@ data class WorkspaceUiState(
     val plan: DownloadPlan? = null,
     val preparing: Boolean = false,
     val download: DownloadState? = null,
+    val edit: EditState? = null,
+    val upload: UploadState? = null,
+    val uploadLimitMb: Long? = null,
 ) {
     /** 记忆根是平铺的 Markdown 列表，没有子目录，也没有下载。 */
     val canDownloadDirectory: Boolean
-        get() = root != WorkspaceRoot.MEMORY && preview == null && download?.phase != DownloadPhase.RUNNING
+        get() = root != WorkspaceRoot.MEMORY && preview == null &&
+            download?.phase != DownloadPhase.RUNNING &&
+            upload?.phase != UploadPhase.RUNNING &&
+            upload?.phase != UploadPhase.WAITING_CONFLICT
+
+    /**
+     * 只有完整读过一遍的文本文件才能编辑。
+     *
+     * 服务端没有「按区间写入」，保存的是整篇内容；`eof=false` 时本地只有前几块，
+     * 写回去会把文件截断。`etag` 为空同样不放行——没有版本号就无法做乐观锁。
+     * 记忆根没有 `etag` 与写入端点，固定只读。
+     */
+    val canEdit: Boolean
+        get() {
+            val text = preview as? WorkspacePreview.Text ?: return false
+            return root != WorkspaceRoot.MEMORY && text.eof && text.etag != null &&
+                text.content.length <= EDIT_MAX_CHARS
+        }
+
+    /** 上传只在列表页可用；记忆根没有写入端点。 */
+    val canUpload: Boolean
+        get() = root != WorkspaceRoot.MEMORY && preview == null && !preparing &&
+            download?.phase != DownloadPhase.RUNNING &&
+            upload?.phase != UploadPhase.RUNNING &&
+            upload?.phase != UploadPhase.WAITING_CONFLICT
+
+    /** 编辑入口不可用时的原因，供界面显示。 */
+    val editBlockedReason: String?
+        get() {
+            val text = preview as? WorkspacePreview.Text ?: return null
+            return when {
+                root == WorkspaceRoot.MEMORY -> "记忆文件不支持编辑"
+                !text.eof -> "文件尚未完整加载，先点「继续加载」"
+                text.etag == null -> "未取得版本信息，暂时无法编辑"
+                text.content.length > EDIT_MAX_CHARS -> "文件超过 2 MB，请在服务端编辑"
+                else -> null
+            }
+        }
 }
+
+/** 编辑态。`savedText` 是服务端已确认的版本，`dirty = draft != savedText`。 */
+data class EditState(
+    val title: String,
+    val rootParam: String,
+    val path: String,
+    val draft: String,
+    val savedText: String,
+    val etag: String,
+    val saving: Boolean = false,
+    val saved: Boolean = false,
+    val conflict: Boolean = false,
+    val error: String? = null,
+) {
+    val dirty: Boolean get() = draft != savedText
+}
+
+enum class UploadPhase { RUNNING, WAITING_CONFLICT, DONE, CANCELLED, FAILED }
+
+/** 上传进度。`index` / `count` 是当前批次内的序号，冲突重试时只数重试的文件。 */
+data class UploadState(
+    val index: Int = 0,
+    val count: Int = 0,
+    val name: String = "",
+    val phase: UploadPhase = UploadPhase.RUNNING,
+    val succeeded: Int = 0,
+    val failed: Int = 0,
+    val skipped: Int = 0,
+    val conflicts: List<String> = emptyList(),
+    val message: String? = null,
+)
+
+/** 已落到 `cacheDir` 的上传源。界面负责生成，ViewModel 负责上传与删除。 */
+data class StagedUpload(val name: String, val file: java.io.File)
 
 /** 单文件落盘入口。由界面用 SAF 实现，ViewModel 不碰 `Context` 与 `Uri`。 */
 interface DownloadSink {
@@ -186,11 +265,39 @@ class WorkspaceViewModel(
     private var generation = 0
     private var previewJob: Job? = null
     private var downloadJob: Job? = null
+    private var editJob: Job? = null
+    private var uploadJob: Job? = null
+    private var limitJob: Job? = null
+
+    /** 冲突挂起时等待用户决定的文件；重试时只发这些。 */
+    private var pendingConflicts: List<StagedUpload> = emptyList()
+
+    /** 当前上传的目标目录，与浏览位置解耦：用户中途换目录不改变目标。 */
+    private var uploadTarget: Pair<WorkspaceRoot, String>? = null
+
+    /** 本轮上传涉及的临时文件，用于取消与清理。 */
+    private var uploadStaged: List<StagedUpload> = emptyList()
 
     /** 首次进入时自动加载；已经加载过就不重复请求。 */
     fun ensureLoaded() {
+        ensureUploadLimit()
         if (_state.value.loaded || _state.value.loading) return
         refresh()
+    }
+
+    /**
+     * 取一次服务端的上传上限。
+     *
+     * 值可能从 null 变成具体数字，因此每次进入页面都重新取；失败时保持 null
+     * （不拦截上传），错误也不打扰用户——上限只是提示性护栏。
+     */
+    private fun ensureUploadLimit() {
+        if (limitJob?.isActive == true) return
+        val conn = connection() ?: return
+        limitJob = scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.workspaceUploadLimit(conn) } }
+                .onSuccess { limit -> _state.update { it.copy(uploadLimitMb = limit) } }
+        }
     }
 
     /** 手动刷新：清空当前列表重来。 */
@@ -201,6 +308,7 @@ class WorkspaceViewModel(
         }
         val gen = ++generation
         previewJob?.cancel()
+        closeEdit()
         _state.update {
             it.copy(
                 entries = emptyList(),
@@ -353,6 +461,7 @@ class WorkspaceViewModel(
     /** 打开文件。文本与图片进入预览，其余类型只给下载入口。 */
     fun openFile(entry: WorkspaceEntry) {
         if (entry.isDir) return
+        closeEdit()
         previewJob?.cancel()
         when (entry.previewKind) {
             "text" -> {
@@ -373,6 +482,7 @@ class WorkspaceViewModel(
 
     /** 关闭预览，回到目录。预览的协程随即取消，避免后台继续读大文件。 */
     fun closePreview() {
+        closeEdit()
         previewJob?.cancel()
         previewJob = null
         _state.update { it.copy(preview = null) }
@@ -527,11 +637,422 @@ class WorkspaceViewModel(
         }
     }
 
+    // ---------------- 编辑 ----------------
+
+    /** 进入编辑态。只有 [WorkspaceUiState.canEdit] 为真时生效。 */
+    fun beginEdit() {
+        val state = _state.value
+        if (!state.canEdit) return
+        val text = state.preview as? WorkspacePreview.Text ?: return
+        val entry = findEntry(text.title) ?: return
+        val etag = text.etag ?: return
+        editJob?.cancel()
+        _state.update {
+            it.copy(
+                edit = EditState(
+                    title = text.title,
+                    rootParam = state.root.param,
+                    path = entry.path,
+                    draft = text.content,
+                    savedText = text.content,
+                    etag = etag,
+                ),
+            )
+        }
+    }
+
+    fun updateDraft(text: String) {
+        _state.update { state ->
+            val edit = state.edit ?: return@update state
+            if (edit.saving) return@update state
+            state.copy(edit = edit.copy(draft = text, saved = false))
+        }
+    }
+
+    /** 保存当前草稿，带 `If-Match`。 */
+    fun saveEdit() = saveEditWith(_state.value.edit?.etag)
+
+    /**
+     * 强制覆盖：不带 `If-Match`。
+     *
+     * 服务端在缺少这个头时跳过并发校验，直接覆盖并自动建父目录，因此只需要一次请求。
+     */
+    fun forceOverwrite() = saveEditWith(null)
+
+    private fun saveEditWith(etag: String?) {
+        val edit = _state.value.edit ?: return
+        if (edit.saving) return
+        val conn = connection() ?: return
+        if (isDownloading()) {
+            _state.update { it.copy(edit = it.edit?.copy(error = "请等待当前下载结束")) }
+            return
+        }
+        editJob?.cancel()
+        _state.update { state ->
+            state.edit?.let { state.copy(edit = it.copy(saving = true, error = null, conflict = false)) }
+                ?: state
+        }
+        editJob = scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    api.workspaceSaveFileContent(conn, edit.rootParam, edit.path, edit.draft, etag)
+                }
+                _state.update { state ->
+                    val current = state.edit ?: return@update state
+                    val nextEtag = result.etag.ifBlank { current.etag }
+                    state.copy(
+                        edit = current.copy(
+                            savedText = edit.draft,
+                            etag = nextEtag,
+                            saving = false,
+                            saved = current.draft == edit.draft,
+                            conflict = false,
+                            error = null,
+                        ),
+                        preview = savedPreview(state.preview, edit.title, edit.draft, nextEtag),
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ApiException) {
+                _state.update { state ->
+                    val current = state.edit ?: return@update state
+                    if (e.code == 409) {
+                        state.copy(edit = current.copy(saving = false, conflict = true, error = null))
+                    } else {
+                        state.copy(edit = current.copy(saving = false, error = workspaceError(e)))
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update { state ->
+                    state.edit?.let { current ->
+                        state.copy(edit = current.copy(saving = false, error = workspaceError(e)))
+                    } ?: state
+                }
+            }
+        }
+    }
+
+    /** 冲突后重新加载：整文件重读，用服务端内容替换草稿与 etag。 */
+    fun reloadAfterConflict() {
+        val edit = _state.value.edit ?: return
+        val conn = connection() ?: return
+        editJob?.cancel()
+        _state.update { state ->
+            state.edit?.let { state.copy(edit = it.copy(saving = true, conflict = false, error = null)) }
+                ?: state
+        }
+        editJob = scope.launch {
+            try {
+                val (text, etag) = withContext(Dispatchers.IO) {
+                    readWholeText(conn, edit.rootParam, edit.path)
+                }
+                if (etag.isNullOrBlank()) throw IOException("未取得版本信息，无法继续编辑")
+                _state.update { state ->
+                    val current = state.edit ?: return@update state
+                    state.copy(
+                        edit = current.copy(
+                            draft = text,
+                            savedText = text,
+                            etag = etag,
+                            saving = false,
+                            saved = false,
+                            conflict = false,
+                            error = null,
+                        ),
+                        preview = savedPreview(state.preview, edit.title, text, etag),
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { state ->
+                    val current = state.edit ?: return@update state
+                    state.copy(
+                        edit = current.copy(
+                            saving = false,
+                            conflict = false,
+                            error = workspaceError(e),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    /** 放弃草稿。界面对未保存改动先做一次确认。 */
+    fun cancelEdit() = closeEdit()
+
+    fun dismissConflict() {
+        _state.update { state ->
+            state.edit?.let { state.copy(edit = it.copy(conflict = false)) } ?: state
+        }
+    }
+
+    private fun closeEdit() {
+        editJob?.cancel()
+        editJob = null
+        if (_state.value.edit != null) _state.update { it.copy(edit = null) }
+    }
+
+    /** 读到 `eof` 为止，用来在冲突后取回整篇内容。 */
+    private suspend fun readWholeText(
+        conn: Connection,
+        rootParam: String,
+        path: String,
+    ): Pair<String, String?> {
+        val builder = StringBuilder()
+        var offset = 0L
+        var etag: String? = null
+        while (true) {
+            val chunk = api.workspaceFileContent(conn, rootParam, path, offset, CONTENT_CHUNK)
+            builder.append(chunk.content)
+            etag = chunk.etag ?: etag
+            if (chunk.eof) break
+            val next = chunk.nextOffset
+            if (next <= offset) break
+            offset = next
+        }
+        return builder.toString() to etag
+    }
+
+    private fun savedPreview(
+        preview: WorkspacePreview?,
+        title: String,
+        content: String,
+        etag: String,
+    ): WorkspacePreview? {
+        val text = preview as? WorkspacePreview.Text ?: return preview
+        if (text.title != title) return preview
+        return text.copy(
+            content = content,
+            nextOffset = content.toByteArray(Charsets.UTF_8).size.toLong(),
+            eof = true,
+            truncated = false,
+            etag = etag,
+            loading = false,
+            loadingMore = false,
+            error = null,
+        )
+    }
+
+    // ---------------- 上传 ----------------
+
+    /** 只做前置校验；选择器与暂存由界面负责。 */
+    fun beginUpload() {
+        if (!_state.value.canUpload || isDownloading()) return
+        _state.update { it.copy(upload = null, error = null) }
+    }
+
+    /** 界面把选中文件落到 `cacheDir` 后调用。 */
+    fun upload(staged: List<StagedUpload>) {
+        if (staged.isEmpty()) return
+        if (uploadJob?.isActive == true || isDownloading()) {
+            deleteStaged(staged)
+            return
+        }
+        val state = _state.value
+        val target = state.root to state.path
+        uploadTarget = target
+        uploadStaged = staged
+        pendingConflicts = emptyList()
+        val initial = UploadState(count = staged.size)
+        _state.update { it.copy(upload = initial, error = null) }
+        uploadJob = scope.launch {
+            runUpload(target.first, target.second, staged, conflict = null, initial = initial)
+        }
+    }
+
+    /** 用户在冲突框里选了覆盖或跳过：只重发冲突文件。 */
+    fun resolveUploadConflict(policy: UploadConflictPolicy) {
+        val pending = pendingConflicts
+        if (pending.isEmpty()) return
+        val target = uploadTarget ?: return
+        val previous = _state.value.upload ?: return
+        // 挂起时上一批的协程可能还在收尾（状态已到 WAITING_CONFLICT），不能因此拒绝重试。
+        if (previous.phase != UploadPhase.WAITING_CONFLICT && uploadJob?.isActive == true) return
+        uploadJob?.cancel()
+        pendingConflicts = emptyList()
+        uploadStaged = pending
+        val initial = previous.copy(
+            index = 0,
+            count = pending.size,
+            conflicts = emptyList(),
+            phase = UploadPhase.RUNNING,
+            message = null,
+        )
+        _state.update { it.copy(upload = initial) }
+        uploadJob = scope.launch {
+            runUpload(target.first, target.second, pending, policy, initial)
+        }
+    }
+
+    fun cancelUpload() {
+        val phase = _state.value.upload?.phase
+        if (phase == UploadPhase.WAITING_CONFLICT) {
+            deleteStaged(pendingConflicts)
+            pendingConflicts = emptyList()
+            uploadStaged = emptyList()
+            uploadTarget = null
+            _state.update { state ->
+                state.upload?.let {
+                    state.copy(upload = it.copy(phase = UploadPhase.CANCELLED, message = "上传已取消"))
+                } ?: state
+            }
+            return
+        }
+        uploadJob?.cancel()
+    }
+
+    /** 关闭完成/取消/失败的卡片。运行中与等待冲突时不能直接关闭。 */
+    fun dismissUpload() {
+        val phase = _state.value.upload?.phase ?: return
+        if (phase == UploadPhase.RUNNING || phase == UploadPhase.WAITING_CONFLICT) return
+        _state.update { it.copy(upload = null) }
+    }
+
+    private suspend fun runUpload(
+        root: WorkspaceRoot,
+        targetPath: String,
+        files: List<StagedUpload>,
+        conflict: UploadConflictPolicy?,
+        initial: UploadState,
+    ) {
+        val conn = connection()
+        if (conn == null) {
+            deleteStaged(files)
+            _state.update { state ->
+                state.upload?.let {
+                    state.copy(upload = it.copy(phase = UploadPhase.FAILED, message = "尚未连接服务器"))
+                } ?: state
+            }
+            return
+        }
+        val limit = _state.value.uploadLimitMb
+        var succeeded = initial.succeeded
+        var failed = initial.failed
+        var skipped = initial.skipped
+        var lastError: String? = null
+        val conflicts = mutableListOf<StagedUpload>()
+        var cancelled = false
+        try {
+            files.forEachIndexed { i, staged ->
+                currentCoroutineContext().ensureActive()
+                updateUpload {
+                    it.copy(
+                        index = i + 1,
+                        count = files.size,
+                        name = staged.name,
+                        phase = UploadPhase.RUNNING,
+                    )
+                }
+                if (exceedsLimit(staged.file.length(), limit)) {
+                    skipped++
+                    updateUpload { it.copy(succeeded = succeeded, failed = failed, skipped = skipped) }
+                    return@forEachIndexed
+                }
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        api.workspaceFileUpload(
+                            conn, root.param, targetPath, staged.file, staged.name, conflict,
+                        )
+                    }
+                    if (result.files.firstOrNull()?.status == "skipped") skipped++ else succeeded++
+                } catch (e: UploadConflictException) {
+                    conflicts += staged
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed++
+                    lastError = if (e is ApiException && e.code == 404) {
+                        "目标目录不存在，可能已被删除"
+                    } else {
+                        workspaceError(e)
+                    }
+                }
+                updateUpload { it.copy(succeeded = succeeded, failed = failed, skipped = skipped) }
+            }
+        } catch (e: CancellationException) {
+            cancelled = true
+            throw e
+        } finally {
+            // 先删临时文件再发终态：调用方看到 DONE / CANCELLED 时，cacheDir 已经干净。
+            withContext(NonCancellable) {
+                deleteStaged(files.filter { file -> conflicts.none { it === file } })
+                if (cancelled) {
+                    updateUpload { it.copy(phase = UploadPhase.CANCELLED, message = "上传已取消") }
+                }
+            }
+        }
+        if (conflicts.isNotEmpty()) {
+            pendingConflicts = conflicts
+            uploadStaged = conflicts
+            updateUpload {
+                it.copy(
+                    phase = UploadPhase.WAITING_CONFLICT,
+                    conflicts = conflicts.map { file -> file.name },
+                    message = "有 ${conflicts.size} 个文件已存在",
+                )
+            }
+            return
+        }
+        finishUpload(root, targetPath, succeeded, failed, skipped, lastError)
+    }
+
+    private fun finishUpload(
+        root: WorkspaceRoot,
+        targetPath: String,
+        succeeded: Int,
+        failed: Int,
+        skipped: Int,
+        lastError: String?,
+    ) {
+        val message = buildString {
+            append("已上传 $succeeded 个文件")
+            if (failed > 0) append("，失败 $failed 个")
+            if (skipped > 0) append("，跳过 $skipped 个")
+            if (succeeded == 0 && failed > 0 && lastError != null) append("：$lastError")
+        }
+        val phase = if (succeeded == 0 && skipped == 0 && failed > 0) {
+            UploadPhase.FAILED
+        } else {
+            UploadPhase.DONE
+        }
+        updateUpload {
+            it.copy(
+                phase = phase,
+                succeeded = succeeded,
+                failed = failed,
+                skipped = skipped,
+                message = message,
+            )
+        }
+        uploadStaged = emptyList()
+        uploadTarget = null
+        // 用户可能已换到别的目录；只有仍停在目标目录时才刷新列表。
+        if (root == _state.value.root && targetPath == _state.value.path) refresh()
+    }
+
+    private fun isUploading(): Boolean =
+        uploadJob?.isActive == true ||
+            _state.value.upload?.phase == UploadPhase.RUNNING ||
+            _state.value.upload?.phase == UploadPhase.WAITING_CONFLICT
+
+    private inline fun updateUpload(crossinline block: (UploadState) -> UploadState) {
+        _state.update { state ->
+            state.upload?.let { state.copy(upload = block(it)) } ?: state
+        }
+    }
+
+    private fun deleteStaged(files: List<StagedUpload>) {
+        files.forEach { runCatching { it.file.delete() } }
+    }
+
     // ---------------- 下载 ----------------
 
     /** 单文件下载：先出确认卡，体积超过 100 MB 或网络计费时带提示。 */
     fun requestDownload(entry: WorkspaceEntry) {
-        if (entry.isDir || isDownloading() || _state.value.preparing) return
+        if (entry.isDir || isDownloading() || isUploading() || _state.value.preparing) return
         val warning = DownloadPolicy.warning(
             sizeBytes = entry.size,
             fileCount = null,
@@ -549,7 +1070,7 @@ class WorkspaceViewModel(
      */
     fun requestDirectoryDownload() {
         val conn = connection() ?: return
-        if (isDownloading() || _state.value.preparing) return
+        if (isDownloading() || isUploading() || _state.value.preparing) return
         val root = _state.value.root
         val basePath = _state.value.path
         if (root == WorkspaceRoot.MEMORY) return
@@ -820,8 +1341,18 @@ class WorkspaceViewModel(
         paged = null
         previewJob?.cancel()
         downloadJob?.cancel()
+        editJob?.cancel()
+        uploadJob?.cancel()
+        limitJob?.cancel()
         previewJob = null
         downloadJob = null
+        editJob = null
+        uploadJob = null
+        limitJob = null
+        deleteStaged(uploadStaged + pendingConflicts)
+        uploadStaged = emptyList()
+        pendingConflicts = emptyList()
+        uploadTarget = null
         _state.value = WorkspaceUiState()
     }
 

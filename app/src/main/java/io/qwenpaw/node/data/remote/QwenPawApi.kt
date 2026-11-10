@@ -38,13 +38,16 @@ import io.qwenpaw.node.data.model.ToolCallInfoDto
 import io.qwenpaw.node.data.model.ToolCallListDto
 import io.qwenpaw.node.data.model.ToolCallOutputDto
 import io.qwenpaw.node.data.model.ToolDto
+import io.qwenpaw.node.data.model.UploadLimitDto
 import io.qwenpaw.node.data.model.UploadResultDto
 import io.qwenpaw.node.data.model.UserTimezoneDto
 import io.qwenpaw.node.data.model.VersionDto
 import io.qwenpaw.node.data.model.WorkspaceFileContentDto
 import io.qwenpaw.node.data.model.WorkspaceMemoryContentDto
 import io.qwenpaw.node.data.model.WorkspaceMemoryFileDto
+import io.qwenpaw.node.data.model.WorkspaceSaveResultDto
 import io.qwenpaw.node.data.model.WorkspaceTreeDto
+import io.qwenpaw.node.data.model.WorkspaceUploadResultDto
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -52,7 +55,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import okhttp3.HttpUrl
@@ -128,6 +133,20 @@ class ApiException(
     /** 这次请求是否带了 token。用于区分「没登录」与「登录过期」。 */
     val tokenSent: Boolean = false,
 ) : IOException(message)
+
+/**
+ * 上传时目标目录已存在同名文件。
+ *
+ * 服务端在未指定 `conflict` 策略时会一次性列出全部冲突名（`409` 的 `detail` 是对象，
+ * 不是字符串），因此单独抛一个带名单的异常，界面才能让用户选择覆盖还是跳过。
+ */
+class UploadConflictException(val names: List<String>) : IOException("upload conflict")
+
+/** 上传同名文件的处理策略，取值与服务端 `conflict` 查询参数一致。 */
+enum class UploadConflictPolicy(val param: String) {
+    OVERWRITE("overwrite"),
+    SKIP("skip"),
+}
 
 /**
  * QwenPaw REST 客户端。
@@ -1241,7 +1260,94 @@ class QwenPawApi(
             workspaceUrl(conn, "/api/workspace/file-download", mapOf("root" to root, "path" to path)),
         ).get().build()
 
+    /**
+     * `PUT /api/workspace/file-content`。
+     *
+     * 请求体是 `{"content": "..."}`，并发控制靠 `If-Match`。服务端做的是**字符串全等
+     * 比较**，[etag] 必须原样回传 `GET` 得到的值，包括 `W/` 前缀与引号。
+     * [etag] 为 null 时不发这个头，服务端会跳过并发校验直接覆盖，用于「强制覆盖」。
+     */
+    fun workspaceSaveFileContent(
+        conn: Connection,
+        root: String,
+        path: String,
+        content: String,
+        etag: String?,
+    ): WorkspaceSaveResultDto {
+        val body = buildJsonObject { put("content", content) }.toString().toRequestBody(JSON_MEDIA)
+        val builder = baseBuilder(
+            conn,
+            workspaceUrl(
+                conn,
+                "/api/workspace/file-content",
+                mapOf("root" to root, "path" to path),
+            ),
+        ).put(body)
+        if (etag != null) builder.header("If-Match", etag)
+        return decode(execute(builder.build()), WorkspaceSaveResultDto.serializer())
+    }
+
+    /**
+     * `POST /api/workspace/file-upload`，单个请求只带一个文件。
+     *
+     * 表单字段名是 `files`（服务端声明为 `list[UploadFile]`，但只放一个也接受）。
+     * [fileName] 是落到服务端的文件名，必须与本地暂存文件的名字解耦：暂存用的是
+     * `cacheDir` 里的随机名，直接拿 [File.getName] 会把 `upload-123.tmp` 传上去。
+     * [conflict] 为 null 时不发策略参数，由服务端判定同名冲突并返回
+     * 409，调用方据此抛出 [UploadConflictException]。
+     */
+    fun workspaceFileUpload(
+        conn: Connection,
+        root: String,
+        path: String,
+        file: File,
+        fileName: String,
+        conflict: UploadConflictPolicy? = null,
+    ): WorkspaceUploadResultDto {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("files", fileName, file.asRequestBody(OCTET_MEDIA))
+            .build()
+        val url = workspaceUrl(
+            conn,
+            "/api/workspace/file-upload",
+            mapOf(
+                "root" to root,
+                "path" to path,
+                "conflict" to conflict?.param,
+            ),
+        )
+        val request = baseBuilder(conn, url).post(body).build()
+        return try {
+            decode(execute(request), WorkspaceUploadResultDto.serializer())
+        } catch (e: ApiException) {
+            if (e.code == 409) uploadConflictOf(e.detail)?.let { throw it }
+            throw e
+        }
+    }
+
+    /** `GET /api/settings/upload-limit`。返回 null 表示服务端不限制。 */
+    fun workspaceUploadLimit(conn: Connection): Long? = decode(
+        request(conn, "GET", "/api/settings/upload-limit"),
+        UploadLimitDto.serializer(),
+    ).uploadMaxSizeMb
+
     // ---------- 内部实现 ----------
+
+    /**
+     * 从 409 的 `detail` 中取出同名文件列表。
+     *
+     * `extractDetail` 已把 `detail` 序列化成字符串，这里再解析回对象。
+     * 解析失败（例如原文被截断）返回 null，让调用方按普通 [ApiException] 处理。
+     */
+    private fun uploadConflictOf(detail: String?): UploadConflictException? {
+        val raw = detail ?: return null
+        val names = runCatching {
+            json.parseToJsonElement(raw).jsonObject["files"]?.jsonArray
+                ?.map { it.jsonPrimitive.content }
+        }.getOrNull() ?: return null
+        return UploadConflictException(names)
+    }
 
     private fun request(
         conn: Connection,
@@ -1411,6 +1517,7 @@ class QwenPawApi(
 
     companion object {
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+        private val OCTET_MEDIA = "application/octet-stream".toMediaType()
         private val EMPTY_BODY = ByteArray(0).toRequestBody(JSON_MEDIA)
 
         /** 收件箱事件列表端点。 */

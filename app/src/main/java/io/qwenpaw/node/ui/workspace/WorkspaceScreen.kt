@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -52,7 +53,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.data.remote.UploadConflictPolicy
+import io.qwenpaw.node.ui.common.GetMultipleContent
 import io.qwenpaw.node.ui.theme.QwenIcons
+import kotlinx.coroutines.launch
+
+/**
+ * 写入侧回调集合。
+ *
+ * 编辑与上传的动作数量已经超过读侧，逐条平铺会让页面参数表继续膨胀；
+ * 这里打包成一个对象，`MainActivity` 只需组装一次。
+ */
+data class WorkspaceWriteActions(
+    val beginEdit: () -> Unit,
+    val updateDraft: (String) -> Unit,
+    val saveEdit: () -> Unit,
+    val cancelEdit: () -> Unit,
+    val reloadConflict: () -> Unit,
+    val forceOverwrite: () -> Unit,
+    val dismissConflict: () -> Unit,
+    val beginUpload: () -> Unit,
+    val upload: (List<StagedUpload>) -> Unit,
+    val resolveUploadConflict: (UploadConflictPolicy) -> Unit,
+    val cancelUpload: () -> Unit,
+    val dismissUpload: () -> Unit,
+)
 
 /**
  * 工作区文件：浏览、预览与下载服务端文件。
@@ -83,10 +108,31 @@ fun WorkspaceScreen(
     onStartDirectoryDownload: (DirectorySink) -> Unit,
     onCancelDownload: () -> Unit,
     onDismissDownload: () -> Unit,
+    write: WorkspaceWriteActions,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     // 预览页需要「下载当前文件」，而预览模型只带标题与体积，因此记住打开它的条目。
     var openedEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
+    // 选中文件到开始上传之间要复制到 cacheDir；期间用模态提示挡住重复触发。
+    var staging by remember { mutableStateOf(false) }
+
+    val uploadLauncher = rememberLauncherForActivityResult(GetMultipleContent()) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            staging = true
+            val result = stageWorkspaceUploads(context, uris, state.uploadLimitMb)
+            staging = false
+            if (result.skipped.isNotEmpty()) {
+                android.widget.Toast.makeText(
+                    context,
+                    "已跳过 ${result.skipped.size} 个文件（超过上传上限或无法读取）",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+            if (result.staged.isNotEmpty()) write.upload(result.staged)
+        }
+    }
 
     val singleLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -101,9 +147,9 @@ fun WorkspaceScreen(
     }
 
     // 先注册目录级返回，再注册预览级：Compose 中后注册者优先，
-    // 预览打开时返回键先关预览，而不是退回上一级目录。
-    BackHandler(enabled = state.path.isNotEmpty() && state.preview == null) { onUp() }
-    BackHandler(enabled = state.preview != null) {
+    // 预览打开时返回键先关预览，而不是退回上一级目录。编辑态的返回由编辑器自己处理。
+    BackHandler(enabled = state.path.isNotEmpty() && state.preview == null && state.edit == null) { onUp() }
+    BackHandler(enabled = state.preview != null && state.edit == null) {
         openedEntry = null
         onClosePreview()
     }
@@ -118,6 +164,10 @@ fun WorkspaceScreen(
                 onRefresh = onRefresh,
                 onOpenRoot = onOpenRoot,
                 onRequestDirectoryDownload = onRequestDirectoryDownload,
+                onUpload = {
+                    write.beginUpload()
+                    uploadLauncher.launch(Unit)
+                },
             )
         },
     ) { padding ->
@@ -126,17 +176,23 @@ fun WorkspaceScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            val edit = state.edit
             val preview = state.preview
             when {
+                edit != null -> WorkspaceEditor(edit = edit, actions = write)
+
                 preview != null -> PreviewContent(
                     preview = preview,
                     entry = openedEntry,
+                    canEdit = state.canEdit,
+                    editBlockedReason = state.editBlockedReason,
                     onBack = {
                         openedEntry = null
                         onClosePreview()
                     },
                     onLoadMore = onLoadMoreContent,
                     onDownload = { entry -> entry?.let(onRequestDownload) },
+                    onEdit = write.beginEdit,
                 )
 
                 state.loading && state.entries.isEmpty() -> Box(
@@ -162,6 +218,24 @@ fun WorkspaceScreen(
                 ErrorStrip(message = message, onRetry = onRefresh)
             }
         }
+    }
+
+    if (staging) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("正在准备文件") },
+            text = { Text("选中文件会先复制到本地缓存，上传结束后自动删除。") },
+            confirmButton = {},
+        )
+    }
+
+    state.upload?.let { upload ->
+        UploadDialog(
+            upload = upload,
+            onCancel = write.cancelUpload,
+            onDismiss = write.dismissUpload,
+            onConflict = write.resolveUploadConflict,
+        )
     }
 
     // 目录下载先枚举体积，枚举期间不可重复触发。
@@ -224,6 +298,7 @@ private fun WorkspaceTopBar(
     onRefresh: () -> Unit,
     onOpenRoot: (WorkspaceRoot) -> Unit,
     onRequestDirectoryDownload: () -> Unit,
+    onUpload: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -258,6 +333,9 @@ private fun WorkspaceTopBar(
                 )
             }
             IconCircle(icon = QwenIcons.refresh, description = "刷新", onClick = onRefresh)
+            if (state.canUpload) {
+                IconCircle(icon = QwenIcons.filePlus, description = "上传文件", onClick = onUpload)
+            }
             if (state.canDownloadDirectory) {
                 IconCircle(
                     icon = QwenIcons.download,
@@ -437,9 +515,12 @@ private fun EntryRow(
 private fun PreviewContent(
     preview: WorkspacePreview,
     entry: WorkspaceEntry?,
+    canEdit: Boolean,
+    editBlockedReason: String?,
     onBack: () -> Unit,
     onLoadMore: () -> Unit,
     onDownload: (WorkspaceEntry?) -> Unit,
+    onEdit: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -458,6 +539,14 @@ private fun PreviewContent(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (preview is WorkspacePreview.Text) {
+                IconCircle(
+                    icon = QwenIcons.pencil,
+                    description = "编辑",
+                    onClick = onEdit,
+                    enabled = canEdit,
+                )
+            }
             if (entry != null) {
                 IconCircle(
                     icon = QwenIcons.download,
@@ -473,7 +562,11 @@ private fun PreviewContent(
                 .background(MaterialTheme.colorScheme.outlineVariant),
         )
         when (preview) {
-            is WorkspacePreview.Text -> TextPreview(preview = preview, onLoadMore = onLoadMore)
+            is WorkspacePreview.Text -> TextPreview(
+                preview = preview,
+                onLoadMore = onLoadMore,
+                blockedReason = editBlockedReason,
+            )
             is WorkspacePreview.Image -> ImagePreview(preview = preview, onDownload = { onDownload(entry) })
             is WorkspacePreview.Unsupported -> UnsupportedPreview(
                 preview = preview,
@@ -484,7 +577,11 @@ private fun PreviewContent(
 }
 
 @Composable
-private fun TextPreview(preview: WorkspacePreview.Text, onLoadMore: () -> Unit) {
+private fun TextPreview(
+    preview: WorkspacePreview.Text,
+    onLoadMore: () -> Unit,
+    blockedReason: String?,
+) {
     if (preview.loading && preview.content.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
@@ -539,6 +636,14 @@ private fun TextPreview(preview: WorkspacePreview.Text, onLoadMore: () -> Unit) 
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+        blockedReason?.let { reason ->
+            Text(
+                text = reason,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
             )
         }
     }
@@ -706,22 +811,27 @@ private fun DownloadDialog(
 }
 
 @Composable
-private fun IconCircle(
+internal fun IconCircle(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     description: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier = Modifier
             .size(38.dp)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = description,
-            tint = MaterialTheme.colorScheme.onSurface,
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+            },
             modifier = Modifier.size(20.dp),
         )
     }
