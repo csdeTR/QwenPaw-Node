@@ -75,6 +75,10 @@ fun SettingsScreen(
     onBack: () -> Unit,
     /** 打开设置页下的「工作区文件」。默认空实现，预览与测试不受影响。 */
     onOpenWorkspace: () -> Unit = {},
+    /** 打开设置页下的「备份」。 */
+    onOpenBackup: () -> Unit = {},
+    /** 打开设置页下的「检查点」。 */
+    onOpenCheckpoint: () -> Unit = {},
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
     onEdit: (InstanceConfig) -> Unit,
@@ -659,6 +663,20 @@ fun SettingsScreen(
                                 title = "工作区文件",
                                 subtitle = "浏览、预览与下载服务端文件",
                                 onClick = onOpenWorkspace,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.packageIcon,
+                                title = "备份",
+                                subtitle = "创建、导出与恢复服务端配置与工作区",
+                                onClick = onOpenBackup,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.workflow,
+                                title = "检查点",
+                                subtitle = "查看时间线并回滚到之前的状态",
+                                onClick = onOpenCheckpoint,
                             )
                             Divider()
                             NavRow(

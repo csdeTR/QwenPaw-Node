@@ -211,6 +211,18 @@ internal fun mergeHistory(
 }
 
 /**
+ * 把检查点侧的会话标识换成对话 id。
+ *
+ * 检查点的 `session_key` / `session_id` 来自 `history.db`，对话列表里的 `id` 是对话 id，
+ * 两者不同；一个会话可能对应多个对话，取列表顺序里第一个匹配的。
+ * 两者都不命中时原样返回，交给 `openChat` 走「找不到就空着」的路径。
+ */
+internal fun resolveChatId(chats: List<io.qwenpaw.node.data.model.ChatSpecDto>, sessionId: String): String =
+    chats.firstOrNull { it.id == sessionId }?.id
+        ?: chats.firstOrNull { it.sessionId == sessionId }?.id
+        ?: sessionId
+
+/**
  * 重新进入对话时用哪一份历史。
  *
  * 服务端在对话运行期间只返回已经落库的那几轮，本轮的用户消息与正在生成的
@@ -1354,9 +1366,7 @@ class ChatViewModel(
      */
     fun openChatAtMessage(sessionId: String, msgId: String) {
         val chats = _state.value.chats + _state.value.archivedChats
-        val chatId = chats.firstOrNull { it.id == sessionId }?.id
-            ?: chats.firstOrNull { it.sessionId == sessionId }?.id
-            ?: sessionId
+        val chatId = resolveChatId(chats, sessionId)
         _state.update { it.copy(pendingScrollMessageId = msgId) }
         openChat(chatId)
     }

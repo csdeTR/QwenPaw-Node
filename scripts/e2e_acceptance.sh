@@ -2,7 +2,7 @@
 # QwenPaw Node redroid 验收脚本。
 #
 # 用法：
-#   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A7）
+#   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A7、B1-B6）
 #   ./scripts/e2e_acceptance.sh --keep       # 保留当前应用数据
 #   ./scripts/e2e_acceptance.sh --only A4    # 只跑某个场景
 #
@@ -26,6 +26,13 @@
 #   A5 多实例     —— 第二个实例的会话列表与第一个隔离
 #   A6 断网/409   —— 断网提示中文、草稿保留、失败气泡可重试
 #   A7 工作区     —— 设置入口可达、三个根可切换、记忆根列出 Markdown
+#
+#   B1 检查点页   —— 设置入口可达，自动开关与手动快照区都在
+#   B2 只读对话   —— 点会话进入只读页，有「创建检查点」且没有输入框
+#   B3 创建检查点 —— 命名后创建成功，回到检查点页且时间线出现该名称
+#   B4 回滚预览   —— 打开回滚弹窗，能看到记忆与文件两个范围
+#   B5 自动开关   —— 切换自动检查点后服务端状态跟随，并还原
+#   B6 备份页     —— 设置入口可达，新建与导入入口都在
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -77,6 +84,16 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# 场景名写错时整轮会「什么都不跑却报完成」，所以先校验一次。
+if [ -n "$ONLY" ] && [[ ! "$ONLY" =~ ^(A[1-7]|B[1-6])$ ]]; then
+  echo "未知场景：$ONLY（可用：A1-A7、B1-B6）"; exit 2
+fi
+# B3 依赖 B2 留在只读页的状态，单跑 B3 会立刻跳过；
+# 两者一起指定时按 B2 → B3 的顺序执行。
+if [ "$ONLY" = "B3" ]; then
+  echo "[提示] B3 依赖 B2 留下的只读页，单独跑会被跳过"
+fi
+
 mkdir -p "$OUT"
 
 shot() {
@@ -84,12 +101,17 @@ shot() {
   echo "  截图：$OUT/$1.png"
 }
 
+# 导出一次界面层级到本地，供后续查找控件使用。
+dump_ui() {
+  "${ADB[@]}" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
+  "${ADB[@]}" shell cat /sdcard/ui.xml > "$OUT/ui.xml"
+}
+
 # 从 uiautomator dump 里按 text/content-desc 找控件中心点，输出 "x y"。
 # 找不到返回非零。避免写死坐标导致点击落空。
 find_xy() {
   local pattern="$1"
-  "${ADB[@]}" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
-  "${ADB[@]}" shell cat /sdcard/ui.xml > "$OUT/ui.xml"
+  dump_ui || return 1
   python3 - "$OUT/ui.xml" "$pattern" <<'PY'
 import re, sys
 xml, pat = sys.argv[1], sys.argv[2]
@@ -199,7 +221,7 @@ open_chat_list() {
 #
 # 不能简单地「取 y>400 的第一个整行宽可点区」：地址输入框本身就是整行宽的可点区，
 # 那样会点进输入框，把地址改成别的值并把流程打回第 1 步。
-# 因此先定位「选择智能体」这个小标题，再取它下方第一个整行宽可点区。
+# 因此先定位「智能体」这个小标题，再取它下方第一个整行宽可点区。
 pick_first_agent() {
   local xy
   xy="$("${ADB[@]}" shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; "${ADB[@]}" shell cat /sdcard/ui.xml | python3 -c '
@@ -212,10 +234,10 @@ for n in re.findall(r"<node[^>]*>", data):
     x1,y1,x2,y2=map(int,m.groups())
     t=re.search(r"text=\"([^\"]*)\"", n)
     nodes.append((x1,y1,x2,y2,t.group(1) if t else "", "clickable=\"true\"" in n))
-# 「选择智能体」标题的下边界，作为卡片区起点
+# 「智能体」标题的下边界，作为卡片区起点
 anchor=None
 for x1,y1,x2,y2,t,c in nodes:
-    if t.strip()=="选择智能体": anchor=y2; break
+    if t.strip()=="智能体": anchor=y2; break
 if anchor is None: sys.exit(1)
 rows=[]
 for x1,y1,x2,y2,t,c in nodes:
@@ -254,29 +276,69 @@ shot 01-launch
 
 if screen_has '连接到 QwenPaw'; then
   echo "== 首次连接：填地址→读列表→选智能体→连接 =="
-  # 只填地址不会推进：步骤 1 的勾以「验证成功」为准，
-  # 而验证成功要么点「验证连接」，要么读列表成功后自动置位。
+  # 三步向导：第 1 步填地址并「验证连接」后才点亮「下一步」，
+  # 第 2 步是账号（服务端未开鉴权时自动跳过），第 3 步才出现智能体列表。
   # 地址框可能带默认值，先清空再输入，
   # 否则 `input text` 会追加到默认值后面，拼出一个无效地址。
-  tap_text 'class="android.widget.EditText"' || true
+  # 页面有三个输入框（名称 / 地址 / 别名），只按 class 会点到第一个。
+  # 改为按占位文案定位地址框：它同时含「chat.example.com」。
+  tap_text 'text="例如 chat.example.com 或 192.168.1.10:8088"' \
+    || tap_text 'class="android.widget.EditText"' || true
   sleep 1
   "${ADB[@]}" shell input keyevent 123   # 光标移到行尾
   for _ in $(seq 1 40); do "${ADB[@]}" shell input keyevent 67; done
   sleep 1
   "${ADB[@]}" shell input text "$HOST"
   sleep 1
-  "${ADB[@]}" shell input keyevent 111
-  sleep 1
+  # 收起键盘：`keyevent 111` 只在部分输入法上生效，redroid 的软键盘仍会占掉
+  # 下半屏，把「验证连接」「下一步」推到可视区之外，导致后面所有点击落空。
+  "${ADB[@]}" shell input keyevent 4
+  sleep 2
+  # 「下一步」在第 1 步只有在验证通过后才可点，所以先点「验证连接」。
   tap_text 'text="验证连接"' || true
   sleep 6
-  tap_text 'text="读取列表"' || true
-  sleep 8
-  # 选第一个智能体：智能体卡片是一整行可点区域，取 y>400 的第一行。
-  pick_first_agent || echo "  [警告] 没读到智能体列表"
+  tap_text 'text="下一步"' || true
+  sleep 5
+  # 第 2 步是账号；服务端 auth 关闭时向导会自动跳过，这里再兜一次。
+  if screen_has 'text="账号"'; then
+    tap_text 'text="下一步"' || true
+    sleep 6
+  fi
+  # 第 3 步自动拉智能体列表。
+  sleep 6
+  # 选第一个智能体：智能体卡片是一整行可点区域，取「智能体」标题下方的第一行。
+  # 卡片本身没有 text（文字在子节点里），pick_first_agent 只认 text，
+  # 因此直接按位置点：智能体步骤的卡片区第一张卡的中心。
+  xy="$(dump_ui >/dev/null 2>&1; python3 - "$OUT/ui.xml" <<'PY'
+import re, sys
+xml = sys.argv[1]
+data = open(xml, encoding='utf-8', errors='ignore').read()
+anchor = None
+rows = []
+for n in re.findall(r'<node[^>]*>', data):
+    m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not m:
+        continue
+    x1, y1, x2, y2 = map(int, m.groups())
+    t = re.search(r'text="([^"]*)"', n)
+    if t and t.group(1).strip() == "智能体":
+        anchor = y2
+    if 'clickable="true"' not in n or "long-clickable=\"true\"" in n:
+        continue
+    if anchor is not None and y1 >= anchor and (x2 - x1) > 500:
+        rows.append((y1, (x1 + x2) // 2, (y1 + y2) // 2))
+rows.sort()
+print(rows[0][1], rows[0][2]) if rows else sys.exit(1)
+PY
+)" || xy=""
+  if [ -n "$xy" ]; then
+    "${ADB[@]}" shell input tap $xy
+  else
+    echo "  [警告] 没读到智能体列表"
+  fi
   sleep 2
-  "${ADB[@]}" shell input swipe 540 1800 540 900 300 >/dev/null 2>&1 || true
-  sleep 1
-  tap_text 'text="连接"' || true
+  # 第 3 步的确认按钮叫「完成」；旧版本叫「连接」，两个都试一次。
+  tap_text 'text="完成"' || tap_text 'text="连接"' || true
   sleep 12
 fi
 shot 02-chat-list
@@ -306,6 +368,28 @@ print(rows[0][0], rows[0][1]) if rows else sys.exit(1)
 ')" || { echo "  没有可打开的会话"; return 1; }
   "${ADB[@]}" shell input tap $xy
   sleep 6
+}
+
+# 打开设置里的一个二级页面（工作区文件 / 备份 / 检查点）。
+#
+# 条目在「服务端配置」卡片靠下，先滚动到可见再点；
+# 前面的场景可能把 App 留在任意页面，所以先回前台再回列表。
+open_settings_item() {
+  local name="$1"
+  "${ADB[@]}" shell am start -n "$PKG/io.qwenpaw.node.MainActivity" >/dev/null 2>&1 || true
+  sleep 4
+  open_chat_list >/dev/null 2>&1 || true
+  tap_text 'content-desc="设置"' || { echo "  未找到设置入口"; return 1; }
+  sleep 3
+  local found=1
+  for _ in 1 2 3 4 5 6; do
+    if screen_has "text=\"$name\""; then found=0; break; fi
+    "${ADB[@]}" shell input swipe 360 1300 360 600 300 >/dev/null 2>&1 || true
+    sleep 1
+  done
+  [ "$found" = 0 ] || { echo "  设置页没有「$name」"; return 1; }
+  tap_text "text=\"$name\"" || { echo "  无法打开「$name」"; return 1; }
+  sleep 4
 }
 
 echo "== 进入一条会话 =="
@@ -527,6 +611,262 @@ if want A7; then
     fi
   else
     echo "  [跳过] 未找到设置入口"
+  fi
+fi
+
+# ---------------------------------------------------------------- B1 检查点页
+#
+# B 段覆盖备份与检查点。判据一律看界面上能找到的文字，
+# 因为它们就是用户看到的字符串；改文案后这里要同步改。
+
+if want B1; then
+  echo "== B1 检查点页面 =="
+  if open_settings_item "检查点"; then
+    sleep 2
+    shot 15-b1-checkpoint
+    if screen_has 'text="自动检查点"'; then
+      echo "  [通过] 自动开关区可见"
+    else
+      echo "  [警告] 未找到「自动检查点」"
+    fi
+    if screen_has 'text="手动快照"'; then
+      echo "  [通过] 手动快照区可见"
+    else
+      echo "  [警告] 未找到「手动快照」，可能工作区不是 git 仓库（页面为只读）"
+    fi
+  else
+    echo "  [失败] 无法打开检查点页"
+  fi
+fi
+
+# 进入检查点页第一条会话的只读页。
+# B2 与 B3 都用它：脚本一次只跑一个场景，不能让 B3 依赖上一次运行留下的页面。
+open_snapshot_readonly() {
+  open_settings_item "检查点" || return 1
+  sleep 2
+  local xy
+  xy="$(dump_ui >/dev/null 2>&1; python3 - "$OUT/ui.xml" <<'PY'
+import re, sys
+data = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
+anchor = None
+rows = []
+for n in re.findall(r'<node[^>]*>', data):
+    m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not m:
+        continue
+    x1, y1, x2, y2 = map(int, m.groups())
+    t = re.search(r'text="([^"]*)"', n)
+    if t and t.group(1).strip() == "手动快照":
+        anchor = y2
+    if 'clickable="true"' not in n:
+        continue
+    if anchor is not None and y1 >= anchor and (x2 - x1) > 500:
+        rows.append((y1, (x1 + x2) // 2, (y1 + y2) // 2))
+rows.sort()
+print(rows[0][1], rows[0][2]) if rows else sys.exit(1)
+PY
+)" || return 1
+  "${ADB[@]}" shell input tap $xy
+  sleep 6
+  screen_has 'text="创建检查点"'
+}
+
+# ---------------------------------------------------------------- B2 只读对话页
+#
+# 「创建检查点」只在只读页出现；同时确认页面里没有输入框，
+# 否则说明打开的是聊天页而不是只读页。
+
+if want B2; then
+  echo "== B2 只读对话页 =="
+  if open_snapshot_readonly; then
+    shot 16-b2-readonly
+    if screen_has 'text="创建检查点"'; then
+      echo "  [通过] 只读页底部是「创建检查点」"
+    else
+      echo "  [警告] 未找到「创建检查点」"
+    fi
+    if screen_has 'class="android.widget.EditText"'; then
+      echo "  [警告] 只读页出现了输入框，可能不是只读页"
+    else
+      echo "  [通过] 只读页没有输入框"
+    fi
+  else
+    echo "  [跳过] 手动快照区没有可点的会话"
+  fi
+fi
+
+# ---------------------------------------------------------------- B3 创建检查点
+#
+# 自己进只读页，不依赖 B2 留下的状态。
+# 成功判据是回到检查点页（「手动快照」重现）且时间线上出现该名称。
+
+if want B3; then
+  echo "== B3 创建检查点 =="
+  if open_snapshot_readonly; then
+    if tap_text 'text="创建检查点"'; then
+      sleep 2
+      tap_text 'class="android.widget.EditText"' || true
+      sleep 1
+      "${ADB[@]}" shell input text "acceptance"
+      sleep 1
+      "${ADB[@]}" shell input keyevent 111
+      sleep 1
+      # 对话框里同时有「名称（可选）」与按钮「创建」，按完整文字定位按钮。
+      if tap_text 'text="创建"'; then
+        sleep 8
+        shot 17-b3-created
+        # 时间线按会话分组、组内按时间倒序，新节点可能落在首屏之外，
+        # 因此以服务端图谱为准判断「确实创建出来了」。
+        created="$(api_get /api/workspace/checkpoints/graph?limit=20 | python3 -c '
+import json,sys
+try:
+    nodes=json.load(sys.stdin).get("nodes",[])
+    print("yes" if any(n.get("kind")=="snap" and n.get("name")=="acceptance" for n in nodes) else "no")
+except Exception:
+    print("unknown")')"
+        echo "  服务端出现 acceptance 检查点：$created"
+        if [ "$created" = "yes" ]; then
+          echo "  [通过] 检查点已创建"
+        else
+          echo "  [警告] 服务端未见该检查点，见截图"
+        fi
+        if screen_has 'text="手动快照"'; then
+          echo "  [通过] 已回到检查点页"
+        else
+          echo "  [警告] 创建后未回到检查点页"
+        fi
+      else
+        echo "  [失败] 命名对话框里没有「创建」按钮"
+      fi
+    else
+      echo "  [失败] 无法点击「创建检查点」"
+    fi
+  else
+    echo "  [跳过] 无法进入只读页"
+  fi
+fi
+
+# ---------------------------------------------------------------- B4 回滚预览
+#
+# 只打开预览，不点确认：回滚会改写工作区，验收不该留下副作用。
+
+if want B4; then
+  echo "== B4 回滚预览 =="
+  if open_settings_item "检查点"; then
+    sleep 3
+    # 时间线在「手动快照」卡片下方，首屏看不到；先往下滚到出现「回滚」。
+    found=""
+    for _ in 1 2 3 4 5 6; do
+      if screen_has 'text="回滚"'; then found="yes"; break; fi
+      "${ADB[@]}" shell input swipe 360 1400 360 600 300 >/dev/null 2>&1 || true
+      sleep 1
+    done
+    if [ -n "$found" ] && tap_text 'text="回滚"'; then
+      sleep 5
+      shot 18-b4-restore-preview
+      if screen_has 'text="会话记忆"' && screen_has 'text="工作区文件"'; then
+        echo "  [通过] 回滚范围可选"
+      else
+        echo "  [警告] 回滚弹窗里没有范围开关"
+      fi
+      # 返回键关闭弹窗，不执行回滚。
+      "${ADB[@]}" shell input keyevent 4
+      sleep 2
+    else
+      echo "  [跳过] 时间线上没有「回滚」按钮（可能还没有检查点）"
+    fi
+  else
+    echo "  [失败] 无法打开检查点页"
+  fi
+fi
+
+# ---------------------------------------------------------------- B5 自动开关
+#
+# 开关状态改完要还原，否则会污染后续场景与测试容器。
+
+if want B5; then
+  echo "== B5 自动检查点开关 =="
+  auto_state() {
+    api_get /api/workspace/checkpoints/status | python3 -c '
+import json,sys
+try: print("true" if json.load(sys.stdin).get("auto_enabled") else "false")
+except Exception: print("unknown")'
+  }
+  if open_settings_item "检查点"; then
+    sleep 2
+    # 开关文字不可点，真正可点的是右侧的 Switch：从「自动创建检查点」这一行
+    # 取同一 y 上最靠右的可点控件。
+    tap_auto_switch() {
+      local xy
+      xy="$(dump_ui >/dev/null 2>&1; python3 - "$OUT/ui.xml" <<'PY'
+import re, sys
+data = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
+row_y = None
+cands = []
+for n in re.findall(r'<node[^>]*>', data):
+    m = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not m:
+        continue
+    x1, y1, x2, y2 = map(int, m.groups())
+    t = re.search(r'text="([^"]*)"', n)
+    if t and t.group(1).strip() == "自动创建检查点":
+        row_y = (y1 + y2) // 2
+    if 'clickable="true"' in n:
+        cands.append((x2, (x1 + x2) // 2, (y1 + y2) // 2, y1, y2))
+if row_y is None:
+    sys.exit(1)
+hits = [c for c in cands if c[3] <= row_y <= c[4]]
+hits.sort(reverse=True)
+print(hits[0][1], row_y) if hits else sys.exit(1)
+PY
+)" || return 1
+      "${ADB[@]}" shell input tap $xy
+    }
+    before="$(auto_state)"
+    echo "  切换前 auto_enabled=$before"
+    if tap_auto_switch; then
+      sleep 4
+      after="$(auto_state)"
+      echo "  切换后 auto_enabled=$after"
+      if [ "$before" != "$after" ] && [ "$after" != "unknown" ]; then
+        echo "  [通过] 服务端状态随开关变化"
+      else
+        echo "  [警告] 服务端状态未变化，可能没点到开关"
+      fi
+      # 再点一次还原。
+      tap_auto_switch || true
+      sleep 4
+      restored="$(auto_state)"
+      echo "  还原后 auto_enabled=$restored"
+      [ "$restored" = "$before" ] && echo "  [通过] 已还原" || echo "  [警告] 未还原，请手动改回 $before"
+      shot 19-b5-auto-toggle
+    else
+      echo "  [跳过] 未找到自动开关"
+    fi
+  else
+    echo "  [失败] 无法打开检查点页"
+  fi
+fi
+
+# ---------------------------------------------------------------- B6 备份页
+
+if want B6; then
+  echo "== B6 备份页面 =="
+  if open_settings_item "备份"; then
+    sleep 2
+    shot 20-b6-backup
+    if screen_has 'text="新建备份"'; then
+      echo "  [通过] 新建备份区可见"
+    else
+      echo "  [警告] 未找到「新建备份」"
+    fi
+    if screen_has 'text="导入备份"'; then
+      echo "  [通过] 导入备份区可见"
+    else
+      echo "  [警告] 未找到「导入备份」"
+    fi
+  else
+    echo "  [失败] 无法打开备份页"
   fi
 fi
 

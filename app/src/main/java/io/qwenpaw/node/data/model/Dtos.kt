@@ -899,3 +899,277 @@ data class WorkspaceMemoryFileDto(
 data class WorkspaceMemoryContentDto(
     val content: String = "",
 )
+
+// ---------------- 备份 ----------------
+
+/**
+ * 备份范围。
+ *
+ * 默认值与服务端 `BackupScope` 一致：不包含密钥。恢复时密钥是否可行
+ * 取备份创建时的选择，界面不能默认打开这一项。
+ */
+@Serializable
+data class BackupScopeDto(
+    @SerialName("include_agents") val includeAgents: Boolean = true,
+    @SerialName("include_global_config") val includeGlobalConfig: Boolean = true,
+    @SerialName("include_secrets") val includeSecrets: Boolean = false,
+    @SerialName("include_skill_pool") val includeSkillPool: Boolean = true,
+)
+
+/** `GET /api/backups` 的元素。列表接口把 `signature` 置空。 */
+@Serializable
+data class BackupMetaDto(
+    val id: String,
+    val name: String = "",
+    val description: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+    val version: String = "1",
+    val scope: BackupScopeDto = BackupScopeDto(),
+    @SerialName("agent_count") val agentCount: Int = 0,
+    @SerialName("qwenpaw_version") val qwenpawVersion: String = "",
+    /**
+     * 信任标记。`null` 表示未签名或状态未知，`false` 为本机签名，
+     * `true` 为导入时曾显式信任过。
+     */
+    @SerialName("accepted_via_trust") val acceptedViaTrust: Boolean? = null,
+)
+
+/** 备份详情里的单智能体统计。 */
+@Serializable
+data class BackupAgentStatsDto(
+    val files: Int = 0,
+    val size: Long = 0,
+)
+
+/**
+ * `GET /api/backups/{id}`。
+ *
+ * 与 [BackupMetaDto] 的重复字段是刻意的：服务端的 `BackupDetail` 继承
+ * `BackupMeta`，Kotlin 侧用两个独立类比「继承 + 委托」直白，列表与详情
+ * 也不必互相牵连。
+ */
+@Serializable
+data class BackupDetailDto(
+    val id: String,
+    val name: String = "",
+    val description: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+    val version: String = "1",
+    val scope: BackupScopeDto = BackupScopeDto(),
+    @SerialName("agent_count") val agentCount: Int = 0,
+    @SerialName("qwenpaw_version") val qwenpawVersion: String = "",
+    @SerialName("accepted_via_trust") val acceptedViaTrust: Boolean? = null,
+    @SerialName("workspace_stats") val workspaceStats: Map<String, BackupAgentStatsDto> = emptyMap(),
+)
+
+/** `POST /api/backups/jobs` 的请求体。`agents` 必须是显式列表。 */
+@Serializable
+data class CreateBackupRequestDto(
+    val name: String,
+    val description: String = "",
+    val scope: BackupScopeDto = BackupScopeDto(),
+    val agents: List<String> = emptyList(),
+)
+
+/**
+ * 备份任务快照。
+ *
+ * `status` 取值为 `pending|running|cancel_requested|completed|failed|cancelled`，
+ * `phase` 为 `preparing|agents|finalizing`。SSE 每一帧都是完整快照，不是增量。
+ */
+@Serializable
+data class BackupJobSnapshotDto(
+    @SerialName("job_id") val jobId: String = "",
+    @SerialName("backup_id") val backupId: String = "",
+    val status: String = "",
+    val phase: String = "",
+    val percent: Int = 0,
+    @SerialName("current_agent") val currentAgent: String? = null,
+    @SerialName("agent_index") val agentIndex: Int = 0,
+    @SerialName("total_agents") val totalAgents: Int = 0,
+    val result: BackupMetaDto? = null,
+    val error: String? = null,
+) {
+    /** 任务已经结束，不再产生新帧。 */
+    val isTerminal: Boolean
+        get() = status == "completed" || status == "failed" || status == "cancelled"
+}
+
+/** `POST /api/backups/{id}/restore` 的请求体。 */
+@Serializable
+data class RestoreBackupRequestDto(
+    val mode: String = "custom",
+    @SerialName("include_agents") val includeAgents: Boolean = true,
+    @SerialName("agent_ids") val agentIds: List<String> = emptyList(),
+    @SerialName("include_global_config") val includeGlobalConfig: Boolean = true,
+    @SerialName("include_secrets") val includeSecrets: Boolean = false,
+    @SerialName("include_skill_pool") val includeSkillPool: Boolean = true,
+    @SerialName("default_workspace_dir") val defaultWorkspaceDir: String? = null,
+    @SerialName("preserve_local_protected_config") val preserveLocalProtectedConfig: Boolean? = null,
+    @SerialName("trust_mode") val trustMode: String? = null,
+)
+
+/** `POST /api/backups/{id}/restore` 的响应。 */
+@Serializable
+data class RestoreBackupResponseDto(
+    val ok: Boolean = false,
+    @SerialName("preserved_local_keys") val preservedLocalKeys: List<String> = emptyList(),
+)
+
+/** 批量删除结果里失败的条目。字段形状服务端未固定，未知字段一律忽略。 */
+@Serializable
+data class DeleteBackupFailureDto(
+    val id: String = "",
+    val error: String? = null,
+)
+
+/** `POST /api/backups/delete`。 */
+@Serializable
+data class DeleteBackupsResultDto(
+    val deleted: List<String> = emptyList(),
+    val failed: List<DeleteBackupFailureDto> = emptyList(),
+)
+
+// ---------------- 检查点 ----------------
+
+/** `GET /api/workspace/checkpoints/status`。 */
+@Serializable
+data class CheckpointStatusDto(
+    @SerialName("auto_enabled") val autoEnabled: Boolean = false,
+    @SerialName("has_checkpoints") val hasCheckpoints: Boolean = false,
+    @SerialName("workspace_dir") val workspaceDir: String = "",
+)
+
+/** 图谱节点。`sha` 是 `commit` 的前 12 位，不起唯一标识作用。 */
+@Serializable
+data class CheckpointNodeDto(
+    val ref: String = "",
+    val kind: String = "",
+    @SerialName("session_key") val sessionKey: String = "",
+    val name: String = "",
+    val commit: String = "",
+    val sha: String = "",
+    @SerialName("timestamp_ms") val timestampMs: Long = 0,
+    val subject: String = "",
+    val query: String? = null,
+    val channel: String = "unknown",
+    @SerialName("restore_index") val restoreIndex: Int? = null,
+    @SerialName("parent_commit") val parentCommit: String? = null,
+    @SerialName("is_head") val isHead: Boolean = false,
+    @SerialName("user_id") val userId: String = "",
+    @SerialName("session_id") val sessionId: String = "",
+    @SerialName("session_title") val sessionTitle: String = "",
+)
+
+/** 图谱里的会话目录。`archived` 的会话仍会出现，界面按原样展示。 */
+@Serializable
+data class CheckpointSessionDto(
+    @SerialName("session_key") val sessionKey: String = "",
+    @SerialName("session_id") val sessionId: String = "",
+    @SerialName("user_id") val userId: String = "",
+    val channel: String = "",
+    val title: String = "",
+    val archived: Boolean = false,
+)
+
+/** 图谱摘要。 */
+@Serializable
+data class CheckpointSummaryDto(
+    val total: Int = 0,
+    val auto: Int = 0,
+    val snapshots: Int = 0,
+    val safety: Int = 0,
+    val heads: Int = 0,
+)
+
+/** `GET /api/workspace/checkpoints/graph`。节点数达到 `limit` 时 `truncated` 为真。 */
+@Serializable
+data class CheckpointGraphDto(
+    val nodes: List<CheckpointNodeDto> = emptyList(),
+    val sessions: List<CheckpointSessionDto> = emptyList(),
+    val summary: CheckpointSummaryDto = CheckpointSummaryDto(),
+    val truncated: Boolean = false,
+)
+
+/** `POST /api/workspace/checkpoints/snapshot` 的请求体。 */
+@Serializable
+data class SnapshotRequestDto(
+    @SerialName("session_id") val sessionId: String,
+    @SerialName("user_id") val userId: String = "",
+    val channel: String = "console",
+    val name: String = "",
+)
+
+/** 快照创建结果。 */
+@Serializable
+data class SnapshotResultDto(
+    val ref: String = "",
+    val commit: String = "",
+    val tree: String = "",
+    @SerialName("parent_commit") val parentCommit: String? = null,
+    @SerialName("timestamp_ms") val timestampMs: Long = 0,
+)
+
+/**
+ * 回滚请求。
+ *
+ * 服务端的字段名是 `commit`（不是 `target`），且 `session_id` 必填；
+ * 回滚范围由 `include_memory` / `include_files` 决定，`include_files=true`
+ * 时 `files` 不能为空。
+ */
+@Serializable
+data class RestoreCheckpointRequestDto(
+    val commit: String,
+    @SerialName("session_id") val sessionId: String,
+    @SerialName("user_id") val userId: String = "",
+    val channel: String = "console",
+    @SerialName("include_memory") val includeMemory: Boolean = false,
+    @SerialName("include_files") val includeFiles: Boolean = false,
+    val files: List<String> = emptyList(),
+)
+
+/** 回滚预览与执行共用。tuple 在 JSON 里是数组。 */
+@Serializable
+data class RestoreResultDto(
+    val target: String = "",
+    val commit: String = "",
+    @SerialName("restored_paths") val restoredPaths: List<String> = emptyList(),
+    @SerialName("pre_restore_ref") val preRestoreRef: String? = null,
+    @SerialName("dry_run") val dryRun: Boolean = false,
+    @SerialName("include_memory") val includeMemory: Boolean = false,
+    @SerialName("include_files") val includeFiles: Boolean = false,
+    @SerialName("deleted_paths") val deletedPaths: List<String> = emptyList(),
+    @SerialName("file_paths") val filePaths: List<String> = emptyList(),
+)
+
+/** `GET/PATCH /api/workspace/checkpoints/gc/settings`。 */
+@Serializable
+data class GcSettingsDto(
+    @SerialName("gc_keep_count") val gcKeepCount: Int = 20,
+    @SerialName("gc_keep_days") val gcKeepDays: Int = 30,
+    @SerialName("pre_restore_retention_days") val preRestoreRetentionDays: Int = 7,
+)
+
+/** `POST /api/workspace/checkpoints/gc` 与 `/gc/preview` 的请求体。 */
+@Serializable
+data class GcRequestDto(
+    val compact: Boolean = false,
+    @SerialName("keep_count") val keepCount: Int? = null,
+    @SerialName("keep_days") val keepDays: Int? = null,
+    @SerialName("pre_restore_days") val preRestoreDays: Int? = null,
+)
+
+/** 清理结果。 */
+@Serializable
+data class GcResultDto(
+    @SerialName("deleted_refs") val deletedRefs: List<String> = emptyList(),
+    @SerialName("kept_refs") val keptRefs: List<String> = emptyList(),
+    @SerialName("dry_run") val dryRun: Boolean = false,
+)
+
+/** `DELETE /api/workspace/checkpoints`。 */
+@Serializable
+data class ResetCheckpointsDto(
+    val reset: Boolean = false,
+    @SerialName("auto_enabled") val autoEnabled: Boolean = false,
+)

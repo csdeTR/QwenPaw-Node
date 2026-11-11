@@ -1244,19 +1244,6 @@ private fun ChatRow(
     onMoveToGroup: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
-    // 时间文案只在时间戳变化时重算，避免每次重组都解析日期。
-    val time = remember(chat.updatedAt, chat.lastFinishedAt, chat.createdAt) {
-        timeLabel(chat)
-    }
-    // 图标只在非紧凑排版下显示，紧凑排版的整个左侧图标区都被去掉了。
-    // 按 (chatId, version) 记忆：滚动时反复重组不应重复查磁盘。
-    val iconFile = remember(chat.id, iconVersion, compact) {
-        if (!compact) runCatching { iconStore?.fileFor(chat.id) }.getOrNull() else null
-    }
-    val presetKey = remember(chat.id, iconVersion, compact) {
-        if (!compact) iconStore?.presetFor(chat.id) else null
-    }
-    val iconSource = resolveChatIcon(hasImage = iconFile != null, hasPreset = presetKey != null)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1274,125 +1261,14 @@ private fun ChatRow(
                 onLongClick = if (selecting) null else ({ menu = true }),
             ),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = if (compact) 9.dp else 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (selecting) {
-                SelectionCheck(checked = checked)
-                Spacer(Modifier.width(10.dp))
-            } else if (!compact) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (chat.status == "running") {
-                                MaterialTheme.colorScheme.secondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                        )
-                        .border(
-                            1.dp,
-                            if (chat.status == "running") {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
-                            } else {
-                                MaterialTheme.colorScheme.outlineVariant
-                            },
-                            RoundedCornerShape(10.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    when (iconSource) {
-                        io.qwenpaw.node.avatar.ChatIconSource.IMAGE -> coil.compose.AsyncImage(
-                            model = coil.request.ImageRequest.Builder(
-                                androidx.compose.ui.platform.LocalContext.current,
-                            )
-                                .data(iconFile)
-                                .crossfade(false)
-                                .build(),
-                            contentDescription = null,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp)),
-                        )
-
-                        io.qwenpaw.node.avatar.ChatIconSource.PRESET -> Icon(
-                            imageVector = iconStore?.presetIcon(presetKey)
-                                ?: QwenIcons.messageCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp),
-                            tint = if (chat.status == "running") {
-                                MaterialTheme.colorScheme.secondary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-
-                        io.qwenpaw.node.avatar.ChatIconSource.DEFAULT -> Icon(
-                            imageVector = QwenIcons.messageCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(17.dp),
-                            tint = if (chat.status == "running") {
-                                MaterialTheme.colorScheme.secondary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (chat.pinned) {
-                        Icon(
-                            imageVector = QwenIcons.pin,
-                            contentDescription = "已置顶",
-                            modifier = Modifier.size(13.dp),
-                            tint = MaterialTheme.colorScheme.tertiary,
-                        )
-                        Spacer(Modifier.width(4.dp))
-                    }
-                    Text(
-                        text = chat.name.ifBlank { "未命名对话" },
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = time,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
-                // 预览文案：紧凑模式也保留，用户扫一眼就能认出对话内容。
-                if (!preview.isNullOrBlank()) {
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = preview,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                val running = chat.status == "running"
-                if (!compact && running) {
-                    Spacer(Modifier.height(5.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        StatusTag("运行中", MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-        }
+        ChatRowContent(
+            chat = chat,
+            compact = compact,
+            preview = preview,
+            iconStore = iconStore,
+            iconVersion = iconVersion,
+            leading = if (selecting) {{ SelectionCheck(checked = checked) }} else null,
+        )
         if (!selecting) {
             ChatRowMenu(
                 expanded = menu,
@@ -1436,6 +1312,160 @@ private fun ChatRow(
                 .height(1.dp)
                 .background(MaterialTheme.colorScheme.outlineVariant),
         )
+    }
+}
+
+/**
+ * 对话行的内容：图标、标题、时间、预览与状态标签。
+ *
+ * 对话列表与检查点的手动快照选择器共用这一份排布，两处的行高、字号与时间格式因此不会分叉。
+ * [leading] 供多选模式的勾选框替换图标位；[trailing] 供调用方在标题行右侧追加标签。
+ */
+@Composable
+fun ChatRowContent(
+    chat: ChatSpecDto,
+    compact: Boolean,
+    preview: String?,
+    iconStore: io.qwenpaw.node.avatar.ChatIconStore? = null,
+    iconVersion: Long = 0L,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    // 时间文案只在时间戳变化时重算，避免每次重组都解析日期。
+    val time = remember(chat.updatedAt, chat.lastFinishedAt, chat.createdAt) {
+        timeLabel(chat)
+    }
+    // 图标只在非紧凑排版下显示，紧凑排版的整个左侧图标区都被去掉了。
+    // 按 (chatId, version) 记忆：滚动时反复重组不应重复查磁盘。
+    val iconFile = remember(chat.id, iconVersion, compact) {
+        if (!compact) runCatching { iconStore?.fileFor(chat.id) }.getOrNull() else null
+    }
+    val presetKey = remember(chat.id, iconVersion, compact) {
+        if (!compact) iconStore?.presetFor(chat.id) else null
+    }
+    val iconSource = resolveChatIcon(hasImage = iconFile != null, hasPreset = presetKey != null)
+    Row(
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = if (compact) 9.dp else 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leading != null) {
+            leading()
+            Spacer(Modifier.width(10.dp))
+        } else if (!compact) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (chat.status == "running") {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                    )
+                    .border(
+                        1.dp,
+                        if (chat.status == "running") {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        },
+                        RoundedCornerShape(10.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (iconSource) {
+                    io.qwenpaw.node.avatar.ChatIconSource.IMAGE -> coil.compose.AsyncImage(
+                        model = coil.request.ImageRequest.Builder(
+                            androidx.compose.ui.platform.LocalContext.current,
+                        )
+                            .data(iconFile)
+                            .crossfade(false)
+                            .build(),
+                        contentDescription = null,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp)),
+                    )
+
+                    io.qwenpaw.node.avatar.ChatIconSource.PRESET -> Icon(
+                        imageVector = iconStore?.presetIcon(presetKey)
+                            ?: QwenIcons.messageCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                        tint = if (chat.status == "running") {
+                            MaterialTheme.colorScheme.secondary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+
+                    io.qwenpaw.node.avatar.ChatIconSource.DEFAULT -> Icon(
+                        imageVector = QwenIcons.messageCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                        tint = if (chat.status == "running") {
+                            MaterialTheme.colorScheme.secondary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (chat.pinned) {
+                    Icon(
+                        imageVector = QwenIcons.pin,
+                        contentDescription = "已置顶",
+                        modifier = Modifier.size(13.dp),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    text = chat.name.ifBlank { "未命名对话" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = time,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                trailing?.let {
+                    Spacer(Modifier.width(6.dp))
+                    it()
+                }
+            }
+            // 预览文案：紧凑模式也保留，用户扫一眼就能认出对话内容。
+            if (!preview.isNullOrBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = preview,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            val running = chat.status == "running"
+            if (!compact && running) {
+                Spacer(Modifier.height(5.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusTag("运行中", MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
     }
 }
 

@@ -71,6 +71,11 @@ fun ChatTopBar(
     onSetGroup: (String?) -> Unit = {},
     /** 打开「移动到分组」对话框。 */
     onOpenGroupDialog: () -> Unit = {},
+    /**
+     * 只读模式：顶栏仍按聊天页排布，但标题不可点改名，
+     * 「更多」里只保留「刷新对话」，改写类入口全部隐藏。
+     */
+    readOnly: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -115,7 +120,7 @@ fun ChatTopBar(
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable(onClick = onRename),
+                    modifier = if (readOnly) Modifier else Modifier.clickable(onClick = onRename),
                 )
                 Spacer(Modifier.height(3.dp))
                 Row(
@@ -208,6 +213,7 @@ fun ChatTopBar(
                             onRefresh()
                         },
                     )
+                    if (readOnly) return@DropdownMenu
                     DropdownMenuItem(
                         text = { Text("重命名对话") },
                         leadingIcon = { MenuIcons.Leading(MenuAction.RENAME) },

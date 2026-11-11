@@ -530,67 +530,28 @@ fun ChatScreen(
                     androidx.compose.runtime.CompositionLocalProvider(
                         LocalAutoOffload provides (state.offloadAction == "offload"),
                     ) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = 12.dp,
-                            bottom = 12.dp,
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        if (hasMore) {
-                            item(key = "load-more") {
-                                LoadEarlierHint(loading = false)
-                            }
-                        }
-                        items(timeline, key = { it.key }) { item ->
-                            when (item) {
-                                is ChatItem.Single -> MessageBubble(
-                                    message = item.message,
-                                    imageLoader = imageLoader,
-                                    connection = connection,
-                                    onImageClick = { viewingImage = it },
-                                    onRetry = onRetry,
-                                    appearance = appearance,
-                                    renderMarkdown = if (item.message.role ==
-                                        io.qwenpaw.node.data.stream.Role.USER
-                                    ) {
-                                        renderUserMarkdown
-                                    } else {
-                                        renderAssistantMarkdown
-                                    },
-                                    onOpenSource = onOpenSource,
-                                )
-
-                                is ChatItem.Steps -> StepsGroup(
-                                    steps = item.steps,
-                                    renderMarkdown = renderAssistantMarkdown,
-                                    toolCalls = state.toolCalls,
-                                    toolLive = state.toolLive,
-                                    onCancelTool = onCancelTool,
-                                    onOffloadTool = onOffloadTool,
-                                    onExtendOffload = { id -> onExtendTool(id, 30.0, "offload") },
-                                    onExtendKill = { id -> onExtendTool(id, 30.0, "kill") },
-                                    onToolOpen = onToolOpen,
-                                    onToolClose = onToolClose,
-                                    onToolDeadline = onToolDeadline,
-                                )
-
-                                is ChatItem.Files -> DeliveredFilesCard(
-                                    files = item.files,
-                                    imageLoader = imageLoader,
-                                    connection = connection,
-                                    onImageClick = { viewingImage = it },
-                                )
-                            }
-                        }
-                        if (awaitingReply) {
-                            item(key = "awaiting-reply") { AwaitingReplyRow() }
-                        }
-                    }
+                        ChatMessageList(
+                            state = state,
+                            timeline = timeline,
+                            listState = listState,
+                            imageLoader = imageLoader,
+                            connection = connection,
+                            appearance = appearance,
+                            renderUserMarkdown = renderUserMarkdown,
+                            renderAssistantMarkdown = renderAssistantMarkdown,
+                            awaitingReply = awaitingReply,
+                            hasMore = hasMore,
+                            onImageClick = { viewingImage = it },
+                            onRetry = onRetry,
+                            onOpenSource = onOpenSource,
+                            onCancelTool = onCancelTool,
+                            onOffloadTool = onOffloadTool,
+                            onExtendOffload = { id -> onExtendTool(id, 30.0, "offload") },
+                            onExtendKill = { id -> onExtendTool(id, 30.0, "kill") },
+                            onToolOpen = onToolOpen,
+                            onToolClose = onToolClose,
+                            onToolDeadline = onToolDeadline,
+                        )
                     }
                 }
             }
@@ -869,6 +830,98 @@ private fun BoxScope.JumpToLatestButton(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.secondary,
             )
+        }
+    }
+}
+
+/**
+ * 消息列表主体：气泡、步骤组、已投递文件与「等待回复」占位。
+ *
+ * 抽出来是为了让检查点的只读对话页复用同一套渲染。只读页不传重试与原文入口，
+ * 气泡上的「重试」按钮随 `onRetry == null` 一并消失。
+ */
+@Composable
+fun ChatMessageList(
+    state: ChatUiState,
+    timeline: List<ChatItem>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    imageLoader: ChatImageLoader?,
+    connection: io.qwenpaw.node.data.remote.Connection?,
+    appearance: MessageAppearance,
+    renderUserMarkdown: Boolean,
+    renderAssistantMarkdown: Boolean,
+    awaitingReply: Boolean = false,
+    hasMore: Boolean = false,
+    onImageClick: (String) -> Unit = {},
+    onRetry: ((ChatMessage) -> Unit)? = null,
+    onOpenSource: (String) -> Unit = {},
+    onCancelTool: (String) -> Unit = {},
+    onOffloadTool: (String) -> Unit = {},
+    onExtendOffload: (String) -> Unit = {},
+    onExtendKill: (String) -> Unit = {},
+    onToolOpen: (String) -> Unit = {},
+    onToolClose: () -> Unit = {},
+    onToolDeadline: () -> Unit = {},
+) {
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 12.dp,
+            bottom = 12.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (hasMore) {
+            item(key = "load-more") {
+                LoadEarlierHint(loading = false)
+            }
+        }
+        items(timeline, key = { it.key }) { item ->
+            when (item) {
+                is ChatItem.Single -> MessageBubble(
+                    message = item.message,
+                    imageLoader = imageLoader,
+                    connection = connection,
+                    onImageClick = onImageClick,
+                    onRetry = onRetry,
+                    appearance = appearance,
+                    renderMarkdown = if (item.message.role ==
+                        io.qwenpaw.node.data.stream.Role.USER
+                    ) {
+                        renderUserMarkdown
+                    } else {
+                        renderAssistantMarkdown
+                    },
+                    onOpenSource = onOpenSource,
+                )
+
+                is ChatItem.Steps -> StepsGroup(
+                    steps = item.steps,
+                    renderMarkdown = renderAssistantMarkdown,
+                    toolCalls = state.toolCalls,
+                    toolLive = state.toolLive,
+                    onCancelTool = onCancelTool,
+                    onOffloadTool = onOffloadTool,
+                    onExtendOffload = onExtendOffload,
+                    onExtendKill = onExtendKill,
+                    onToolOpen = onToolOpen,
+                    onToolClose = onToolClose,
+                    onToolDeadline = onToolDeadline,
+                )
+
+                is ChatItem.Files -> DeliveredFilesCard(
+                    files = item.files,
+                    imageLoader = imageLoader,
+                    connection = connection,
+                    onImageClick = onImageClick,
+                )
+            }
+        }
+        if (awaitingReply) {
+            item(key = "awaiting-reply") { AwaitingReplyRow() }
         }
     }
 }

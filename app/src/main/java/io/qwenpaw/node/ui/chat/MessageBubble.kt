@@ -547,7 +547,8 @@ fun MessageBubble(
     imageLoader: ChatImageLoader? = null,
     connection: io.qwenpaw.node.data.remote.Connection? = null,
     onImageClick: (String) -> Unit = {},
-    onRetry: (ChatMessage) -> Unit = {},
+    /** 重试入口。为 null 时不渲染「重试」按钮，供只读页面复用。 */
+    onRetry: ((ChatMessage) -> Unit)? = null,
     /** 消息外观参数：头像、显示名、时间与统计开关。 */
     appearance: MessageAppearance = MessageAppearance(),
     /** 是否按 Markdown / LaTeX 渲染正文。关闭后按原文显示。 */
@@ -665,7 +666,7 @@ private fun ImageBubble(
 private fun TextBubble(
     message: ChatMessage,
     modifier: Modifier,
-    onRetry: (ChatMessage) -> Unit,
+    onRetry: ((ChatMessage) -> Unit)?,
     appearance: MessageAppearance,
     renderMarkdown: Boolean = true,
     onOpenSource: (String) -> Unit = {},
@@ -839,10 +840,10 @@ private fun TextBubble(
                     )
                 }
                 // 发送失败的提示只做「重试」入口，不做自动补发。
-                if (message.error != null && message.retryText != null) {
+                if (message.error != null && message.retryText != null && onRetry != null) {
                     Spacer(Modifier.height(6.dp))
                     TextButton(
-                        onClick = { onRetry(message) },
+                        onClick = { onRetry?.invoke(message) },
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                     ) {
                         Text("重试", style = MaterialTheme.typography.labelLarge)

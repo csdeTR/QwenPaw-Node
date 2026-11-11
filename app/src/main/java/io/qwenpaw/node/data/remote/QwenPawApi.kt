@@ -8,21 +8,30 @@ import io.qwenpaw.node.data.model.ApprovalListDto
 import io.qwenpaw.node.data.model.AuthStatusDto
 import io.qwenpaw.node.data.model.AuthTokenDto
 import io.qwenpaw.node.data.model.AvailableCommandsDto
+import io.qwenpaw.node.data.model.BackupDetailDto
+import io.qwenpaw.node.data.model.BackupJobSnapshotDto
+import io.qwenpaw.node.data.model.BackupMetaDto
 import io.qwenpaw.node.data.model.BatchChatResultDto
 import io.qwenpaw.node.data.model.BridgeInfoDto
 import io.qwenpaw.node.data.model.BrowseDirsDto
-import io.qwenpaw.node.data.model.SearchPageDto
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.data.model.ChatStatusDto
+import io.qwenpaw.node.data.model.CheckpointGraphDto
+import io.qwenpaw.node.data.model.CheckpointStatusDto
+import io.qwenpaw.node.data.model.CreateBackupRequestDto
 import io.qwenpaw.node.data.model.CronDispatchTargetsDto
 import io.qwenpaw.node.data.model.CronExecutionRecordDto
 import io.qwenpaw.node.data.model.CronJobSpecDto
 import io.qwenpaw.node.data.model.CronJobStateDto
 import io.qwenpaw.node.data.model.CronJobViewDto
+import io.qwenpaw.node.data.model.DeleteBackupsResultDto
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
+import io.qwenpaw.node.data.model.GcRequestDto
+import io.qwenpaw.node.data.model.GcResultDto
+import io.qwenpaw.node.data.model.GcSettingsDto
 import io.qwenpaw.node.data.model.InboxPageDto
 import io.qwenpaw.node.data.model.InboxTraceDto
 import io.qwenpaw.node.data.model.ModelPoolDto
@@ -31,7 +40,15 @@ import io.qwenpaw.node.data.model.OffloadPolicyDto
 import io.qwenpaw.node.data.model.ProviderDto
 import io.qwenpaw.node.data.model.ProjectDirDto
 import io.qwenpaw.node.data.model.PushMessagesDto
+import io.qwenpaw.node.data.model.ResetCheckpointsDto
+import io.qwenpaw.node.data.model.RestoreBackupRequestDto
+import io.qwenpaw.node.data.model.RestoreBackupResponseDto
+import io.qwenpaw.node.data.model.RestoreCheckpointRequestDto
+import io.qwenpaw.node.data.model.RestoreResultDto
+import io.qwenpaw.node.data.model.SearchPageDto
 import io.qwenpaw.node.data.model.SlashCommandDto
+import io.qwenpaw.node.data.model.SnapshotRequestDto
+import io.qwenpaw.node.data.model.SnapshotResultDto
 import io.qwenpaw.node.data.model.ThinkingViewDto
 import io.qwenpaw.node.data.model.TokenUsageDto
 import io.qwenpaw.node.data.model.ToolCallInfoDto
@@ -66,6 +83,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
@@ -1332,7 +1350,334 @@ class QwenPawApi(
         UploadLimitDto.serializer(),
     ).uploadMaxSizeMb
 
+    // ---------- 备份 ----------
+
+    /**
+     * `GET /api/backups`。
+     *
+     * 响应是**裸数组**，不是 `{items: [...]}`。列表与当前选中的智能体无关，
+     * 但仍走 [baseBuilder]，因此会带上 `X-Agent-Id`。
+     */
+    fun backups(conn: Connection): List<BackupMetaDto> = decode(
+        request(conn, "GET", "/api/backups"),
+        ListSerializer(BackupMetaDto.serializer()),
+    )
+
+    /** `GET /api/backups/{id}`。 */
+    fun backupDetail(conn: Connection, id: String): BackupDetailDto = decode(
+        request(conn, "GET", "/api/backups/${encodeSegment(id)}"),
+        BackupDetailDto.serializer(),
+    )
+
+    /** `POST /api/backups/jobs`。已有任务或恢复进行中时服务端返回 409。 */
+    fun startBackupJob(conn: Connection, req: CreateBackupRequestDto): BackupJobSnapshotDto = decode(
+        execute(
+            baseBuilder(conn, connUrl(conn, "/api/backups/jobs"))
+                .post(json.encodeToString(CreateBackupRequestDto.serializer(), req).toRequestBody(JSON_MEDIA))
+                .build(),
+        ),
+        BackupJobSnapshotDto.serializer(),
+    )
+
+    /** `GET /api/backups/jobs/active`。空闲时服务端返回 JSON `null`。 */
+    fun activeBackupJob(conn: Connection): BackupJobSnapshotDto? {
+        val text = request(conn, "GET", "/api/backups/jobs/active")
+        if (text.isBlank() || text.trim() == "null") return null
+        return decode(text, BackupJobSnapshotDto.serializer())
+    }
+
+    /**
+     * `GET /api/backups/jobs/{job_id}`。
+     *
+     * 任务只存在服务端内存里，服务端重启后这里会 404；调用方据此清空任务卡。
+     */
+    fun backupJob(conn: Connection, jobId: String): BackupJobSnapshotDto = decode(
+        request(conn, "GET", "/api/backups/jobs/${encodeSegment(jobId)}"),
+        BackupJobSnapshotDto.serializer(),
+    )
+
+    /** `POST /api/backups/jobs/{job_id}/cancel`。 */
+    fun cancelBackupJob(conn: Connection, jobId: String): BackupJobSnapshotDto = decode(
+        request(conn, "POST", "/api/backups/jobs/${encodeSegment(jobId)}/cancel", buildJsonObject { }),
+        BackupJobSnapshotDto.serializer(),
+    )
+
+    /** SSE 请求：`GET /api/backups/jobs/{job_id}/events`。 */
+    fun backupJobEventsRequest(conn: Connection, jobId: String): Request =
+        baseBuilder(conn, connUrl(conn, "/api/backups/jobs/${encodeSegment(jobId)}/events"))
+            .get()
+            .header("Accept", "text/event-stream")
+            .build()
+
+    /** `GET /api/backups/{id}/export`，交给 DownloadClient 流式写 SAF。 */
+    fun exportBackupRequest(conn: Connection, id: String): Request =
+        baseBuilder(conn, connUrl(conn, "/api/backups/${encodeSegment(id)}/export"))
+            .get()
+            .build()
+
+    /**
+     * `POST /api/backups/import`（multipart）。
+     *
+     * 首次调用带 `file`；确认覆盖时 [body] 传 null、只带 [pendingToken]。
+     * 重名 409 抛 [BackupImportConflictException]，签名不可信 400 抛
+     * [BackupTrustException]。
+     */
+    fun importBackup(
+        conn: Connection,
+        body: RequestBody?,
+        fileName: String = "backup.zip",
+        pendingToken: String? = null,
+        trustMode: String? = null,
+    ): BackupMetaDto {
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+        if (body != null) multipart.addFormDataPart("file", fileName, body)
+        pendingToken?.takeIf { it.isNotBlank() }?.let { multipart.addFormDataPart("pending_token", it) }
+        trustMode?.takeIf { it.isNotBlank() }?.let { multipart.addFormDataPart("trust_mode", it) }
+        val request = baseBuilder(conn, connUrl(conn, "/api/backups/import"))
+            .post(multipart.build())
+            .build()
+        return decode(executeImport(request), BackupMetaDto.serializer())
+    }
+
+    /** `POST /api/backups/delete`。请求体是对象，响应列出成功与失败项。 */
+    fun deleteBackups(conn: Connection, ids: List<String>): DeleteBackupsResultDto {
+        val body = buildJsonObject {
+            putJsonArray("ids") { ids.forEach { add(it) } }
+        }
+        return decode(
+            request(conn, "POST", "/api/backups/delete", body),
+            DeleteBackupsResultDto.serializer(),
+        )
+    }
+
+    /**
+     * `POST /api/backups/{id}/restore`。
+     *
+     * 签名不可信时服务端返回 400，`detail` 是对象；这里转成
+     * [BackupTrustException]，界面据此提供「信任并恢复」。
+     */
+    fun restoreBackup(
+        conn: Connection,
+        id: String,
+        req: RestoreBackupRequestDto,
+    ): RestoreBackupResponseDto {
+        val request = baseBuilder(conn, connUrl(conn, "/api/backups/${encodeSegment(id)}/restore"))
+            .post(json.encodeToString(RestoreBackupRequestDto.serializer(), req).toRequestBody(JSON_MEDIA))
+            .build()
+        return decode(executeTrustAware(request), RestoreBackupResponseDto.serializer())
+    }
+
+    // ---------- 检查点 ----------
+
+    /** `GET /api/workspace/checkpoints/status`。工作区不是 git 仓库时返回 400。 */
+    fun checkpointStatus(conn: Connection): CheckpointStatusDto = decode(
+        request(conn, "GET", "/api/workspace/checkpoints/status"),
+        CheckpointStatusDto.serializer(),
+    )
+
+    /** `PATCH /api/workspace/checkpoints/auto`，返回服务端归一化后的开关值。 */
+    fun setCheckpointAuto(conn: Connection, enabled: Boolean): Boolean {
+        val body = buildJsonObject { put("enabled", enabled) }
+        return decode(
+            request(conn, "PATCH", "/api/workspace/checkpoints/auto", body),
+            CheckpointStatusDto.serializer(),
+        ).autoEnabled
+    }
+
+    /** `GET /api/workspace/checkpoints/graph?limit=`。`limit` 取值 1–1000。 */
+    fun checkpointGraph(conn: Connection, limit: Int = 500): CheckpointGraphDto = decode(
+        execute(
+            baseBuilder(
+                conn,
+                workspaceUrl(
+                    conn,
+                    "/api/workspace/checkpoints/graph",
+                    mapOf("limit" to limit.coerceIn(1, 1000).toString()),
+                ),
+            ).get().build(),
+        ),
+        CheckpointGraphDto.serializer(),
+    )
+
+    /** `POST /api/workspace/checkpoints/snapshot`。 */
+    fun createCheckpointSnapshot(
+        conn: Connection,
+        req: SnapshotRequestDto,
+    ): SnapshotResultDto = decode(
+        execute(
+            baseBuilder(conn, connUrl(conn, "/api/workspace/checkpoints/snapshot"))
+                .post(json.encodeToString(SnapshotRequestDto.serializer(), req).toRequestBody(JSON_MEDIA))
+                .build(),
+        ),
+        SnapshotResultDto.serializer(),
+    )
+
+    /** `POST /api/workspace/checkpoints/restore/preview`。 */
+    fun previewCheckpointRestore(
+        conn: Connection,
+        req: RestoreCheckpointRequestDto,
+    ): RestoreResultDto = checkpointRestore(conn, req, preview = true)
+
+    /** `POST /api/workspace/checkpoints/restore`。 */
+    fun applyCheckpointRestore(
+        conn: Connection,
+        req: RestoreCheckpointRequestDto,
+    ): RestoreResultDto = checkpointRestore(conn, req, preview = false)
+
+    /** `GET /api/workspace/checkpoints/gc/settings`。 */
+    fun checkpointGcSettings(conn: Connection): GcSettingsDto = decode(
+        request(conn, "GET", "/api/workspace/checkpoints/gc/settings"),
+        GcSettingsDto.serializer(),
+    )
+
+    /** `PATCH /api/workspace/checkpoints/gc/settings`。三项都必须带。 */
+    fun updateCheckpointGcSettings(conn: Connection, settings: GcSettingsDto): GcSettingsDto {
+        val body = buildJsonObject {
+            put("gc_keep_count", settings.gcKeepCount)
+            put("gc_keep_days", settings.gcKeepDays)
+            put("pre_restore_retention_days", settings.preRestoreRetentionDays)
+        }
+        return decode(
+            request(conn, "PATCH", "/api/workspace/checkpoints/gc/settings", body),
+            GcSettingsDto.serializer(),
+        )
+    }
+
+    /** `POST /api/workspace/checkpoints/gc/preview`。 */
+    fun previewCheckpointGc(conn: Connection, req: GcRequestDto): GcResultDto = checkpointGc(conn, req, true)
+
+    /** `POST /api/workspace/checkpoints/gc`。 */
+    fun applyCheckpointGc(conn: Connection, req: GcRequestDto): GcResultDto = checkpointGc(conn, req, false)
+
+    /** `DELETE /api/workspace/checkpoints`，删除全部会话的检查点。 */
+    fun resetCheckpoints(conn: Connection): ResetCheckpointsDto = decode(
+        request(conn, "DELETE", "/api/workspace/checkpoints"),
+        ResetCheckpointsDto.serializer(),
+    )
+
+    private fun checkpointRestore(
+        conn: Connection,
+        req: RestoreCheckpointRequestDto,
+        preview: Boolean,
+    ): RestoreResultDto {
+        val path = if (preview) {
+            "/api/workspace/checkpoints/restore/preview"
+        } else {
+            "/api/workspace/checkpoints/restore"
+        }
+        return decode(
+            execute(
+                baseBuilder(conn, connUrl(conn, path))
+                    .post(json.encodeToString(RestoreCheckpointRequestDto.serializer(), req).toRequestBody(JSON_MEDIA))
+                    .build(),
+            ),
+            RestoreResultDto.serializer(),
+        )
+    }
+
+    private fun checkpointGc(conn: Connection, req: GcRequestDto, preview: Boolean): GcResultDto {
+        val path = if (preview) {
+            "/api/workspace/checkpoints/gc/preview"
+        } else {
+            "/api/workspace/checkpoints/gc"
+        }
+        return decode(
+            execute(
+                baseBuilder(conn, connUrl(conn, path))
+                    .post(json.encodeToString(GcRequestDto.serializer(), req).toRequestBody(JSON_MEDIA))
+                    .build(),
+            ),
+            GcResultDto.serializer(),
+        )
+    }
+
     // ---------- 内部实现 ----------
+
+    /**
+     * 导入需要读 409 与 400 的完整 body。
+     *
+     * 不能走 [execute]：它只把 `detail` 截断成字符串，丢失 `existing` /
+     * `pending_token`，而这两个字段决定用户能不能一键完成覆盖。
+     */
+    private fun executeImport(request: Request): String =
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.isSuccessful) return@use text
+            val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull()
+            val detail = root?.get("detail")
+            if (detail is kotlinx.serialization.json.JsonPrimitive &&
+                detail.content == "backup_conflict"
+            ) {
+                val existing = root["existing"]?.let {
+                    runCatching {
+                        json.decodeFromJsonElement(BackupMetaDto.serializer(), it)
+                    }.getOrNull()
+                }
+                val token = runCatching {
+                    root["pending_token"]?.jsonPrimitive?.content
+                }.getOrNull()
+                if (existing != null && !token.isNullOrBlank()) {
+                    throw BackupImportConflictException(existing, token)
+                }
+            }
+            trustExceptionOf(text)?.let { throw it }
+            logFailure(request, response.code, text)
+            throw failureOf(
+                response.code,
+                text,
+                response.header("WWW-Authenticate"),
+                tokenSentOf(request),
+            )
+        }
+
+    /** 与 [execute] 同构，但把 400 的签名错误转成 [BackupTrustException]。 */
+    private fun executeTrustAware(request: Request): String =
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.isSuccessful) return@use text
+            trustExceptionOf(text)?.let { throw it }
+            logFailure(request, response.code, text)
+            throw failureOf(
+                response.code,
+                text,
+                response.header("WWW-Authenticate"),
+                tokenSentOf(request),
+            )
+        }
+
+    /**
+     * 从 400 的 `detail` 对象里取签名错误。
+     *
+     * 只有 `detail` 是对象且带 `code` 时才成立：其余 400（例如参数非法）
+     * 的 `detail` 是字符串，必须继续按普通 [ApiException] 处理。
+     */
+    private fun trustExceptionOf(body: String): BackupTrustException? {
+        val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        val detail = root["detail"] as? JsonObject ?: return null
+        val code = detail["code"]?.let {
+            runCatching { it.jsonPrimitive.content }.getOrNull()
+        } ?: return null
+        val message = detail["message"]?.let {
+            runCatching { it.jsonPrimitive.content }.getOrNull()
+        } ?: code
+        return BackupTrustException(code, message)
+    }
+
+    private fun tokenSentOf(request: Request): Boolean =
+        request.header("Authorization")?.startsWith("Bearer ") == true ||
+            request.url.queryParameter("token") != null
+
+    private fun logFailure(request: Request, code: Int, body: String) {
+        io.qwenpaw.node.log.RunLog.d(
+            io.qwenpaw.node.log.LogKind.NETWORK,
+            "API",
+            "${request.method} ${request.url.encodedPath} → $code ${extractDetail(body, code)}",
+        )
+    }
+
+    /** 路径段编码：备份 id 与 job id 由服务端生成，仍按段编码以避开 `?` 与 `#`。 */
+    private fun encodeSegment(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
     /**
      * 从 409 的 `detail` 中取出同名文件列表。

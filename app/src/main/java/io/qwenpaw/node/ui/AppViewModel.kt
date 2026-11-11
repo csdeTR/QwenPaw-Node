@@ -1141,6 +1141,28 @@ class AppViewModel(
             network = network,
         ).also { workspaceHolder = it }
 
+    /** 备份归档。按实例区分，与当前智能体无关。 */
+    private var backupHolder: io.qwenpaw.node.ui.backup.BackupViewModel? = null
+
+    val backup: io.qwenpaw.node.ui.backup.BackupViewModel
+        get() = backupHolder ?: io.qwenpaw.node.ui.backup.BackupViewModel(
+            api = api,
+            connection = ::activeConnection,
+            downloadClient = downloadClient
+                ?: io.qwenpaw.node.data.remote.DownloadClient(
+                    io.qwenpaw.node.data.remote.QwenPawApi.defaultClient(),
+                ),
+        ).also { backupHolder = it }
+
+    /** 工作区检查点。端点按智能体隔离，切换实例或智能体时必须清空。 */
+    private var checkpointHolder: io.qwenpaw.node.ui.checkpoint.CheckpointViewModel? = null
+
+    val checkpoint: io.qwenpaw.node.ui.checkpoint.CheckpointViewModel
+        get() = checkpointHolder ?: io.qwenpaw.node.ui.checkpoint.CheckpointViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { checkpointHolder = it }
+
     private fun activeConnection(): io.qwenpaw.node.data.remote.Connection? =
         repository.active()?.let { instance ->
             io.qwenpaw.node.data.remote.Connection(
@@ -1207,6 +1229,8 @@ class AppViewModel(
             configHolder?.clear()
             cronHolder?.clear()
             workspaceHolder?.clear()
+            backupHolder?.clear()
+            checkpointHolder?.clear()
         }
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。

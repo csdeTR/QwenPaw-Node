@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT }
 
 @Composable
 private fun QwenPawNav(
@@ -195,6 +195,8 @@ private fun QwenPawNav(
     val cronState by viewModel.cron.state.collectAsState()
     // 工作区文件的状态单独一条流，与设置页无关。
     val workspaceState by viewModel.workspace.state.collectAsState()
+    val backupState by viewModel.backup.state.collectAsState()
+    val checkpointState by viewModel.checkpoint.state.collectAsState()
     val fontState by viewModel.fontState.collectAsState()
     // 当前网络类型与 WiFi 名称：地址编辑区据此提示「这条现在会被优先使用」。
     val netSnapshot by app.networkMonitor.current.collectAsState()
@@ -674,6 +676,110 @@ private fun QwenPawNav(
                 )
             }
 
+            Screen.BACKUP -> {
+                LaunchedEffect(Unit) { viewModel.backup.ensureLoaded() }
+                io.qwenpaw.node.ui.backup.BackupScreen(
+                    state = backupState,
+                    onBack = { screen = Screen.SETTINGS },
+                    actions = io.qwenpaw.node.ui.backup.BackupActions(
+                        refresh = viewModel.backup::refresh,
+                        retryJob = viewModel.backup::refreshJob,
+                        cancelJob = viewModel.backup::cancelJob,
+                        setCreateName = viewModel.backup::setCreateName,
+                        setCreateDescription = viewModel.backup::setCreateDescription,
+                        toggleCreateAgent = viewModel.backup::toggleCreateAgent,
+                        setCreateScope = viewModel.backup::setCreateScope,
+                        startCreate = viewModel.backup::startCreate,
+                        openDetail = viewModel.backup::openDetail,
+                        dismissDetail = viewModel.backup::dismissDetail,
+                        requestDelete = viewModel.backup::requestDelete,
+                        dismissDelete = viewModel.backup::dismissDelete,
+                        confirmDelete = viewModel.backup::confirmDelete,
+                        export = viewModel.backup::export,
+                        beginImport = viewModel.backup::beginImport,
+                        reportImportProgress = viewModel.backup::reportImportProgress,
+                        confirmImportOverwrite = viewModel.backup::confirmImportOverwrite,
+                        trustImport = viewModel.backup::trustImportAndContinue,
+                        dismissImport = viewModel.backup::dismissImport,
+                        prepareRestore = viewModel.backup::prepareRestore,
+                        updateRestore = viewModel.backup::updateRestore,
+                        dismissRestore = viewModel.backup::dismissRestore,
+                        confirmRestore = viewModel.backup::confirmRestore,
+                        dismissNotice = viewModel.backup::dismissNotice,
+                        dismissError = viewModel.backup::dismissError,
+                        dismissExportError = viewModel.backup::dismissExportError,
+                    ),
+                )
+            }
+
+            Screen.CHECKPOINT -> {
+                LaunchedEffect(Unit) { viewModel.checkpoint.ensureLoaded() }
+                // 只读对话页是检查点的下一层：打开会话时切到 CHECKPOINT_CHAT，
+                // 返回时由 parentOf 回到检查点页，而不是一路退回设置。
+                LaunchedEffect(checkpointState.viewingSession?.sessionKey) {
+                    if (checkpointState.viewingSession != null) screen = Screen.CHECKPOINT_CHAT
+                }
+                io.qwenpaw.node.ui.checkpoint.CheckpointScreen(
+                    state = checkpointState,
+                    onBack = { screen = Screen.SETTINGS },
+                    actions = io.qwenpaw.node.ui.checkpoint.CheckpointActions(
+                        refresh = viewModel.checkpoint::refresh,
+                        toggleAuto = viewModel.checkpoint::toggleAuto,
+                        openSnapshot = viewModel.checkpoint::openSnapshot,
+                        closeSnapshot = viewModel.checkpoint::closeSnapshot,
+                        setSnapshotName = viewModel.checkpoint::setSnapshotName,
+                        dismissSnapshot = viewModel.checkpoint::dismissSnapshot,
+                        submitSnapshot = viewModel.checkpoint::submitSnapshot,
+                        openRestore = viewModel.checkpoint::openRestore,
+                        dismissRestore = viewModel.checkpoint::dismissRestore,
+                        setIncludeMemory = viewModel.checkpoint::setIncludeMemory,
+                        setIncludeFiles = viewModel.checkpoint::setIncludeFiles,
+                        toggleFile = viewModel.checkpoint::toggleFile,
+                        selectAllFiles = viewModel.checkpoint::selectAllFiles,
+                        clearFiles = viewModel.checkpoint::clearFiles,
+                        loadPreview = viewModel.checkpoint::loadPreview,
+                        applyRestore = viewModel.checkpoint::applyRestore,
+                        updateGcDraft = viewModel.checkpoint::updateGcDraft,
+                        saveGcSettings = viewModel.checkpoint::saveGcSettings,
+                        previewGc = viewModel.checkpoint::previewGc,
+                        applyGc = viewModel.checkpoint::applyGc,
+                        requestReset = viewModel.checkpoint::requestReset,
+                        dismissReset = viewModel.checkpoint::dismissReset,
+                        confirmReset = viewModel.checkpoint::confirmReset,
+                        dismissNotice = viewModel.checkpoint::dismissNotice,
+                        dismissError = viewModel.checkpoint::dismissError,
+                    ),
+                )
+            }
+
+            Screen.CHECKPOINT_CHAT -> {
+                val viewing = checkpointState.viewingSession
+                if (viewing == null) {
+                    // 快照刚创建成功或已返回：这一帧之后由状态驱动切回检查点页。
+                    LaunchedEffect(Unit) { screen = Screen.CHECKPOINT }
+                } else {
+                    CheckpointChatPane(
+                        viewing = viewing,
+                        checkpointState = checkpointState,
+                        chatState = chatVmState,
+                        chatVm = chatVm,
+                        imageLoader = imageLoader,
+                        connection = connection,
+                        appearance = messageAppearance,
+                        assistantCollapse = appState.assistantCollapse,
+                        renderUserMarkdown = appState.renderUserMarkdown,
+                        renderAssistantMarkdown = appState.renderAssistantMarkdown,
+                        onBack = {
+                            viewModel.checkpoint.closeSnapshot()
+                            screen = Screen.CHECKPOINT
+                        },
+                        snapshotName = viewModel.checkpoint::setSnapshotName,
+                        submitSnapshot = viewModel.checkpoint::submitSnapshot,
+                        dismissSnapshot = viewModel.checkpoint::dismissSnapshot,
+                    )
+                }
+            }
+
             Screen.CHAT -> {
                 ChatScreen(
                     state = chatVmState,
@@ -816,6 +922,8 @@ private fun QwenPawNav(
                     appVersion = BuildConfig.VERSION_NAME,
                     onBack = { screen = Screen.LIST },
                     onOpenWorkspace = { screen = Screen.WORKSPACE },
+                    onOpenBackup = { screen = Screen.BACKUP },
+                    onOpenCheckpoint = { screen = Screen.CHECKPOINT },
                     onSwitch = { id -> viewModel.switchTo(id) },
                     onRemove = viewModel::remove,
                     onEdit = viewModel::editInstance,
@@ -1097,6 +1205,72 @@ private fun toast(context: android.content.Context, text: String) {
 }
 
 /**
+ * 检查点的只读对话页。
+ *
+ * 单独抽成组件是因为页面里有两段 `LaunchedEffect`：一段拉历史，一段在
+ * `viewingSession` 被清空时通知上层退出。放进 `when` 分支内联会与
+ * `AnimatedContent` 的作用域纠缠，抽出来后焦点只有一个子节点，进出也更干净。
+ */
+@Composable
+private fun CheckpointChatPane(
+    viewing: io.qwenpaw.node.data.model.CheckpointSessionDto,
+    checkpointState: io.qwenpaw.node.ui.checkpoint.CheckpointUiState,
+    chatState: ChatUiState,
+    chatVm: io.qwenpaw.node.ui.chat.ChatViewModel,
+    imageLoader: io.qwenpaw.node.ui.chat.ChatImageLoader?,
+    connection: io.qwenpaw.node.data.remote.Connection?,
+    appearance: io.qwenpaw.node.ui.chat.MessageAppearance,
+    assistantCollapse: io.qwenpaw.node.ui.chat.AssistantCollapse,
+    renderUserMarkdown: Boolean,
+    renderAssistantMarkdown: Boolean,
+    onBack: () -> Unit,
+    snapshotName: (String) -> Unit,
+    submitSnapshot: () -> Unit,
+    dismissSnapshot: () -> Unit,
+) {
+    val chats = chatState.chats + chatState.archivedChats
+    // 检查点的会话标识来自 history.db，对话列表里的 id 是对话 id，两者可能不同。
+    // 用会话标识与其 id 双路匹配，找不到时只显示提示，不阻止创建快照。
+    val resolvedId = io.qwenpaw.node.ui.chat.resolveChatId(chats, viewing.sessionId)
+    val found = chats.any { it.id == resolvedId || it.sessionId == viewing.sessionId }
+    LaunchedEffect(resolvedId) {
+        if (found) chatVm.openChat(resolvedId)
+    }
+    var snapshotDialogOpen by remember { mutableStateOf(false) }
+    io.qwenpaw.node.ui.checkpoint.CheckpointChatScreen(
+        state = chatState,
+        sessionTitle = viewing.title.ifBlank { viewing.sessionKey.take(8) },
+        chatMissing = !found,
+        creating = checkpointState.snapshotPending,
+        error = checkpointState.snapshotError,
+        imageLoader = imageLoader,
+        connection = connection,
+        appearance = appearance,
+        assistantCollapse = assistantCollapse,
+        renderUserMarkdown = renderUserMarkdown,
+        renderAssistantMarkdown = renderAssistantMarkdown,
+        onBack = onBack,
+        onSnapshot = { snapshotDialogOpen = true },
+        onRefresh = { chatVm.openChat(resolvedId) },
+    )
+    val snapshotSession = checkpointState.snapshotSession
+    if (snapshotDialogOpen && snapshotSession != null) {
+        io.qwenpaw.node.ui.checkpoint.CheckpointSnapshotDialog(
+            session = snapshotSession,
+            name = checkpointState.snapshotName,
+            pending = checkpointState.snapshotPending,
+            error = checkpointState.snapshotError,
+            onNameChange = snapshotName,
+            onConfirm = submitSnapshot,
+            onDismiss = {
+                snapshotDialogOpen = false
+                dismissSnapshot()
+            },
+        )
+    }
+}
+
+/**
  * 通过系统分享发送纯文本。
  *
  * 分享的是内容而不是文件：不需要 FileProvider，也不会在用户存储里留下副本。
@@ -1118,8 +1292,10 @@ private fun parentOf(screen: Screen): Screen? = when (screen) {
     Screen.LIST -> Screen.CHAT
     Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE, Screen.INBOX, Screen.SEARCH -> Screen.LIST
     Screen.RUN_LOG -> Screen.SETTINGS
-    // 工作区文件从设置页进入，返回也回设置页。
-    Screen.WORKSPACE -> Screen.SETTINGS
+    // 工作区文件、备份与检查点都从设置页进入，返回也回设置页。
+    Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT -> Screen.SETTINGS
+    // 检查点的只读对话页是检查点的下一层，返回直接回到检查点。
+    Screen.CHECKPOINT_CHAT -> Screen.CHECKPOINT
     // 原文页从聊天页的气泡进入，返回也回聊天页。
     Screen.MESSAGE_SOURCE -> Screen.CHAT
 }

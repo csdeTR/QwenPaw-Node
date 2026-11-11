@@ -206,4 +206,27 @@ class TimeLabelsTest {
         val time = TimeLabels.fromEpochSeconds(1761437742.75, zone)!!
         assertEquals(750, time.nano / 1_000_000)
     }
+
+    /**
+     * 检查点的 `timestamp_ms` 是整数毫秒。
+     *
+     * 与浮点秒的换算不同，这里直接按毫秒构造；断言显式传入东八区，
+     * 不依赖 runner 的默认时区。
+     */
+    @Test
+    fun `epoch millis convert in the given zone`() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val local = LocalDate.of(2026, 1, 2).atTime(3, 4, 5)
+        val millis = local.atZone(zone).toInstant().toEpochMilli()
+        assertEquals("2026.01.02 03:04:05", TimeLabels.epochMillisFull(millis, zone))
+        assertEquals("01-02", TimeLabels.epochMillisStamp(millis, zone))
+    }
+
+    @Test
+    fun `epoch millis of today shows time only`() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val todayNoon = LocalDate.now(zone).atTime(12, 34)
+        val millis = todayNoon.atZone(zone).toInstant().toEpochMilli()
+        assertEquals("12:34", TimeLabels.epochMillisStamp(millis, zone))
+    }
 }

@@ -106,6 +106,28 @@ object TimeLabels {
     fun epochTime(seconds: Double, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
         fromEpochSeconds(seconds, zone)?.format(timeFormatter).orEmpty()
 
+    /**
+     * 毫秒时间戳的展示：今天 `HH:mm`，更早 `MM-dd`。
+     *
+     * 检查点节点的 `timestamp_ms` 是整数毫秒，与收件箱的浮点秒不同，
+     * 不能共用 [epochStamp]。时区显式传入，单测才能钉住东八区的输出。
+     */
+    fun epochMillisStamp(
+        millis: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): String {
+        val time = runCatching { Instant.ofEpochMilli(millis).atZone(zone) }.getOrNull() ?: return ""
+        return relativeEpochStamp(time, zone)
+    }
+
+    /** 毫秒时间戳的完整时刻，供检查点详情行使用。 */
+    fun epochMillisFull(
+        millis: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): String = runCatching {
+        Instant.ofEpochMilli(millis).atZone(zone).format(fullStampFormatter)
+    }.getOrDefault("")
+
     private fun relativeEpochStamp(time: ZonedDateTime, zone: java.time.ZoneId): String {
         val today = LocalDate.now(zone)
         val days = ChronoUnit.DAYS.between(time.toLocalDate(), today)
