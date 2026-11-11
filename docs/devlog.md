@@ -5558,6 +5558,32 @@ SSE、检查点端点、两个 ViewModel、时间线与恢复草稿等用例）�
 
 ---
 
+## 66、发布 v0.3.2 与测试环境维护（2026-11-11）
+
+**发版。** 0.3.2 的改动分三笔提交（功能、契约与验收文档、开发日志）后推送 `master`，
+打附注 tag `v0.3.2` 触发 release workflow。第一次跑失败：CHANGELOG 顶部的
+`## 未发布` 成了首个版本小节，workflow 校验要求首节与 tag 一致，于是中止。
+把那段补丁说明并进 `## v0.3.2` 小节后重推 tag，四个 ABI 的包全部构建、验签并挂上 Release。
+教训是固定的：**CHANGELOG 只留已发布的版本小节**，发布前不保留「未发布」段。
+
+**两个 LXC 容器。** `qp-test-prerelease` 缺少 `git`，检查点接口因此返回 400，
+补装后两个版本的 `/api/workspace/checkpoints/status` 与 `GET /api/backups` 都恢复正常。
+
+**AVD 起不来。** `qp35` 直接以 `x86_64 emulation currently requires hardware acceleration!`
+退出。CPU 支持虚拟化（`/proc/cpuinfo` 有 `vmx`），但 `kvm` / `kvm_intel` 模块没加载、
+`/dev/kvm` 不存在。`modprobe kvm kvm_intel` 后出现设备节点，写进
+`/etc/modules-load.d/kvm.conf` 保证开机自动加载，并放开节点权限。
+启动后确认 720×1600、280dpi、Android 15，装上 0.3.2 release 包能启动、无崩溃。
+另外发现 `nohup ... &` 启动的模拟器会随命令 shell 一起被回收，
+要写成 `setsid nohup ... &`，这一点已补进 test-env.md 第 3 节。
+
+**redroid 的 root 前提写错了。** 容器内 `adb shell` 现在默认是 `uid=2000(shell)`，
+不是文档里写的 `uid=0`。`adb root` 后回到 0，`adb unroot` 后回到 2000，来回都正常；
+验收脚本的 `can_block` 本来就带这条回退，所以 A6 不受影响。文档已订正。
+显示参数、三 GB 上限与 x86_64 release 包的安装启动都复验过。
+
+---
+
 ## 附录：几条反复起作用的原则
 
 1. **先测量，再优化。** 本项目代价最大的教训是：四个「看起来很像」的假设全部被实测推翻，

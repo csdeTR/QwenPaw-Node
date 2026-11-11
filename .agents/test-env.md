@@ -128,7 +128,10 @@ docker compose -f scripts/redroid/docker-compose.yml up -d
   容器内非 root 进程打不开，因此要放开权限。
 - 宿主机重启后 `docker compose up` 之前必须先 `modprobe`，否则容器会因 binder 节点缺失
   反复崩溃。因此 compose 里 `restart` 固定为 `"no"`，不要改成 `unless-stopped`。
-- 容器内是 userdebug，`adb shell` 默认 `uid=0`，**不需要 `adb root`**。
+- 容器内是 userdebug，但 `adb shell` **默认是 `uid=2000(shell)`，不是 root**。
+  需要 root 的场景（A6 断网、写 `/data` 等）先 `adb root`，等 3–5 秒再执行，
+  之后 `id -u` 应为 `0`。验收脚本的 `can_block` 已经包含这条回退，不需要手工处理。
+  2026-11-11 实测：`adb unroot` 后回到 2000，`adb root` 后回到 0，来回都正常。
 
 ### 2.3 显示参数
 
@@ -175,6 +178,18 @@ AVD 走 QEMU 用户态 NAT，与容器的桥接网络不是同一条路径，
   `hw.lcd.width = 720`、`hw.lcd.height = 1600`、`hw.lcd.density = 280`。
   dp 视口仍是 411×914，与 redroid 相同，因此 [ui-guidelines.md](../docs/ui-guidelines.md) 1.5 的布局期望通用；
   像素值按 720×1600 重取，不要沿用 1080×2400 的数字。
+- **必须能打开 `/dev/kvm`，否则 x86_64 镜像直接退出。** 2026-11-11 实测：
+  本机 CPU 支持虚拟化（`/proc/cpuinfo` 有 `vmx`/`svm`），但 `kvm` 与 `kvm_intel`
+  两个模块都没有加载，`/dev/kvm` 不存在，模拟器以
+  `x86_64 emulation currently requires hardware acceleration!` 退出。
+  修复并已固化到 `/etc/modules-load.d/kvm.conf`：
+
+  ```bash
+  sudo modprobe kvm kvm_intel        # 开机时由 modules-load.d 自动加载
+  sudo chmod 666 /dev/kvm            # 节点权限 0660，非 kvm 组用户打不开
+  ```
+
+  `redroid` 不依赖 KVM，模块缺失只影响这一节。
 - **启动必须带 `-feature -BluetoothEmulation`。** 不加时 QEMU 卡在
   `detected a hanging thread 'QEMU2 CPU0 thread'` 并以段错误退出；
   `-accel off`、`-gpu off`、`-no-snapshot`、`-wipe-data` 都不能绕过，
@@ -184,6 +199,18 @@ AVD 走 QEMU 用户态 NAT，与容器的桥接网络不是同一条路径，
   ~/Android/Sdk/emulator/emulator -avd qp35 -feature -BluetoothEmulation &
   ~/Android/Sdk/platform-tools/adb wait-for-device
   ```
+
+- **后台启动要用 `setsid`。** 只写 `nohup ... &` 时，模拟器会随发起命令的
+  shell 一起被回收，表现为 `adb devices` 短暂出现后消失、日志里没有报错。
+  本机验证过的写法：
+
+  ```bash
+  setsid nohup ~/Android/Sdk/emulator/emulator -avd qp35 -no-window -no-audio \
+    -no-boot-anim -gpu swiftshader_indirect > /tmp/avd-qp35.log 2>&1 < /dev/null &
+  ```
+
+  冷启动约 30 秒（`Boot completed in 28450 ms`），`sys.boot_completed` 为 `1`。
+  实测 `wm size` / `wm density` 为 `720x1600` / `280`，`ro.build.version.release` 为 `15`。
 
 - 设备序列号是 `emulator-5554`，验收脚本用 `ADB_SERIAL=emulator-5554`。
 - 服务端地址：历史上模拟器测试用 `adb reverse tcp:8088 tcp:8088` 指向宿主实例，
