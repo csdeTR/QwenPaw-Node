@@ -75,6 +75,21 @@ docker 走的是 iptables-nft 的 xt `MASQUERADE`，因此该模块不会被 doc
 测试会留下大量 running / idle 状态的会话。结束时应确认没有残留，
 必要时用 `POST /api/console/chat/stop?chat_id=` 收尾。
 
+### 1.6 容器内缺 `git` 时检查点不可用
+
+`qp-test` 重建后曾缺少 `git`，`/api/workspace/checkpoints/status` 直接返回 400
+「QwenPaw checkpoints require Git」，界面降级成只读，B1 起的手动快照链路全部走不通。
+这是测试环境问题，不是契约差异。修复：
+
+```bash
+lxc exec qp-test -- apt-get install -y git
+lxc exec qp-test -- sudo -u csdetr bash -lc 'screen -S qwenpaw -X quit'
+lxc exec qp-test -- sudo -u csdetr bash -lc \
+  'screen -dmS qwenpaw bash -lc "~/.qwenpaw/venv/bin/qwenpaw app --host 0.0.0.0 --port 8088 > /tmp/qp.log 2>&1"'
+```
+
+服务进程在启动时解析 `git` 路径，**装完必须重启**才生效。
+
 ---
 
 ## 2、redroid 容器（首选设备）
@@ -184,7 +199,7 @@ AVD 走 QEMU 用户态 NAT，与容器的桥接网络不是同一条路径，
 - 操作界面时坐标一律从 `uiautomator dump` 动态获取，不要凭截图目测。
   截图是缩放的，按截图坐标点击会落空。
 - `adb shell input text` 不支持中文，空格用 `%s`。
-- 验收脚本：`ADB_SERIAL=localhost:5555 ./scripts/e2e_acceptance.sh --only <A1..A6>`。
+- 验收脚本：`ADB_SERIAL=localhost:5555 ./scripts/e2e_acceptance.sh --only <A1..A7|B1..B6>`。
   脚本默认操作 debug 包 `io.qwenpaw.node.debug`，可用 `ADB_PKG` 覆盖。
   A6 断网场景走第 2.4 节的路由黑洞。
   **脚本已移除真机分支**，只按 redroid 维护；`su -c` 免密提权一类的手段不再保留。

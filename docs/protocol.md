@@ -1768,3 +1768,125 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 
 `null` 表示不限制。服务端**不据此拦截**上传，这个值只供客户端提前提示与跳过，
 因此取值失败时不阻断上传。
+
+---
+
+## 27、备份与检查点
+
+备份归档与工作区检查点两块，2026-11-11 核对。两个版本的源码逐文件比对无差异：
+`app/routers/backup.py`、`app/routers/checkpoints.py`、`backup/models.py`、
+`checkpoints/models.py`、`backup/_backup_helpers.py`、`backup/_utils/signing/trust.py`
+在 2.2.2.post1 与 2.3.0b2 上完全一致，客户端因此同样不做运行时版本分支。
+
+运行期实测：`GET /api/backups` 在两版都返回**裸数组**，元素含 `accepted_via_trust`；
+`/status` 在 `qp-test-prerelease` 容器里返回 500，原因是容器内服务进程的 `PATH` 找不到 `git`，
+属于测试环境问题，不改契约结论。
+
+### 27.1 备份端点
+
+前缀 `/api/backups`，与当前选中的智能体无关，`X-Agent-Id` 照常注入但不参与路由。
+
+| 方法 | 路径 | 返回 |
+| --- | --- | --- |
+| GET | `/api/backups` | **裸数组** `[BackupMeta]`，`signature` 被置空 |
+| GET | `/api/backups/{id}` | `BackupDetail` = `BackupMeta` + `workspace_stats: {agent_id: {files, size}}` |
+| POST | `/api/backups/jobs` | 202 `BackupJobSnapshot`；已有任务或恢复进行中返回 409 |
+| GET | `/api/backups/jobs/active` | `BackupJobSnapshot` 或 JSON `null` |
+| GET | `/api/backups/jobs/{job_id}` | `BackupJobSnapshot`；不存在 404 |
+| GET | `/api/backups/jobs/{job_id}/events` | SSE，帧是**完整快照** |
+| POST | `/api/backups/jobs/{job_id}/cancel` | `BackupJobSnapshot` |
+| POST | `/api/backups/{id}/restore` | `{"ok": true, "preserved_local_keys": [...]}` |
+| GET | `/api/backups/{id}/export` | zip 流，带 `Content-Length` |
+| POST | `/api/backups/import` | multipart，字段 `file`、`pending_token`、`trust_mode` |
+| POST | `/api/backups/delete` | `{"ids": [...]}` → `{"deleted": [...], "failed": [{id, error}]}` |
+
+`BackupMeta` 字段：`id`、`name`、`description`、`created_at`（ISO 8601 带偏移）、`version`、
+`scope`、`agent_count`、`qwenpaw_version`、`system_info`、`accepted_via_trust`。
+
+`BackupScope`：`include_agents`、`include_global_config`、`include_skill_pool` 默认 `true`，
+`include_secrets` 默认 `false`。
+
+`CreateBackupRequest`：`name`、`description`、`scope`、`agents`。
+**`agents` 必须是显式列表**，即便是「全部智能体」也不能省略；
+`scope.include_agents=false` 时才可为空。
+
+`BackupJobSnapshot`：`job_id`、`backup_id`、`status`（`pending|running|cancel_requested|completed|failed|cancelled`）、
+`phase`（`preparing|agents|finalizing`）、`percent`（整数）、`current_agent`、`agent_index`、
+`total_agents`、`result`、`error`。
+
+`RestoreBackupRequest`：`mode`（`full|custom`，默认 `custom`）、`include_agents`、`agent_ids`、
+`include_global_config`、`include_secrets`、`include_skill_pool`、`default_workspace_dir`、
+`preserve_local_protected_config`、`trust_mode`。
+
+### 27.2 备份的两类错误体
+
+导入与恢复都要按 `detail` 的类型分流，不能一律取字符串：
+
+- **重名**：409，`{"detail": "backup_conflict", "existing": BackupMeta, "pending_token": "..."}`。
+  用 `pending_token` 重发（**不再上传文件**）即覆盖，服务端删除临时文件。
+- **签名不可信**：400，`detail` 是**对象** `{"code": ..., "message": ...}`。
+  `code` 为 `backup_legacy_unsigned` 或 `backup_signature_mismatch` 时，
+  可分别用 `trust_mode="legacy"` / `"foreign"` 显式信任；
+  `backup_unknown_signature_scheme` 没有信任通路，只能拒绝。
+- **忙**：409，`detail` 是字符串（任务与恢复互斥）。
+
+信任会以本机密钥重新签名，之后该备份不再有「未签名」状态，界面必须提前写明。
+
+### 27.3 任务进度 SSE
+
+`GET /api/backups/jobs/{job_id}/events`：
+
+- 每个 `data:` 帧是一份完整快照，直接替换状态，不需要合并字段。
+- 每 15 秒一行 `: heartbeat`，是注释行，不产生状态。读取器按空行切帧、只收集 `data:` 行，
+  被忽略的注释行不会打断帧。
+- 终态（`completed` / `failed` / `cancelled`）之后服务端结束流；客户端也应在收到终态后主动停止。
+- 任务状态只在服务端内存里。断流后重新订阅可能 404，此时应以 `GET /jobs/{id}` 的
+  最后一次成功结果为准，并刷新列表，而不是持续报错。
+- 鉴权与其他端点一致走 `Authorization` 头，`Accept: text/event-stream` 固定传。
+
+### 27.4 检查点端点
+
+前缀 `/api/workspace/checkpoints`，**按智能体隔离**：服务端用 `get_agent_for_request`
+取工作区，客户端靠 `baseBuilder` 注入的 `X-Agent-Id` 命中当前智能体。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/status` | `{auto_enabled, has_checkpoints, workspace_dir}` |
+| PATCH | `/auto` | body `{enabled}` → `{auto_enabled}` |
+| GET | `/graph?limit=500` | `{nodes, sessions, summary, truncated}`，`limit` 取 1–1000 |
+| POST | `/snapshot` | `{session_id, user_id, channel, name}` → `{ref, commit, tree, parent_commit, timestamp_ms}` |
+| POST | `/restore/preview` | 与 `/restore` 同 body，返回 `dry_run: true` 的结果 |
+| POST | `/restore` | 执行回滚 |
+| GET / PATCH | `/gc/settings` | `{gc_keep_count, gc_keep_days, pre_restore_retention_days}` |
+| POST | `/gc/preview` | `{compact, keep_count, keep_days, pre_restore_days}` → `{deleted_refs, kept_refs, dry_run}` |
+| POST | `/gc` | 同上，`dry_run=false` |
+| DELETE | 前缀本身 | `{reset: true, auto_enabled}` |
+
+节点字段：`ref`、`kind`（`auto|snap|pre-restore|sha`）、`session_key`、`name`、`commit`、
+`sha`（`commit[:12]`）、`timestamp_ms`（epoch 毫秒）、`subject`、`query`、`channel`、
+`restore_index`、`parent_commit`、`is_head`、`user_id`、`session_id`、`session_title`。
+
+`sessions[]`：`session_key`、`session_id`、`user_id`、`channel`、`title`、`archived`。
+`summary`：`total`、`auto`、`snapshots`、`safety`、`heads`。
+
+三条约束：
+
+1. 回滚目标是 `commit`，不是 `target`；服务端接受完整 commit、≥7 位前缀、`ref` 与 `#序号`，
+   客户端统一传节点上的完整 `commit`。
+2. `RestoreResult` 是 dataclass 的 `asdict`，其中元组序列化为 **JSON 数组**
+   （`restored_paths`、`deleted_paths`、`file_paths`）。
+3. `include_files=true` 且 `files` 为空时 `/restore` 返回 400
+   `Select at least one file before restoring files.`；
+   预览的 `file_paths` 是候选文件，界面据此做多选。
+
+`/status` 返回 400 表示该工作区不是 git 仓库。界面应降级为只读并显示服务端原文，
+不猜测原因，也不补自动初始化。
+
+### 27.5 清理与重置
+
+- `PATCH /gc/settings` 三项范围：`gc_keep_count` 0–1000000、`gc_keep_days` 0–36500、
+  `pre_restore_retention_days` 0–36500。客户端先做整数与范围校验，非法时不发请求。
+- `/gc/preview` 与 `/gc` 的 `compact` 对应「压缩仓库对象」，会改变仓库对象数量，
+  执行前要按破坏性操作确认。
+- `DELETE /api/workspace/checkpoints` 删除当前工作区的全部检查点（自动、手动与恢复前快照），
+  返回 `{reset, auto_enabled}`。`auto_enabled` 保持原值，重置后仍按开关继续产生检查点。
