@@ -1214,3 +1214,21 @@ lucide 0.562.0 的八条 `d` 原样，描边宽度 2f（lucide 默认值，18dp 
 **第二条线不能用主题的 `tertiary`。** 本项目 `tertiary` 是警告色 `#FAAD14`，
 与主色 `#FF7F16` 只差一点色相，2dp 细线几乎分不开。第二条用 `onSurfaceVariant` 的灰，
 并让图例的色点与线一致。
+
+### 9.25 返回时保留滚动位置
+
+**从列表进入某一项、再返回，列表应停在离开时的位置**，而不是回到顶部。
+设置页是最容易踩到的一处：分区切换与页面切换各有一层 `AnimatedContent`，
+两层都会销毁离开页面的组合，页内的 `rememberScrollState` 跟着一起没了。
+
+两条写法：
+
+- 页内的滚动位置存在页面外层（`rememberSaveable` 的整型列表，按分区索引），
+  用 `rememberScrollState(initial = 保存值)` 恢复。不要写成「先建在顶部，再
+  `LaunchedEffect` 里 `scrollTo`」——那会在切换动画结束后补一次可见的跳动。
+- 整页级的返回（设置 → 工作区 → 返回）需要 `rememberSaveableStateHolder()` +
+  `SaveableStateProvider(key)` 把 `rememberSaveable` 存下来，否则整页重建，
+  连当前分区都会丢。
+
+**未访问过的页面仍从顶部开始。** 恢复位置只对「来过又回去」成立；
+第一次进入任何页面都应该看到它的标题，而不是上次别处的偏移。
