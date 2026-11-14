@@ -44,7 +44,8 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 | `avatar/` | `AvatarStore`（头像文件）、`AvatarIntake`（GIF 判定与 EXIF 纠正）、`CropGeometry`（裁剪换算）、`AvatarCropScreen`（裁剪页）、`ChatIconStore`（会话图标） | 调整头像规格、裁剪交互或图片处理方式时 |
 | `log/` | `RunLog`（进程内环形缓冲）、`LoggingInterceptor`、`LogImporter` | 新增日志类别、改动导出格式或脱敏规则时 |
 | `ui/chat/` | 对话页、会话列表与分组、输入条、Markdown 渲染、工具卡片、消息气泡与头像、语音浮层 | 绝大多数界面改动的落点 |
-| `ui/settings/` | 实例连接表单、地址管理、设置页、智能体选择 | 设置项增删，或连接流程变化时 |
+| `ui/settings/` | 实例连接表单、地址管理、设置页、智能体选择、模型与提供商（`ModelsViewModel` / `ModelsScreen`，含 `ModelCatalog.modelChoicesOf`） | 设置项增删，或连接流程变化时 |
+| `ui/stats/` | 用量统计：`UsageViewModel`（四个端点并行取数、分块报错）、`UsageAggregation`（区间换算、按模型聚合、趋势补齐）、`UsageChart`（Vico 双线折线）、`UsageScreen` | 调整统计口径、换图表库或改范围档位时 |
 | `ui/theme/` | 配色、字号缩放、MiSans 字体接入 | 调整视觉 token 或字号体系时 |
 | `ui/log/` | 运行日志页 | 调整日志展示形态时 |
 | `ui/workspace/` | 工作区文件：目录浏览、文本与图片预览、下载计划与进度、SAF 落盘（`SafDownloads`） | 调整文件浏览交互或下载落盘方式时 |

@@ -61,7 +61,7 @@ M3 `Scaffold` 的 `ScaffoldDefaults.contentWindowInsets` 取值是 **systemBars*
 | `ChatListScreen.ListHeader` | `statusBarsPadding()` | 列表页标题与搜索框贴近屏幕顶边 |
 | `ChatListScreen` 新建按钮 / 批量操作条 | `navigationBarsPadding()` | 按钮压住手势条，滑动返回手势与点击冲突 |
 | `ChatInputBar` | `Surface` 内部使用 `navigationBars ∪ ime` | 发送按钮被手势条覆盖；键盘弹出时输入条与键盘之间出现空隙 |
-| `ArchivedScreen` / `TokenUsageScreen` | `statusBarsPadding()` | 标题压进通知栏 |
+| `ArchivedScreen` / `UsageScreen` / `ModelsScreen` | `statusBarsPadding()` | 标题压进通知栏 |
 | `ConnectScreen` | 外层 `statusBarsPadding()` + `navigationBarsPadding()` | 连接表单顶部贴边、底部按钮压住手势条 |
 
 ### 1.5 验收基准
@@ -1179,3 +1179,38 @@ lucide 0.562.0 的八条 `d` 原样，描边宽度 2f（lucide 默认值，18dp 
 
 **存储用 `StringSet`，键名 `trusted_hosts`。** 初始化时逐项归一化并丢弃非法值；
 移除某个 host 后重新连接同一地址，提示恢复。
+
+### 9.23 设置页「服务端配置」的行的顺序
+
+「服务端配置」卡片里的行按**是否写入服务端**排序，只读展示放最后：
+
+1. 配套插件（开关，其余功能的前提，排在最前）
+2. 工具 / 环境变量 / 定时任务 / 模型与提供商（都会写服务端状态）
+3. 工作区文件 / 备份 / 检查点 / 后台策略
+4. 用量统计（纯只读，排在卡片末尾）
+
+依据：一个卡片里混放「会改服务端」与「只看一眼」的入口时，用户点开后者的预期是
+「看完就退」，把它插在中间会让相邻的配置入口看起来也像只读。
+新增行时按这条排，不要按实现先后顺序追加。
+
+**两个页面都是独立的 `Screen`，不新增 `SettingsPage` 枚举项。** 与工作区、备份、
+检查点一致：它们有自己的返回落点，塞进设置页的二级页会让返回逻辑分叉。
+
+### 9.24 图表：空数据与刻度
+
+用量统计的趋势图用 Vico 画，三条约定在实现时被设备验收逼出来：
+
+- **空数据不给空坐标系。** 没有趋势数据时直接显示一行「所选时间范围内没有调用」，
+  不组合图表。空的折线图会画出一块带网格的空白，看起来像加载失败。
+- **轴格式化器不能返回空串。** Vico 对这一点有硬校验，返回 `""` 会抛
+  `IllegalStateException` 并整页崩溃（实测在切换时间范围时触发）。
+  刻度由 `ItemPlacer` 控制；格式化器只负责把值转成文字，越界时夹到有效范围。
+- **纵轴不要截断成整数。** 区间上限低于 1 时 Vico 会给 `0.2` / `0.4` 这类刻度，
+  统一 `toLong()` 会得到一排「0」。写法是「大数走 k/M、整数原样、其余保留一位小数」。
+
+**多条序列写在一个 `lineSeries {}` 块里。** 分两次调用会得到两个 Partial，
+图层只消费第一个，第二条线静默消失——不报错，只是图上少一条。
+
+**第二条线不能用主题的 `tertiary`。** 本项目 `tertiary` 是警告色 `#FAAD14`，
+与主色 `#FF7F16` 只差一点色相，2dp 细线几乎分不开。第二条用 `onSurfaceVariant` 的灰，
+并让图例的色点与线一致。

@@ -2009,3 +2009,159 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 设备端完整链路（录音 → 补 WAV 头 → 上传 → 填入草稿）已在 redroid 上验通，
 细节见 [devlog](devlog.md) 第 67 节。
+
+---
+
+## 29、用量统计与模型管理
+
+三组统计端点与四个模型端点，2026-11-14 在 2.2.2.post1 与 2.3.0b2 上逐条实测，
+路径与字段在两版一致；差异只在 `GET /api/models/active` 的响应多一个
+`default_models` 对象（见第 17 节），客户端忽略未知字段即可。
+
+### 29.1 三组统计的口径不同
+
+| 方法 | 路径 | 口径 | 默认窗口 |
+| --- | --- | --- | --- |
+| GET | `/api/agent-stats` | **按 `X-Agent-Id` 过滤**，只有当前智能体 | 今天往前 30 天 |
+| GET | `/api/agent-stats/llm-tool-trend` | **跨智能体汇总**（全局） | 同上 |
+| GET | `/api/token-usage/details` | **全局**，一行是「日期 × 智能体 × 供应商 × 模型」 | 同上 |
+| GET | `/api/token-usage` | 全局聚合（第 10 节） | 同上 |
+
+查询参数都是 `start_date` / `end_date`（`YYYY-MM-DD`，**两端都含**）。
+**传反的区间会被服务端自动交换**：`start_date=2026-11-14&end_date=2026-11-12`
+返回的 `start_date` 是 `2026-11-12`。客户端因此不需要自己纠正顺序。
+
+界面上同页并列这几块时必须分别标注范围。实测同一天：
+`agent-stats` 的 `total_tool_calls` 是 32（当前智能体），
+而 `token-usage` 的 `total_calls` 是 87（全局），两个数字放一起不加说明会互相矛盾。
+
+`agent-stats` 带一个不存在的智能体 id 回 **404** `Agent 'NoSuchAgent' not found`。
+
+### 29.2 `AgentStatsSummary` 的字段
+
+`total_active_sessions`、`total_messages`、`total_user_messages`、
+`total_assistant_messages`、`total_prompt_tokens`、`total_completion_tokens`、
+`total_llm_calls`、`total_tool_calls`、`start_date`、`end_date`，
+外加 `agent_*` 六个：`agent_prompt_tokens`、`agent_completion_tokens`、
+`agent_llm_calls`、`agent_cache_read_tokens`、`agent_cache_eligible_input_tokens`、
+`agent_cache_hit_rate`。
+
+`by_date` 的元素 `DailyStats` 有 14 个字段：`date`、`chats`、`active_sessions`、
+`user_messages`、`assistant_messages`、`total_messages`、`prompt_tokens`、
+`completion_tokens`、`llm_calls`、`tool_calls`，以及 `agent_prompt_tokens`、
+`agent_completion_tokens`、`agent_llm_calls`、`agent_cache_read_tokens`。
+`by_date` 的长度等于区间天数，**无数据的那天也返回一条零值**。
+
+`channel_stats` 的元素是 `channel`、`session_count`、`user_messages`、
+`assistant_messages`、`total_messages`。无数据时是 `[]`。
+
+**`agent_cache_hit_rate` 可以是 `null`**，与第 10 节的 `cache_hit_rate` 同形。
+实测空区间（`2020-01-01..2020-01-03`）返回 `"agent_cache_hit_rate": null`，
+其余计数全为 0。声明成非空 `Double` 会让整个响应解析失败，
+用户看到的是「加载失败」而不是一组零值。
+
+### 29.3 趋势端点已自行补零
+
+`GET /api/agent-stats/llm-tool-trend` 返回**裸数组**，元素是
+`{date, agent_llm_calls, tool_calls}`。
+
+实测 `2026-08-14..2026-11-14`（93 天）返回 **93 条**，其中只有 4 天非零，
+其余都是零值条目——服务端已经把区间补齐。客户端仍做一次幂等补齐：
+补了不变，缺日才填，防止将来版本改回「只返回有数据的日期」时折线跨空档连成直线。
+
+### 29.4 明细端点
+
+`GET /api/token-usage/details` 返回裸数组，元素字段：
+
+```json
+{"date":"2026-11-01","provider_id":"a2a","model":"CodeArts/deepseek-v4.1-flash-1017",
+ "agent_id":"default","prompt_tokens":142091,"completion_tokens":3278,
+ "cache_read_tokens":77568,"cache_write_tokens":0,"cache_eligible_input_tokens":141919,
+ "cache_observed_calls":9,"call_count":11}
+```
+
+**行数等于「有调用的日期 × 智能体 × 模型」，不是区间天数**：
+90 天区间实测只有 4 行。因此不存在「行数过大需要分页」的问题。
+`agent_id` 可以是 `null`（早于服务端智能体归属机制的历史行），客户端不能丢这些行，
+否则明细合计与概览对不上。
+
+### 29.5 默认模型的三个作用域
+
+`GET /api/models/active?scope=`
+
+| scope | 含义 | 缺 `agent_id` |
+| --- | --- | --- |
+| `effective`（默认） | agent 优先、否则回落全局，即实际生效的 | 可省略 |
+| `global` | 服务端全局默认 | 可省略 |
+| `agent` | 该智能体**配置里显式写下**的模型 | **400** `agent_id is required when scope is 'agent'` |
+
+**`scope=agent` 读的是「写过的值」，不是「生效值」。** 实测 `default` 智能体在
+未写入过时返回 `{"active_llm": null, "effective_max_input_length": null}`，
+而同一时刻 `effective` 返回全局模型。因此界面「当前智能体默认」一行读 `agent`，
+为空时显示「跟随全局」，不能把全局值抄过来当成该智能体的选择。
+
+`PUT /api/models/active` 的 body 必填三字段：`{provider_id, model, scope}`，
+`scope` 只接受 `global` / `agent`，`scope=agent` 时还要带 `agent_id`。
+
+| 场景 | 状态码 | `detail` |
+| --- | --- | --- |
+| 成功 | 200 | 新的 `ActiveModelsInfo` |
+| `scope=agent` 缺 `agent_id` | 400 | `agent_id is required when scope is 'agent'` |
+| 供应商不存在 | 404 | `Provider 'nope' not found.`（**句末有句号**） |
+
+### 29.6 供应商连通性测试
+
+`POST /api/models/{provider_id}/test`，body 可省略（服务端声明为
+`Optional[TestProviderRequest]`）。返回：
+
+```json
+{"success":true,"message":"Connection successful","status":null,
+ "http_status":null,"retryable":null,"checked_at":null,"verification":null}
+```
+
+**测试失败也是 HTTP 200**，靠 `success` 区分：
+
+```json
+{"success":false,
+ "message":"Connection failed: API error when connecting to `http://localhost:1234/v1` (status=unknown): Connection error."}
+```
+
+按状态码判断会把「供应商连不上」显示成「测试成功」。失败时直接把 `message` 透给用户。
+
+未知供应商回 **404** `Provider 'nope' not found`（**句末没有句号**，
+与 29.5 的 404 文案不一致，两处都是服务端原文，客户端不做字符串加工）。
+
+### 29.7 模型级测试单独一条路径
+
+服务端没有 `POST /api/models/{id}/test` 这个「模型级」端点：
+`/{provider_id}/test` 测的是**供应商**连通性。模型级是
+`POST /api/models/{provider_id}/models/test`，body `{model_id}`，
+返回同一个 `TestConnectionResponse`。客户端本期只接供应商级。
+
+### 29.8 模型池端点不能当列表数据源
+
+`GET /api/models/{provider_id}/pool` 的 `limit` 上限是 **100**
+（`ge=1, le=100`），传 200 回 422：
+
+```json
+{"detail":[{"type":"less_than_equal","loc":["query","limit"],
+  "msg":"Input should be less than or equal to 100","input":"200","ctx":{"le":100}}]}
+```
+
+返回 `ModelPoolPage`：`models`、`total`、`selected_count`、`candidate_count`、
+`families`、`offset`、`limit`。
+
+**客户端不接这个端点。** 本地部署下它的 `models` 常常是空数组（第 9 节已记），
+模型清单统一取 `GET /api/models` 的三个数组（配置 / 额外 / 探测）。
+0.4.1 顺带删掉了客户端里无调用方、且 `limit` 默认写 200 的 `modelPool` 方法——
+那个默认值一旦被调用必然 422。
+
+### 29.9 供应商列表的可用性形状
+
+`GET /api/models` 实测 2.2.2.post1 有 36 个供应商（32 个 enabled），
+但**只有 2 个带模型**（`dashscope` 1 个、`a2a` 1 个）；2.3.0b2 有 38 个，同样 2 个模型。
+大多数 enabled 供应商的模型数组为空（未配凭据或未发现），
+界面必须能表达「已启用但没有模型」，不能把它当成「没有供应商」。
+
+单个 `ModelInfo` 有 50 余个字段，客户端只用 `id` / `name` / `is_free` /
+`is_recommended` / `max_input_length`。
