@@ -362,20 +362,20 @@ QwenPaw-Node-<tag>-no-sherpa-<abi>.apk    # nosherpa
 
 实测命令：`find app/build/outputs/apk -path "*/release/*.apk" -printf "%s %p\n"`。
 
-0.4.2 实测（`full` / `nosherpa`）：
+0.4.2 实测（`full` / `nosherpa`，取自 `v0.4.2` 的 Release 产物）：
 
 | 架构 | `full` | `nosherpa` | `full` 包内 native |
 | --- | --- | --- | --- |
-| `arm64-v8a` | 25,404,422（约 25.4MB） | 2,864,795（约 2.86MB） | `libsherpa-onnx-jni.so` 22.4MB |
-| `armeabi-v7a` | 18,175,242（约 18.2MB） | 2,861,953 | 同上量级 |
-| `x86_64` | 28,350,712（约 28.4MB） | 2,865,456 | 同上 |
-| `x86` | 39,355,921（约 39.4MB） | 2,863,977 | 另带 `libonnxruntime.so` |
+| `arm64-v8a` | 25,404,422（约 25.4MB） | 2,848,411（约 2.85MB） | `libsherpa-onnx-jni.so` 22.4MB |
+| `armeabi-v7a` | 18,175,242（约 18.2MB） | 2,845,569 | 同上量级 |
+| `x86_64` | 28,350,712（约 28.4MB） | 2,849,072 | 同上 |
+| `x86` | 39,355,921（约 39.4MB） | 2,847,593 | 另带 `libonnxruntime.so` |
 
 `nosherpa` 的四个包内只剩 `libandroidx.graphics.path.so`（10KB）。
 `full` 的 arm64 里 sherpa 的 `.so` 仍占近九成；
 `x86` 一枝独秀是因为它额外带 `libonnxruntime.so`。
 
-**0.4.1 引入图表库后，每个包相对 0.4.0 增加约 408KB**（`nosherpa` arm64 由 2,447,277 增至 2,864,795），
+**0.4.1 引入图表库后，每个包相对 0.4.0 增加约 392KB**（`nosherpa` arm64 由 2,447,277 增至 2,848,411），
 来源是新增的图表库 Vico（`compose` + `compose-m3` 2.0.0）及其传递依赖：
 Vico `core` 的 AAR 约 593KB，另外它声明了 `appcompat` 与 `fragment`，
 两者在 R8 后只剩被实际引用的部分。选 2.0.0 而不是更新版本，是因为它的
