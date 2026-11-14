@@ -236,6 +236,15 @@ fun SettingsScreen(
     // 待确认移除的实例。移除会连带清掉地址与智能体选择，点一下就走太危险。
     var pendingRemove by remember { mutableStateOf<InstanceConfig?>(null) }
 
+    // 每一页上次离开时的滚动位置。
+    //
+    // 必须存在 AnimatedContent 外面：它为每个目标页单独建组合，页内的
+    // rememberScrollState 会随旧页一起销毁，返回时只能从 0 重新开始——
+    // 表现为「滑到底点进『关于』，返回后跳回顶部」。
+    var scrollOffsets by rememberSaveable {
+        mutableStateOf(List(SettingsPage.entries.size) { 0 })
+    }
+
     // 子页的导航状态。
     //
     // 必须把「页 + 这一页依赖的数据」作为整体交给 AnimatedContent，而不是只传枚举：
@@ -479,9 +488,19 @@ fun SettingsScreen(
         // section 在点击瞬间就变成新值，正在退出的旧槽位会被画成新页面，
         // 表现为先瞬切到目标页、再两个相同画面互推一遍。
         val page = current.page
-        val scrollState = rememberScrollState()
-        // 切到子页时回到顶部：沿用上一页的滚动位置会让用户落在半截内容里。
-        androidx.compose.runtime.LaunchedEffect(page) { scrollState.scrollTo(0) }
+        // 直接以保存的位置作为初值：先建在顶部再用 LaunchedEffect 滚下去，
+        // 会在动画结束后补一次可见的跳动。没来过的页保存值是 0，即从顶部开始。
+        val scrollState = rememberScrollState(
+            initial = scrollOffsets.getOrElse(page.ordinal) { 0 },
+        )
+        // 离开这一页（含 AnimatedContent 的退出动画结束）时记下位置。
+        androidx.compose.runtime.DisposableEffect(page) {
+            onDispose {
+                scrollOffsets = scrollOffsets.toMutableList().also {
+                    it[page.ordinal] = scrollState.value
+                }
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()

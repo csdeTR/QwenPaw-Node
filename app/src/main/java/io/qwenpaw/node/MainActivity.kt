@@ -185,6 +185,10 @@ private fun QwenPawNav(
         }
     }
     val imageLoader = remember { io.qwenpaw.node.ui.chat.ChatImageLoader() }
+    // 设置页的 rememberSaveable 状态（当前分区、各分页的滚动位置）。
+    // AnimatedContent 会销毁离开页面的组合；没有这个 holder，从设置进入
+    // 工作区 / 备份 / 检查点 / 用量 / 模型再返回时，会回到一级列表顶部。
+    val settingsStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val usageState by viewModel.usage.state.collectAsState()
     val modelsState by viewModel.models.state.collectAsState()
     val inboxState by viewModel.inbox.state.collectAsState()
@@ -1024,7 +1028,7 @@ private fun QwenPawNav(
                 )
             }
 
-            Screen.SETTINGS -> {
+            Screen.SETTINGS -> settingsStateHolder.SaveableStateProvider("settings") {
                 SettingsScreen(
                     instances = instances,
                     activeId = activeId,
