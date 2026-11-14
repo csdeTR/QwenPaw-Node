@@ -1258,35 +1258,25 @@ class AppViewModel(
             )
         }
 
-    // ---------------- Token 用量 ----------------
+    // ---------------- 用量统计 ----------------
 
-    private val _tokenUsage = MutableStateFlow<io.qwenpaw.node.data.model.TokenUsageDto?>(null)
-    val tokenUsage: StateFlow<io.qwenpaw.node.data.model.TokenUsageDto?> = _tokenUsage.asStateFlow()
+    /** 用量统计。统计口径按实例与智能体区分，换绑时清空。 */
+    private var usageHolder: io.qwenpaw.node.ui.stats.UsageViewModel? = null
 
-    private val _tokenUsageLoading = MutableStateFlow(false)
-    val tokenUsageLoading: StateFlow<Boolean> = _tokenUsageLoading.asStateFlow()
+    val usage: io.qwenpaw.node.ui.stats.UsageViewModel
+        get() = usageHolder ?: io.qwenpaw.node.ui.stats.UsageViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { usageHolder = it }
 
-    private val _tokenUsageError = MutableStateFlow<String?>(null)
-    val tokenUsageError: StateFlow<String?> = _tokenUsageError.asStateFlow()
+    /** 模型与提供商。默认模型按智能体区分，换绑时清空。 */
+    private var modelsHolder: io.qwenpaw.node.ui.settings.ModelsViewModel? = null
 
-    fun loadTokenUsage() {
-        val instance = repository.active() ?: return
-        if (_tokenUsageLoading.value) return
-        _tokenUsageLoading.value = true
-        _tokenUsageError.value = null
-        scope.launch {
-            val conn = Connection(
-                repository.resolvedBaseUrl(instance),
-                instance.token,
-                instance.agentId,
-                instance.basicAuth,
-            )
-            runCatching { withContext(Dispatchers.IO) { api.tokenUsage(conn) } }
-                .onSuccess { _tokenUsage.value = it }
-                .onFailure { _tokenUsageError.value = it.message ?: "加载用量失败" }
-            _tokenUsageLoading.value = false
-        }
-    }
+    val models: io.qwenpaw.node.ui.settings.ModelsViewModel
+        get() = modelsHolder ?: io.qwenpaw.node.ui.settings.ModelsViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { modelsHolder = it }
 
     private fun bind(instance: InstanceConfig) {
         // 用仓库解析出的地址：本次运行已探明能连通的优先，否则用列表第一个。
@@ -1316,6 +1306,8 @@ class AppViewModel(
             workspaceHolder?.clear()
             backupHolder?.clear()
             checkpointHolder?.clear()
+            usageHolder?.clear()
+            modelsHolder?.clear()
         }
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。

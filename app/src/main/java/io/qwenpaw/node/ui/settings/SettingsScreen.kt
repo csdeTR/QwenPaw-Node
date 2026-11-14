@@ -78,6 +78,10 @@ fun SettingsScreen(
     onOpenBackup: () -> Unit = {},
     /** 打开设置页下的「检查点」。 */
     onOpenCheckpoint: () -> Unit = {},
+    /** 打开设置页下的「模型与提供商」。 */
+    onOpenModels: () -> Unit = {},
+    /** 打开用量统计。从设置进入时，返回也回设置页。 */
+    onOpenUsage: () -> Unit = {},
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
     onEdit: (InstanceConfig) -> Unit,
@@ -670,6 +674,13 @@ fun SettingsScreen(
                             )
                             Divider()
                             NavRow(
+                                icon = QwenIcons.zap,
+                                title = "模型与提供商",
+                                subtitle = "默认模型与连通性测试",
+                                onClick = onOpenModels,
+                            )
+                            Divider()
+                            NavRow(
                                 icon = QwenIcons.folder,
                                 title = "工作区文件",
                                 subtitle = "浏览、预览与下载服务端文件",
@@ -702,6 +713,13 @@ fun SettingsScreen(
                                     config.onLoadOffload()
                                     section = SettingsPage.OFFLOAD
                                 },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.barChart,
+                                title = "用量统计",
+                                subtitle = "Token、调用与工具趋势",
+                                onClick = onOpenUsage,
                             )
                         }
                     }

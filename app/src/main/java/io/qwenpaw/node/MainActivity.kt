@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS }
 
 @Composable
 private fun QwenPawNav(
@@ -136,6 +136,9 @@ private fun QwenPawNav(
     app: QwenPawApp,
 ) {
     var screen by remember { mutableStateOf(Screen.CHAT) }
+    // 用量统计有两个入口（对话列表顶栏、设置页）。记住是谁打开的，
+    // 返回时才回到进入前那一层——固定回列表会让「设置 → 用量 → 返回」跳过设置页。
+    var usageOrigin by remember { mutableStateOf(Screen.LIST) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val chatVmState = chatState
@@ -182,9 +185,8 @@ private fun QwenPawNav(
         }
     }
     val imageLoader = remember { io.qwenpaw.node.ui.chat.ChatImageLoader() }
-    val tokenUsage by viewModel.tokenUsage.collectAsState()
-    val tokenUsageLoading by viewModel.tokenUsageLoading.collectAsState()
-    val tokenUsageError by viewModel.tokenUsageError.collectAsState()
+    val usageState by viewModel.usage.state.collectAsState()
+    val modelsState by viewModel.models.state.collectAsState()
     val inboxState by viewModel.inbox.state.collectAsState()
     // 全文检索状态单独一条流，与对话页状态无关。
     val searchState by chatVm.search.collectAsState()
@@ -505,7 +507,7 @@ private fun QwenPawNav(
     // 按层级后退而不是一律回聊天页：从列表进设置再返回时应当回到列表，
     // 否则「设置盖住列表」的层级关系在返回时被跳过，滑向也就无从推导。
     BackHandler(enabled = appState.connected && screen != Screen.CHAT) {
-        parentOf(screen)?.let { screen = it }
+        parentOf(screen, usageOrigin)?.let { screen = it }
     }
 
     // 附件同时支持图片与文档。用 ACTION_GET_CONTENT 而不是 OpenDocument：
@@ -612,7 +614,7 @@ private fun QwenPawNav(
                 } else {
                     // 其余入口都在屏幕右侧（设置、已归档、用量的右上角或行尾箭头，
                     // 日志是设置里的行），因此深入从右滑入、返回向右退出。
-                    val forward = parentOf(targetState) == initialState
+                    val forward = parentOf(targetState, usageOrigin) == initialState
                     (fadeIn(tween(200)) +
                         slideInHorizontally(tween(240)) { if (forward) it / 3 else -it / 3 })
                         .togetherWith(
@@ -657,7 +659,8 @@ private fun QwenPawNav(
                         screen = Screen.ARCHIVED
                     },
                     onOpenTokenUsage = {
-                        viewModel.loadTokenUsage()
+                        usageOrigin = Screen.LIST
+                        viewModel.usage.ensureLoaded()
                         screen = Screen.TOKEN_USAGE
                     },
                     onOpenInbox = {
@@ -979,12 +982,29 @@ private fun QwenPawNav(
             }
 
             Screen.TOKEN_USAGE -> {
-                io.qwenpaw.node.ui.chat.TokenUsageScreen(
-                    usage = tokenUsage,
-                    loading = tokenUsageLoading,
-                    error = tokenUsageError,
-                    onBack = { screen = Screen.LIST },
-                    onRetry = { viewModel.loadTokenUsage() },
+                io.qwenpaw.node.ui.stats.UsageScreen(
+                    state = usageState,
+                    onBack = {
+                        parentOf(Screen.TOKEN_USAGE, usageOrigin)?.let { screen = it }
+                    },
+                    onRange = viewModel.usage::setRange,
+                    onRetry = viewModel.usage::refresh,
+                )
+            }
+
+            Screen.MODELS -> {
+                // 每次进入重拉：默认模型可能在别处改过（聊天页切模型、Web 控制台），
+                // 用 ensureLoaded 会一直显示上次进入时的值。
+                LaunchedEffect(Unit) { viewModel.models.refresh() }
+                io.qwenpaw.node.ui.settings.ModelsScreen(
+                    state = modelsState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onPickDefault = { scope, providerId, model ->
+                        viewModel.models.setDefault(scope, providerId, model)
+                    },
+                    onTest = viewModel.models::test,
+                    onRetry = viewModel.models::refresh,
+                    onDismissNotice = viewModel.models::dismissNotice,
                 )
             }
 
@@ -1019,6 +1039,12 @@ private fun QwenPawNav(
                     onOpenWorkspace = { screen = Screen.WORKSPACE },
                     onOpenBackup = { screen = Screen.BACKUP },
                     onOpenCheckpoint = { screen = Screen.CHECKPOINT },
+                    onOpenModels = { screen = Screen.MODELS },
+                    onOpenUsage = {
+                        usageOrigin = Screen.SETTINGS
+                        viewModel.usage.ensureLoaded()
+                        screen = Screen.TOKEN_USAGE
+                    },
                     onSwitch = { id -> viewModel.switchTo(id) },
                     onRemove = viewModel::remove,
                     onEdit = viewModel::editInstance,
@@ -1397,14 +1423,20 @@ private fun shareText(context: android.content.Context, subject: String, text: S
     context.startActivity(android.content.Intent.createChooser(send, "分享到"))
 }
 
-/** 页面的上一层。null 表示已在主页面，再按返回应退出应用。 */
-private fun parentOf(screen: Screen): Screen? = when (screen) {
+/**
+ * 页面的上一层。
+ *
+ * `usageOrigin` 只影响用量统计：它有两个入口（对话列表顶栏与设置页），
+ * 固定回列表会让「设置 → 用量 → 返回」跳过设置页那一层。
+ */
+private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (screen) {
     Screen.CHAT -> null
     Screen.LIST -> Screen.CHAT
-    Screen.SETTINGS, Screen.ARCHIVED, Screen.TOKEN_USAGE, Screen.INBOX, Screen.SEARCH -> Screen.LIST
+    Screen.SETTINGS, Screen.ARCHIVED, Screen.INBOX, Screen.SEARCH -> Screen.LIST
+    Screen.TOKEN_USAGE -> usageOrigin
     Screen.RUN_LOG -> Screen.SETTINGS
-    // 工作区文件、备份与检查点都从设置页进入，返回也回设置页。
-    Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT -> Screen.SETTINGS
+    // 工作区文件、备份、检查点、模型与提供商都从设置页进入，返回也回设置页。
+    Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS -> Screen.SETTINGS
     // 检查点的只读对话页是检查点的下一层，返回直接回到检查点。
     Screen.CHECKPOINT_CHAT -> Screen.CHECKPOINT
     // 原文页从聊天页的气泡进入，返回也回聊天页。

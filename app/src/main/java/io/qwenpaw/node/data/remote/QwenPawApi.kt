@@ -3,6 +3,7 @@ package io.qwenpaw.node.data.remote
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.AgentListDto
 import io.qwenpaw.node.data.model.AgentProfileDto
+import io.qwenpaw.node.data.model.AgentStatsSummaryDto
 import io.qwenpaw.node.data.model.ApprovalDto
 import io.qwenpaw.node.data.model.ApprovalListDto
 import io.qwenpaw.node.data.model.AuthStatusDto
@@ -35,7 +36,7 @@ import io.qwenpaw.node.data.model.GcSettingsDto
 import io.qwenpaw.node.data.model.InboxPageDto
 import io.qwenpaw.node.data.model.InboxTraceDto
 import io.qwenpaw.node.data.model.LocalWhisperStatusDto
-import io.qwenpaw.node.data.model.ModelPoolDto
+import io.qwenpaw.node.data.model.LlmToolDailyDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
 import io.qwenpaw.node.data.model.OffloadPolicyDto
 import io.qwenpaw.node.data.model.ProviderDto
@@ -50,8 +51,10 @@ import io.qwenpaw.node.data.model.SearchPageDto
 import io.qwenpaw.node.data.model.SlashCommandDto
 import io.qwenpaw.node.data.model.SnapshotRequestDto
 import io.qwenpaw.node.data.model.SnapshotResultDto
+import io.qwenpaw.node.data.model.TestConnectionDto
 import io.qwenpaw.node.data.model.ThinkingViewDto
 import io.qwenpaw.node.data.model.TokenUsageDto
+import io.qwenpaw.node.data.model.TokenUsageRecordDto
 import io.qwenpaw.node.data.model.ToolCallInfoDto
 import io.qwenpaw.node.data.model.ToolCallListDto
 import io.qwenpaw.node.data.model.ToolCallOutputDto
@@ -582,12 +585,58 @@ class QwenPawApi(
             kotlinx.serialization.builtins.ListSerializer(ProviderDto.serializer()),
         )
 
-    /** 某个供应商的模型池。 */
-    fun modelPool(conn: Connection, providerId: String, limit: Int = 200): ModelPoolDto =
-        decode(
-            request(conn, "GET", "/api/models/$providerId/pool?limit=$limit"),
-            ModelPoolDto.serializer(),
-        )
+    /**
+     * 指定作用域的默认模型，对应 `GET /api/models/active?scope=`。
+     *
+     * 三个 scope 的语义不同，不能互相替代：
+     * - `global`：服务端全局默认；
+     * - `agent`：该智能体**配置里显式写下**的模型，没写过时 `active_llm` 为 `null`；
+     * - `effective`：agent 优先、否则回落全局，即实际生效的那个。
+     *
+     * 因此「当前智能体默认」一行读 `agent`，为空时界面写「跟随全局」而不是把全局值抄过来。
+     */
+    fun activeModels(conn: Connection, scope: String, agentId: String? = null): ModelsActiveDto {
+        // 编码交给 HttpUrl：智能体 id 里可能出现空格或中文。
+        val builder = connUrl(conn, "/api/models/active").newBuilder().addQueryParameter("scope", scope)
+        // 只有 scope=agent 才带 agent_id：服务端在缺该参数时回 400
+        // 「agent_id is required when scope is 'agent'」，而 global / effective 带上它无意义。
+        if (scope == "agent" && agentId != null) builder.addQueryParameter("agent_id", agentId)
+        return decode(execute(baseBuilder(conn, builder.build()).get().build()), ModelsActiveDto.serializer())
+    }
+
+    /**
+     * 设置默认模型，对应 `PUT /api/models/active`。
+     *
+     * body 必须带 `scope`（`global` / `agent`）——服务端没有「只写 provider 与 model」的形态。
+     * `scope=agent` 缺 `agent_id` 回 400，供应商不存在回 404，两条都是服务端原文。
+     */
+    fun setActiveModel(
+        conn: Connection,
+        providerId: String,
+        model: String,
+        scope: String,
+        agentId: String? = null,
+    ): ModelsActiveDto {
+        val body = buildJsonObject {
+            put("provider_id", providerId)
+            put("model", model)
+            put("scope", scope)
+            if (scope == "agent" && agentId != null) put("agent_id", agentId)
+        }
+        return decode(request(conn, "PUT", "/api/models/active", body), ModelsActiveDto.serializer())
+    }
+
+    /**
+     * 供应商连通性测试，对应 `POST /api/models/{provider_id}/test`。
+     *
+     * **不带 body**：服务端把它声明为 `Optional[TestProviderRequest]`，省略即可。
+     * 失败不是 HTTP 错误——实测返回 200 + `success=false`，调用方要看 `success`。
+     * 路径带的是**供应商** id；模型级测试是 `/{provider_id}/models/test`，本期不接。
+     */
+    fun testProvider(conn: Connection, providerId: String): TestConnectionDto = decode(
+        request(conn, "POST", "/api/models/$providerId/test"),
+        TestConnectionDto.serializer(),
+    )
 
     // ---------- 头像 ----------
 
@@ -687,14 +736,68 @@ class QwenPawApi(
             AvailableCommandsDto.serializer(),
         ).all
 
-    /** token 用量汇总。 */
-    fun tokenUsage(conn: Connection, startDate: String? = null, endDate: String? = null): TokenUsageDto {
-        val query = buildList {
+    /**
+     * token 用量汇总，对应 `GET /api/token-usage`。
+     *
+     * **全局**口径：不受 `X-Agent-Id` 过滤，与服务端的智能体统计是两套数。
+     */
+    fun tokenUsage(conn: Connection, startDate: String? = null, endDate: String? = null): TokenUsageDto =
+        decode(
+            request(conn, "GET", "/api/token-usage${dateRangeQuery(startDate, endDate)}"),
+            TokenUsageDto.serializer(),
+        )
+
+    /**
+     * 原始用量记录，对应 `GET /api/token-usage/details`。
+     *
+     * 一行是「日期 × 智能体 × 供应商 × 模型」，行数等于有调用的天数，不是区间天数
+     * （实测 90 天区间只有 4 行）。留给调用方按模型聚合。
+     */
+    fun tokenUsageDetails(
+        conn: Connection,
+        startDate: String? = null,
+        endDate: String? = null,
+    ): List<TokenUsageRecordDto> = decode(
+        request(conn, "GET", "/api/token-usage/details${dateRangeQuery(startDate, endDate)}"),
+        kotlinx.serialization.builtins.ListSerializer(TokenUsageRecordDto.serializer()),
+    )
+
+    /**
+     * 智能体统计汇总，对应 `GET /api/agent-stats`。
+     *
+     * **按 `X-Agent-Id` 过滤**，只有当前智能体的数据；与 [tokenUsage] 的全局口径不同，
+     * 界面上两个区块必须各自标注范围。
+     */
+    fun agentStats(
+        conn: Connection,
+        startDate: String? = null,
+        endDate: String? = null,
+    ): AgentStatsSummaryDto = decode(
+        request(conn, "GET", "/api/agent-stats${dateRangeQuery(startDate, endDate)}"),
+        AgentStatsSummaryDto.serializer(),
+    )
+
+    /**
+     * 全局调用趋势，对应 `GET /api/agent-stats/llm-tool-trend`。返回裸数组、跨智能体汇总。
+     *
+     * 实测服务端已把整个区间补齐零值（93 天返回 93 条），客户端只做幂等归一化。
+     */
+    fun agentLlmToolTrend(
+        conn: Connection,
+        startDate: String? = null,
+        endDate: String? = null,
+    ): List<LlmToolDailyDto> = decode(
+        request(conn, "GET", "/api/agent-stats/llm-tool-trend${dateRangeQuery(startDate, endDate)}"),
+        kotlinx.serialization.builtins.ListSerializer(LlmToolDailyDto.serializer()),
+    )
+
+    /** 统计类端点的日期范围查询串。两个都为空时返回空串，不拼一个空的 `?`。 */
+    private fun dateRangeQuery(startDate: String?, endDate: String?): String {
+        val parts = buildList {
             if (startDate != null) add("start_date=$startDate")
             if (endDate != null) add("end_date=$endDate")
-        }.joinToString("&")
-        val path = if (query.isBlank()) "/api/token-usage" else "/api/token-usage?$query"
-        return decode(request(conn, "GET", path), TokenUsageDto.serializer())
+        }
+        return if (parts.isEmpty()) "" else "?" + parts.joinToString("&")
     }
 
     // ---------- 收件箱 ----------

@@ -35,6 +35,9 @@
 #   B4 回滚预览   —— 打开回滚弹窗，能看到记忆与文件两个范围
 #   B5 自动开关   —— 切换自动检查点后服务端状态跟随，并还原
 #   B6 备份页     —— 设置入口可达，新建与导入入口都在
+#
+#   C1 用量统计   —— 设置入口可达、三档范围、两处范围标注、返回回到进入前那一页
+#   C2 模型提供商 —— 两行默认模型、供应商列表与「测试连接」结果
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -94,8 +97,8 @@ while [ $# -gt 0 ]; do
 done
 
 # 场景名写错时整轮会「什么都不跑却报完成」，所以先校验一次。
-if [ -n "$ONLY" ] && [[ ! "$ONLY" =~ ^(A[1-8]|B[1-6])$ ]]; then
-  echo "未知场景：$ONLY（可用：A1-A8、B1-B6）"; exit 2
+if [ -n "$ONLY" ] && [[ ! "$ONLY" =~ ^(A[1-8]|B[1-6]|C[1-2])$ ]]; then
+  echo "未知场景：$ONLY（可用：A1-A8、B1-B6、C1-C2）"; exit 2
 fi
 # B3 依赖 B2 留在只读页的状态，单跑 B3 会立刻跳过；
 # 两者一起指定时按 B2 → B3 的顺序执行。
@@ -402,9 +405,10 @@ open_settings_item() {
 }
 
 echo "== 进入一条会话 =="
-# A7 只验设置里的工作区入口，不需要已有会话；A8 只验设置页与麦克风点击，同理。
+# A7 只验设置里的工作区入口，不需要已有会话；A8 只验设置页与麦克风点击，同理；
+# C1/C2 都从设置页进入，同样不依赖会话。
 if ! open_first_chat; then
-  if want A7 || want A8; then
+  if want A7 || want A8 || want C1 || want C2; then
     echo "  [提示] 没有可打开的会话，该场景不依赖会话，继续"
   else
     exit 1
@@ -971,6 +975,114 @@ if want B6; then
     fi
   else
     echo "  [失败] 无法打开备份页"
+  fi
+fi
+
+# ---------------------------------------------------------------- C1 用量统计
+
+# 判据用界面上真正显示的文字。用量页的四块数据来自三组端点，
+# 其中「当前智能体」按 X-Agent-Id 过滤、其余全局，因此两处范围标注必须都在。
+if want C1; then
+  echo "== C1 用量统计 =="
+  if open_settings_item "用量统计"; then
+    sleep 4
+    shot 21-c1-usage
+    if screen_has 'text="近 7 天"' && screen_has 'text="近 30 天"' && screen_has 'text="近 90 天"'; then
+      echo "  [通过] 三档时间范围可见"
+    else
+      echo "  [失败] 未找到完整的三档时间范围"
+    fi
+    if screen_has 'text="当前智能体"'; then
+      echo "  [通过] 「当前智能体」范围标注可见"
+    else
+      echo "  [失败] 未找到「当前智能体」，范围差异没有讲清"
+    fi
+    if screen_has 'text="全服务端"'; then
+      echo "  [通过] 「全服务端」范围标注可见"
+    else
+      echo "  [失败] 未找到「全服务端」"
+    fi
+    # 切到 7 天：换范围会重建四个请求，这里只看界面没崩、仍在用量页。
+    if tap_text 'text="近 7 天"'; then
+      sleep 5
+      shot 22-c1-usage-7d
+      if screen_has 'text="近 7 天"'; then
+        echo "  [通过] 切换范围后仍在用量页"
+      else
+        echo "  [失败] 切换范围后页面异常"
+      fi
+    else
+      echo "  [警告] 未点中「近 7 天」"
+    fi
+    # 从设置进入的用量页，返回应回到设置（有一级列表的「服务端配置」）。
+    "${ADB[@]}" shell input keyevent 4
+    sleep 3
+    if screen_has 'text="服务端配置"'; then
+      echo "  [通过] 从设置进入时返回回到设置页"
+    else
+      echo "  [失败] 返回没有回到设置页"
+    fi
+  else
+    echo "  [失败] 无法打开用量统计页"
+  fi
+
+  # 第二个入口：对话列表顶栏的柱状图。返回应回到列表。
+  if open_chat_list >/dev/null 2>&1; then
+    if tap_text 'content-desc="用量统计"'; then
+      sleep 4
+      shot 23-c1-usage-from-list
+      "${ADB[@]}" shell input keyevent 4
+      sleep 3
+      if screen_has 'content-desc="批量管理"'; then
+        echo "  [通过] 从列表进入时返回回到对话列表"
+      else
+        echo "  [失败] 从列表进入的返回落点不对"
+      fi
+    else
+      echo "  [警告] 列表顶栏没有「用量统计」图标"
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------- C2 模型与提供商
+
+# 两行默认模型必须同时显示「全局默认」与「当前智能体默认」：
+# 服务端 `scope=global` 与 `scope=agent` 是两个不同的值，合并成一行会让用户
+# 以为改的是同一件事。连通性测试失败也是 HTTP 200，界面按 success 分支。
+if want C2; then
+  echo "== C2 模型与提供商 =="
+  if open_settings_item "模型与提供商"; then
+    sleep 4
+    shot 24-c2-models
+    if screen_has 'text="全局默认"' && screen_has 'text="当前智能体默认"'; then
+      echo "  [通过] 两行默认模型可见"
+    else
+      echo "  [失败] 未同时找到两行默认模型"
+    fi
+    if screen_has 'text="测试连接"'; then
+      echo "  [通过] 供应商列表非空"
+      tap_text 'text="测试连接"' >/dev/null 2>&1 || true
+      sleep 6
+      shot 25-c2-model-test
+      if screen_has 'text="可用"'; then
+        echo "  [通过] 连通性测试返回可用"
+      elif screen_has 'text="测试连接"'; then
+        echo "  [提示] 未见「可用」，页面已恢复为可再次测试（失败时显示服务端原文）"
+      else
+        echo "  [警告] 测试后页面状态异常"
+      fi
+    else
+      echo "  [警告] 供应商列表为空，或「测试连接」不在可视范围内"
+    fi
+    "${ADB[@]}" shell input keyevent 4
+    sleep 3
+    if screen_has 'text="服务端配置"'; then
+      echo "  [通过] 返回回到设置页"
+    else
+      echo "  [失败] 返回没有回到设置页"
+    fi
+  else
+    echo "  [失败] 无法打开模型与提供商页"
   fi
 fi
 

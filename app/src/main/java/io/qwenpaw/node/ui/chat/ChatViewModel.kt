@@ -1085,19 +1085,8 @@ class ChatViewModel(
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.providers(conn) } }
                 .onSuccess { providers ->
-                    val choices = providers
-                        .filter { it.enabled }
-                        .flatMap { provider ->
-                            provider.allModels.map { slot ->
-                                ModelChoice(
-                                    providerId = provider.id,
-                                    providerName = provider.name.ifBlank { provider.id },
-                                    modelId = slot.id,
-                                    modelName = slot.name.ifBlank { slot.id },
-                                )
-                            }
-                        }
-                        .distinctBy { it.key }
+                    // 合并规则与「设置 → 模型与提供商」同源，见 modelChoicesOf 的注释。
+                    val choices = io.qwenpaw.node.ui.settings.modelChoicesOf(providers)
                     _state.update { it.copy(modelChoices = choices) }
                 }
                 .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }

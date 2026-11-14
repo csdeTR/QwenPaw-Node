@@ -359,13 +359,6 @@ data class ThinkingValueDto(
     @SerialName("budget_tokens") val budgetTokens: Long? = null,
 )
 
-/** 模型池的一页，对应 `GET /api/models/{provider_id}/pool`。 */
-@Serializable
-data class ModelPoolDto(
-    val models: List<ModelSlotDto> = emptyList(),
-    val total: Int? = null,
-)
-
 /** 模型池里的单个模型条目。 */
 @Serializable
 data class ModelSlotDto(
@@ -374,6 +367,24 @@ data class ModelSlotDto(
     @SerialName("is_free") val isFree: Boolean = false,
     @SerialName("is_recommended") val isRecommended: Boolean = false,
     @SerialName("max_input_length") val maxInputLength: Long? = null,
+)
+
+/**
+ * 供应商连通性测试的结果，对应 `POST /api/models/{provider_id}/test`。
+ *
+ * **测试失败仍是 HTTP 200**，靠 [success] 区分（实测 `lmstudio` 在未启动时返回
+ * `success=false` + `message` + 200）。因此界面必须先看 `success`，不能靠状态码。
+ * 除 [success] 外全部可空：实测成功路径其余字段都是 `null`。
+ */
+@Serializable
+data class TestConnectionDto(
+    val success: Boolean = false,
+    val message: String = "",
+    val status: String? = null,
+    @SerialName("http_status") val httpStatus: Int? = null,
+    val retryable: Boolean? = null,
+    @SerialName("checked_at") val checkedAt: String? = null,
+    val verification: String? = null,
 )
 
 /**
@@ -477,6 +488,96 @@ data class TokenUsageBucketDto(
     @SerialName("call_count") val callCount: Int = 0,
     @SerialName("provider_id") val providerId: String? = null,
     val model: String? = null,
+)
+
+/**
+ * 一条原始用量记录，对应 `GET /api/token-usage/details` 的元素。
+ *
+ * 一行是「日期 × 智能体 × 供应商 × 模型」。**全局**口径：不受 `X-Agent-Id` 过滤，
+ * `agent_id` 为 `null` 表示该行早于服务端的智能体归属机制，不能丢弃。
+ */
+@Serializable
+data class TokenUsageRecordDto(
+    val date: String = "",
+    @SerialName("provider_id") val providerId: String = "",
+    val model: String = "",
+    @SerialName("agent_id") val agentId: String? = null,
+    @SerialName("prompt_tokens") val promptTokens: Long = 0,
+    @SerialName("completion_tokens") val completionTokens: Long = 0,
+    @SerialName("cache_read_tokens") val cacheReadTokens: Long = 0,
+    @SerialName("call_count") val callCount: Int = 0,
+)
+
+/**
+ * 智能体统计汇总，对应 `GET /api/agent-stats`。
+ *
+ * **按请求的工作区过滤**（服务端读 `X-Agent-Id`），与 [TokenUsageDto] 的全局口径不同。
+ *
+ * `agent_cache_hit_rate` 必须可空：空区间实测返回 `null`（2026-11-14 在 2.2.2.post1 与
+ * 2.3.0b2 上均为 `null`），声明成非空 `Double` 会让整页解析失败。
+ */
+@Serializable
+data class AgentStatsSummaryDto(
+    @SerialName("total_active_sessions") val totalActiveSessions: Int = 0,
+    @SerialName("total_messages") val totalMessages: Int = 0,
+    @SerialName("total_user_messages") val totalUserMessages: Int = 0,
+    @SerialName("total_assistant_messages") val totalAssistantMessages: Int = 0,
+    @SerialName("total_prompt_tokens") val totalPromptTokens: Long = 0,
+    @SerialName("total_completion_tokens") val totalCompletionTokens: Long = 0,
+    @SerialName("total_llm_calls") val totalLlmCalls: Int = 0,
+    @SerialName("total_tool_calls") val totalToolCalls: Int = 0,
+    @SerialName("by_date") val byDate: List<DailyStatsDto> = emptyList(),
+    @SerialName("channel_stats") val channelStats: List<ChannelStatsDto> = emptyList(),
+    @SerialName("start_date") val startDate: String = "",
+    @SerialName("end_date") val endDate: String = "",
+    @SerialName("agent_prompt_tokens") val agentPromptTokens: Long = 0,
+    @SerialName("agent_completion_tokens") val agentCompletionTokens: Long = 0,
+    @SerialName("agent_llm_calls") val agentLlmCalls: Int = 0,
+    @SerialName("agent_cache_read_tokens") val agentCacheReadTokens: Long = 0,
+    @SerialName("agent_cache_eligible_input_tokens") val agentCacheEligibleInputTokens: Long = 0,
+    @SerialName("agent_cache_hit_rate") val agentCacheHitRate: Double? = null,
+)
+
+/** `AgentStatsSummaryDto.by_date` 的元素，共 14 个字段。 */
+@Serializable
+data class DailyStatsDto(
+    val date: String = "",
+    val chats: Int = 0,
+    @SerialName("active_sessions") val activeSessions: Int = 0,
+    @SerialName("user_messages") val userMessages: Int = 0,
+    @SerialName("assistant_messages") val assistantMessages: Int = 0,
+    @SerialName("total_messages") val totalMessages: Int = 0,
+    @SerialName("prompt_tokens") val promptTokens: Long = 0,
+    @SerialName("completion_tokens") val completionTokens: Long = 0,
+    @SerialName("llm_calls") val llmCalls: Int = 0,
+    @SerialName("tool_calls") val toolCalls: Int = 0,
+    @SerialName("agent_prompt_tokens") val agentPromptTokens: Long = 0,
+    @SerialName("agent_completion_tokens") val agentCompletionTokens: Long = 0,
+    @SerialName("agent_llm_calls") val agentLlmCalls: Int = 0,
+    @SerialName("agent_cache_read_tokens") val agentCacheReadTokens: Long = 0,
+)
+
+/** 按渠道分组的会话与消息计数。 */
+@Serializable
+data class ChannelStatsDto(
+    val channel: String = "",
+    @SerialName("session_count") val sessionCount: Int = 0,
+    @SerialName("user_messages") val userMessages: Int = 0,
+    @SerialName("assistant_messages") val assistantMessages: Int = 0,
+    @SerialName("total_messages") val totalMessages: Int = 0,
+)
+
+/**
+ * 单日调用趋势，对应 `GET /api/agent-stats/llm-tool-trend` 的元素。
+ *
+ * 该端点**跨智能体汇总**、返回裸数组；实测服务端已把整个区间补齐零值
+ * （93 天区间返回 93 条），客户端仍保留一次幂等补齐以防版本变化。
+ */
+@Serializable
+data class LlmToolDailyDto(
+    val date: String = "",
+    @SerialName("agent_llm_calls") val agentLlmCalls: Int = 0,
+    @SerialName("tool_calls") val toolCalls: Int = 0,
 )
 
 // ---------------- 收件箱 ----------------
