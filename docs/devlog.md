@@ -80,6 +80,7 @@
 | [66](#66发布-v032-与测试环境维护2026-11-11) | 发布 v0.3.2 与测试环境修正 | CHANGELOG 只留已发布小节；`adb shell` 默认不是 root | [release.md](release.md) 第 5 节、[.agents/test-env.md](../.agents/test-env.md) |
 | [67](#67v040语音转写改服务端第一版单包2026-11-14) | 语音改服务端（第一版，单包） | `transcribe` 的四种 `detail` 形状；「开关打开」不等于可用 | [protocol.md](protocol.md) 第 28 节 |
 | [68](#68v040语音改回双变体2026-11-14) | 试用后改双变体 | `full` / `nosherpa` 两个源码集与 8 个包；工厂漏传参数导致静默降级 | [release.md](release.md) 第 7 节、[guide.md](guide.md) 第 4 节 |
+| [69](#69发布-v0402026-11-14) | 发布 v0.4.0 | 8 个资产与变体表；发布流水线此前仍在调已不存在的单测任务 | [release.md](release.md) 第 5、7 节 |
 
 ---
 
@@ -5792,6 +5793,34 @@ Release 正文补了变体表：标准包按架构 17.8–39.0MB，`-no-sherpa` 
 这一轮之前，正文第 63–66 节都已存在，但文首目录表停在 `[62]`；第 67 节加进来时
 也没有入表。`.agents/writing.md` 第 2 节第 4 条要求追加时同步更新目录并确认锚点可跳，
 这几笔提交都漏做了。本轮把 63–68 全部补进目录。
+
+---
+
+## 69、发布 v0.4.0（2026-11-14）
+
+双变体首次发版。推送 tag `v0.4.0` 后 Release 流水线 6 分 23 秒完成，
+CI 3 分 50 秒通过，Release 页面挂上 8 个资产：
+
+- `QwenPaw-Node-v0.4.0-{arm64-v8a,armeabi-v7a,x86_64,x86}.apk`
+- `QwenPaw-Node-v0.4.0-no-sherpa-{arm64-v8a,armeabi-v7a,x86_64,x86}.apk`
+
+正文里的变体表与实测一致（标准包约 25MB、`-no-sherpa` 约 2.4MB），
+CHANGELOG 的 v0.4.0 小节被原样抽成正文，没有出现重复段落。
+
+**发布前修掉一处会直接失败的地方。** workflow 的单测步骤原先写的是
+`./gradlew :app:testDebugUnitTest`；加了变体之后这个任务不存在，
+推 tag 会在第一步以 `Task 'testDebugUnitTest' not found` 中止。
+改为同时调用 `testFullDebugUnitTest` 与 `testNosherpaDebugUnitTest`，
+CI 的失败用例汇总与测试报告上传路径也一并改成匹配两个结果目录。
+
+**数字与本地构建完全一致。** 8 个包的字节数与本地 `assembleRelease` 的结果相同，
+说明 CI 的 R8、签名与资源裁剪环境没有引入差异。
+
+**这一版没有在设备上重跑 release 包。** A8 验收用的是 debug 包；
+debug 与 release 的差别只有混淆与资源裁剪，语音两条路径的行为不依赖这两者。
+下一次动 `voice/` 时应补一次 release 包的实机确认。
+
+`待办清单` 已把 0.4.0 从「版本总览」移到「已发布」，并写上 tag。
 
 ---
 
