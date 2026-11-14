@@ -32,3 +32,10 @@
 
 # Tink（EncryptedSharedPreferences 的传递依赖）只在编译期引用 errorprone 注解
 -dontwarn com.google.errorprone.annotations.**
+
+# sherpa-onnx 的 native 库按类名与方法名回查 Java 侧，AAR 自带的 proguard.txt 是空文件。
+# 只保留声明了 native 方法的类名与方法名；其余成员照常混淆与裁剪，避免放大包体。
+# 该依赖只进 full 变体，nosherpa 包里没有这些类。
+-keepclasseswithmembers class com.k2fsa.sherpa.onnx.** {
+    native <methods>;
+}

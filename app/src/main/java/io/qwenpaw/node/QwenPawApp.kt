@@ -34,13 +34,22 @@ class QwenPawApp : Application() {
         private set
     lateinit var pluginProbe: io.qwenpaw.node.data.plugin.PluginProbe
         private set
+    lateinit var transcriptionProbe: io.qwenpaw.node.data.transcription.TranscriptionProbe
+        private set
     lateinit var downloadClient: io.qwenpaw.node.data.remote.DownloadClient
+        private set
+
+    /** 端上识别能力。`full` 变体有声，`_no-sherpa` 恒为不可用。 */
+    lateinit var localAsr: io.qwenpaw.node.voice.LocalAsr
         private set
 
     override fun onCreate() {
         super.onCreate()
         api = QwenPawApi()
+        // 由变体源码决定：full 是 sherpa，_no-sherpa 是不可用桩。
+        localAsr = io.qwenpaw.node.voice.LocalAsrProvider.create(this)
         pluginProbe = io.qwenpaw.node.data.plugin.PluginProbe(api)
+        transcriptionProbe = io.qwenpaw.node.data.transcription.TranscriptionProbe(api)
         streamClient = ChatStreamClient(api, QwenPawApi.defaultClient())
         toolStreamClient = io.qwenpaw.node.data.stream.ToolStreamClient(
             api,

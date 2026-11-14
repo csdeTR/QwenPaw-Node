@@ -36,6 +36,20 @@ enum class VoiceTrigger {
     HOLD,
 }
 
+/**
+ * 语音转写的来源。
+ *
+ * 两个变体各有不同：[io.qwenpaw.node.voice.LocalAsr] 的 `available` 为 false 时
+ * （`_no-sherpa` 包）只能选 [SERVER]，界面不会给出选项。
+ */
+enum class VoiceSource {
+    /** 端上 sherpa-onnx 流式识别。边说话边出字，音频不出手机。 */
+    LOCAL,
+
+    /** 上传整段录音由服务端转写。需要联网且服务端配好转写服务。 */
+    SERVER,
+}
+
 /** 用户昵称的默认值。设置里清空输入框时回落到它。 */
 const val DEFAULT_USER_NAME = "我"
 
@@ -58,11 +72,22 @@ data class AppState(
     val compactList: Boolean = false,
     /** 生成回复时保持屏幕常亮。 */
     val keepScreenOn: Boolean = false,
-    /** 输入框是否显示语音按钮。默认开启；模型未下载时点击会提示下载。 */
+    /** 输入框是否显示语音按钮。默认开启；服务端转写不可用时点击会给说明。 */
     val voiceEnabled: Boolean = true,
     /** 语音触发方式，默认点一下。 */
     val voiceTrigger: VoiceTrigger = VoiceTrigger.TAP,
-    /** 点一下触发时，识别到停顿是否自动结束。 */
+    /**
+     * 转写来源，默认本地识别。
+     *
+     * `_no-sherpa` 包没有端上引擎，读取时会被强制回落到 [VoiceSource.SERVER]
+     * （见 `AppViewModel.init`），界面因此不必各自判断变体。
+     */
+    val voiceSource: VoiceSource = VoiceSource.LOCAL,
+    /**
+     * 点一下触发时，识别到停顿是否自动结束。
+     *
+     * 只对本地识别有效：服务端转写是整段上传，断句没有意义，界面在该来源下不显示此项。
+     */
     val voiceAutoStop: Boolean = true,
     /** 智能体输出的折叠方式，默认与官方一致：折叠结果。 */
     val assistantCollapse: io.qwenpaw.node.ui.chat.AssistantCollapse =
@@ -161,6 +186,14 @@ data class AppState(
      */
     val bridgeFeaturesEnabled: Boolean = false,
     /**
+     * 服务端语音转写的可用性。
+     *
+     * 语音入口据此决定能不能开录：只有 `Ready` 直接录，`Unknown` 先重探，
+     * 其余不可用态弹说明。判定与缓存都在 [io.qwenpaw.node.data.transcription.TranscriptionProbe]。
+     */
+    val transcribeStatus: io.qwenpaw.node.data.transcription.TranscriptionStatus =
+        io.qwenpaw.node.data.transcription.TranscriptionStatus.Unknown,
+    /**
      * 本次运行手动指定的地址：实例 id → 地址。
      *
      * 放进 state 而不是让界面直接读仓库里的内存 map：后者不是可观察对象，
@@ -180,6 +213,15 @@ class AppViewModel(
     private val serverAvatarClient: io.qwenpaw.node.data.remote.ServerAvatarClient? = null,
     /** 配套插件探测。为 null 时（测试、预览）插件行固定显示「尚未检测」。 */
     private val pluginProbe: io.qwenpaw.node.data.plugin.PluginProbe? = null,
+    /** 语音转写探测。为 null 时（测试、预览）语音入口按「尚未检测」处理。 */
+    private val transcriptionProbe: io.qwenpaw.node.data.transcription.TranscriptionProbe? = null,
+    /**
+     * 端上识别能力。两个变体各注入一份实现：
+     * `full` 是真正的 sherpa 引擎，`_no-sherpa` 是 `available = false` 的桩。
+     *
+     * 默认给桩，这样测试与预览不需要 AAR 也能构造。
+     */
+    private val localAsr: io.qwenpaw.node.voice.LocalAsr = io.qwenpaw.node.voice.LocalAsr.Disabled,
     /** 大文件下载通道。为 null 时（测试、预览）工作区页面不创建。 */
     private val downloadClient: io.qwenpaw.node.data.remote.DownloadClient? = null,
 ) : ViewModel() {
@@ -203,6 +245,17 @@ class AppViewModel(
             voiceTrigger = runCatching {
                 VoiceTrigger.valueOf(prefs.getString(KEY_VOICE_TRIGGER, VoiceTrigger.TAP.name)!!)
             }.getOrDefault(VoiceTrigger.TAP),
+            // 默认本地识别，与 0.3.2 一致。没有端上引擎的包（_no-sherpa）
+            // 无论存过什么都只能是服务端：否则界面会显示一个用不了的选项。
+            voiceSource = if (!localAsr.available) {
+                VoiceSource.SERVER
+            } else {
+                runCatching {
+                    VoiceSource.valueOf(
+                        prefs.getString(KEY_VOICE_SOURCE, VoiceSource.LOCAL.name)!!,
+                    )
+                }.getOrDefault(VoiceSource.LOCAL)
+            },
             voiceAutoStop = prefs.getBoolean(KEY_VOICE_AUTO_STOP, true),
             assistantCollapse = runCatching {
                 io.qwenpaw.node.ui.chat.AssistantCollapse.valueOf(
@@ -883,6 +936,26 @@ class AppViewModel(
     }
 
     /**
+     * 探测服务端语音转写是否可用。
+     *
+     * 时机与插件探测一致：绑定连接后、以及用户点麦克风时（`Unknown` 的情形）。
+     * 只在绑定与手动重探时发请求，不做定时轮询——转写配置由服务端管理员改，
+     * 不会在两次操作之间频繁变化。
+     */
+    fun refreshTranscribeStatus(onResult: ((io.qwenpaw.node.data.transcription.TranscriptionStatus) -> Unit)? = null) {
+        val probe = transcriptionProbe ?: return
+        val instance = repository.active() ?: return
+        val conn = repository.connection(instance) ?: return
+        scope.launch {
+            val status = withContext(Dispatchers.IO) {
+                probe.probe(instance.id, conn)
+            }
+            _state.update { it.copy(transcribeStatus = status) }
+            onResult?.invoke(status)
+        }
+    }
+
+    /**
      * 按插件能力与总开关决定事件流要不要连。
      *
      * 每次重探都先取消旧连接：插件版本可能变了（比如从 0.1.1 升到 0.1.2 才有
@@ -952,6 +1025,18 @@ class AppViewModel(
     fun setVoiceTrigger(trigger: VoiceTrigger) {
         prefs.edit().putString(KEY_VOICE_TRIGGER, trigger.name).apply()
         _state.update { it.copy(voiceTrigger = trigger) }
+    }
+
+    /**
+     * 切换转写来源。
+     *
+     * 没有端上引擎的包忽略 [VoiceSource.LOCAL]：界面本就不该给出这个选项，
+     * 这里再挡一次，防止旧偏好或误操作把状态改成用不了的来源。
+     */
+    fun setVoiceSource(source: VoiceSource) {
+        if (source == VoiceSource.LOCAL && !localAsr.available) return
+        prefs.edit().putString(KEY_VOICE_SOURCE, source.name).apply()
+        _state.update { it.copy(voiceSource = source) }
     }
 
     fun setVoiceAutoStop(enabled: Boolean) {
@@ -1238,6 +1323,9 @@ class AppViewModel(
         // 插件结论同样按实例区分，换实例后要重探；同一实例的重绑也会重探，
         // 这样服务端热加载插件后，用户切一次页面就能看到。
         refreshBridgeStatus()
+        // 转写结论同样按实例区分；换实例后必须重探，否则上一个实例的
+        // 「已就绪」会让新实例的麦克风误开放。
+        refreshTranscribeStatus()
     }
 
     private var inboxKey: String? = null
@@ -1255,6 +1343,7 @@ class AppViewModel(
         private const val KEY_KEEP_ON = "keep_screen_on"
         private const val KEY_VOICE = "voice_enabled"
         private const val KEY_VOICE_TRIGGER = "voice_trigger"
+        private const val KEY_VOICE_SOURCE = "voice_source"
         private const val KEY_VOICE_AUTO_STOP = "voice_auto_stop"
         /** 归档提示被抑制到的日期（yyyy-MM-dd）。当天再次归档不再弹确认框。 */
         private const val KEY_ARCHIVE_TIP_DATE = "archive_tip_hidden_date"
@@ -1310,6 +1399,10 @@ class AppViewModel(
                         network = app.networkMonitor,
                         serverAvatarClient = app.serverAvatar,
                         pluginProbe = app.pluginProbe,
+                        transcriptionProbe = app.transcriptionProbe,
+                        // 忘了传就会退到 LocalAsr.Disabled，full 包里「本地识别」
+                        // 会被静默降级成服务端转写，界面上看不出原因。
+                        localAsr = app.localAsr,
                         downloadClient = app.downloadClient,
                     ) as T
                 }

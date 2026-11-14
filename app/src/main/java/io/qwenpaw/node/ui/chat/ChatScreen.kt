@@ -63,11 +63,16 @@ fun ChatScreen(
     state: ChatUiState,
     modelName: String? = null,
     voiceState: VoiceState = VoiceState.Idle,
+    /** 录音开始的时刻（毫秒），语音浮层据此显示录制时长。 */
+    voiceStartedAt: Long? = null,
+    /** 本地识别的实时文字。服务端转写没有增量结果，此时为空串。 */
     voicePartial: String = "",
-    /** 麦克风是否显示。只由设置开关决定，模型未下载时也显示。 */
+    /** 麦克风是否显示。只由设置开关决定，转写不可用时仍显示。 */
     voiceVisible: Boolean = false,
-    /** 模型是否已就绪。未就绪时麦克风仍可点，但点击会先弹下载提示。 */
-    voiceReady: Boolean = false,
+    /** 服务端转写是否可用。不可用时麦克风仍可点，但点击只会弹说明。 */
+    voiceAvailable: Boolean = false,
+    /** 本地识别是否可用（`full` 包且模型已就绪）。与 [voiceAvailable] 同为 false 时才弱化。 */
+    voiceLocalReady: Boolean = false,
     imageLoader: ChatImageLoader? = null,
     connection: io.qwenpaw.node.data.remote.Connection? = null,
     onBack: () -> Unit,
@@ -98,8 +103,6 @@ fun ChatScreen(
     onDismissError: () -> Unit = {},
     /** true 为「按住说话」，false 为「点一下」。 */
     voiceHoldMode: Boolean = false,
-    /** 点一下模式且开启了自动停止。 */
-    voiceAutoStop: Boolean = false,
     /** 智能体输出的折叠方式，默认折叠结果。 */
     assistantCollapse: AssistantCollapse = AssistantCollapse.RESULT_COLLAPSED,
     /** 消息外观：头像、显示名与用量开关。 */
@@ -450,10 +453,10 @@ fun ChatScreen(
                 ) {
                     VoiceSheet(
                         state = voiceState,
+                        startedAt = voiceStartedAt,
                         partial = voicePartial,
                         onCancel = onVoiceCancel,
                         holdMode = voiceHoldMode,
-                        autoStop = voiceAutoStop,
                     )
                 }
                 ChatInputBar(
@@ -464,7 +467,8 @@ fun ChatScreen(
                     // 入参 modelName 仅作为尚未拉取到时的兜底。
                     modelName = state.currentModelLabel ?: modelName,
                     voiceVisible = voiceVisible,
-                    voiceReady = voiceReady,
+                    voiceAvailable = voiceAvailable,
+                    voiceLocalReady = voiceLocalReady,
                     onDraftChange = onDraftChange,
                     onSend = onSend,
                     onStop = onStop,
@@ -473,7 +477,7 @@ fun ChatScreen(
                     onVoiceStart = onVoiceStart,
                     onVoiceStop = onVoiceStop,
                     voiceHoldMode = voiceHoldMode,
-                    voiceListening = voiceState == VoiceState.Listening,
+                    voiceListening = voiceState == VoiceState.Recording,
                     onRemoveAttachment = onRemoveAttachment,
                     // 胶囊本身就是「当前模型」的显示，点它是改模型的自然入口，
                     // 比让用户去右上角「...」里翻更直接。

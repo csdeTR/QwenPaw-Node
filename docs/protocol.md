@@ -714,47 +714,81 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ---
 
-## 14、语音输入（离线）
+## 14、语音输入（本地识别或服务端转写）
 
-语音输入全程在手机本地完成，不依赖系统语音服务，也不会上传音频。
+0.4.0 起每版出**两个安装包**，差别只在 `full` 带端上识别引擎、`-no-sherpa` 不带：
 
-选择自建引擎的原因：Android 自带的 `SpeechRecognizer` 需要设备预先安装识别服务，
-实测测试机上没有，调用后没有任何结果返回。因此改为内置离线引擎，避免依赖设备厂商。
+| 安装包 | 转写来源 | 体积（arm64 release） |
+| --- | --- | --- |
+| 标准包（`full`） | 本地识别与服务端转写二选一，**默认本地识别** | 25.0MB |
+| `-no-sherpa` 包 | 只能服务端转写 | 2.45MB |
 
-### 引擎与模型
+两个包的 `applicationId` 相同，可以互相覆盖升级；后缀只出现在文件名与
+`versionName`（`0.4.0-no-sherpa`）上，不改变数据目录。
 
-- 引擎：[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（k2-fsa 团队，Apache-2.0）。
-  文档见 <https://k2-fsa.github.io/sherpa/onnx/>，Android AAR 从
-  [Releases](https://github.com/k2-fsa/sherpa-onnx/releases) 获取。
-  仓库内为 `app/libs/sherpa-onnx-1.13.3.aar`。
-- 模型：[sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)，
-  中英流式 zipformer2，int8 量化。压缩包 126MB，解压后约 168MB。
-  下载地址固定写在 `SpeechModelManager.MODEL_URL`，由用户在设置页手动触发下载。
+服务端转写的端点、四种失败形状与可用性判定见第 28 节。
 
-### 解压
+### 两个变体怎样隔离
 
-模型是 `tar.bz2`。解压使用 [commons-compress](https://commons.apache.org/proper/commons-compress/)
-的 `BZip2CompressorInputStream`，边解压边喂给 `TarArchiveInputStream`，
-不落中间文件，避免在手机上额外占用一份完整压缩包的存储空间。
+隔离靠 Gradle 源码集，不是运行时开关：
 
-### 采集参数与崩溃风险
+- `app/src/main/.../voice/LocalAsr.kt` 定义 `LocalAsr`、`LocalEngine`、`LocalModelState`，
+  `main` 里的界面与 ViewModel 只依赖这三个类型。
+- `app/src/full/.../voice/` 提供 `SherpaAsr`（模型下载与安装）、`SherpaEngine`
+  （`OnlineRecognizer` 的包装）与返回它们的 `LocalAsrProvider`。
+- `app/src/nosherpa/.../voice/LocalAsrProvider.kt` 只有一个返回 `LocalAsr.Disabled`
+  的同名对象。
 
-`AudioRecord` 以 16kHz 单声道采集，每 0.1 秒送一块数据给识别器。
+`sherpa-onnx` 的 AAR 与解压模型用的 `commons-compress` 都声明为
+`fullImplementation`。`nosherpa` 既不编译上述类，也不合并那两份依赖，
+四个 ABI 的包里都只有 `libandroidx.graphics.path.so`。
+「在同一个类里加一个布尔开关」做不到这一点：`.so` 仍会被打进包，体积不会降。
 
-块长必须固定。sherpa 会根据每块传入的采样数反推采样率，
-块长不固定时会报 `You changed the input sampling rate` 并直接崩溃。
-若设备实际采样率与 16kHz 不同，先用 `LinearResampler` 折回 16kHz 再送入。
+### 本地识别
+
+端上引擎是 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 的流式识别，
+模型为 `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30`（tar.bz2，约 150MB），
+由用户按需下载到应用私有目录后解压。识别全程在手机上，不需要网络。
+
+它支持边说边出字（浮层实时显示已识别片段），也支持「说完自动停止」：
+靠 `OnlineRecognizer` 的 `isEndpoint` 判定，静音一段时间后自动收尾，
+只在「转写来源＝本地识别」且「触发方式＝点一下」时可用。
+
+### 采集与封装
+
+两种来源共用一条采集循环：`AudioRecord` 以 16kHz 单声道 16 位读取，
+每次 100ms 一块。差别在块交出去之后去哪：
+
+- **本地识别**：直接 `acceptWaveform` 交给 `OnlineRecognizer`，不落盘，
+  实时片段推给浮层。
+- **服务端转写**：原样写入缓存目录下的裸 PCM，结束时由 `WavWriter`
+  在文件开头补 44 字节 RIFF/WAVE 头。
+
+**先写裸数据、收尾补头**是刻意的：边录边写头要在开头预留位置并在收尾回填长度，
+而内存里攒满 90 秒约 2.9MB。`RandomAccessFile` 一次读取后重写即可，峰值内存是文件大小。
+
+若设备实际采样率与 16kHz 不同，先用 `LinearResampler` 折回再交给引擎或写盘。
+
+**头字段写错时服务端不会报错**（它只看文件名后缀），错误要到播放或识别阶段才暴露，
+因此 `WavWriterTest` 逐字段断言，而不是只验「文件能打开」。
 
 ### 收尾
 
-用户点「说完了」时，只调用 `AudioRecord.stop()` 并置一个停止标志，
-让采集协程自己走到 `inputFinished()` 完成收尾。
-**不能直接取消采集协程**——取消会跳过收尾流程，把状态永久卡在「录音中」。
+用户松手或再点一次时，只调用 `AudioRecord.stop()` 并置停止标志，
+让采集协程自己走到收尾这一步：本地识别调 `inputFinished` 取最后一段文本，
+服务端转写补头并交文件出来。
+**服务端路径上不能直接取消采集协程**——取消会跳过补头，产出没有头的文件，
+服务端仍会接受上传，但识别结果为空。
 
-### 入口开关
+### 入口开关与可用性
 
-设置项为「显示语音按钮」。开关打开但模型尚未下载时会弹出说明并引导去下载；
-模型未就绪时，输入框不显示麦克风。
+设置项为「显示语音按钮」只决定按钮是否渲染，与来源和可用性无关。
+`full` 包的来源可在「本地识别」与「服务端转写」之间切换，默认本地识别；
+`-no-sherpa` 包没有这一组选项，恒为服务端转写。
+
+点麦克风时的判定按来源分开：本地识别要求模型已下载，否则弹「需要先下载识别模型」；
+服务端转写要求 `TranscriptionProbe`（第 28 节）判定为 `Ready`，
+否则弹窗说明原因，两者都不会开始录音。
 
 ---
 
@@ -777,9 +811,10 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 > 都不再是单包。体积与实测状态见 [release.md](release.md) 7.1、7.2 节。
 > `splits.abi` 与 `ndk.abiFilters` 二选一，同时存在时后者被忽略。
 
-> **当前实测值**（此后又接入了更多功能，数字已变化）：`arm64-v8a` release **23.4MB**
-> （native 21.4MB + dex 3.0MB，R8 把 dex 从 44MB 压到 3.0MB），debug **41MB**。
-> release 的体积几乎全部是 sherpa-onnx 的 `.so`，已无压缩空间。
+> **当前实测值**（0.4.0 拆成两个变体之后）：标准包按架构是 17.8–39.0MB，
+> 其中 arm64 为 25.0MB、`x86` 为 39.0MB（多一份 `libonnxruntime.so`）；
+> `-no-sherpa` 的四个包都在 2.45MB 左右，包内只剩 `libandroidx.graphics.path.so`（约 10KB）。
+> 两套数字的差额就是 `libsherpa-onnx-jni.so`（arm64 上 22.4MB）。
 > 数字会随功能增长而变化，引用时以实测为准。
 
 ---
@@ -1890,3 +1925,87 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
   执行前要按破坏性操作确认。
 - `DELETE /api/workspace/checkpoints` 删除当前工作区的全部检查点（自动、手动与恢复前快照），
   返回 `{reset, auto_enabled}`。`auto_enabled` 保持原值，重置后仍按开关继续产生检查点。
+
+---
+
+## 28、语音转写
+
+五个端点，2026-11-14 在 2.2.2.post1 与 2.3.0b2 上逐条实测，形状一致。
+两版唯一差异：`/transcription-providers` 在 2.3.0b2 上多一项 `opencode`，属新增可选条目。
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| POST | `/api/workspace/transcribe` | multipart，字段 `file`；成功返回 `{"text":"..."}` |
+| GET | `/api/workspace/transcription-provider-type` | `{"transcription_provider_type":"disabled"\|"whisper_api"\|"local_whisper"}` |
+| GET/PUT | `/api/workspace/transcription-provider` | `{"provider_id":""}`，空串表示未选定 |
+| GET | `/api/workspace/transcription-providers` | `{"providers":[{id,name,available}],"configured_provider_id":""}` |
+| GET | `/api/workspace/local-whisper-status` | `{"available":false,"ffmpeg_installed":false,"whisper_installed":false}` |
+| GET/PUT | `/api/workspace/audio-mode` | `{"audio_mode":"auto"\|"native"}` |
+
+客户端只用前四组；`audio-mode` 是「收到的语音消息如何交给模型」的服务端策略，
+`local-whisper-status` 只用于判定 `local_whisper` 档位是否装齐依赖。
+
+### 28.1 `transcribe` 的四套失败形状
+
+`detail` 在不同原因下的 **JSON 类型都不一样**，按字符串统一处理的写法必然出错：
+
+| 场景 | 状态码 | `detail` |
+| --- | --- | --- |
+| `transcription_provider_type=disabled` | 400 | 对象 `{"code":"TRANSCRIPTION_DISABLED","message":"…"}` |
+| 扩展名不在白名单 | 400 | 对象 `{"code":"UNSUPPORTED_FILE_TYPE","message":"…"}` |
+| 已启用但 provider 不可用 / 调用失败 | 500 | 字符串 `"Transcription failed. Check provider configuration."` |
+| 缺 `file` 字段 | 422 | FastAPI 校验数组 `[{"type":"missing",…}]` |
+
+客户端按状态码 + `detail` 里的 `code` 分流，映射表在 `voice/ServerTranscriber`。
+**500 不能报成网络问题**：它明确指向服务端的 provider 配置，两种处置完全不同。
+
+允许的扩展名：`.webm .mp4 .m4a .wav .mp3 .ogg .flac`，服务端对文件名 `lower()` 后比较。
+**文件名没有后缀时会回落成 `.webm`**（`os.path.splitext` 取空 + `or ".webm"`），
+因此客户端必须显式带 `.wav`，否则日志里看不出真实格式。
+
+### 28.2 检查顺序
+
+服务端先看 `disabled`，再看扩展名。因此在 `disabled` 的实例上，连 `.xyz` 也只会得到
+`TRANSCRIPTION_DISABLED`——探测阶段看到的永远是第一个原因，不能据此判断格式是否合法。
+
+`transcribe` **不接受任何 query 参数**（`root`、`path` 传了也被忽略），
+`X-Agent-Id` 带上不影响结果：同一个 handler，不按智能体区分。
+
+### 28.3 开关不等于可用
+
+`transcription_provider_type=whisper_api` 只表示「用远端 Whisper」，
+真正生效还要求 `transcription_provider_id` 指向一个有凭据的 provider。
+实测空 `configured_provider_id` 时 `transcribe` 返回 500，而 `/transcription-providers`
+仍会列出 6–7 项 `available:true` 的候选——**只看开关或候选数量都会误判为可用**。
+
+客户端因此分五态（`TranscriptionProbe`）：
+
+| 结论 | 条件 |
+| --- | --- |
+| `Ready` | `whisper_api` 且有 `configured_provider_id`；或 `local_whisper` 且 `available:true` |
+| `Disabled` | 开关为 `disabled` |
+| `Misconfigured` | `whisper_api` 无 `configured_provider_id`；或 `local_whisper` 依赖不全 |
+| `Unsupported` | 端点 404（服务端版本没有该路由） |
+| `Unknown` | 401/403（没权限问），或尚未探测 |
+
+401 记 `Unknown` 而不是未配置，理由与第 19 节的插件探测相同：转写路由不在鉴权的公开路径里，
+验证阶段还没有 token 时必然 401。连不上（`IOException`）保留上一次结论。
+
+### 28.4 成功路径的验证方式
+
+两个测试容器默认都是 `disabled`，`config.json` 的 `providers` 为空。
+为了让成功路径可验，在 `qp-test` 内起了一个假 ASR（`127.0.0.1:9099`，固定返回一句文本），
+再把 `qwenpaw-local` 指过去：
+
+```
+PUT /api/models/qwenpaw-local/config            {"enabled":true,"api_key":"sk-test","base_url":"http://127.0.0.1:9099/v1",…}
+PUT /api/workspace/transcription-provider       {"provider_id":"qwenpaw-local"}
+PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"whisper_api"}
+```
+
+随后 `POST transcribe` 即返回 `{"text":"你好，这是一次转写验证"}` 200，两版都验过。
+注意 **providers 路由的前缀是 `/api/models`**，`/api/providers/...` 返回 405。
+这是测试环境手段，客户端不接这两个配置端点。
+
+设备端完整链路（录音 → 补 WAV 头 → 上传 → 填入草稿）已在 redroid 上验通，
+细节见 [devlog](devlog.md) 第 67 节。

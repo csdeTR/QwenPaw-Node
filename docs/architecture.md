@@ -39,6 +39,8 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 | `data/remote/` | `QwenPawApi`（全部 HTTP 端点）、`ChatStreamClient`（SSE 连接）、`ServerAvatarClient`（服务端头像缓存）、`DownloadClient`（流式下载到 `OutputStream`） | 接入新端点，或调整请求头、超时、重试策略时 |
 | `data/stream/` | SSE 解析链路：`SseReader` → `ChatEventParser` → `StreamAccumulator`；`HistoryMapper` 负责把历史接口的返回映射为渲染单元 | 服务端帧格式变化，或发现某类内容没有被正确归类时 |
 | `data/`（根） | `NetworkMonitor`（网络类型与连通性）、`InstanceRepository`（多实例与地址解析）、`AddressFallback`（多地址回退判定） | 改动地址优先级、回退策略或网络感知时 |
+| `data/plugin/` | `PluginProbe`（配套插件探测与能力判定）、`BridgeEvents`（插件事件流解析） | 插件 capability 增删，或探测规则变化时 |
+| `data/transcription/` | `TranscriptionProbe`（服务端语音转写可用性判定与缓存） | 转写的可用条件变化，或服务端新增档位时 |
 | `avatar/` | `AvatarStore`（头像文件）、`AvatarIntake`（GIF 判定与 EXIF 纠正）、`CropGeometry`（裁剪换算）、`AvatarCropScreen`（裁剪页）、`ChatIconStore`（会话图标） | 调整头像规格、裁剪交互或图片处理方式时 |
 | `log/` | `RunLog`（进程内环形缓冲）、`LoggingInterceptor`、`LogImporter` | 新增日志类别、改动导出格式或脱敏规则时 |
 | `ui/chat/` | 对话页、会话列表与分组、输入条、Markdown 渲染、工具卡片、消息气泡与头像、语音浮层 | 绝大多数界面改动的落点 |
@@ -46,9 +48,17 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 | `ui/theme/` | 配色、字号缩放、MiSans 字体接入 | 调整视觉 token 或字号体系时 |
 | `ui/log/` | 运行日志页 | 调整日志展示形态时 |
 | `ui/workspace/` | 工作区文件：目录浏览、文本与图片预览、下载计划与进度、SAF 落盘（`SafDownloads`） | 调整文件浏览交互或下载落盘方式时 |
-| `voice/` | sherpa-onnx 流式识别、模型下载解压、重采样 | 更换识别引擎或调整采集参数时 |
+| `voice/` | 录音（`VoiceInput`，两种来源共用一条采集循环）、变体无关的接缝（`LocalAsr` / `LocalEngine` / `LocalModelState`）、WAV 封装（`WavWriter`）、重采样（`LinearResampler`）、服务端转写调用（`ServerTranscriber`） | 调整采集参数、换录音格式或改转写失败文案时 |
+| `voice/`（`full` 源码集） | `LocalAsrProvider` → `SherpaAsr`（模型下载、安装与删除）、`SherpaEngine`（`OnlineRecognizer` 的包装） | 调整端上识别参数、换模型或改解压方式时 |
+| `voice/`（`nosherpa` 源码集） | `LocalAsrProvider` → `LocalAsr.Disabled`，不引用任何 sherpa 类 | 一般不修改；它的存在只是为了让 `main` 不用条件编译 |
 | `font/` | MiSans 运行时下载与校验 | 调整字体下载策略时 |
 | `notify/` | 本地通知。项目没有推送通道，只在前台丢失时提醒 | 调整通知触发条件时 |
+
+**两个语音变体靠源码集隔离。** `app/src/main` 只依赖 `LocalAsr` 这层接口，
+sherpa 的实现与 `fullImplementation` 的 AAR 都只在 `app/src/full`；
+`app/src/nosherpa` 提供同名 `LocalAsrProvider` 但返回不可用实现。
+因此 `nosherpa` 编译期就不含端上引擎，四个 ABI 的包都不带 `libsherpa-onnx-jni.so`，
+详见 [protocol.md](protocol.md) 第 14 节与 [release.md](release.md) 7.1。
 
 ---
 
@@ -338,8 +348,11 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 这些测试不依赖设备，可以反复快速执行：
 
 ```bash
-./gradlew :app:testDebugUnitTest
+./gradlew :app:testFullDebugUnitTest :app:testNosherpaDebugUnitTest
 ```
+
+单测按变体各跑一次。两个变体共用同一批用例，差别只在 `LocalAsrProvider` 的实现，
+所以两边的用例数应当相同。
 
 `app/src/androidTest/` 有一条启动冒烟测试，另有一组界面回归测试 `UiRegressionTest`。
 后者只断言「用户能看见的差异」：操作行的文字/图标切换、设置分组的默认收起、

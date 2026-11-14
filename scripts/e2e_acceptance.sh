@@ -2,7 +2,7 @@
 # QwenPaw Node redroid 验收脚本。
 #
 # 用法：
-#   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A7、B1-B6）
+#   ./scripts/e2e_acceptance.sh              # 跑全部场景（A1-A8、B1-B6）
 #   ./scripts/e2e_acceptance.sh --keep       # 保留当前应用数据
 #   ./scripts/e2e_acceptance.sh --only A4    # 只跑某个场景
 #
@@ -16,7 +16,8 @@
 #      容器内 userdebug 默认 root，A6 断网用路由黑洞而不是 iptables；
 #   2. LXC 测试容器已启动 QwenPaw（默认 qp-test / 10.10.0.211:8088），
 #      启动方式见 AGENTS.md 2.1。本机 :8088 实例承载真实数据，不参与验收；
-#   3. 已执行 `./gradlew :app:assembleDebug`。
+#   3. 已执行 `./gradlew :app:assembleFullDebug`（验 -no-sherpa 包时改成
+#      `assembleNosherpaDebug`，并设 ADB_FLAVOR=nosherpa）。
 #
 # 覆盖场景：
 #   A1 审批       —— 服务端 approval_level=STRICT 时触发审批后点允许
@@ -26,6 +27,7 @@
 #   A5 多实例     —— 第二个实例的会话列表与第一个隔离
 #   A6 断网/409   —— 断网提示中文、草稿保留、失败气泡可重试
 #   A7 工作区     —— 设置入口可达、三个根可切换、记忆根列出 Markdown
+#   A8 语音       —— 两个变体各自的设置页与麦克风行为（见 A8 段落注释）
 #
 #   B1 检查点页   —— 设置入口可达，自动开关与手动快照区都在
 #   B2 只读对话   —— 点会话进入只读页，有「创建检查点」且没有输入框
@@ -59,14 +61,21 @@ ADB=("$ADB_BIN" -s "$SERIAL")
 echo "设备：$SERIAL"
 
 # splits.abi 对 debug 变体同样生效，产物是 app-<abi>-debug.apk；
-# 早期未拆分时是 app-debug.apk。按设备实际 ABI 选包，两者都能命中。
+# 早期未拆分时是 app-debug.apk。
+# 0.4.0 起有 full / nosherpa 两个变体，产物落在 apk/<flavor>/debug/ 下。
+# 默认装 full（语音能力最全）；验「无 sherpa 包」时用 ADB_FLAVOR=nosherpa 覆盖。
+FLAVOR="${ADB_FLAVOR:-full}"
+DEBUG_DIR="$ROOT/app/build/outputs/apk/$FLAVOR/debug"
 DEVICE_ABI="$("${ADB[@]}" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r')"
 PICKED=""
-for candidate in "$DEBUG_DIR/app-$DEVICE_ABI-debug.apk" "$DEBUG_DIR/app-debug.apk"; do
+for candidate in \
+  "$DEBUG_DIR/app-$FLAVOR-$DEVICE_ABI-debug.apk" \
+  "$DEBUG_DIR/app-$DEVICE_ABI-debug.apk"; do
   [ -f "$candidate" ] && { PICKED="$candidate"; break; }
 done
-[ -n "$PICKED" ] || { echo "找不到 debug 包（设备 ABI=$DEVICE_ABI）：$DEBUG_DIR"; exit 1; }
+[ -n "$PICKED" ] || { echo "找不到 debug 包（变体=$FLAVOR，设备 ABI=$DEVICE_ABI）：$DEBUG_DIR"; exit 1; }
 APK="$PICKED"
+echo "变体：$FLAVOR"
 echo "安装包：$(basename "$APK")"
 
 echo "服务器地址：$HOST"
@@ -85,8 +94,8 @@ while [ $# -gt 0 ]; do
 done
 
 # 场景名写错时整轮会「什么都不跑却报完成」，所以先校验一次。
-if [ -n "$ONLY" ] && [[ ! "$ONLY" =~ ^(A[1-7]|B[1-6])$ ]]; then
-  echo "未知场景：$ONLY（可用：A1-A7、B1-B6）"; exit 2
+if [ -n "$ONLY" ] && [[ ! "$ONLY" =~ ^(A[1-8]|B[1-6])$ ]]; then
+  echo "未知场景：$ONLY（可用：A1-A8、B1-B6）"; exit 2
 fi
 # B3 依赖 B2 留在只读页的状态，单跑 B3 会立刻跳过；
 # 两者一起指定时按 B2 → B3 的顺序执行。
@@ -393,10 +402,10 @@ open_settings_item() {
 }
 
 echo "== 进入一条会话 =="
-# A7 只验设置里的工作区入口，不需要已有会话；其余场景必须有会话可打开。
+# A7 只验设置里的工作区入口，不需要已有会话；A8 只验设置页与麦克风点击，同理。
 if ! open_first_chat; then
-  if want A7; then
-    echo "  [提示] 没有可打开的会话，A7 不依赖会话，继续"
+  if want A7 || want A8; then
+    echo "  [提示] 没有可打开的会话，该场景不依赖会话，继续"
   else
     exit 1
   fi
@@ -611,6 +620,101 @@ if want A7; then
     fi
   else
     echo "  [跳过] 未找到设置入口"
+  fi
+fi
+
+# ---------------------------------------------------------------- A8 语音
+#
+# 判据随变体不同：
+#   full     设置页要有「转写来源」两档与「语音识别模型」行；默认本地识别，
+#            未下载模型时点麦克风弹「需要先下载识别模型」。
+#   nosherpa 设置页必须没有「转写来源」与「语音识别模型」；
+#            点麦克风时服务端未配好则弹说明。
+# 文案即用户看到的字符串，改文案后这里要同步改。
+if want A8; then
+  echo "== A8 语音（变体 $FLAVOR） =="
+  if open_settings_item "语音"; then
+    sleep 2
+    shot 17-a8-voice-settings
+    if screen_has 'text="显示语音按钮"' && screen_has 'text="触发方式"'; then
+      echo "  [通过] 语音开关与触发方式可见"
+    else
+      echo "  [失败] 未找到语音开关或触发方式"
+    fi
+    if [ "$FLAVOR" = "nosherpa" ]; then
+      for gone in 'text="转写来源"' 'text="语音识别模型"'; do
+        if screen_has "$gone"; then
+          echo "  [失败] 无端上引擎的包仍出现 $gone"
+        else
+          echo "  [通过] 已移除 $gone"
+        fi
+      done
+      if screen_has 'text="重新检测"'; then
+        echo "  [通过] 服务端转写行可见"
+      else
+        echo "  [失败] 未找到「重新检测」按钮（服务端转写行）"
+      fi
+    else
+      if screen_has 'text="转写来源"' && screen_has 'text="本地识别"' \
+        && screen_has 'text="服务端转写"'; then
+        echo "  [通过] 转写来源两档可见"
+      else
+        echo "  [失败] 未找到「转写来源」或其两个选项"
+      fi
+      if screen_has 'text="语音识别模型"'; then
+        echo "  [通过] 模型行可见（full 包默认本地识别）"
+      else
+        echo "  [失败] full 包在本地识别下未显示模型行"
+      fi
+      # 「服务端转写」这四个字同时是「转写来源」里的选项名，不能拿来判这一行是否存在；
+      # 用该行独有的「重新检测」按钮做判据。
+      if screen_has 'text="重新检测"'; then
+        echo "  [失败] 本地识别为来源时仍显示服务端转写行"
+      else
+        echo "  [通过] 本地识别为来源时不显示服务端转写行"
+      fi
+    fi
+    # 回到聊天页点麦克风。
+    # 麦克风只在聊天页。当前停在设置的二级页，要逐层退回列表（先回设置主页，
+    # 再回列表），然后点开一条会话。open_chat_list 每次只退一层。
+    open_chat_list >/dev/null 2>&1 || true
+    open_chat_list >/dev/null 2>&1 || true
+    # 脚本前面清过应用数据，录音权限会重新弹系统对话框把界面顶掉。
+    # 预先授予，让判断落在应用自己的提示上而不是权限弹窗上。
+    "${ADB[@]}" shell pm grant "$PKG" android.permission.RECORD_AUDIO >/dev/null 2>&1 || true
+    if open_first_chat; then
+      if tap_text 'content-desc="点击开始录音"' || tap_text 'content-desc="按住说话"'; then
+        sleep 3
+        shot 18-a8-voice-tap
+        if [ "$FLAVOR" = "nosherpa" ]; then
+          if screen_has 'text="服务端未启用语音转写"' || screen_has 'text="服务端转写缺少配置"' \
+            || screen_has 'text="当前服务端版本不支持语音转写"'; then
+            echo "  [通过] 不可用时给出说明"
+          elif screen_has 'text="正在录音，再次点击麦克风结束"' \
+            || screen_has 'text="正在录音，松开麦克风结束"'; then
+            echo "  [提示] 服务端转写可用，直接进入录音态"
+          else
+            echo "  [警告] 点击麦克风后未见说明也未见录音浮层"
+          fi
+        else
+          # full 包默认本地识别：未下载模型时应弹下载提示，不应进入录音态。
+          if screen_has 'text="需要先下载识别模型"'; then
+            echo "  [通过] 本地识别缺模型时提示下载"
+          elif screen_has 'text="正在录音，再次点击麦克风结束"' \
+            || screen_has 'text="正在录音，松开麦克风结束"'; then
+            echo "  [提示] 模型已就绪，直接进入录音态"
+          else
+            echo "  [警告] 点击麦克风后未见提示也未见录音浮层"
+          fi
+        fi
+      else
+        echo "  [跳过] 未找到麦克风（可能「显示语音按钮」已关闭）"
+      fi
+    else
+      echo "  [跳过] 没有可打开的会话，无法验证麦克风"
+    fi
+  else
+    echo "  [失败] 无法打开语音设置页"
   fi
 fi
 

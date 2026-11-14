@@ -34,6 +34,7 @@ import io.qwenpaw.node.data.model.GcResultDto
 import io.qwenpaw.node.data.model.GcSettingsDto
 import io.qwenpaw.node.data.model.InboxPageDto
 import io.qwenpaw.node.data.model.InboxTraceDto
+import io.qwenpaw.node.data.model.LocalWhisperStatusDto
 import io.qwenpaw.node.data.model.ModelPoolDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
 import io.qwenpaw.node.data.model.OffloadPolicyDto
@@ -55,6 +56,9 @@ import io.qwenpaw.node.data.model.ToolCallInfoDto
 import io.qwenpaw.node.data.model.ToolCallListDto
 import io.qwenpaw.node.data.model.ToolCallOutputDto
 import io.qwenpaw.node.data.model.ToolDto
+import io.qwenpaw.node.data.model.TranscribeResultDto
+import io.qwenpaw.node.data.model.TranscriptionProvidersDto
+import io.qwenpaw.node.data.model.TranscriptionProviderTypeDto
 import io.qwenpaw.node.data.model.UploadLimitDto
 import io.qwenpaw.node.data.model.UploadResultDto
 import io.qwenpaw.node.data.model.UserTimezoneDto
@@ -1350,6 +1354,46 @@ class QwenPawApi(
         UploadLimitDto.serializer(),
     ).uploadMaxSizeMb
 
+    // ---------- 语音转写 ----------
+
+    /**
+     * `POST /api/workspace/transcribe`，表单字段名是 `file`（**不是** `files`）。
+     *
+     * 服务端按文件名的后缀判定格式，没有后缀时回落成 `.webm`，所以 [fileName]
+     * 必须带 `.wav`。实测另有三条：不接受任何 query 参数；`X-Agent-Id` 不影响结果
+     * （同一个 handler，不按智能体区分）；`disabled` 时连扩展名校验都不会走到。
+     */
+    fun transcribeAudio(
+        conn: Connection,
+        file: File,
+        fileName: String,
+    ): String {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", fileName, file.asRequestBody(WAV_MEDIA))
+            .build()
+        val text = execute(baseBuilder(conn, connUrl(conn, TRANSCRIBE_PATH)).post(body).build())
+        return decode(text, TranscribeResultDto.serializer()).text
+    }
+
+    /** `GET /api/workspace/transcription-provider-type`。取值见 [TranscriptionProviderTypeDto]。 */
+    fun transcriptionProviderType(conn: Connection): TranscriptionProviderTypeDto = decode(
+        request(conn, "GET", "/api/workspace/transcription-provider-type"),
+        TranscriptionProviderTypeDto.serializer(),
+    )
+
+    /** `GET /api/workspace/transcription-providers`。判定「真的能转写」还要看 `configured_provider_id`。 */
+    fun transcriptionProviders(conn: Connection): TranscriptionProvidersDto = decode(
+        request(conn, "GET", "/api/workspace/transcription-providers"),
+        TranscriptionProvidersDto.serializer(),
+    )
+
+    /** `GET /api/workspace/local-whisper-status`。`local_whisper` 档位下用它判断依赖是否装齐。 */
+    fun localWhisperStatus(conn: Connection): LocalWhisperStatusDto = decode(
+        request(conn, "GET", "/api/workspace/local-whisper-status"),
+        LocalWhisperStatusDto.serializer(),
+    )
+
     // ---------- 备份 ----------
 
     /**
@@ -1863,7 +1907,11 @@ class QwenPawApi(
     companion object {
         private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
         private val OCTET_MEDIA = "application/octet-stream".toMediaType()
+        private val WAV_MEDIA = "audio/wav".toMediaType()
         private val EMPTY_BODY = ByteArray(0).toRequestBody(JSON_MEDIA)
+
+        /** 语音转写端点。整段上传后返回全文，没有流式形态。 */
+        const val TRANSCRIBE_PATH = "/api/workspace/transcribe"
 
         /** 收件箱事件列表端点。 */
         private const val INBOX_EVENTS_PATH = "/api/console/inbox/events"

@@ -880,6 +880,58 @@ data class UploadLimitDto(
 )
 
 /**
+ * `POST /api/workspace/transcribe`。表单字段名是 `file`，成功时只回 `{"text": "..."}`。
+ *
+ * 失败有三套形状（实测）：`disabled` 与不支持的扩展名是 400 + 对象 detail
+ * （`{"code","message"}`），provider 不可用是 500 + 字符串 detail。判定留在
+ * `voice/ServerTranscriber` 一处，这里只描述成功形状。
+ */
+@Serializable
+data class TranscribeResultDto(
+    val text: String = "",
+)
+
+/**
+ * `GET /api/workspace/transcription-provider-type`。
+ *
+ * 取值只有三个：`disabled` / `whisper_api` / `local_whisper`。
+ * 这是「转写开关」本身，不是可用 provider 清单。
+ */
+@Serializable
+data class TranscriptionProviderTypeDto(
+    @SerialName("transcription_provider_type") val providerType: String = "disabled",
+)
+
+/** `GET /api/workspace/transcription-providers` 里的单个 provider。 */
+@Serializable
+data class TranscriptionProviderDto(
+    val id: String = "",
+    val name: String = "",
+    val available: Boolean = true,
+)
+
+/**
+ * `GET /api/workspace/transcription-providers`。
+ *
+ * 这不等于「能转写」：`providers` 列的是**有能力**转写的 provider（服务端按凭据判定），
+ * 而真正生效的是 `configured_provider_id`。实测 `whisper_api` + 空
+ * `configured_provider_id` 时 `transcribe` 返回 500，因此客户端不能只看 provider 数量。
+ */
+@Serializable
+data class TranscriptionProvidersDto(
+    val providers: List<TranscriptionProviderDto> = emptyList(),
+    @SerialName("configured_provider_id") val configuredProviderId: String = "",
+)
+
+/** `GET /api/workspace/local-whisper-status`。两项依赖都装齐才算可用。 */
+@Serializable
+data class LocalWhisperStatusDto(
+    val available: Boolean = false,
+    @SerialName("ffmpeg_installed") val ffmpegInstalled: Boolean = false,
+    @SerialName("whisper_installed") val whisperInstalled: Boolean = false,
+)
+
+/**
  * `GET /api/workspace/memory` 的元素。
  *
  * `path` 是服务端绝对路径，只用于展示或排错；读取时用 [filename]（相对记忆根，

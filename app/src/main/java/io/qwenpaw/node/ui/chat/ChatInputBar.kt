@@ -73,14 +73,17 @@ fun ChatInputBar(
     running: Boolean,
     modelName: String?,
     /**
-     * 是否显示麦克风。**只由设置里的开关决定，与模型是否下载无关。**
+     * 是否显示麦克风。**只由设置里的开关决定，与服务端转写是否可用无关。**
      *
-     * 模型未下载时按钮依然显示，点击后由外部弹提示引导下载——若此时也隐藏，
+     * 转写不可用时按钮依然显示，点击后由外部弹说明——若此时也隐藏，
      * 用户将无从发现该功能缺少什么。这个参数此前叫 voiceAvailable，
      * 混淆了「可用」与「可见」两种含义，导致开关关闭后按钮仍然露出。
      */
     voiceVisible: Boolean,
-    voiceReady: Boolean,
+    /** 服务端转写是否可用。只影响图标的弱化显示，不影响点击。 */
+    voiceAvailable: Boolean,
+    /** 本地识别是否可用。与 [voiceAvailable] 任一为 true 即不弱化。 */
+    voiceLocalReady: Boolean = false,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
@@ -93,7 +96,7 @@ fun ChatInputBar(
      * false（默认）时是「点一下」：点一次开始，再点一次结束。
      */
     voiceHoldMode: Boolean = false,
-    /** 「点一下」模式下当前是否正在录音，用来切换麦克风的高亮与图标含义。 */
+    /** 当前是否正在录音，用来切换麦克风的高亮与图标含义。 */
     voiceListening: Boolean = false,
     /**
      * 点击模型名。打开模型切换对话框。
@@ -265,8 +268,8 @@ fun ChatInputBar(
                                     contentDescription = null,
                                     modifier = Modifier.size(20.dp),
                                     tint = composerIconTint(
-                                        // 模型未就绪也可点：由外部弹提示引导下载，而不是把入口藏起来。
-                                        dimmed = !voiceReady,
+                                        // 转写不可用也可点：由外部弹说明，而不是把入口藏起来。
+                                        dimmed = !voiceAvailable && !voiceLocalReady,
                                         highlighted = voiceListening,
                                     ),
                                 )

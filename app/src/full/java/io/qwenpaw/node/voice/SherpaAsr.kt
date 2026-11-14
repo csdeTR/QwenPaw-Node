@@ -14,27 +14,20 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.util.concurrent.TimeUnit
 
-/** 离线识别模型的下载与安装状态。 */
-sealed interface ModelState {
-    data object NotInstalled : ModelState
-    data class Downloading(val progress: Float) : ModelState
-    data object Installing : ModelState
-    data object Ready : ModelState
-    data class Failed(val message: String) : ModelState
-}
-
 /**
- * 离线语音识别模型的管理。
+ * 端上识别模型的下载与安装（`full` 变体专用）。
  *
  * 模型来自 sherpa-onnx 官方发布的流式中文模型，下载后解压到应用私有目录，
  * 识别全程在本机完成，不走网络。
  */
-class SpeechModelManager(private val context: Context) {
+class SherpaAsr(private val context: Context) : LocalAsr {
 
-    private val _state = MutableStateFlow<ModelState>(
-        if (StreamingRecognizer.isReady(installedDir())) ModelState.Ready else ModelState.NotInstalled,
+    override val available: Boolean = true
+
+    private val _modelState = MutableStateFlow<LocalModelState>(
+        if (SherpaEngine.isReady(installedDir())) LocalModelState.Ready else LocalModelState.NotInstalled,
     )
-    val state: StateFlow<ModelState> = _state.asStateFlow()
+    override val modelState: StateFlow<LocalModelState> = _modelState.asStateFlow()
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -47,13 +40,12 @@ class SpeechModelManager(private val context: Context) {
     /** 已解压的模型目录，识别时从这里读文件。 */
     fun installedDir(): File = File(root(), "streaming-zh")
 
-    /** 下载并解压。重复调用会从头开始。 */
-    suspend fun download(url: String = MODEL_URL) = withContext(Dispatchers.IO) {
+    override suspend fun download() = withContext(Dispatchers.IO) {
         val target = installedDir()
         val archive = File(root(), "model.tar.bz2")
         try {
-            _state.value = ModelState.Downloading(0f)
-            val request = Request.Builder().url(url).build()
+            _modelState.value = LocalModelState.Downloading(0f)
+            val request = Request.Builder().url(MODEL_URL).build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IllegalStateException("下载失败，服务端返回 ${response.code}")
@@ -70,7 +62,7 @@ class SpeechModelManager(private val context: Context) {
                             output.write(buffer, 0, read)
                             written += read
                             if (total > 0) {
-                                _state.value = ModelState.Downloading(
+                                _modelState.value = LocalModelState.Downloading(
                                     (written.toFloat() / total).coerceIn(0f, 1f),
                                 )
                             }
@@ -78,7 +70,7 @@ class SpeechModelManager(private val context: Context) {
                     }
                 }
             }
-            _state.value = ModelState.Installing
+            _modelState.value = LocalModelState.Installing
             target.deleteRecursively()
             target.mkdirs()
             extract(archive, target)
@@ -86,23 +78,25 @@ class SpeechModelManager(private val context: Context) {
             if (target.listFiles().isNullOrEmpty()) {
                 throw IllegalStateException("模型包内容为空")
             }
-            if (!StreamingRecognizer.isReady(target)) {
+            if (!SherpaEngine.isReady(target)) {
                 throw IllegalStateException("模型文件不全，重新下载一次")
             }
-            _state.value = ModelState.Ready
+            _modelState.value = LocalModelState.Ready
         } catch (e: Exception) {
             archive.delete()
             File(root(), "model.tar").delete()
             target.deleteRecursively()
-            _state.value = ModelState.Failed(e.message ?: "下载没有完成")
+            _modelState.value = LocalModelState.Failed(e.message ?: "下载没有完成")
         }
     }
 
-    /** 删除已下载的模型，释放空间。 */
-    fun remove() {
+    override fun remove() {
         installedDir().deleteRecursively()
-        _state.value = ModelState.NotInstalled
+        _modelState.value = LocalModelState.NotInstalled
     }
+
+    override fun createEngine(endpointing: Boolean): LocalEngine? =
+        SherpaEngine.create(installedDir(), SAMPLE_RATE, endpointing)
 
     /** 解压 tar.bz2 或 zip。 */
     private fun extract(archive: File, target: File) {
@@ -164,5 +158,7 @@ class SpeechModelManager(private val context: Context) {
         const val MODEL_URL =
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" +
                 "sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30.tar.bz2"
+
+        private const val SAMPLE_RATE = 16_000
     }
 }

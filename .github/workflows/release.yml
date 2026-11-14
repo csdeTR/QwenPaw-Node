@@ -1,6 +1,8 @@
 name: Release
 
-# 推一个 v* 的 tag 就会编译四个架构的 release 包，并挂到对应的 GitHub Release。
+# 推一个 v* 的 tag 就会编译两个变体 × 四个架构的 release 包，并挂到对应的 GitHub Release：
+#   full      支持本地识别（sherpa-onnx）与服务端转写二选一，默认本地
+#   nosherpa  只支持服务端转写，包体小约 22MB，文件名带 -no-sherpa
 # 需要在仓库 Settings → Secrets and variables → Actions 里配置四项：
 #   ANDROID_KEYSTORE_BASE64   release.jks 的 base64（单行，不含换行）
 #   ANDROID_KEYSTORE_PASSWORD  storePassword
@@ -75,7 +77,7 @@ jobs:
       - name: 运行 JVM 单测
         run: |
           set +e
-          ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee /tmp/build.log
+          ./gradlew :app:testFullDebugUnitTest :app:testNosherpaDebugUnitTest --stacktrace 2>&1 | tee /tmp/build.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
             MSG=$(awk '/What went wrong/{f=1} f{print} /Get more help/{f=0}' /tmp/build.log | tr '\n' ' ')
@@ -84,7 +86,7 @@ jobs:
           fi
           exit "$code"
 
-      - name: 编译四个架构的 release 包
+      - name: 编译两个变体 × 四个架构的 release 包
         run: |
           set +e
           ./gradlew :app:assembleRelease --stacktrace 2>&1 | tee /tmp/build.log
@@ -96,6 +98,7 @@ jobs:
           fi
           exit "$code"
 
+      # 加了 flavor 之后产物落在 apk/<flavor>/release/，不再是 apk/release/。
       - name: 校验签名有效
         run: |
           TOOL=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | tail -1)
@@ -103,21 +106,39 @@ jobs:
             echo "::error::找不到 apksigner，无法确认签名"
             exit 1
           fi
-          for f in app/build/outputs/apk/release/*.apk; do
+          for f in $(find app/build/outputs/apk -path "*/release/*.apk"); do
             "$TOOL" verify --print-certs "$f" > /dev/null || {
               echo "::error::$f 签名校验失败，不发布未签名的包"
               exit 1
             }
           done
 
+      # 产物名要能一眼分出变体与架构：
+      #   QwenPaw-Node-v0.4.0-arm64-v8a.apk
+      #   QwenPaw-Node-v0.4.0-no-sherpa-arm64-v8a.apk
+      # Gradle 的 flavor 名是 nosherpa，按用户可见的说法改成 no-sherpa。
       - name: 按版本重命名产物
         run: |
           mkdir -p dist
-          for f in app/build/outputs/apk/release/*.apk; do
-            ABI=$(basename "$f" | sed -E 's/^app-(.+)-release\.apk$/\1/')
-            cp "$f" "dist/QwenPaw-Node-${TAG}-${ABI}.apk"
+          for f in $(find app/build/outputs/apk -path "*/release/*.apk"); do
+            # 变体取自目录名（apk/<flavor>/release/xxx.apk），ABI 取自文件名：
+            # ABI 里本身带连字符（armeabi-v7a），不能靠切最后一段解析。
+            VARIANT=$(basename "$(dirname "$(dirname "$f")")")
+            ABI=$(basename "$f" | sed -E "s/^app-${VARIANT}-//; s/-release\.apk$//")
+            case "$VARIANT" in
+              full) SUFFIX="" ;;
+              nosherpa) SUFFIX="-no-sherpa" ;;
+              *) echo "::error::未知变体 $VARIANT（$f）"; exit 1 ;;
+            esac
+            cp "$f" "dist/QwenPaw-Node-${TAG}${SUFFIX}-${ABI}.apk"
           done
           ls -l dist
+          # 两个变体各四个包，少一个就说明某个变体没编出来。
+          COUNT=$(ls dist/*.apk | wc -l)
+          if [ "$COUNT" -ne 8 ]; then
+            echo "::error::应有 8 个包（2 变体 × 4 架构），实际 $COUNT 个"
+            exit 1
+          fi
 
       # Release 正文里的「本版变化」直接取 CHANGELOG 的同版本小节，避免两处各写一份。
       # 抽不到时（版本号与 tag 不一致、CHANGELOG 缺该版）不静默通过：
@@ -140,6 +161,15 @@ jobs:
             echo
             echo '## 安装包'
             echo
+            echo '每个架构出两个变体，按需下载：'
+            echo
+            echo '| 变体 | 语音 | 体积 | 说明 |'
+            echo '| --- | --- | --- | --- |'
+            echo '| 标准包 | 本地识别或服务端转写（二选一，默认本地） | 约 25MB | 需要离线可用与实时字幕时选择这一种 |'
+            echo '| `-no-sherpa` | 仅服务端转写 | 约 2.4MB | 不需要离线识别时可省下约 22MB |'
+            echo
+            echo '文件名里的架构部分与之对应：'
+            echo
             echo '| 架构 | 说明 |'
             echo '| --- | --- |'
             echo '| `arm64-v8a` | 已实测。2019 年之后发布的绝大多数手机 |'
@@ -148,7 +178,7 @@ jobs:
             echo '| `x86` | **未实测**，仅为兼容 32 位模拟器而构建 |'
             echo
             echo '未实测的两个包只确认可以编译产出，不保证安装或运行。遇到问题请改用 `arm64-v8a`。'
-            echo '每个包都已校验签名有效。'
+            echo '每个包都已校验签名有效。两个变体的包名相同，可以互相覆盖升级。'
             echo 'RELEASE_BODY_EOF'
           } >> "$GITHUB_ENV"
 

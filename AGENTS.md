@@ -51,8 +51,10 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
    参数与依据见 [.agents/test-env.md](.agents/test-env.md) 第 2 节。
 
 5. **优先增量构建。**
-   只编译并装包时用 `./gradlew installDebug`；只跑单测时用 `./gradlew testDebugUnitTest`。
-   不要顺手敲 `./gradlew build`，该目标会连带执行 lint、release 构建与全部测试。
+   只编译并装包时用 `./gradlew installFullDebug`；只跑单测时用
+   `./gradlew :app:testFullDebugUnitTest`（`-no-sherpa` 包用 `testNosherpaDebugUnitTest`）。
+   不要顺手敲 `./gradlew build`，该目标会连带执行 lint、release 构建与全部测试；
+   `assembleDebug` / `assembleRelease` 也会一次构建 8 个包，同样避免。
 
 6. **单测优先于设备测试。**
    设备端测试启动成本高，失败信息也差。能覆盖的逻辑一律写成 JVM 单测。
@@ -95,8 +97,8 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 - 技术栈、常用命令与 release 构建的特殊之处见 [docs/release.md](docs/release.md) 1.1–1.4；
   签名密钥的位置与「构建成功不等于包可用」的判据见第 2 节。
 - **新增或升级依赖必做两件事。** 一是补 `app/proguard-rules.pro` 的 keep 规则；
-  二是复核四个 ABI 的包体积（`sherpa-onnx` 的 `.so` 每架构 14–30 MB，不能只看 arm64-v8a）。
-  见 release.md 1.4 与 7。
+  二是复核两个变体 × 四个 ABI 的包体积（`sherpa-onnx` 的 `.so` 每架构 14–30 MB，
+  且只进 `full`，不能只看 arm64-v8a 或只看标准包）。见 release.md 1.4 与 7。
 - **涉及时间与时区的单测必须显式固定 `ZoneId`。** 本机是 `Asia/Shanghai`、runner 是 UTC，
   本地通过而 CI 失败的典型原因就是断言里隐含了默认时区，写法参照 `TimeLabelsTest`。
 - **镜像仓库按环境切换。** `CI=true` 时只用 `google()` / `mavenCentral()` / `gradlePluginPortal()`；
@@ -107,6 +109,9 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 - **debug 与 release 用不同包名，可同机共存。** debug 为 `io.qwenpaw.node.debug` / `[debug]QP Node`，
   release 为 `io.qwenpaw.node` / `QwenPaw Node`。设备侧 `pm`、`am` 与验收脚本默认按 debug 执行，
   脚本可用 `ADB_PKG` 覆盖。
+- **语音有两个构建变体。** `full` 带端上识别引擎、可二选一来源；`nosherpa` 不带，
+  只能服务端转写。变体名只进产物文件名与 `versionName`，`applicationId` 相同、可互相覆盖，
+  不能同机共存。见 release.md 7.1；改动 `voice/` 时两个变体都要编译与跑单测。
 
 ## 5、文档
 
@@ -147,8 +152,8 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 
 | 改了 | 必须执行 | 通过判据 |
 | --- | --- | --- |
-| 任何 `app/src/main` 代码 | `./gradlew :app:testDebugUnitTest` | 全部用例通过；新增逻辑补了对应用例 |
-| 依赖、`proguard-rules.pro`、`build.gradle.kts`、版本号 | `./gradlew :app:assembleRelease` | 构建成功，四个 ABI 的包都产出，签名配置生效 |
+| 任何 `app/src/main` 代码 | `./gradlew :app:testFullDebugUnitTest :app:testNosherpaDebugUnitTest` | 两个变体全部用例通过；新增逻辑补了对应用例 |
+| 依赖、`proguard-rules.pro`、`build.gradle.kts`、版本号 | `./gradlew :app:assembleRelease` | 构建成功，两个变体 × 四个 ABI 共 8 个包都产出，签名配置生效 |
 | 涉及时间、时区、格式化的断言 | 同上单测 + 固定 `ZoneId` | 显式写出时区，不依赖运行环境的默认值 |
 | 任何文档 | 对照 [.agents/writing.md](.agents/writing.md) 的语体规则逐条核对 | 文案与源码字符串一致，链接与节号引用可达 |
 | 端口、地址、路径类常量 | 实际执行一次相关命令 | 命令能跑通，不是照抄旧记录 |

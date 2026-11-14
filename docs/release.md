@@ -11,13 +11,19 @@
 ### 1.1 常用命令
 
 ```bash
-./gradlew :app:assembleDebug        # 产出 app/build/outputs/apk/debug/
-./gradlew :app:assembleRelease      # 产出 app/build/outputs/apk/release/
-./gradlew :app:testDebugUnitTest    # 运行 JVM 单测
-./gradlew :app:installDebug         # 编译并安装到已连接设备
+./gradlew :app:assembleFullDebug      # 产出 app/build/outputs/apk/full/debug/
+./gradlew :app:assembleNosherpaDebug  # 产出 app/build/outputs/apk/nosherpa/debug/
+./gradlew :app:assembleRelease        # 两个变体的 release 各四个架构
+./gradlew :app:testFullDebugUnitTest     # 标准包的单测
+./gradlew :app:testNosherpaDebugUnitTest # -no-sherpa 包的单测
+./gradlew :app:installFullDebug          # 编译并安装标准包到已连接设备
 ```
 
-日常只编译并装包时使用 `installDebug`，只跑单测时使用 `testDebugUnitTest`。
+任务名带变体前缀：`assemble<Flavor><BuildType>`、`test<Flavor><BuildType>UnitTest`、
+`install<Flavor><BuildType>`。**没有 `testDebugUnitTest` 这个任务**——加了变体之后
+单测只能按变体跑。`assembleDebug` 与 `assembleRelease` 仍是聚合目标，
+一次会构建 8 个包，日常不要用。
+日常只编译并装包时使用 `installFullDebug`，只跑单测时按变体各跑一次。
 
 **不要直接执行 `./gradlew build`。** 该目标会连带执行 lint、release 构建与全部测试，
 是整条命令链里最重的一条，在内存受限的机器上极易与设备测试或模拟器叠加导致 swap 打满。
@@ -100,8 +106,8 @@ keystore.properties    # storeFile / storePassword / keyAlias / keyPassword
 `build.gradle.kts` 只在 `keystore.properties` 里能读到 `storeFile` 时才创建 `release`
 签名配置，因此「找不到密钥」与「`signingConfig` 为 null」是同一件事。
 
-`splits.abi` 之后产物按架构拆分，签好名的文件名形如 `app-arm64-v8a-release.apk`，
-未签名则是 `app-arm64-v8a-release-unsigned.apk`。
+`splits.abi` 之后产物按架构拆分，签好名的文件名形如 `app-full-arm64-v8a-release.apk`，
+未签名则是 `app-full-arm64-v8a-release-unsigned.apk`。
 
 ---
 
@@ -128,17 +134,20 @@ debug 与 release 使用不同签名，直接覆盖安装会失败：
 INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package ... signatures do not match
 ```
 
-正确顺序（`splits.abi` 之后产物按架构拆分，装设备对应那一份）：
+正确顺序（`splits.abi` 之后产物按架构拆分，装设备对应那一份；变体按需选择）：
 
 ```bash
 adb uninstall io.qwenpaw.node
-adb install app/build/outputs/apk/release/app-arm64-v8a-release.apk   # 手机
-adb install app/build/outputs/apk/release/app-x86_64-release.apk      # x86_64 模拟器
+adb install app/build/outputs/apk/full/release/app-full-arm64-v8a-release.apk              # 手机，标准包
+adb install app/build/outputs/apk/nosherpa/release/app-nosherpa-x86_64-release.apk        # x86_64 模拟器，无 sherpa
 ```
 
 若省掉卸载这一步，安装会直接失败，而报错文案不会明示「是因为签名不同」，
 容易误判为 APK 损坏。装错架构则报 `INSTALL_FAILED_NO_MATCHING_ABIS`，
 可用 `adb shell getprop ro.product.cpu.abi` 确认设备架构。
+
+**两个语音变体共用同一个 applicationId**，因此互相覆盖安装即可升级，不需要先卸载；
+但也就不能同机共存，要对比两种包时先卸载再装另一个。
 
 **debug 与 release 用不同包名，可同机共存。** debug 的 applicationId 为
 `io.qwenpaw.node.debug`，应用名为 `[debug]QP Node`（由
@@ -166,7 +175,8 @@ Compose 内部还会走 debug 断言路径。实测对话页滚动的主线程�
 ```
 
 运行前提：设备已连接、LXC 测试容器已启动（见 [.agents/test-env.md](../.agents/test-env.md) 第 1 节）、
-且已执行过 `./gradlew :app:assembleDebug`。
+且已执行过 `./gradlew :app:assembleFullDebug`（验 `-no-sherpa` 包时改成
+`assembleNosherpaDebug`，并用 `ADB_FLAVOR=nosherpa` 让脚本取对产物）。
 
 容器内的 `qwenpaw` 只在交互式 shell 的 PATH 中（见 [test-env.md](../.agents/test-env.md) 1.1），
 `lxc exec` 之外的命令一律写全路径 `/home/csdetr/.qwenpaw/bin/qwenpaw`。
@@ -245,9 +255,10 @@ git tag -a v0.1.0 -m "QwenPaw Node v0.1.0 — 首个最小可用版本"
 
 ### 5.3 自动发布
 
-推送 `v*` tag 即触发 `.github/workflows/release.yml`，流程为：运行 JVM 单测 →
-`assembleRelease` → `apksigner verify` 校验签名 → 重命名产物 →
-创建 Release 并上传四个包。需要补发时用 `workflow_dispatch`，输入已存在的 tag，
+推送 `v*` tag 即触发 `.github/workflows/release.yml`，流程为：运行两个变体的
+JVM 单测 → `assembleRelease` → `apksigner verify` 校验签名 → 重命名产物 →
+创建 Release 并上传八个包（2 变体 × 4 架构，少一个就失败）。
+需要补发时用 `workflow_dispatch`，输入已存在的 tag，
 版本名取自该输入，而不是触发时的分支名。
 
 签名密钥不进仓库，由四个 Repository secrets 在构建时还原：
@@ -299,11 +310,37 @@ adb emu kill                  # 关闭模拟器（使用模拟器时）
 
 ## 7、发布形态的限制
 
-### 7.1 按 ABI 拆分，不打单一全量包
+### 7.1 两个变体，各按 ABI 拆分
 
-`splits.abi` 覆盖四个架构，`isUniversalApk = false`。不打「全架构单包」的原因是
-sherpa-onnx 的 `.so` 每个 ABI 14–30MB，四个合进一个包光 native 就 93MB，
-用户为聊天下载 93MB 不合理。拆开后每台设备只取自己那份。
+0.4.0 起每次发版产出 **8 个 APK**：`full` 与 `nosherpa` 两个变体，各覆盖四个架构。
+`splits.abi` 使用 `isUniversalApk = false`，每台设备只取自己那一份。
+
+| 变体 | 语音能力 | 产物目录 |
+| --- | --- | --- |
+| `full` | 本地识别（默认）与服务端转写二选一 | `app/build/outputs/apk/full/release/` |
+| `nosherpa` | 只能服务端转写 | `app/build/outputs/apk/nosherpa/release/` |
+
+**变体差异靠 Gradle 源码集实现，不是同一份代码里的运行时开关**：
+`sherpa-onnx` 的 AAR 与 `commons-compress` 都声明成 `fullImplementation`，
+`SherpaAsr` / `SherpaEngine` 只放在 `app/src/full/`，`nosherpa` 的同名
+`LocalAsrProvider` 返回 `LocalAsr.Disabled`。因此 `nosherpa` 编译期就不含这些类，
+四个 ABI 的包都不带 `libsherpa-onnx-jni.so`。理由与接缝细节见
+[protocol.md](protocol.md) 第 14 节。
+
+文件名规则（workflow 统一改名）：
+
+```
+QwenPaw-Node-<tag>-<abi>.apk              # full
+QwenPaw-Node-<tag>-no-sherpa-<abi>.apk    # nosherpa
+```
+
+`-no-sherpa` 只进文件名与 `versionName`，**`applicationId` 两个变体相同**，
+可以互相覆盖升级，登录态、字体、设置都跟着走。代价是两版不能同机共存，
+需要对比时先卸载再装另一个。
+
+拆包的理由在 `full` 上仍然成立：sherpa-onnx 的 `.so` 每个 ABI 14–30MB，
+四个合进一个包光 native 就 90MB 出头。`nosherpa` 的四个包都只有 2.4MB 左右，
+拆包对它收益很小，但两条产物线共用同一套命名与校验，不单独区别对待。
 
 **`splits.abi` 与 `ndk.abiFilters` 二选一，同时存在时后者被忽略**，
 因此不再保留 `abiFilters` 那一行。本地想只出一个架构时，临时把 `include()` 收窄即可。
@@ -311,31 +348,35 @@ sherpa-onnx 的 `.so` 每个 ABI 14–30MB，四个合进一个包光 native 就
 | ABI | 实测状态 | 说明 |
 | --- | --- | --- |
 | `arm64-v8a` | **已验证** | 覆盖 2019 年后的主流手机；此前多轮真机验证过安装、启动、连接与对话 |
-| `x86_64` | **已验证** | 模拟器 `qp35` 上安装 release 包、走完引导第 1 步连接验证 |
+| `x86_64` | **已验证** | 模拟器 `qp35` 与 redroid 容器上安装 release 包、走完引导第 1 步连接验证 |
 | `armeabi-v7a` | **未验证** | 本机无 32 位 ARM 设备；仅确认能编译产出 |
 | `x86` | **未验证** | API 30 起官方不再提供 32 位 x86 系统镜像，无设备可测 |
 
 **未验证不等于不能用，但也不能写成「支持」。** 对外只陈述「额外构建、未实测」，
 不承诺可用性。这一口径要同步到 README 的下载说明，避免用户从 Release 页面
-看到四个包就以为都经过验证。
+看到八个包就以为都经过验证。
 
 ### 7.2 体积现状
 
-实测命令：`find app/build/outputs/apk/release -name "*.apk" -printf "%s %f\n"`。
+实测命令：`find app/build/outputs/apk -path "*/release/*.apk" -printf "%s %p\n"`。
 
-| 架构 | release APK | native 构成 |
-| --- | --- | --- |
-| `arm64-v8a` | 24,497,163 字节（约 23.4MB） | `libsherpa-onnx-jni.so` 21.4MB |
-| `armeabi-v7a` | 17,267,983 字节（约 16.5MB） | 14.5MB |
-| `x86_64` | 27,443,453 字节（约 26.2MB） | 24.2MB |
-| `x86` | 38,448,662 字节（约 36.7MB） | `libsherpa-onnx-jni.so` 5.1MB + `libonnxruntime.so` 29.6MB |
+0.4.0 实测（`full` / `nosherpa`）：
 
-`x86` 明显大于其它三个：只有它在 AAR 里额外带了一份独立的 `libonnxruntime.so`。
+| 架构 | `full` | `nosherpa` | `full` 包内 native |
+| --- | --- | --- | --- |
+| `arm64-v8a` | 25,003,288（约 25.0MB） | 2,447,277（约 2.45MB） | `libsherpa-onnx-jni.so` 22.4MB |
+| `armeabi-v7a` | 17,774,108（约 17.8MB） | 2,444,435 | 同上量级 |
+| `x86_64` | 27,949,578（约 27.9MB） | 2,447,938 | 同上 |
+| `x86` | 38,954,787（约 39.0MB） | 2,446,459 | 另带 `libonnxruntime.so` |
 
-release 的体积几乎全部是 sherpa-onnx 的 native 库，这一点无法继续压缩——
-语音识别引擎本身就有这么大。四个包的 dex 相同，R8 只跑一次。
+`nosherpa` 的四个包内只剩 `libandroidx.graphics.path.so`（10KB）。
+`full` 的 arm64 里 sherpa 的 `.so` 占 89.6%，与 0.3.2 的九成左右同量级；
+`x86` 一枝独秀是因为它额外带 `libonnxruntime.so`。
 
-### 7.3 字体与模型不随包分发
+### 7.3 字体与模型都不随包分发
 
-MiSans 字体与语音识别模型都不打进 APK，由用户在应用内按需下载。
-因此首次安装的包体较小，但语音输入与 MiSans 字体需要先完成下载才能使用。
+MiSans 字体不打进 APK，由用户在应用内按需下载，因此首次安装的包体较小，
+但 MiSans 字体需要先完成下载才能使用。
+
+语音识别模型同样不打进包：`full` 的「设置 → 语音 → 语音识别模型」在用户点击后
+从 sherpa-onnx 官方 release 下载（约 150MB），`nosherpa` 没有这一行，也不需要下载。

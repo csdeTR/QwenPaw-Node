@@ -224,8 +224,10 @@ private fun QwenPawNav(
     // 「Activity 被重建后文本丢失」的问题。
 
     val speech = remember(context) { io.qwenpaw.node.voice.VoiceInput(context) }
-    val modelManager = remember(context) { io.qwenpaw.node.voice.SpeechModelManager(context) }
-    val modelState by modelManager.state.collectAsState()
+    val transcriber = remember { io.qwenpaw.node.voice.ServerTranscriber(app.api) }
+    // 端上识别能力由变体决定：full 有 sherpa，_no-sherpa 恒为不可用。
+    val localAsr = app.localAsr
+    val localModel by localAsr.modelState.collectAsState()
 
     // 日志导入：读外部文本后替换日志页内容，用于查看别人分享的日志。
     val logImportLauncher = rememberLauncherForActivityResult(
@@ -252,6 +254,7 @@ private fun QwenPawNav(
         }
     }
     val voiceState by speech.state.collectAsState()
+    val voiceStartedAt by speech.startedAt.collectAsState()
     val voicePartial by speech.partial.collectAsState()
 
     // ---------------- 头像 ----------------
@@ -350,63 +353,152 @@ private fun QwenPawNav(
     // 归档提示按自然日抑制。用 state 而非每次直接读 prefs，
     // 勾选后当次就能立刻生效，不必等下一次重组。
     var archiveTipVisible by remember { mutableStateOf(viewModel.shouldShowArchiveTip()) }
-    // 点击麦克风但模型未下载：第一级提示。
-    var showVoiceModelRequired by remember { mutableStateOf(false) }
-    // 第一级选了「关闭」后，第二级询问是否顺带隐藏按钮。
+    // 点击麦克风但服务端转写不可用：说明原因，不发起录音。
+    var voiceUnavailable by remember {
+        mutableStateOf<io.qwenpaw.node.data.transcription.TranscriptionStatus?>(null)
+    }
+    // 第一次选了「关闭」后，询问是否顺带隐藏按钮。
     var showHideVoiceButton by remember { mutableStateOf(false) }
+    // 本地识别未下载模型时的一级提示。
+    var showVoiceModelRequired by remember { mutableStateOf(false) }
 
-    // 「点一下」模式且开了自动停止时才启用端点检测；按住说话松手即停，不需要。
+    /**
+     * 「说完自动停止」的生效条件。
+     *
+     * 只有本地识别 + 点一下模式才启用：按住说话本来就是松手即停，
+     * 服务端转写则是整段上传，断句没有意义。
+     */
     fun voiceAutoStopNow(): Boolean =
-        appState.voiceTrigger == io.qwenpaw.node.ui.VoiceTrigger.TAP && appState.voiceAutoStop
+        appState.voiceSource == io.qwenpaw.node.ui.VoiceSource.LOCAL &&
+            appState.voiceTrigger == io.qwenpaw.node.ui.VoiceTrigger.TAP &&
+            appState.voiceAutoStop
+
+    /** 转写结果追加进草稿，不覆盖用户已输入的文字。 */
+    fun appendDraft(text: String) {
+        val existing = chatVmState.draft
+        val merged = if (existing.isBlank()) text else "$existing$text"
+        chatVm.updateDraft(merged)
+    }
+
+    /** 录音结束后的上传与结果填充（服务端转写）。 */
+    fun transcribe(file: File) {
+        val conn = connection
+        if (conn == null) {
+            speech.resetToIdle()
+            toast(context, "还没有连接服务器")
+            return
+        }
+        speech.markTranscribing()
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { transcriber.transcribe(conn, file) }
+            }
+            result
+                .onSuccess { text -> appendDraft(text) }
+                .onFailure { e -> toast(context, e.message ?: "转写失败") }
+            speech.resetToIdle()
+        }
+    }
+
+    /** 端上识别：边录边出字，结束时填入草稿。 */
+    fun beginLocalRecording() {
+        val engine = localAsr.createEngine(endpointing = voiceAutoStopNow())
+        if (engine == null) {
+            toast(context, "模型文件不完整，重新下载一次")
+            return
+        }
+        speech.start(
+            target = io.qwenpaw.node.voice.VoiceTarget.Local(
+                engine = engine,
+                autoStop = voiceAutoStopNow(),
+                onPartial = {},
+                onFinal = { text -> appendDraft(text) },
+            ),
+            onError = { message ->
+                speech.resetToIdle()
+                toast(context, message)
+            },
+        )
+    }
+
+    fun beginUploadRecording() {
+        speech.start(
+            target = io.qwenpaw.node.voice.VoiceTarget.Upload(
+                onRecorded = { file, reachedLimit ->
+                    if (reachedLimit) {
+                        toast(
+                            context,
+                            "录音已达 ${io.qwenpaw.node.voice.VoiceInput.MAX_DURATION_MS / 1000} 秒上限",
+                        )
+                    }
+                    transcribe(file)
+                },
+            ),
+            onError = { message ->
+                speech.resetToIdle()
+                toast(context, message)
+            },
+        )
+    }
+
+    /** 按当前来源开录。本地识别不看服务端，只有上传才需要先确认服务端可用。 */
+    fun beginRecording() {
+        if (appState.voiceSource == io.qwenpaw.node.ui.VoiceSource.LOCAL && localAsr.available) {
+            beginLocalRecording()
+        } else {
+            beginUploadRecording()
+        }
+    }
 
     val askMic = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) {
-            speech.start(
-                model = modelManager.installedDir(),
-                onPartial = {},
-                onFinal = { text -> chatVm.updateDraft(text) },
-                onError = {},
-                autoStop = voiceAutoStopNow(),
-            )
-        }
+        if (granted) beginRecording() else toast(context, "没有麦克风权限，无法录音")
     }
 
+    /**
+     * 点麦克风。
+     *
+     * 本地识别不依赖服务端，直接开录；服务端转写要先确认可用，
+     * 否则用户会白录一段再等一次失败上传。
+     */
     fun startVoice() {
-        // 模型是使用前提。未下载时先弹两级提示，不要静默失败。
-        if (modelState !is io.qwenpaw.node.voice.ModelState.Ready) {
-            showVoiceModelRequired = true
+        // 本地识别要先有模型：未下载时弹说明并引导去设置。
+        if (appState.voiceSource == io.qwenpaw.node.ui.VoiceSource.LOCAL && localAsr.available) {
+            if (localModel !is io.qwenpaw.node.voice.LocalModelState.Ready) {
+                showVoiceModelRequired = true
+                return
+            }
+            if (!speech.hasPermission()) {
+                askMic.launch(Manifest.permission.RECORD_AUDIO)
+                return
+            }
+            beginLocalRecording()
             return
+        }
+        when (val status = appState.transcribeStatus) {
+            io.qwenpaw.node.data.transcription.TranscriptionStatus.Ready -> Unit
+            // 还没问出来（首次进入、或 401 期间）先探一次，拿到结论再决定。
+            io.qwenpaw.node.data.transcription.TranscriptionStatus.Unknown -> {
+                viewModel.refreshTranscribeStatus { result ->
+                    if (result.canRecord) {
+                        if (speech.hasPermission()) beginUploadRecording() else askMic.launch(Manifest.permission.RECORD_AUDIO)
+                    } else {
+                        voiceUnavailable = result
+                    }
+                }
+                return
+            }
+            else -> {
+                voiceUnavailable = status
+                return
+            }
         }
         if (!speech.hasPermission()) {
             askMic.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        speech.start(
-            model = modelManager.installedDir(),
-            onPartial = {},
-            onFinal = { text -> chatVm.updateDraft(text) },
-            onError = {},
-            autoStop = voiceAutoStopNow(),
-        )
-    }
-
-    // 模型加载要几秒，提前在后台预热，按下麦克风时才能立即出声。
-    // 端点检测会改变识别器配置，两种配置各预热一份，切换设置后不必等第一次加载。
-    LaunchedEffect(appState.voiceEnabled, modelState, appState.voiceTrigger, appState.voiceAutoStop) {
-        if (appState.voiceEnabled &&
-            modelState is io.qwenpaw.node.voice.ModelState.Ready &&
-            speech.hasPermission()
-        ) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                io.qwenpaw.node.voice.StreamingRecognizer.create(
-                    modelManager.installedDir(),
-                    16_000,
-                    endpointing = voiceAutoStopNow(),
-                )
-            }
-        }
+        beginUploadRecording()
     }
 
     // 屏幕是 Compose 内部状态，系统返回键默认会直接退出 Activity。
@@ -784,16 +876,19 @@ private fun QwenPawNav(
                 ChatScreen(
                     state = chatVmState,
                     voiceState = voiceState,
+                    voiceStartedAt = voiceStartedAt,
                     voicePartial = voicePartial,
-                    // 可见性只看开关；模型是否就绪另行传入，用于点击时的提示与弱化显示。
+                    // 可见性只看开关；服务端转写是否可用另行传入，用于点击时的提示与弱化显示。
                     voiceVisible = appState.voiceEnabled,
-                    voiceReady = modelState is io.qwenpaw.node.voice.ModelState.Ready,
+                    // 两个来源任一可用就不弱化：本地识别不看服务端配置。
+                    voiceAvailable = appState.transcribeStatus.canRecord,
+                    voiceLocalReady = appState.voiceSource == io.qwenpaw.node.ui.VoiceSource.LOCAL &&
+                        localModel is io.qwenpaw.node.voice.LocalModelState.Ready,
                     imageLoader = imageLoader,
                     connection = connection,
                     // 左上角按钮打开对话列表（附加页），不是在页面栈里返回。
                     onBack = { screen = Screen.LIST },
                     voiceHoldMode = appState.voiceTrigger == io.qwenpaw.node.ui.VoiceTrigger.HOLD,
-                    voiceAutoStop = appState.voiceAutoStop,
                     assistantCollapse = appState.assistantCollapse,
                     onDraftChange = chatVm::updateDraft,
                     onSend = { chatVm.send() },
@@ -802,7 +897,7 @@ private fun QwenPawNav(
                     onAttach = { pickFiles.launch(Unit) },
                     onVoiceStart = { startVoice() },
                     onVoiceStop = { speech.stop() },
-                    onVoiceCancel = { speech.stop() },
+                    onVoiceCancel = { speech.resetToIdle() },
                     onRemoveAttachment = chatVm::removeAttachment,
                     onApprove = chatVm::approve,
                     onDeny = chatVm::deny,
@@ -990,22 +1085,29 @@ private fun QwenPawNav(
                     voiceEnabled = appState.voiceEnabled,
                     onVoiceEnabled = { on ->
                         viewModel.setVoiceEnabled(on)
-                        // 打开开关但模型还没下载，先说明再引导下载。
-                        if (on && modelState !is io.qwenpaw.node.voice.ModelState.Ready) {
-                            showVoiceIntro = true
-                        }
+                        // 打开开关时先说明录音会上传到服务端，不再有模型下载这一步。
+                        if (on) showVoiceIntro = true
                     },
                     voiceTrigger = appState.voiceTrigger,
                     onVoiceTrigger = viewModel::setVoiceTrigger,
+                    voiceSource = appState.voiceSource,
+                    onVoiceSource = { source ->
+                        viewModel.setVoiceSource(source)
+                        // 切到服务端转写时顺手探一次，切过去就能看到是否可用。
+                        if (source == io.qwenpaw.node.ui.VoiceSource.SERVER) {
+                            viewModel.refreshTranscribeStatus()
+                        }
+                    },
+                    localAsrAvailable = localAsr.available,
+                    localModel = localModel,
+                    onDownloadModel = { scope.launch { localAsr.download() } },
+                    onRemoveModel = { localAsr.remove() },
                     voiceAutoStop = appState.voiceAutoStop,
                     onVoiceAutoStop = viewModel::setVoiceAutoStop,
+                    transcribeStatus = appState.transcribeStatus,
+                    onRefreshTranscribe = { viewModel.refreshTranscribeStatus() },
                     assistantCollapse = appState.assistantCollapse,
                     onAssistantCollapse = viewModel::setAssistantCollapse,
-                    modelState = modelState,
-                    onDownloadModel = {
-                        scope.launch { modelManager.download() }
-                    },
-                    onRemoveModel = { modelManager.remove() },
                     fontState = fontState,
                     onDownloadFont = { viewModel.downloadFont() },
                     onRemoveFont = { viewModel.removeFont() },
@@ -1128,28 +1230,37 @@ private fun QwenPawNav(
 
     if (showVoiceIntro) {
         io.qwenpaw.node.ui.chat.VoiceIntroDialog(
-            modelReady = modelState is io.qwenpaw.node.voice.ModelState.Ready,
+            modelReady = localModel is io.qwenpaw.node.voice.LocalModelState.Ready,
             onDismiss = { showVoiceIntro = false },
             onDownload = {
                 showVoiceIntro = false
                 viewModel.setVoiceEnabled(true)
-                scope.launch { modelManager.download() }
+                scope.launch { localAsr.download() }
             },
             holdMode = appState.voiceTrigger == io.qwenpaw.node.ui.VoiceTrigger.HOLD,
         )
     }
 
-    // 点击麦克风但模型未下载：第一级说明原因，并给出「去设置下载」。
+    // 本地识别未下载模型：说明原因并引导去设置下载。
     if (showVoiceModelRequired) {
         io.qwenpaw.node.ui.chat.VoiceModelRequiredDialog(
             onGoToSettings = {
                 showVoiceModelRequired = false
                 screen = Screen.SETTINGS
             },
-            // 选「关闭」不是终点：紧接着问要不要顺带隐藏按钮，
-            // 把「这次不用」与「以后都不显示」分开处理。
             onDismiss = {
                 showVoiceModelRequired = false
+                showHideVoiceButton = true
+            },
+        )
+    }
+
+    // 服务端转写不可用：说明原因。配置在服务端那一侧，本机没有可下载的东西。
+    voiceUnavailable?.let { status ->
+        io.qwenpaw.node.ui.chat.VoiceUnavailableDialog(
+            status = status,
+            onDismiss = {
+                voiceUnavailable = null
                 showHideVoiceButton = true
             },
         )

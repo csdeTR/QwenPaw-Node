@@ -31,8 +31,8 @@ android {
         applicationId = "io.qwenpaw.node"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.3.2"
+        versionCode = 12
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 「关于」页里展示的仓库地址，单独抽成 BuildConfig 字段，
@@ -48,15 +48,35 @@ android {
             "\"https://github.com/csdeTR/QwenPaw-Node-Bridge\"",
         )
 
-        // sherpa-onnx 的 .so 每个 ABI 20-30MB，四个架构全打进一个包光 native 就 93MB。
-        // 改为按 ABI 拆分：每台设备只下载自己架构的那份，arm64-v8a 约 24MB。
+        // 按 ABI 拆分：四个架构各出一个包，每台设备只下载自己架构的那份。
         // 与 abiFilters 二选一，同时写时 abiFilters 会被忽略。
+        // full 变体每个架构带一份 sherpa-onnx 的 .so（14–30MB），合进一个包会成倍放大；
+        // nosherpa 的包只有 2.4MB 左右，同样拆开以免旧设备下载无关架构。
         splits {
             abi {
                 isEnable = true
                 reset()
                 include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
                 isUniversalApk = false
+            }
+        }
+
+        // 两个变体：full 带端上识别引擎，nosherpa 不带。
+        // 0.4.0 一度只留服务端转写，实测体验不如本地识别，因此恢复为双变体：
+        // full 可在本地识别与服务端转写之间二选一（默认本地），
+        // nosherpa 只能走服务端，体积小约 22MB。
+        // 变体名只体现在产物文件名上，applicationId 相同，可互相覆盖升级。
+        flavorDimensions += "asr"
+        productFlavors {
+            create("full") {
+                dimension = "asr"
+                versionNameSuffix = ""
+            }
+            create("nosherpa") {
+                dimension = "asr"
+                // 后缀进 APK 文件名（QwenPaw-Node-<tag>-no-sherpa-<abi>.apk），
+                // 不进 applicationId：两个变体共用一套登录态与缓存。
+                versionNameSuffix = "-no-sherpa"
             }
         }
     }
@@ -144,11 +164,12 @@ dependencies {
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
-    // 离线语音模型是 tar.bz2 包，需要 bzip2 解压
-    implementation("org.apache.commons:commons-compress:1.26.2")
-    // 离线语音识别引擎，AAR 不在 Maven 中央仓库，放在 app/libs
-    implementation(files("libs/sherpa-onnx-1.13.3.aar"))
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // 端上识别引擎只在 full 变体里。AAR 不在 Maven 中央仓库，放在 app/libs。
+    // nosherpa 变体不带这个依赖，因此四个 ABI 的包里都不会出现它的 .so。
+    "fullImplementation"(files("libs/sherpa-onnx-1.13.3.aar"))
+    // 模型是 tar.bz2，解压需要 bzip2。只有 full 变体会下载模型。
+    "fullImplementation"("org.apache.commons:commons-compress:1.26.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     implementation("androidx.room:room-runtime:2.6.1")

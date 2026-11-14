@@ -57,7 +57,6 @@ import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.font.FontState
 import io.qwenpaw.node.ui.VoiceTrigger
 import io.qwenpaw.node.ui.theme.ThemeMode
-import io.qwenpaw.node.voice.ModelState
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 设置页：实例、外观、消息显示、通知与行为、语音输入、运行日志、关于。 */
@@ -145,14 +144,26 @@ fun SettingsScreen(
     onVoiceEnabled: (Boolean) -> Unit = {},
     voiceTrigger: VoiceTrigger = VoiceTrigger.TAP,
     onVoiceTrigger: (VoiceTrigger) -> Unit = {},
+    /** 转写来源，默认本地识别。 */
+    voiceSource: io.qwenpaw.node.ui.VoiceSource = io.qwenpaw.node.ui.VoiceSource.LOCAL,
+    onVoiceSource: (io.qwenpaw.node.ui.VoiceSource) -> Unit = {},
+    /** 本变体是否带端上识别引擎。`_no-sherpa` 包为 false，此时不显示来源与模型两段。 */
+    localAsrAvailable: Boolean = false,
+    /** 端上识别模型的状态。 */
+    localModel: io.qwenpaw.node.voice.LocalModelState =
+        io.qwenpaw.node.voice.LocalModelState.NotInstalled,
+    onDownloadModel: () -> Unit = {},
+    onRemoveModel: () -> Unit = {},
+    /** 「说完自动停止」，只在本地识别 + 点一下模式下显示。 */
     voiceAutoStop: Boolean = true,
     onVoiceAutoStop: (Boolean) -> Unit = {},
+    /** 服务端语音转写的可用性，语音页底部据此给结论并支持重探。 */
+    transcribeStatus: io.qwenpaw.node.data.transcription.TranscriptionStatus =
+        io.qwenpaw.node.data.transcription.TranscriptionStatus.Unknown,
+    onRefreshTranscribe: () -> Unit = {},
     assistantCollapse: io.qwenpaw.node.ui.chat.AssistantCollapse =
         io.qwenpaw.node.ui.chat.AssistantCollapse.RESULT_COLLAPSED,
     onAssistantCollapse: (io.qwenpaw.node.ui.chat.AssistantCollapse) -> Unit = {},
-    modelState: ModelState = ModelState.NotInstalled,
-    onDownloadModel: () -> Unit = {},
-    onRemoveModel: () -> Unit = {},
     fontState: FontState = FontState.NotInstalled,
     onDownloadFont: () -> Unit = {},
     onRemoveFont: () -> Unit = {},
@@ -541,7 +552,7 @@ fun SettingsScreen(
                         NavRow(
                             icon = QwenIcons.mic,
                             title = "语音",
-                            subtitle = "语音按钮、触发方式、识别模型",
+                            subtitle = "语音按钮、转写来源与触发方式",
                             onClick = { section = SettingsPage.VOICE },
                         )
                         Divider()
@@ -962,10 +973,43 @@ fun SettingsScreen(
                     Card {
                         SwitchRow(
                             title = "显示语音按钮",
-                            subtitle = "首次使用需下载识别模型",
+                            subtitle = "录音后转写为文字",
                             checked = voiceEnabled,
                             onCheckedChange = onVoiceEnabled,
                         )
+                        // 转写来源只在带端上引擎的包里有得选。
+                        // `_no-sherpa` 包没有本地识别，给出一个用不了的选项只会误导。
+                        if (localAsrAvailable) {
+                            Divider()
+                            Text(
+                                text = "转写来源",
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp),
+                            )
+                            ChipRow {
+                                io.qwenpaw.node.ui.VoiceSource.entries.forEach { source ->
+                                    Chip(
+                                        text = when (source) {
+                                            io.qwenpaw.node.ui.VoiceSource.LOCAL -> "本地识别"
+                                            io.qwenpaw.node.ui.VoiceSource.SERVER -> "服务端转写"
+                                        },
+                                        selected = voiceSource == source,
+                                        onClick = { onVoiceSource(source) },
+                                    )
+                                }
+                            }
+                            Text(
+                                text = when (voiceSource) {
+                                    io.qwenpaw.node.ui.VoiceSource.LOCAL ->
+                                        "识别在本机完成，音频不出手机；需先下载识别模型。"
+                                    io.qwenpaw.node.ui.VoiceSource.SERVER ->
+                                        "录音上传至所连接的服务端转写；需联网且服务端已配置转写服务。"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                            )
+                        }
                         Divider()
                         Text(
                             text = "触发方式",
@@ -989,8 +1033,12 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        // 自动停止只在「点一下」模式下有意义：按住说话本来就是松手即停。
-                        if (voiceTrigger == VoiceTrigger.TAP) {
+                        // 自动停止只在「本地识别 + 点一下」下有意义：
+                        // 按住说话本来就是松手即停，服务端转写则是整段上传。
+                        if (localAsrAvailable &&
+                            voiceSource == io.qwenpaw.node.ui.VoiceSource.LOCAL &&
+                            voiceTrigger == VoiceTrigger.TAP
+                        ) {
                             Divider()
                             SwitchRow(
                                 title = "说完自动停止",
@@ -999,12 +1047,24 @@ fun SettingsScreen(
                                 onCheckedChange = onVoiceAutoStop,
                             )
                         }
-                        Divider()
-                        ModelRow(
-                            state = modelState,
-                            onDownload = onDownloadModel,
-                            onRemove = onRemoveModel,
-                        )
+                        if (localAsrAvailable && voiceSource == io.qwenpaw.node.ui.VoiceSource.LOCAL) {
+                            Divider()
+                            ModelRow(
+                                state = localModel,
+                                onDownload = onDownloadModel,
+                                onRemove = onRemoveModel,
+                            )
+                        }
+                        // 服务端转写这一行只在真的走服务端时才有意义。
+                        if (!localAsrAvailable ||
+                            voiceSource == io.qwenpaw.node.ui.VoiceSource.SERVER
+                        ) {
+                            Divider()
+                            TranscribeRow(
+                                status = transcribeStatus,
+                                onRefresh = onRefreshTranscribe,
+                            )
+                        }
                     }
                 }
 
@@ -1191,7 +1251,8 @@ fun SettingsScreen(
                         CreditLine(
                             name = "k2-fsa/sherpa-onnx",
                             url = "https://github.com/k2-fsa/sherpa-onnx",
-                            detail = "离线语音识别引擎（Apache-2.0），语音模型按需下载",
+                            detail = "端上流式识别引擎（Apache-2.0），仅标准包内置；" +
+                                "识别模型按需从该仓库下载",
                         )
                         CreditLine(
                             name = "adivenxnataly/MiSans",
@@ -1376,7 +1437,7 @@ private fun SettingsTopBar(onBack: () -> Unit, subtitle: String) {
 
 @Composable
 private fun ModelRow(
-    state: ModelState,
+    state: io.qwenpaw.node.voice.LocalModelState,
     onDownload: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -1386,16 +1447,16 @@ private fun ModelRow(
                 Text(text = "语音识别模型", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     text = when (state) {
-                        // 模型是使用前提，不是可选增强。原文案容易读成「下载后还能离线用」，
-                        // 实际是不下载就完全不能用。
-                        ModelState.NotInstalled -> "未下载，语音输入现不可用"
-                        ModelState.Ready -> "已安装，语音输入可用"
-                        is ModelState.Downloading -> "正在下载 ${(state.progress * 100).toInt()}%"
-                        ModelState.Installing -> "正在解压"
-                        is ModelState.Failed -> state.message
+                        // 模型是本地识别的前提，不是可选增强。
+                        io.qwenpaw.node.voice.LocalModelState.NotInstalled -> "未下载，本地识别暂不可用"
+                        io.qwenpaw.node.voice.LocalModelState.Ready -> "已安装，本地识别可用"
+                        is io.qwenpaw.node.voice.LocalModelState.Downloading ->
+                            "正在下载 ${(state.progress * 100).toInt()}%"
+                        io.qwenpaw.node.voice.LocalModelState.Installing -> "正在解压"
+                        is io.qwenpaw.node.voice.LocalModelState.Failed -> state.message
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (state is ModelState.Failed) {
+                    color = if (state is io.qwenpaw.node.voice.LocalModelState.Failed) {
                         MaterialTheme.colorScheme.error
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
@@ -1404,16 +1465,16 @@ private fun ModelRow(
             }
             Spacer(Modifier.width(10.dp))
             when (state) {
-                ModelState.NotInstalled -> MiniButton("下载", onDownload)
-                is ModelState.Failed -> MiniButton("重试", onDownload)
-                ModelState.Ready -> MiniButton("删除", onRemove, danger = true)
+                io.qwenpaw.node.voice.LocalModelState.NotInstalled -> MiniButton("下载", onDownload)
+                is io.qwenpaw.node.voice.LocalModelState.Failed -> MiniButton("重试", onDownload)
+                io.qwenpaw.node.voice.LocalModelState.Ready -> MiniButton("删除", onRemove, danger = true)
                 else -> CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
                 )
             }
         }
-        if (state is ModelState.Downloading) {
+        if (state is io.qwenpaw.node.voice.LocalModelState.Downloading) {
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(
                 progress = { state.progress },
@@ -1423,6 +1484,39 @@ private fun ModelRow(
         Spacer(Modifier.height(6.dp))
         Text(
             text = "来自 sherpa-onnx；约 150MB，识别全程在本机完成",
+            style = MaterialTheme.typography.labelSmall,
+            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+        )
+    }
+}
+
+@Composable
+private fun TranscribeRow(
+    status: io.qwenpaw.node.data.transcription.TranscriptionStatus,
+    onRefresh: () -> Unit,
+) {
+    Column(modifier = Modifier.padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "服务端转写", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = status.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (status.canRecord) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            // 配置在服务端改，不会自动通知；提供重探入口，改完不必重启应用。
+            MiniButton("重新检测", onRefresh)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "语音转写由服务端完成，需先在服务端配置转写服务；" +
+                "录音会发送到所连接的服务器，识别结果填入输入框。",
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )

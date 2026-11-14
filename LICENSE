@@ -29,11 +29,11 @@ SOFTWARE.
 
 | 资源 | 许可 | 说明 |
 | --- | --- | --- |
-| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | Apache-2.0 | `app/libs/sherpa-onnx-1.13.3.aar` 为官方发布产物 |
-| [MiSans 字体](https://github.com/adivenxnataly/MiSans) | MiSans 字体知识产权许可协议 | 版权归小米科技有限责任公司。**允许免费商用，但禁止再分发字体本体**。故本仓库不包含字体文件，仅在用户主动点击时运行时下载 |
+| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | Apache-2.0 | `app/libs/sherpa-onnx-1.13.3.aar` 为官方发布产物，只随标准包分发，`-no-sherpa` 包不含 |
 | [语音识别模型](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) | 见模型发布页 | 不随 APK 分发，用户按需下载 |
+| [commons-compress](https://commons.apache.org/proper/commons-compress/) | Apache-2.0 | 用 BZip2 + Tar 解压语音模型，只随标准包分发 |
+| [MiSans 字体](https://github.com/adivenxnataly/MiSans) | MiSans 字体知识产权许可协议 | 版权归小米科技有限责任公司。**允许免费商用，但禁止再分发字体本体**。故本仓库不包含字体文件，仅在用户主动点击时运行时下载 |
 | [Coil](https://coil-kt.github.io/coil/) | Apache-2.0 | 头像加载与 GIF 逐帧播放 |
-| [commons-compress](https://commons.apache.org/proper/commons-compress/) | Apache-2.0 | 用 BZip2 + Tar 解压语音模型 |
 | [OkHttp](https://square.github.io/okhttp/) | Apache-2.0 | HTTP / SSE |
 | [AndroidX / Jetpack Compose](https://developer.android.com/jetpack) | Apache-2.0 | UI 与基础库 |
 | [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) | Apache-2.0 | JSON 解析 |

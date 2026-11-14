@@ -57,7 +57,7 @@
 | [43](#43阶段-1-起步与主体合并发版2026-11-03) | 分页骨架、频道筛选、斜杠补全、上下标字号、收件箱、工具/环境变量/后台策略 | 497 个单测；`tools` 的 `config_fields` 实测为 `null`；M3 的 `MaterialTheme` 自带 `ProvideTextStyle(bodyLarge)` | [protocol.md](protocol.md) 第 20–22 节、[ui-guidelines.md](ui-guidelines.md) 8.7、[CHANGELOG.md](../CHANGELOG.md) |
 | [44](#44v014-收尾中文文案与工具行形态2026-11-03) | 命令与工具中文化、工具行改单行圆片、环境变量新增 | 518 个单测；中文只在 Console 打包产物里；模拟器须关蓝牙模拟；`toggle` 是取反语义 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.7、9.15、[AGENTS.md](../AGENTS.md) 第 3.1 节、[CHANGELOG.md](../CHANGELOG.md) |
 | [45](#45工具分组与环境变量三段2026-11-03) | 工具按官方静态表分组、emoji 换 lucide、环境变量三段常驻与二次确认 | 534 个单测；`category` 对内置工具为 `null`；catalog 17 项里只有 2 项可热改 | [protocol.md](protocol.md) 第 22 节、[ui-guidelines.md](ui-guidelines.md) 9.16、[guide.md](guide.md) 第 2 节 |
-| [46](#46v020-定时任务与工具调用控制2026-11-04) | cron 列表与表单、聊天页工具控制、双时区对照 | 578 个单测；服务端把 `dow` 归一化成 `mon`…`sun`；`promote` 后顶层 `meta.safety` 仍是锁 | [protocol.md](protocol.md) 第 23 节、[ui-guidelines.md](ui-guidelines.md) 9.17、[guide.md](guide.md) 第 9 节 |
+| [46](#46v020定时任务与工具调用控制2026-11-04) | cron 列表与表单、聊天页工具控制、双时区对照 | 578 个单测；服务端把 `dow` 归一化成 `mon`…`sun`；`promote` 后顶层 `meta.safety` 仍是锁 | [protocol.md](protocol.md) 第 23 节、[ui-guidelines.md](ui-guidelines.md) 9.17、[guide.md](guide.md) 第 9 节 |
 | [47](#47v020-试用反馈会话选择器与自动展开2026-11-04) | 会话选择器补名称与搜索、隐藏 `console`、工具卡片 7.5 秒自动展开 | 582 个单测；`dispatch-targets` 不带会话名；自动展开须让位于用户手动切换 | [ui-guidelines.md](ui-guidelines.md) 9.17、[CHANGELOG.md](../CHANGELOG.md) |
 | [48](#48测试设备切换为-redroid-152026-11-04) | 测试设备由 AVD 换成 redroid 15，720×1600 | 内核无 binderfs 的绕法、netfilter 不可用、容器资源上限 3 GB | [AGENTS.md](../AGENTS.md) 第 1、3 节、[ui-guidelines.md](ui-guidelines.md) 1.5 |
 | [49](#49docker-与-lxc-网络连通2026-11-04) | redroid 容器到 LXC 服务端的连通 | 根因是 `nft_masq` 未加载，已固化自启；实测 HTTP 200 | [AGENTS.md](../AGENTS.md) 2.1、3.1 |
@@ -74,6 +74,12 @@
 | [60](#60输入区重做受信任连接与两处修正2026-11-10) | 输入区收进单一圆角框、思考按钮按强度填充、受信任的连接、实例页停留、收件箱筛选改版 | 729 个单测；AVD `qp35` 上四场景验收；空输入即报错是实测才暴露的问题 | [ui-guidelines.md](ui-guidelines.md) 9.20–9.22、[guide.md](guide.md) 第 1、2 节 |
 | [61](#61脑图修正全屏输入与消息渲染开关2026-11-10) | 脑图路径修正、滑块松手不关窗、「+」菜单扩容与右上角瘦身、全屏输入、工作区目录浏览、两侧渲染开关 | 731 个单测；Dialog 里 `WindowInsets.ime` 恒为 0；`browse-dirs` 必须带 `show_hidden` | [ui-guidelines.md](ui-guidelines.md) 9.21、[protocol.md](protocol.md) 26.4、[guide.md](guide.md) 第 2 节 |
 | [62](#62思考强度提交缺陷魔法命令与文案硬约束2026-11-10) | 修快速拖动后强度未提交、`审批模式` 改名与两行排布、魔法命令弹窗、界面文案书面语入 AGENTS.md | 732 个单测；松手回调早于重组是强度不生效的根因；官方 PR 7378 是 Expo 独立 App，无命令面板 | [ui-guidelines.md](ui-guidelines.md) 9.21、[guide.md](guide.md) 第 2 节、[AGENTS.md](../AGENTS.md) 第 5 节 |
+| [63](#63v031工作区文本编辑与上传2026-11-10) | 工作区文本编辑与上传 | `etag` 乐观锁、409 冲突的两个选项、逐文件上传与同名冲突 | [protocol.md](protocol.md) 第 26 节 |
+| [64](#64v032备份与检查点回滚2026-11-11) | 备份与检查点回滚 | SSE 进度、签名信任按 `code` 映射、恢复范围选择 | [protocol.md](protocol.md) 第 27 节 |
+| [65](#65v032-补丁检查点的手动快照改为只读对话页验收补-b1b62026-11-11) | 检查点页改只读对话页，补 B1–B6 验收 | 消息列表与对话行抽成共用组件；`keyevent 111` 收不起软键盘 | [ui-guidelines.md](ui-guidelines.md)、[release.md](release.md) 第 4 节 |
+| [66](#66发布-v032-与测试环境维护2026-11-11) | 发布 v0.3.2 与测试环境修正 | CHANGELOG 只留已发布小节；`adb shell` 默认不是 root | [release.md](release.md) 第 5 节、[.agents/test-env.md](../.agents/test-env.md) |
+| [67](#67v040语音转写改服务端第一版单包2026-11-14) | 语音改服务端（第一版，单包） | `transcribe` 的四种 `detail` 形状；「开关打开」不等于可用 | [protocol.md](protocol.md) 第 28 节 |
+| [68](#68v040语音改回双变体2026-11-14) | 试用后改双变体 | `full` / `nosherpa` 两个源码集与 8 个包；工厂漏传参数导致静默降级 | [release.md](release.md) 第 7 节、[guide.md](guide.md) 第 4 节 |
 
 ---
 
@@ -5581,6 +5587,211 @@ SSE、检查点端点、两个 ViewModel、时间线与恢复草稿等用例）�
 不是文档里写的 `uid=0`。`adb root` 后回到 0，`adb unroot` 后回到 2000，来回都正常；
 验收脚本的 `can_block` 本来就带这条回退，所以 A6 不受影响。文档已订正。
 显示参数、三 GB 上限与 x86_64 release 包的安装启动都复验过。
+
+---
+
+## 67、v0.4.0：语音转写改服务端（第一版，单包）（2026-11-14）
+
+> **本节是已被取代的第一版方案，以第 68 节为准。** 这一版把端上识别引擎整个删掉、
+> 只留服务端转写；用户试用后认为体验不如从前，于是改回双变体。文中的包体数字、
+> A8 判据与「不再打包端上引擎」的结论都只对应这一版。
+
+把语音输入从端上 sherpa 流式识别改成「端上录 WAV、上传服务端转写」，
+并删掉端上识别引擎。第一版的包体从 23.4MB 降到 2.44MB。
+
+### 67.1 三条取舍都是先问后做的
+
+开工前向用户确认了三件事，每一项都会显著改变实现：
+
+1. **上传格式**：选了「`AudioRecord` 采 PCM、本地补 WAV 头」。
+   备选是 MediaRecorder 直接录 m4a（体积 1/10，但要换掉整个采集实现，
+   且中断时容易产出不可用文件）与端上转 OGG/Opus（体积最小，但要引编码器，
+   与「删依赖缩包」的初衷相反）。
+2. **「说完自动停止」**：删掉。整段上传下断句没有意义，自己实现能量阈值准确率不高。
+3. **服务端不可用时**：连接后探测，麦克风置灰并说明。不做「允许录音、失败再提示」，
+   那会让用户白录一段再等一次失败上传。
+
+### 67.2 端点实测（先测再动手）
+
+`docs/protocol.md` 第 28 节是完整记录，这里只留几条影响实现的：
+
+- **`transcribe` 的 `detail` 有四种 JSON 类型**：`disabled` 与不支持的后缀是 400 + 对象
+  `{code, message}`，provider 失败是 500 + 字符串，缺字段是 422 + FastAPI 数组。
+  按字符串统一处理必然出错，客户端按状态码 + `code` 分流。
+- **开关不等于可用。** `whisper_api` 但 `configured_provider_id` 为空时，服务端 500，
+  而 `/transcription-providers` 仍列出 6–7 项 `available:true`。只看开关或候选数量
+  都会误判——这是 `Misconfigured` 这一态被加进来的原因。
+- **文件名没有后缀会回落成 `.webm`**，所以客户端必须显式带 `.wav`。
+- **providers 路由的前缀是 `/api/models`**，`/api/providers/...` 是 405。
+
+成功路径一开始无从验证：两个容器都是 `disabled`，`config.json` 的 `providers` 为空。
+在容器内起了一个假 ASR（`127.0.0.1:9099`），把 `qwenpaw-local` 的 `base_url` 指过去，
+才拿到 `{"text":"你好，这是一次转写验证"}`。这部分记在 protocol.md 28.4。
+
+### 67.3 为什么分 `WavWriter` 与 `ServerTranscriber`
+
+两者都是「没有它们也能跑」的抽象，加进来有具体理由：
+
+- **`WavWriter`**：它是这条链路里唯一能脱离设备做单测的部分。头字段写错时
+  服务端照常接受上传（只看后缀），错误要到播放阶段才暴露，因此逐字段断言。
+- **`ServerTranscriber`**：四种失败形状的映射集中在一处。散在 ViewModel 里的话，
+  以后新增一个状态码就要翻三个文件。
+
+`VoiceInput` 的目标是 ≤120 行，实际 190 行左右——多出来的是 90 秒上限、
+采样率不一致时的重采样判断、以及「交出去之后不复位状态」的处理。
+后者是因为调用方紧接着会置「正在转写」，这里先写 `Idle` 会让浮层闪一下。
+
+### 67.4 两处被测试逼出来的修正
+
+1. `TranscriptionProbeTest` 的「连不上保留上次结论」原本用
+   `SocketPolicy.DISCONNECT_AT_START`，实际拿到的是空响应而不是 `IOException`
+   ——`retryOnConnectionFailure` 会重发，队列空时 OkHttp 报的是另一种错，
+   于是被判成 `Misconfigured`。改为先 `shutdown()` 一个临时 MockWebServer，
+   拿一个确定连不上的地址。
+2. `ServerTranscriberTest` 里 `runCatching{}.exceptionOrNull()` 返回 `Throwable?`，
+   `assertTrue(e is TranscriptionException)` 之后 Kotlin 不做智能转换，
+   `e.message` 仍是 `String?`。改为显式 `as TranscriptionException`。
+
+### 67.5 设备验收
+
+新增 `A8 语音` 场景，判据是「设置页没有模型相关项」+「不可用时只弹说明」。
+`--only A8` 在 redroid 上通过。
+
+脚本改了两处：麦克风只在聊天页，而 A8 先停在设置的二级页，
+要连退两层再点开会话；另外 `open_chat_list` 每次只退一层，不能只调一次。
+
+**成功路径此前预判验不了，实际验到了。** 计划里写「redroid 没有麦克风输入，
+成功路径需人工」，实测容器内 `AudioRecord` 能开、采到的是静音，链路照样通：
+点麦克风 → 授权限 → 浮层「已录制 12 秒」→ 再点 → 浮层消失，输入框出现
+服务端返回的那句话。所以「录音 → 补头 → multipart 上传 → 解析 → 追加进草稿」
+这一串在真实设备上完整成立，不只是 MockWebServer 单测。
+
+### 67.6 体积
+
+四包都在 2.44MB 左右，包内只剩 `libandroidx.graphics.path.so`（10KB）。
+0.3.2 的 arm64 是 23.4MB、`x86` 是 36.7MB（多一份 `libonnxruntime.so`），
+这一版 `x86` 一枝独秀的现象一并消失。
+
+拆包策略保留：收益变小，但不增加维护成本，旧设备也不必下载别的架构那份。
+
+### 67.7 收尾
+
+`qp-test` 的 `transcription_provider_type` 已改回 `disabled`，`/tmp` 下的测试音频已删。
+容器内仍保留假 ASR 进程与 `qwenpaw-local` 的 `base_url` 配置（指向 `127.0.0.1:9099`），
+下次要复验成功路径可以直接复用；要恢复原状则用容器里的 `/tmp/config.json.bak`。
+
+---
+
+## 68、v0.4.0：语音改回双变体（2026-11-14）
+
+第 67 节的单包方案在试用后被否掉：没有实时字幕、必须联网、服务端未配置转写时无法使用，
+三条都是相对 0.3.2 的退步。这一轮改成同时发两种包。
+
+### 68.1 两个问题先问清楚
+
+1. **`-no-sherpa` 后缀加在哪里。** 只加在 APK 文件名上，`applicationId` 保持不变。
+   代价是两个包可以互相覆盖升级（数据跟着走），好处是用户不会同时装出两份配置。
+   另一种做法是改 `applicationIdSuffix`，但那样两个包各自一套登录态与缓存，
+   用户在两者之间切换要重新连接、重新下载字体。
+2. **`full` 默认哪种来源。** 默认本地识别，与 0.3.2 一致。
+   默认服务端的话，老用户升级后会发现要联网才能用语音，等于把这次回退的意义抵消掉。
+
+### 68.2 拆变体靠源码集，不是运行时开关
+
+`flavorDimensions += "asr"`，`full` 与 `nosherpa` 两个 flavor。真正的隔离在源码：
+
+- `app/src/main/.../voice/LocalAsr.kt` 放与变体无关的接口（`LocalAsr`、`LocalEngine`、
+  `LocalModelState`），`main` 里其余代码只依赖这层。
+- `app/src/full/.../LocalAsrProvider.kt` 返回 `SherpaAsr`，`SherpaAsr` 与 `SherpaEngine`
+  也只在 `full` 源码集里；`app/src/nosherpa/.../LocalAsrProvider.kt` 只返回 `LocalAsr.Disabled`。
+
+这样 `nosherpa` 根本不编译 sherpa 类，`fullImplementation` 里的 AAR 也不会进它的包。
+换成「同一个类里加一个布尔开关」做不到这一点：依赖仍在，`.so` 照样会被合并进去，
+包体不会降。实测 `nosherpa` 的四个包都只有 `libandroidx.graphics.path.so`（10KB）。
+
+`versionNameSuffix = "-no-sherpa"` 只影响 `BuildConfig.VERSION_NAME` 与产物命名，
+「关于」页会如实显示 `0.4.0-no-sherpa`。
+
+### 68.3 一次静默降级：工厂漏传参数
+
+`AppViewModel` 的 `localAsr` 是带默认值的构造参数（默认 `LocalAsr.Disabled`），
+工厂函数漏传了 `app.localAsr`。结果 `full` 包启动后 `voiceSource` 被强制改成
+`SERVER`，设置页的「转写来源」两档、模型行、说完自动停止一起消失，没有任何报错。
+
+A8 判据比单测更早发现：`full` 变体应当有「语音识别模型」行、不应当有「服务端转写」行，
+实际两项都反了。**带默认值的依赖注入失败时不会抛异常，只会在界面上少一块**，
+所以这类参数只能靠界面级判据兜底。
+
+### 68.4 验收脚本的两处误判
+
+- **判据撞文案。** 「本地识别为来源时不应出现服务端转写行」原本用 `text="服务端转写"` 判断，
+  而「转写来源」的两个 chip 之一就叫「服务端转写」，它一直显示在屏幕上。
+  改用该行独有的「重新检测」。
+- **权限没兜住。** 脚本 `pm clear` 之后录音权限回到未授予，点麦克风弹的是系统授权框，
+  后续点击全部落空。补 `pm grant "$PKG" android.permission.RECORD_AUDIO`。
+
+脚本同时加了 `ADB_FLAVOR`（默认 `full`），产物路径改为 `apk/<flavor>/debug/`，
+包名候选带上变体前缀。A8 内部按变体分支判断设置页内容。
+
+### 68.5 CI 的产物改名错了一次
+
+8 个包（2 变体 × 4 ABI）都在 `apk/<flavor>/release/` 下，用
+`find app/build/outputs/apk -path "*/release/*.apk"` 收集。第一版按
+`ABI=${NAME##*-}` 从 `app-nosherpa-armeabi-v7a-release.apk` 里取最后一段，
+得到 `armeabi`，报 `UNKNOWN nosherpa-armeabi`。改为变体取目录名、
+ABI 用 `sed -E "s/^app-${VARIANT}-//; s/-release\.apk$//"` 剥前后缀，
+本地模拟跑一遍输出 8 个正确文件名后才推。
+
+Release 正文补了变体表：标准包按架构 17.8–39.0MB，`-no-sherpa` 约 2.45MB。
+
+### 68.6 体积与单测
+
+| 架构 | `full` release | `nosherpa` release |
+| --- | --- | --- |
+| `arm64-v8a` | 25,003,288（约 25.0MB） | 2,447,277（约 2.45MB） |
+| `armeabi-v7a` | 17,774,108（约 17.8MB） | 2,444,435 |
+| `x86_64` | 27,949,578（约 27.9MB） | 2,447,938 |
+| `x86` | 38,954,787（约 39.0MB） | 2,446,459 |
+
+`full` 的 arm64 包里 `libsherpa-onnx-jni.so` 是 22,393,072 字节，占该包 89.6%；
+这正是拆变体要解决的问题。`x86` 仍最大，因为它同时带 `libonnxruntime.so`。
+
+**包内构成逐项核对过。** `nosherpa` 的 arm64 包里只有
+`lib/arm64-v8a/libandroidx.graphics.path.so`（10,096 字节），
+`classes.dex` 里 `Lcom/k2fsa/sherpa/onnx/OnlineRecognizer` 的引用数为 0；
+`full` 同一位置有 `libsherpa-onnx-jni.so` 与 3 处引用。
+
+`sherpa-onnx` 的 AAR 里 `proguard.txt` 是 0 字节，项目此前也没有对应 keep 规则。
+按 AGENTS 第 4 节补了 `-keepclasseswithmembers class com.k2fsa.sherpa.onnx.** { native <methods>; }`，
+但加规则前后八个包的字节数完全相同——说明 R8 本来就没有改名，这条规则是保险而非修复。
+
+`testFullDebugUnitTest` 与 `testNosherpaDebugUnitTest` 各跑一遍，都是 860 个用例通过。
+`nosherpa` 上有一次
+`CheckpointViewModelTest` 报 `ConcurrentModificationException`，与语音改动无关，
+单跑该用例通过，判定为既有的并发遍历偶发问题。
+
+### 68.7 设备验收
+
+- **`full` 的 A8 五项全通过**：本地识别为来源时模型行可见、服务端转写行不可见；
+  切到服务端转写后两者互换；说完自动停止只在本地识别 + 点一下时出现。
+- **`nosherpa` 的 A8 全通过**：设置页两个来源 chip 与模型行都消失，
+  「服务端转写」行可见。
+- **`full` 手动复核服务端路径**：来源选服务端转写，点麦克风直接开录（不再要求模型），
+  浮层显示「已录制 4 秒」，再点结束，服务端日志出现 `POST /api/workspace/transcribe`。
+  容器此时是 `disabled`，返回 500，浮层收起、应用不崩——与第 67 节记的错误分派一致。
+- **`full` 手动复核本地路径**：未下载模型时点麦克风弹「需要先下载识别模型」，
+  按钮为「关闭」与「去设置」，不进入录音。
+- **`nosherpa` 手动复核**：服务端 `disabled` 时点麦克风弹「服务端未启用语音转写」。
+
+第 67.7 节说「容器内仍保留假 ASR，下次可直接复用」——容器重起后进程与
+`/tmp/config.json.bak` 都没了，这一轮只能把成功路径验到「上传发出、500 被正确分派」，
+没有拼回假 ASR 再跑一次完整成功链路。
+
+### 68.8 文档欠账一并补上
+
+这一轮之前，正文第 63–66 节都已存在，但文首目录表停在 `[62]`；第 67 节加进来时
+也没有入表。`.agents/writing.md` 第 2 节第 4 条要求追加时同步更新目录并确认锚点可跳，
+这几笔提交都漏做了。本轮把 63–68 全部补进目录。
 
 ---
 

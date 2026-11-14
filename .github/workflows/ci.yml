@@ -39,7 +39,7 @@ jobs:
       - name: 运行 JVM 单测
         run: |
           set +e
-          ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee /tmp/build.log
+          ./gradlew :app:testFullDebugUnitTest :app:testNosherpaDebugUnitTest --stacktrace 2>&1 | tee /tmp/build.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
             # 只截尾部 20 行会被堆栈淹掉，先取 Gradle 的「What went wrong」段
@@ -55,7 +55,7 @@ jobs:
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as ET
           total = 0
-          for f in sorted(glob.glob('app/build/test-results/testDebugUnitTest/*.xml')):
+          for f in sorted(glob.glob('app/build/test-results/test*DebugUnitTest/*.xml')):
               for tc in ET.parse(f).getroot().iter('testcase'):
                   for fail in tc.findall('failure'):
                       total += 1
@@ -71,7 +71,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: app/build/test-results/testDebugUnitTest
+          path: app/build/test-results
           if-no-files-found: warn
 
   assemble-debug:
