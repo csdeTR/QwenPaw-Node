@@ -38,6 +38,7 @@ SOFTWARE.
 | [AndroidX / Jetpack Compose](https://developer.android.com/jetpack) | Apache-2.0 | UI 与基础库 |
 | [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) | Apache-2.0 | JSON 解析 |
 | [lucide](https://lucide.dev) | ISC | 界面图标的几何图形，版本 0.400.0；图形数据已转写进 `QwenIcons.kt`，不随仓库分发 SVG 源文件 |
+| [Vico](https://github.com/patrykandpatrick/vico) | Apache-2.0 | 用量统计页的趋势折线图，版本 2.0.0 |
 
 ## 名称与标识
 

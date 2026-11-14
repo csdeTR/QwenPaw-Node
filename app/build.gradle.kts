@@ -31,8 +31,8 @@ android {
         applicationId = "io.qwenpaw.node"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.4.0"
+        versionCode = 13
+        versionName = "0.4.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 「关于」页里展示的仓库地址，单独抽成 BuildConfig 字段，
@@ -149,6 +149,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    // 用量统计的趋势折线。选 2.0.0 而不是更新的版本：它的 compose-bom 为 2024.12.01，
+    // 与本项目完全一致；2.1 之后会把 Compose 一起抬高，3.x 已转 KMP、要求 Kotlin 2.4。
+    implementation("com.patrykandpatrick.vico:compose:2.0.0")
+    implementation("com.patrykandpatrick.vico:compose-m3:2.0.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
@@ -170,14 +174,16 @@ dependencies {
     "fullImplementation"(files("libs/sherpa-onnx-1.13.3.aar"))
     // 模型是 tar.bz2，解压需要 bzip2。只有 full 变体会下载模型。
     "fullImplementation"("org.apache.commons:commons-compress:1.26.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Vico core 声明 kotlinx-coroutines-core 1.10.1，这里与它对齐，避免
+    // 「core 1.10.1 + android 1.9.0」这种半升级状态带来的运行期 NoSuchMethodError。
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
 
