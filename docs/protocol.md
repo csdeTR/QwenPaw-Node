@@ -2552,6 +2552,27 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 | 插件 | 校验令牌 → `accept()` → `socket.create_connection((host, port))` → 双向泵字节，只发二进制帧 |
 | 客户端 | OkHttp WebSocket ↔ `Socket` 适配器（有界队列做背压）↔ `sshj` 等 SSHv2 实现 |
 
+**插件对外三个端点**（v0.4.0 计划）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| WS | `/ssh` | 二进制帧中继到配置好的目标 |
+| GET | `/ssh/config` | 脱敏连接信息，客户端读 |
+| GET / PUT | `/ssh/settings` | 控制台读写完整设置，私钥只写不读 |
+
+`GET /ssh/config` 回 `{host, port, user, auth, key_configured, key_source}`。
+**私钥内容与口令永不回传**，只有 `key_configured` 这一个布尔。
+客户端据此决定是否引导用户去控制台补配置。
+
+**设置面板在 Web 控制台，不在手机上。** 插件 `plugin.json` 增加
+`entry.frontend: "ui/index.js"`，Console 通过
+`GET /api/frontend_plugin/{plugin_id}/files/ui/index.js` 动态 import 这个 ESM 模块，
+宿主提供 `window.QwenPaw.host.React` 与 `antd`。字段为地址、端口、用户名、认证方式、
+私钥来源、私钥、口令；私钥来源优先「服务端已有路径」，粘贴方式落盘 `0600`。
+
+**终端页的入口先选方式**：服务端终端 / SSH 连接。未装插件或版本低于 v0.4.0 时
+SSH 项**置灰并给出安装地址，不隐藏**——隐藏会让人以为只有一种终端。
+
 **四条约束（写进实现，不是建议）**：
 
 1. **这是代理，必须收窄范围。** 默认只允许 `127.0.0.1:22`，其它目标走显式白名单，
