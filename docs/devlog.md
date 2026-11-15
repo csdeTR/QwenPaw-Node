@@ -88,6 +88,7 @@
 | [74](#74v050-发版一条既有用例的线程竞态2026-11-15) | v0.5.0 发版被一条既有用例拦住 | `ArrayList` 跨线程遍历抛 `ConcurrentModificationException`；Release 未生成时才允许移动 tag | [release.md](release.md) 第 5.2 节 |
 | [75](#75扩展市场可写化调研与分类行溢出2026-11-15) | 扩展市场可写化调研与分类行溢出 | 安装、导入、广播服务端都已有；竖条是 `Row` 溢出不是空数据；`GET /skills/upload` 回 404 是路由抢先匹配 | [protocol.md](protocol.md) 第 30.5 节、[ui-guidelines.md](ui-guidelines.md) 第 9.26 节 |
 | [76](#76排期-071-与-1002026-11-15) | 排期 0.7.1 与 1.0.0 | 硬编码颜色只有 9 处，推翻「颜色散落是大头」；超级岛因测试机非 HyperOS 只列问题不列方案 | [待办清单.md](../待办清单.md) |
+| [77](#77撤出四项明确不做并重排-100-之前的计划2026-11-16) | 撤出四项「明确不做」并重排 1.0.0 之前的计划 | 终端是字符游标长轮询而非 WebSocket；ACP 是七字段表单；鉴权开关存在 `envs.json` 并覆盖进程环境 | [protocol.md](protocol.md) 第 31 节、[待办清单.md](../待办清单.md) |
 
 ---
 
@@ -6255,6 +6256,100 @@ runner 的调度更公平，线程真的并行跑，窗口就被撞开了——�
 
 - 没有调研超级岛，按用户要求
 - 没有动代码，`CHANGELOG` 与 `README` 不涉及
+
+---
+
+## 77、撤出四项「明确不做」并重排 1.0.0 之前的计划（2026-11-16）
+
+用户两点要求：把「待排期」的项统统排进 1.0.0 之前；「明确不做」里的终端、Git、ACP、
+ACL 与邮件访问控制其实有必要，终端参考 termux，其余三项要我想办法。
+
+### 四项里有三项是我当初判错了
+
+| 项 | 原判断 | 实测 |
+| --- | --- | --- |
+| 终端 | PTY 在宿主机，软键盘体验差 | 服务端是**字符游标长轮询**，不是 WebSocket；障碍在客户端渲染，不在协议 |
+| Git | 桌面场景 | `diff` 返回统一 diff 纯文本，按行着色即可读 |
+| ACP | JSON 结构化配置，手机上无法审阅 | `ACPAgentConfig` 是**七字段普通表单**，这条理由直接是错的 |
+| ACL / 邮件 | 管理员向，频次低 | **待审批队列正是手机场景**：通知里点一下通过 |
+
+错误集中在同一处：**把「在 Web 上呈现得复杂」当成「在手机上无法呈现」**。
+ACP 那条尤其明显——它本来就没有嵌套结构，是四个内置 agent 各七字段。
+
+### 终端：协议层没有障碍，成本全在客户端
+
+我在容器内直接驱动 `TerminalManager` 走完整个生命周期，确认可用：
+
+```
+create  → {'id': '9acf35ba-…', 'title': 'bash', 'cwd': '/home/csdetr', 'exited': False}
+output  → cursor: 74, data: '\x1b[?2004h\x1b]0;csdetr@qp-test: ~\x07…$ '
+write   → 'echo QPNODE_PROBE_OK\r\n…QPNODE_PROBE_OK…'
+resize  → ok
+close   → ok
+```
+
+`output` 的形状是 `{data, cursor, reset, exited, exit_code}`，服务端最多阻塞 20 秒。
+**`cursor` 是字符游标不是字节偏移**，客户端原样回传即可。这对手机是友好的：
+不需要 WebSocket，普通的 HTTP 长轮询就能维持一个可恢复的会话。
+
+真正的工作量是 VT 转义渲染器。termux 是自己实现 `TerminalView` 与 `TerminalEmulator` 的，
+没有可复用的轻量替代，因此这一版只做「输出渲染 + 单行输入」，
+全屏程序（`vim`、`top`）明确不保证。
+
+### 踩进去又爬出来的一个坑：鉴权开关不在环境变量里
+
+`POST /api/terminals/{group}` 需要 `QWENPAW_AUTH_ENABLED=true`。我用
+
+```bash
+QWENPAW_AUTH_ENABLED=true qwenpaw app --host 0.0.0.0 --port 8088
+```
+
+起了三次进程，日志每次都打印 `bound to 0.0.0.0:8088 without authentication`，
+`/api/terminals/status` 一直是 `{"enabled":false}`。
+
+`/proc/<pid>/environ` 里确实有 `QWENPAW_AUTH_ENABLED=true`，
+但 `EnvVarLoader.get_str()` 读不到——因为包初始化时
+`load_envs_into_environ()` 把 `envs.json` 的持久化值写进 `os.environ`，**覆盖**进程环境。
+服务端存的是 `false`。
+
+正确路径是 `PUT /api/envs`，且 **body 是字典不是数组**：
+
+```
+curl -X PUT /api/envs -d '{"QWENPAW_AUTH_ENABLED":"true"}'   # 200
+curl -X PUT /api/envs -d '[{"key":"…","value":"true"}]'      # 422 dict_type
+```
+
+先试 `PATCH /api/envs/QWENPAW_AUTH_ENABLED` 与 `PUT /api/envs/{key}` 都是 405——
+`envs.py` 里没有单键端点，只有整表 `PATCH` 与 `PUT`。
+
+**改完立刻生效，没有二次确认。** 写入成功后下一次 `GET /api/envs` 就返回 401。
+这条已写进 `protocol.md` 第 31.1 节和待办清单，并定死一条客户端规则：
+不提供「一键开启鉴权」的入口。
+
+### 排期
+
+新增五版，全部在 1.0.0 之前：0.8.0 终端、0.8.1 Git、0.8.2 访问控制、
+0.9.0 外部智能体运行时（ACP + Harness）、0.9.1 管理面收尾（频道二维码 + 本地模型）。
+
+拆分的依据是「一个版本一个主题」：终端要写 VT 解析器，塞进别版会拖垮那一版；
+Git 紧随其后因为同属工作区开发面；访问控制交互特殊（角标 + 批量审批）单独一版；
+ACP 与 Harness 合并，因为都是「接一个外部 CLI 智能体进来」，而 Harness 的
+`login` 支持 `device_code`，不需要浏览器回跳。
+
+「待排期」表清空，四项分别并入 0.5.1（设置读写）、0.9.1（二维码、本地模型）、0.9.0（Harness）。
+
+### 验收
+
+- 终端：容器内直接驱动 Python 层跑通 create/output/write/resize/close，**未走 HTTP**
+- Git / ACL / 邮件 ACL / ACP：局域网 `curl` 全部 200，形状按源码与响应核对
+- 环境已还原：`QWENPAW_AUTH_ENABLED` 改回 `false`，qp-test 已 stop，
+  复核 `auth:{enabled:false}`、`git/status` 200、`access-control` 200、`acp` 200
+
+### 未做的事
+
+- 没有在真机上验证终端（本轮只改文档，没有代码）
+- 没有实测频道二维码与本地模型的完整流程，只确认端点 200 与空态形状
+- 没有动 Harness 的登录（需要真实 provider 凭据）
 
 ---
 

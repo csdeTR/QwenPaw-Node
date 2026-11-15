@@ -2377,3 +2377,147 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 **方法不匹配时返回 404 而不是 405。** 因为 `/api/skills/{name}` 这条路径参数路由会
 抢先匹配 `GET /api/skills/upload` 之类的请求。排查时不要据此判断端点不存在，
 应直接查 `app/routers/skills.py` 的装饰器，或改用 POST 试请求体校验。
+
+---
+
+## 31、终端、Git、访问控制与外部智能体
+
+2026-11-16 在 qp-test（2.2.2.post1）上实测。这一节记的是「原先被判为不做、
+实测后确认可行」的四组能力，以及各自的反直觉之处。
+
+### 31.1 终端
+
+**硬前置：`QWENPAW_AUTH_ENABLED=true`。** 未开启时 `POST /terminals/{group}` 回 403
+`Terminal requires QWENPAW_AUTH_ENABLED=true`。这是刻意设计，不是缺陷：
+终端等于服务器上的任意命令执行。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/terminals/status` | `{enabled, reason?}` |
+| GET | `/api/terminals/{group}` | 列出该会话的终端 |
+| POST | `/api/terminals/{group}` | 新建，返回 `{id,title,cwd,exited,exit_code}` |
+| GET | `/api/terminals/{group}/{id}/output?after=<cursor>` | 长轮询 |
+| POST | `/api/terminals/{group}/{id}/input` | `{data}`，1–16384 字符 |
+| POST | `/api/terminals/{group}/{id}/resize` | `{rows,cols}`，各 2–500 |
+| PATCH | `/api/terminals/{group}/{id}` | `{title}`，1–64 字符 |
+| DELETE | `/api/terminals/{group}/{id}` | 关闭 |
+
+`output` 返回 `{data, cursor, reset, exited, exit_code}`：
+
+- **`cursor` 是字符游标，不是字节偏移。** 下次带 `after=cursor` 续读，
+  不要自己算长度。
+- 服务端阻塞最多 **20 秒**。客户端读超时必须大于它，否则每次都空转。
+- `reset: true` 表示游标已失效（输出缓冲区上限 256 KB），须按返回的 `cursor` 重来。
+- 单次最多返回 `MAX_CHUNK = 32768` 字符。
+- `{group}` 是 UUID，由客户端为每个会话生成并持久化；换了它就看不到原来的终端。
+- 上限：每会话 8 个、全局 32 个，超出回 409；空闲 1 小时回收（`DETACHED_TTL`）。
+
+**输出是带 ANSI 转义序列的原始流**，实测提示符形如
+`\x1b[?2004h\x1b]0;csdetr@qp-test: ~\x07\x1b[01;32m…\x1b[00m$ `。
+必须自行解析 VT 子集，不能直接放进文本控件。
+
+**两个会把人锁在门外的坑：**
+
+1. **鉴权开关不在进程环境里。** 用 `QWENPAW_AUTH_ENABLED=true` 启动进程无效：
+   包初始化时 `load_envs_into_environ()` 把 `envs.json` 里的持久化值写进 `os.environ`，
+   **覆盖**进程环境。正确路径是 `PUT /api/envs`，body 是**字典**：
+   `{"QWENPAW_AUTH_ENABLED":"true"}`（传数组会 422 `dict_type`）。
+2. **改它立刻生效，且会锁死后续请求。** 实测写入成功后，连 `GET /api/envs`
+   都返回 401。客户端不得提供「一键开启鉴权」的入口。
+
+### 31.2 Git
+
+11 个端点，前缀 `/api/workspace/git`，局域网直连 200（该 router 不做 localhost 限制）。
+
+| 方法 | 路径 | 返回 |
+| --- | --- | --- |
+| GET | `/status` | `{branch, changes, ahead, behind}` |
+| GET | `/diff?path=&staged=&untracked=` | `{diff}`，统一 diff 纯文本 |
+| GET | `/log?limit=` | `[{hash, author, date, message}]`，`hash` 是 8 位短哈希 |
+| GET | `/branches` | `[{name, current, remote}]` |
+| GET | `/commit-diff` | 某次提交的 diff |
+| POST | `/stage` \| `/unstage` \| `/commit` \| `/checkout` \| `/discard` \| `/revert` | 各类写操作 |
+
+- **`diff` 是字符串，不是结构化模型。** 客户端按行首字符着色即可
+  （`+` 新增、`-` 删除、`@@` 段落头）。
+- 未跟踪文件服务端用 `git diff --no-index` 现算，**无差异时返回 `{"diff": ""}`**，
+  不要当成失败。
+- `/status` 在非 git 目录返回 400，`detail` 是 git 自己的报错文本。
+
+### 31.3 访问控制与邮件访问控制
+
+聊天渠道前缀 `/api/access-control`（13 个端点），邮件前缀 `/api/mail-access-control`
+（15 个），结构基本同形。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/access-control` | `{channel: {whitelist, blacklist, pending}}` |
+| GET | `/access-control/pending/all` | 全部待审批 |
+| POST | `/pending/approve` \| `/pending/deny` \| `/pending/dismiss` \| `/pending/remark` | 四个动作 |
+| POST | `/whitelist/add` \| `/whitelist/remove` \| `/blacklist/add` \| `/blacklist/remove` | 名单增删 |
+| GET | `/mail-access-control/pending/count` | `{count}`，可做角标 |
+
+`PendingEntry`：`{user_id, channel, timestamp, first_message, remark, username}`。
+三个动作的 body 统一为 `{entries: [...]}`，支持批量。
+
+**四个动作语义不同，不能合并成一个「关闭」：** 通过进白名单、拒绝进黑名单、
+忽略（dismiss）两边都不改、备注只改 `remark`。
+
+**邮件侧审批后会把该发件人的历史邮件重新投递。** 服务端先把 pending 行移走，
+再把这些消息 UID 放进可重放的 outbox（`mail_access_control.py` 的 approve 分支），
+因此界面上要说明这一点，否则用户会以为「通过」只是放行新邮件。
+
+**实测空库形状**：`GET /access-control` 与 `/mail-access-control` 都返回 `{}`，
+不是空数组；`pending/all` 返回 `[]`；`pending/count` 返回 `{"count":0}`。
+
+### 31.4 ACP 与 Harness
+
+**ACP 不是自由 JSON，是七字段表单。** `ACPAgentConfig`：
+
+```python
+enabled: bool
+command: str
+args: list[str]
+env: Dict[str, str]
+trusted: bool
+tool_parse_mode: str            # 受限于固定枚举
+stdio_buffer_limit_bytes: int   # 默认 50 MB
+```
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET / PUT | `/api/config/acp` | 当前 agent 的完整配置，含 `node_path` 与 `agents` |
+| GET / PUT | `/api/config/acp/node-runtime` | 全局 Node 运行时路径与探测结果 |
+| GET / PUT | `/api/config/acp/{agent_name}` | 单个 agent 的配置 |
+
+- `GET /api/config/acp` 实测返回四个内置 agent：`opencode`、`qwen_code`、
+  `claude_code`、`codex`，`ACPConfig` 的校验器会把缺失的默认项补回来。
+- `tool_parse_mode` 传非法值时回 **400**，`detail` 里直接列出允许值，
+  客户端可据此构造选项而不必硬编码。
+- `PUT /api/config/acp/node-runtime` 传不可用的路径也回 400，
+  `detail` 是 `{reason_code, reason}` 对象——**这一处 detail 是对象**，与上面那条不同。
+
+**Harness 的登录支持设备码，不需要浏览器回跳。**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/harnesses` | `{providers: [...]}`，含 `available` / `installed` / `authenticated` / `error` |
+| GET | `/api/harnesses/{id}/models` \| `/mcp` \| `/skills` | 能力清单 |
+| POST | `/api/harnesses/{id}/status` | 用未保存的设置探测 |
+| POST | `/api/harnesses/{id}/login` | body 可带 `device_code` |
+| POST | `/api/harnesses/{id}/logout` | 登出 |
+
+实测 `codex`：`available: true, installed: false`，`error` 为
+`Codex runtime not found. Install qwenpaw[codex] or provide a standalone Codex CLI.`。
+**「未安装」与「未登录」是两种状态，界面必须分开**，否则用户会去登录一个
+根本不存在的运行时。
+
+### 31.5 客户端据此定的五条规则
+
+1. **终端入口看 `GET /api/terminals/status`**，`enabled:false` 时置灰并说明需在服务端开鉴权；
+   不提供一键开启。
+2. **终端的读超时大于 20 秒**，且 `after` 用服务端返回的 `cursor` 原样回传。
+3. **Git 只做提交链路**：换分支、丢弃改动、反向提交留 Web。
+4. **访问控制的通过 / 拒绝 / 忽略 / 备注四态分开**，不共用「关闭」。
+5. **ACP 的 `command`、`args` 属于在服务端执行任意命令**，改动要有明确说明，
+   不按普通开关处理。
