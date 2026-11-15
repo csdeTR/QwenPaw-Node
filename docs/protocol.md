@@ -2521,3 +2521,46 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 4. **访问控制的通过 / 拒绝 / 忽略 / 备注四态分开**，不共用「关闭」。
 5. **ACP 的 `command`、`args` 属于在服务端执行任意命令**，改动要有明确说明，
    不按普通开关处理。
+
+### 31.6 插件提供的 SSH 通道（源码层确认，未实测）
+
+终端除服务端本地 PTY 外，还能走 SSH。SSH 不在核心 API 里，由配套插件
+`qwenpaw-node-bridge`（≥ v0.4.0，capability `ssh`）提供一条 WebSocket 中继，
+客户端在这条通道上跑标准 SSH 协议。
+
+**三条源码依据**：
+
+1. 插件用 `api.register_http_router(router, prefix=...)` 注册普通 `APIRouter`，
+   宿主在 `plugins/registry.py` 的 `_mount_plugin_http_on_app` 里调
+   `app.include_router(router, prefix=full_path_prefix, tags=tags)`。
+2. FastAPI 的 `include_router` 会保留 `APIWebSocketRoute`
+   （`fastapi/routing.py` 里对 `isinstance(route, APIWebSocketRoute)` 的分支），
+   因此 `@router.websocket("/ssh")` 会挂到 `/api/plugins/qwenpaw-node-bridge/ssh`。
+3. 本服务端已有可用的 WS 端点：`app/routers/voice.py` 的 `@voice_router.websocket("/voice/ws")`，
+   说明 uvicorn 侧无需额外配置。
+
+**鉴权必须由插件自己做。** `AuthMiddleware` 继承 `BaseHTTPMiddleware`
+（`app/auth.py:724`），Starlette 的 `BaseHTTPMiddleware` 只包裹 HTTP 作用域，
+**看不到 WebSocket 连接**。因此 HTTP 那层的登录态不会自动作用在 WS 上，
+插件必须在 handler 里校验令牌再 `accept()`——`voice.py` 正是这么做的
+（先查一次性 token，失败直接 `close(1008)`）。
+
+**两端形态**：
+
+| 侧 | 做法 |
+| --- | --- |
+| 插件 | 校验令牌 → `accept()` → `socket.create_connection((host, port))` → 双向泵字节，只发二进制帧 |
+| 客户端 | OkHttp WebSocket ↔ `Socket` 适配器（有界队列做背压）↔ `sshj` 等 SSHv2 实现 |
+
+**四条约束（写进实现，不是建议）**：
+
+1. **这是代理，必须收窄范围。** 默认只允许 `127.0.0.1:22`，其它目标走显式白名单，
+   并限制并发连接数。不限制等于给公网开了一个跳板。
+2. **反向代理要支持 WS 升级。** nginx 需要 `proxy_http_version 1.1` 与
+   `Upgrade` / `Connection` 头。握手失败时降级为「只有本地终端」，不要报错。
+3. **主机密钥不得自动接受。** 首次连接走 TOFU，用户确认指纹后才记住。
+4. **新增 SSH 库要走依赖门禁**：`proguard-rules.pro` 补 keep 规则，
+   并复核两个变体 × 四个 ABI 的体积。
+
+**为什么还值得做**：本地 PTY 的渲染依赖客户端自己写的 VT 子集，全屏程序不保证；
+SSH 拿到的是真正的 `xterm-256color` PTY。另外它能连服务端可到达的其它主机。
