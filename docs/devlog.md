@@ -81,6 +81,11 @@
 | [67](#67v040语音转写改服务端第一版单包2026-11-14) | 语音改服务端（第一版，单包） | `transcribe` 的四种 `detail` 形状；「开关打开」不等于可用 | [protocol.md](protocol.md) 第 28 节 |
 | [68](#68v040语音改回双变体2026-11-14) | 试用后改双变体 | `full` / `nosherpa` 两个源码集与 8 个包；工厂漏传参数导致静默降级 | [release.md](release.md) 第 7 节、[guide.md](guide.md) 第 4 节 |
 | [69](#69发布-v0402026-11-14) | 发布 v0.4.0 | 8 个资产与变体表；发布流水线此前仍在调已不存在的单测任务 | [release.md](release.md) 第 5、7 节 |
+| [70](#70v042用量统计扩展与模型管理2026-11-14) | 用量统计扩展与模型管理 | 889 个单测；补了 0.4.0 欠的 release 包实机确认，旧包差点被当成 R8 缺陷 | [protocol.md](protocol.md) 第 29 节、[guide.md](guide.md)、[release.md](release.md) 第 7 节 |
+| [71](#71v042设置页返回后保留滚动位置2026-11-14) | 设置页返回后保留滚动位置 | 两处原因叠加；离开时用 `onDispose` 记位置，不在返回时补 `scrollTo` | [ui-guidelines.md](ui-guidelines.md) |
+| [72](#72v050技能mcp-与扩展市场2026-11-15) | v0.5.0 技能、MCP 与扩展市场 | 930 个单测；两处计划偏差以实测为准；D2 反过来逼出「按钮放在正文之前」 | [protocol.md](protocol.md) 第 30 节、[guide.md](guide.md) 第 11 节 |
+| [73](#73修补-qwenpaw-来源的跳转地址2026-11-15) | 修补 QwenPaw 来源的跳转地址 | 服务端拼的是安装用地址，平台前端只认 UUID；按 `id` 全等匹配 | [protocol.md](protocol.md) 第 30.3 节 |
+| [74](#74v050-发版一条既有用例的线程竞态2026-11-15) | v0.5.0 发版被一条既有用例拦住 | `ArrayList` 跨线程遍历抛 `ConcurrentModificationException`；Release 未生成时才允许移动 tag | [release.md](release.md) 第 5.2 节 |
 
 ---
 
@@ -6064,6 +6069,69 @@ redroid + qp-test：搜 `qwenpaw` → 点 `qwenpaw-docs-zh` → 浏览器地址�
 - **没有改服务端。** 修 `qwenpaw.py` 的 `source_url` 或给 `MarketResult` 加 `details_url`
   字段才是根治，但那要等客户端升级服务端才生效；本版客户端在旧服务端上仍需要这层解析。
   这一条已写进 `protocol.md` 第 30.3 节，留给服务端仓库排期。
+
+---
+
+## 74、v0.5.0 发版：一条既有用例的线程竞态（2026-11-15）
+
+`v0.5.0` 标签推上去两分多钟后工作流失败：
+
+```
+CheckpointViewModelTest > snapshot submit leaves read only view FAILED
+    java.util.ConcurrentModificationException at CheckpointViewModelTest.kt:247
+930 tests completed, 1 failed
+```
+
+失败的是 **0.3.2 就存在的用例**，本地两个变体各 930 条全过。改动里没有任何一行碰过检查点。
+
+### 为什么本地过、runner 挂
+
+`requests` 是普通的 `ArrayList`。MockWebServer 的 dispatcher 在自己线程里 `requests += request`，
+测试线程在 `requests.first { … }` 里遍历。`ArrayList` 的迭代器检查 `modCount`，
+写入落在遍历中间就抛 `ConcurrentModificationException`。
+
+本地不炸是因为 `Dispatchers.setMain(Dispatchers.Unconfined)`：请求完成即回调，
+遍历往往在 dispatcher 的同一线程上紧接着发生，窗口窄到几乎撞不上。
+runner 的调度更公平，线程真的并行跑，窗口就被撞开了——这不是概率问题，
+是「本机恰好在正确的一侧」。
+
+这与 AGENTS.md 第 4 节那条「涉及时间与时区的单测必须固定 `ZoneId`」是同一类缺陷：
+断言依赖了运行环境的隐含假设。这次假设的不是时区，是线程调度。
+
+### 改法
+
+只加同步，不动语义：`requests` 换成 `Collections.synchronizedList`，
+读取统一走一个 `recorded()`，它返回 `synchronized` 块里的快照。
+六处遍历全部改成 `recorded()`。
+
+没有改成并发集合（`CopyOnWriteArrayList`）：这条用例只在测试里用，
+写少读也少，同步快照比一个会复制数组的集合更直接。
+
+`routes` 也是 dispatcher 读、测试线程写的普通 `MutableMap`，但所有写都发生在
+`vm.refresh()` 之前，dispatcher 不可能并发读到，不构成竞态，因此没动。
+
+### 标签怎么处理
+
+标签已推、工作流失败、Release 未生成。按仓库约定，发版失败不占用版本号：
+删除远端与本地的 `v0.5.0`，重新标注在修复提交 `d77cb2d` 上推送。
+`versionCode` 与 `versionName` 不变，CHANGELOG 与体积表不变。
+
+代价是远端标签被覆盖一次。只有 `Releases` 里看不到该版本时这样做才安全；
+一旦 Release 已对外发布，就必须发新版本号，不能移标签。
+
+### 验收
+
+- `CI=true ./gradlew :app:testFullDebugUnitTest :app:testNosherpaDebugUnitTest` 两个变体全部用例通过
+- 重跑的工作流 6 分 09 秒全绿，单测、8 个 release 包、签名校验、Release 创建都过
+- Release 的 8 个产物体积与本地 `assembleRelease` 实测值逐字节一致：
+  `25486334 / 18257154 / 39437833 / 28432624`（标准包）与
+  `2930327 / 2927485 / 2929509 / 2930988`（`-no-sherpa`）
+
+### 未做的事
+
+- **没有给这类测试加统一约束。** 目前只有这一处用了 MockWebServer 的 dispatcher 记录请求，
+  其他测试走固定路由表，不存在同形的竞态。等到出现第二处再抽公共夹具，
+  现在抽等于为单个用例引入一层抽象。
 
 ---
 
