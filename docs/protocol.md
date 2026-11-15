@@ -2306,3 +2306,74 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
    部分 → 按服务端工具顺序筛出的列表；一个都不勾 → 空列表（不是 `null`）。
    三者只允许有一处出口（`McpPolicyEdit.whitelistSelection`），
    混起来的后果是「取消全部勾选后把所有工具都打开」。
+
+### 30.5 安装、导入与广播（皆为服务端已有能力，0.5.0 客户端未接入）
+
+0.5.0 把扩展市场做成只读，是产品口径的选择，不是服务端缺接口。以下均为 2026-11-15
+在 qp-test（2.2.2.post1）上的实测，供后续放开时直接采用。
+
+**插件安装**
+
+| 方法 | 路径 | 请求体 | 返回 |
+| --- | --- | --- | --- |
+| POST | `/api/plugins/upload` | multipart `file`，query `force` | `{id,name,version,description,author,loaded,message}` |
+| POST | `/api/plugins/install` | `{source, force}` | 同上 |
+
+- `source` 只接受 http(s) 的 ZIP 地址或本地目录绝对路径，**不支持 git 仓库地址**。
+- **上传完立即热加载**，返回 `loaded: true`，无需重启；服务端会后台重载所有 agent。
+- `plugin.json` 的契约：`entry` 必须是对象（`entry.backend` / `entry.frontend`），
+  且模块必须导出名为 `plugin` 的对象。实测三种错误各有明确 detail：
+  `has no entry points declared (entry.backend or entry.frontend)`、
+  `cannot import name 'PluginAPI'`（正确类名是 `PluginApi`）、
+  `must export a 'plugin' object (or a PawApp 'app' instance)`。
+- 同名目录已存在回 **409** `Plugin installation target already exists`，
+  `force=true` 才有覆盖能力。客户端要做覆盖选项，否则重装必失败。
+- URL 下载上限 500 MB。**没有按市场条目 id 安装的端点**，
+  必须先搜出 `install_url` 再调 `/install`。
+
+**技能导入**
+
+| 方法 | 路径 | 形态 |
+| --- | --- | --- |
+| POST | `/api/skills/upload` | multipart，导入到当前智能体 |
+| POST | `/api/skills/pool/upload-zip` | multipart，导入到技能池 |
+| POST | `/api/skills/hub/install/start` | JSON `{bundle_url,provider_key,version,enable,target_name}`，**异步** |
+| GET | `/api/skills/hub/install/status/{task_id}` | 轮询任务 |
+| POST | `/api/skills/hub/install/cancel/{task_id}` | 取消任务 |
+| POST | `/api/skills/pool/import` | JSON `{bundle_url}`，同步进池 |
+
+- 上传成功回 `{imported:["name"], count:1, enabled:true, conflicts:[]}`。
+- **重复上传同名技能静默覆盖，`conflicts` 恒为空数组。** 实测连传两次同一个 zip 都回 200，
+  第二次把第一次的覆盖掉。客户端若要防误覆盖，只能自己先比对现有列表。
+- 无 frontmatter 回 **400**，detail 为字符串
+  `SKILL.md must include non-empty frontmatter name and description`。
+- **`pool/import` 失败是裸 500**：`content-type: text/plain`，body 只有
+  `Internal Server Error`，没有 JSON。同组的 `hub/install/start` 相反，
+  把错误包进任务的 `error` 字段（实测失败样例：
+  `Skill hub import failed: Error -3 while decompressing data: incorrect header check`）。
+- `bundle_url` 支持的来源：github / skills-sh / lobehub / qwenpaw / modelscope /
+  aliyun / skillsmp / clawhub 及市场 provider。
+
+**技能广播**
+
+服务端没有名为 broadcast 的端点。实际形态是 `POST /api/skills/pool/download`：
+
+```json
+{"skill_name":"x","targets":[{"workspace_id":"agent-id"}],
+ "all_workspaces":false,"overwrite":false,"preview_only":false}
+```
+
+- 成功回 `{downloaded:[{workspace_id,workspace_name,name}]}`。
+- **全有或全无**：任一目标冲突就 409 并全部回滚，`downloaded` 为空数组。
+  服务端注释写明 `All-or-nothing: if any target conflicts, reject everything`，
+  实测一个成功一个冲突时返回两条 conflicts、什么都没下载。
+- `overwrite: true` 可覆盖。`preview_only` 仍以 **409 + conflicts** 报冲突，
+  不是 200 的预览结构——不要照名字假设它是「预演」。
+- 冲突项带 `suggested_name`（服务端算好的带时间戳名字），
+  但 **`rename_map` 不在这个端点上**，它只出现在 `/skills/upload` 的表单字段里。
+- 语义本质是「从技能池复制到多个工作区」，实现是复制而非软链。
+  技能物理位置为 `workspace_dir/skills/<name>`，多 agent 之间不自动共享。
+
+**方法不匹配时返回 404 而不是 405。** 因为 `/api/skills/{name}` 这条路径参数路由会
+抢先匹配 `GET /api/skills/upload` 之类的请求。排查时不要据此判断端点不存在，
+应直接查 `app/routers/skills.py` 的装饰器，或改用 POST 试请求体校验。
