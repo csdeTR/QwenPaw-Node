@@ -2165,3 +2165,144 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 单个 `ModelInfo` 有 50 余个字段，客户端只用 `id` / `name` / `is_free` /
 `is_recommended` / `max_input_length`。
+
+---
+
+## 30、技能、MCP 与市场
+
+三组端点，2026-11-15 在 2.2.2.post1 上逐条实测。三条路由都同时挂在全局与
+`/api/agents/{agentId}/` 下，客户端一律走全局 + `X-Agent-Id`（第 1 节）。
+
+### 30.1 技能
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/skills` | 数组 `SkillSpec`，**已启用的技能也在内** |
+| GET | `/api/skills/{name}` | `SkillDetail`，比列表多 `content` / `config` / `installed_from` / `requirements` |
+| POST | `/api/skills/{name}/enable` \| `/disable` | 无请求体，无目标状态，服务端按当前值取反 |
+| PUT | `/api/skills/save` | body `{name, content}`；原地保存，不做改名 |
+| POST | `/api/skills` | body `{name, content, enable}`；返回服务端最终采用的名字 |
+| DELETE | `/api/skills/{name}` | 服务端先停用再删，**客户端不必先调 disable** |
+| GET | `/api/skills/pool` | 技能池数组，**没有 `enabled`** |
+| GET | `/api/skills/pool/{name}` | 池内详情，多 `builtin_language` 等 |
+
+`SkillSpec` 字段：`name`、`description`、`version_text`、`source`（`customized` / `builtin`）、
+`emoji`、`enabled`、`channels`（默认 `["all"]`）、`preload`、`tags`、`last_updated`。
+
+实测四条：
+
+- `last_updated` 是带 `Z` 的 ISO：`"2026-11-01T01:08:08.599528Z"`。展示前按 UTC 折算本地；
+  **没有时区后缀的值不折算**，否则等于替服务端编造精度。
+- `PUT /api/skills/save` 内容未变时回 `{"success":true,"mode":"noop","name":"…"}`，
+  不是错误。客户端据此显示「内容与服务端一致，未写入」。
+- 重名新建回 **409**，且 `detail` 是**对象**不是字符串：
+  `{"detail":{"reason":"conflict","suggested_name":"qpnode_test-20261115044817"}}`。
+  `suggested_name` 带时间戳后缀，可以直接给用户作改名建议。
+- `DELETE` 对已启用的技能直接成功（服务端内部先 disable），回 `{"deleted":true}`。
+
+**422 是安全扫描拦截，不是校验错误。** `enable` 与 `save` 都会重新扫描技能目录，
+命中策略时回 422，body 为
+`{type:"security_scan_failed", detail, skill_name, max_severity, findings[]}`。
+`max_severity` 与 `findings` 在 body 顶层，客户端只取 `detail` 与（能解析出的）等级，
+剩下的指向「在 Web 控制台确认扫描规则」。
+
+**`SKILL.md` 必须有 frontmatter。** 缺 `name` 或 `description` 回 400：
+`{"detail":"SKILL.md must include non-empty frontmatter name and description"}`。
+判据在 `validate_skill_content`，与界面上的提交前提示同源（第 30.4 节）。
+
+**技能文件没有列举端点。** 只有 `GET /api/skills/{name}/files/{path}` 按路径单取，
+`SkillDetail` 也不带文件清单。因此客户端无法浏览 `references/` 与 `scripts/`——
+没有列举就只能让用户手输路径。0.5.0 只做 `SKILL.md` 正文的编辑。
+
+### 30.2 MCP
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/mcp` | 数组 `MCPClientInfo` |
+| PATCH | `/api/mcp/toggle/{key}` | **无请求体**，取反，回整份客户端 |
+| GET | `/api/mcp/tools/{key}` | 数组 `MCPToolInfo`；**会实时连 MCP 服务端** |
+| PUT | `/api/mcp/tools/{key}` | body `{tools: [String] \| null}` |
+| GET | `/api/mcp/policy/{key}` | `MCPAccessPolicy`，**不连 MCP 服务端** |
+| PUT | `/api/mcp/policy/{key}` | 整份 `MCPAccessPolicy` |
+
+`MCPClientInfo` 字段：`key`、`name`、`description`、`enabled`、`transport`
+（`stdio` / `streamable_http` / `sse`）、`url`、`command`、`args`、`headers`、`env`、
+`cwd`、`http_timeout`、`tools`、`oauth_status`、`access_summary`。
+
+三条与直觉相反的行为：
+
+1. **`tools` 为 `null` 是语义，不是缺值。** 它表示「未设白名单，全部启用」。
+   声明成非空集合会让整份 `/api/mcp` 解析失败（与第 22 节 `config_fields: null` 同类）。
+   客户端勾选草稿的起点按它决定：`null` 时先勾满，否则一保存就把全部工具关掉。
+2. **客户端被禁用时 `/tools` 回空数组 + 200，不是 502。** 因此「空列表」有两种含义，
+   必须结合 `MCPClientInfo.enabled` 区分：已停用（提示先启用）与服务端确实没有工具。
+   502 只留给「卡片写得对但连不上那个 MCP 服务端」，文案不能说成「无法连接服务器」。
+3. **`{client_key:path}` 是 path 转换器**，key 里允许 `/`（如 `some/nested/key`）。
+   客户端直接拼原值，不要再编码一层。
+
+`MCPAccessPolicy` 五个字段：`default_effect`（`allow` / `ask` / `deny`，默认 `deny`）、
+`client_overrides`（规则数组）、`tool_defaults`（`[{tool_name, effect}]`）、
+`tool_overrides`（规则 + `tool_name`）、`unmanaged_rules_count`（只读计数）。
+规则是 `source_type`（实测只有 `channel`）× `source_value` × `subject_type`
+（`all` / `user`）× `subject_value` × `effect` 五维。
+
+**策略是整读整写。** 服务端按提交的 payload 重建全部「控制台托管」规则，
+少的字段就等于删掉一批规则，而界面上完全看不出来。0.5.0 的可编辑面只有
+`default_effect` 与 `tool_defaults`，`client_overrides` / `tool_overrides` 原样带回。
+
+### 30.3 市场与插件目录
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/market/providers` | `{key,label,available,reason,supports_browse}` |
+| GET | `/api/market/categories?lang=zh` | `{id,label}`，按 `lang` 返回中文标签 |
+| POST | `/api/market/search` | body `{query, provider_pages, limit, lang, category}` |
+| GET | `/api/plugins/catalog` | `{updated_at, plugins[], error}` |
+| GET | `/api/plugins/market/search` | 代理 `platform.agentscope.io`，原样透传上游 JSON |
+
+实测：
+
+- 四个来源 `qwenpaw` / `clawhub` / `modelscope` / `aliyun`；`aliyun` 的
+  `available: false`，`reason` 为「missing env vars: …」。
+  **`provider_pages` 里出现不可用或未注册的 key 直接回 400**，客户端只填可用来源。
+- **`qwenpaw` 来源的 `source_url` 不是可浏览地址。** 服务端
+  `market/providers/qwenpaw.py` 用稳定 id 拼 `/skills/@owner/name`，注释写明是为了让
+  安装解析器能从 URL 里拆出 owner/name。但平台前端详情路由 `/skills/:skillId` 只认
+  **UUID**（页面内取详情是 `GET /api/v1/skills/{uuid}`）。实测三条：
+
+  | 地址 | 详情接口 |
+  | --- | --- |
+  | `/skills/@user/qwenpaw-docs-zh` | 404 |
+  | `/skills/qwenpaw-docs-zh` | 404 |
+  | `/skills/01a152e1-49ae-7f82-9cba-41aa77f1fd67` | 200 |
+
+  上游列表响应本来就带 `details_url`（UUID），但服务端映射成 `MarketResult` 时丢掉了。
+  客户端只能自己再查一次：`GET https://platform.agentscope.io/openapi/v1/skills
+  ?search=<技能 code>&page_size=20&page_number=1`，按 `id` 与 slug **全等**匹配取
+  `details_url`。**不能用末段比对**：`id` 形如 `@owner/name`，只比 name 会把别人的同名技能
+  也算命中，把人带到错误页面。查不到时退回平台技能列表并说明原因。
+  其余三个来源的 `source_url` 是真实页面，不做这一步。
+- `limit` 上限 50。三个来源并行搜索实测约 20 秒（`modelscope` 有 967 条），
+  界面必须有「搜索中」状态，不能只显示空列表。
+- 搜索结果的 `stats` 实测为 `null`，只有部分来源会填，界面不能假设它有键。
+  `by_provider[key].has_more` 为真只说明「还有更多」，本版不做翻页。
+- `GET /api/plugins/catalog` 回 34 条、`error: null`。**CDN 拉不到时仍回 200**，
+  此时 `plugins: []` 且 `error` 非空——界面必须先看 `error`，
+  否则会把「取不到」显示成「没有插件」。条目字段含 `installed`、`installed_version`、
+  `upgrade_available`，`description_i18n` 可能是 `null`。
+- `GET /api/plugins/market/search` 外层是 `{success, message, data:{total, plugins}}`，
+  条目字段与插件目录完全不同：`id` / `developer` / `owner` / `version` / `downloads` /
+  `locales{en,zh}` / `display_name` / `view_count` / `details_url` / `is_featured` /
+  `qwenpaw_compat_labels`。失败回 502。
+
+`/api/market/*` 前有 `await market_ready`，冷启动可能等几秒。
+
+### 30.4 客户端据此定的四条规则
+
+1. **技能只编辑 `SKILL.md`**：没有列举端点，无法浏览附件文件。
+2. **技能池只读**：池内没有 `enabled`，启停的对象是「某工作区里的某个技能」。
+3. **MCP 规则表留 Web**：五维规则在手机上无法审阅；只改默认效果与逐工具默认效果。
+4. **白名单的三种提交语义**：全勾 → `null`（取消白名单、全部启用）；
+   部分 → 按服务端工具顺序筛出的列表；一个都不勾 → 空列表（不是 `null`）。
+   三者只允许有一处出口（`McpPolicyEdit.whitelistSelection`），
+   混起来的后果是「取消全部勾选后把所有工具都打开」。

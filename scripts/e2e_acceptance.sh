@@ -38,6 +38,11 @@
 #
 #   C1 用量统计   —— 设置入口可达、三档范围、两处范围标注、返回回到进入前那一页
 #   C2 模型提供商 —— 两行默认模型、供应商列表与「测试连接」结果
+#
+#   D1 技能页     —— 设置入口可达、当前智能体与技能池两段都在
+#   D2 技能编辑   —— 进详情、进入编辑态、正文输入框可用
+#   D3 MCP        —— 列表或空态说明可见、详情两段与策略三档
+#   D4 扩展市场   —— 两段切换、技能市场搜索或明确的来源不可用说明
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -97,8 +102,8 @@ while [ $# -gt 0 ]; do
 done
 
 # 场景名写错时整轮会「什么都不跑却报完成」，所以先校验一次。
-if [ -n "$ONLY" ] && [[ ! "$ONLY" =~ ^(A[1-8]|B[1-6]|C[1-2])$ ]]; then
-  echo "未知场景：$ONLY（可用：A1-A8、B1-B6、C1-C2）"; exit 2
+if [ -n "$ONLY" ] && [[ ! "$ONLY" =~ ^(A[1-8]|B[1-6]|C[1-2]|D[1-4])$ ]]; then
+  echo "未知场景：$ONLY（可用：A1-A8、B1-B6、C1-C2、D1-D4）"; exit 2
 fi
 # B3 依赖 B2 留在只读页的状态，单跑 B3 会立刻跳过；
 # 两者一起指定时按 B2 → B3 的顺序执行。
@@ -406,9 +411,9 @@ open_settings_item() {
 
 echo "== 进入一条会话 =="
 # A7 只验设置里的工作区入口，不需要已有会话；A8 只验设置页与麦克风点击，同理；
-# C1/C2 都从设置页进入，同样不依赖会话。
+# C1/C2 都从设置页进入，同样不依赖会话；D1-D4 同理。
 if ! open_first_chat; then
-  if want A7 || want A8 || want C1 || want C2; then
+  if want A7 || want A8 || want C1 || want C2 || want D1 || want D2 || want D3 || want D4; then
     echo "  [提示] 没有可打开的会话，该场景不依赖会话，继续"
   else
     exit 1
@@ -1083,6 +1088,294 @@ if want C2; then
     fi
   else
     echo "  [失败] 无法打开模型与提供商页"
+  fi
+fi
+
+# ---------------------------------------------------------------- D1 技能页
+
+# 两段都要在：工作区技能（可启停）与技能池（只读）来自两个不同端点，
+# 只验其中一段会让另一段整段失败时仍然「通过」。
+if want D1; then
+  echo "== D1 技能页 =="
+  if open_settings_item "技能"; then
+    sleep 4
+    shot 31-d1-skills
+    if screen_has 'text="当前智能体"'; then
+      echo "  [通过] 「当前智能体」一段可见"
+    else
+      echo "  [失败] 未找到「当前智能体」"
+    fi
+    # 技能池在工作区技能之后，16 条技能能把这一段顶到首屏之外，先滑到它出现为止。
+    for _ in 1 2 3 4 5 6 7 8; do
+      screen_has 'text="技能池"' && break
+      "${ADB[@]}" shell input swipe 360 1300 360 600 300 >/dev/null 2>&1 || true
+      sleep 1
+    done
+    if screen_has 'text="技能池"'; then
+      echo "  [通过] 「技能池」一段可见"
+    else
+      echo "  [失败] 未找到「技能池」"
+    fi
+    if screen_has 'text="只读"'; then
+      echo "  [通过] 技能池标注为只读"
+    else
+      echo "  [警告] 未见「只读」标注"
+    fi
+    "${ADB[@]}" shell input keyevent 4
+    sleep 3
+    if screen_has 'text="服务端配置"'; then
+      echo "  [通过] 返回回到设置页"
+    else
+      echo "  [失败] 返回没有回到设置页"
+    fi
+  else
+    echo "  [失败] 无法打开技能页"
+  fi
+fi
+
+# ---------------------------------------------------------------- D2 技能编辑
+
+# 技能名不可预知，先从服务端取一个真实存在的名字再点它，
+# 不猜界面上的第一行。只验到「进入编辑态且输入框可用」为止：
+# 保存会真写服务端技能目录，在共享测试容器上反复改写会污染其它场景的基线。
+if want D2; then
+  echo "== D2 技能编辑 =="
+  skill_name="$(api_get /api/skills | python3 -c '
+import json,sys
+try:
+    items=json.load(sys.stdin)
+    print(items[0]["name"] if items else "")
+except Exception:
+    print("")')"
+  echo "  目标技能：${skill_name:-（无）}"
+  if [ -z "$skill_name" ]; then
+    echo "  [跳过] 服务端没有可打开的技能"
+  elif open_settings_item "技能"; then
+    sleep 4
+    if tap_text "text=\"$skill_name\""; then
+      sleep 4
+      shot 32-d2-skill-detail
+      if screen_has 'text="编辑正文"'; then
+        echo "  [通过] 详情页有「编辑正文」"
+        if tap_text 'text="编辑正文"'; then
+          sleep 3
+          shot 33-d2-skill-editor
+          if screen_has 'content-desc="返回技能详情"'; then
+            echo "  [通过] 进入编辑态，返回按钮为「返回技能详情」"
+          else
+            echo "  [失败] 未进入编辑态"
+          fi
+          if screen_has 'class="android.widget.EditText"'; then
+            echo "  [通过] 正文输入框可用"
+          else
+            echo "  [失败] 编辑态没有输入框"
+          fi
+          "${ADB[@]}" shell input keyevent 4
+          sleep 2
+          # 未改动时直接退出，不应弹「放弃未保存的修改」。
+          if screen_has 'text="编辑正文"'; then
+            echo "  [通过] 未改动时返回直接回到详情"
+          else
+            echo "  [警告] 返回后未回到详情页"
+          fi
+        fi
+      else
+        echo "  [失败] 详情页未找到「编辑正文」"
+      fi
+    else
+      echo "  [失败] 列表里点不到技能「$skill_name」"
+    fi
+    "${ADB[@]}" shell input keyevent 4
+    sleep 2
+    "${ADB[@]}" shell input keyevent 4
+    sleep 3
+  else
+    echo "  [失败] 无法打开技能页"
+  fi
+fi
+
+# ---------------------------------------------------------------- D3 MCP
+
+# 列表可能为空（服务端未配置 MCP 客户端），此时必须给出可读的空态说明，
+# 不能是一张空白卡片。
+if want D3; then
+  echo "== D3 MCP =="
+  if open_settings_item "MCP"; then
+    sleep 5
+    shot 33-d3-mcp
+    client_name="$(api_get /api/mcp | python3 -c '
+import json,sys
+try:
+    items=json.load(sys.stdin)
+    print(items[0]["name"] if items else "")
+except Exception:
+    print("")')"
+    echo "  目标客户端：${client_name:-（无）}"
+    if screen_has 'text="MCP 客户端（'; then
+      echo "  [通过] 客户端计数可见"
+    elif screen_has 'text="没有配置 MCP 客户端"'; then
+      echo "  [通过] 空态说明了原因"
+    else
+      echo "  [失败] 既没有列表也没有空态说明"
+    fi
+    # 详情页两段都要在：白名单与策略是两条不同端点，只验其中一段会漏掉另一段。
+    if [ -n "$client_name" ] && tap_text "text=\"$client_name\""; then
+      sleep 4
+      shot 34-d3-mcp-detail
+      if screen_has 'text="工具白名单"'; then
+        echo "  [通过] 详情页有「工具白名单」"
+      else
+        echo "  [失败] 详情页未找到「工具白名单」"
+      fi
+      # 客户端被禁用时服务端直接回空数组，界面必须解释这一点而不是显示空列表。
+      if screen_has 'text="该客户端已停用，先启用后才能读取工具列表。"'; then
+        echo "  [通过] 已停用的客户端给出了原因"
+      fi
+      if tap_text 'text="访问策略"'; then
+        sleep 3
+        shot 35-d3-mcp-policy
+        if screen_has 'text="默认效果"'; then
+          echo "  [通过] 策略页有「默认效果」"
+        else
+          echo "  [失败] 策略页未找到「默认效果」"
+        fi
+        if screen_has 'text="允许"' && screen_has 'text="询问"' && screen_has 'text="拒绝"'; then
+          echo "  [通过] 三档效果可见"
+        else
+          echo "  [失败] 三档效果不全"
+        fi
+      else
+        echo "  [失败] 无法切到访问策略"
+      fi
+      "${ADB[@]}" shell input keyevent 4
+      sleep 2
+    fi
+    "${ADB[@]}" shell input keyevent 4
+    sleep 3
+    if screen_has 'text="服务端配置"'; then
+      echo "  [通过] 返回回到设置页"
+    else
+      echo "  [失败] 返回没有回到设置页"
+    fi
+  else
+    echo "  [失败] 无法打开 MCP 页"
+  fi
+fi
+
+# ---------------------------------------------------------------- D4 扩展市场
+
+# 插件目录可能因 CDN 不可达而为空，此时要显示「无法获取插件目录」而不是空白。
+if want D4; then
+  echo "== D4 扩展市场 =="
+  if open_settings_item "扩展市场"; then
+    sleep 5
+    shot 35-d4-market
+    if screen_has 'text="技能市场"'; then
+      echo "  [通过] 技能市场一段可见"
+    else
+      echo "  [失败] 未找到「技能市场」"
+    fi
+    # 来源与分类是搜索参数的两个维度，缺任一项都会让 provider_pages 或 category 失效。
+    if screen_has 'text="来源"'; then
+      echo "  [通过] 来源筛选可见"
+    else
+      echo "  [警告] 未找到来源筛选"
+    fi
+    if screen_has 'text="分类"'; then
+      echo "  [通过] 分类筛选可见"
+    else
+      echo "  [警告] 未找到分类筛选"
+    fi
+    # 真搜一次：三个来源并行，实测十几到二十秒。
+    if tap_text 'class="android.widget.EditText"'; then
+      sleep 1
+      "${ADB[@]}" shell input text "pdf"
+      sleep 1
+      "${ADB[@]}" shell input keyevent 111
+      sleep 1
+      if tap_text 'text="搜索"'; then
+        sleep 22
+        shot 36-d4-market-search
+        if screen_has 'text="ClawHub"' && ! screen_has 'text="没有匹配的技能。"'; then
+          echo "  [通过] 搜索返回了结果，来源标签可见"
+        else
+          echo "  [失败] 搜索没有返回结果"
+        fi
+      else
+        echo "  [警告] 未点中「搜索」"
+      fi
+    else
+      echo "  [警告] 未找到搜索输入框"
+    fi
+    # QwenPaw 来源的落地点：服务端给的是安装用地址（/skills/@owner/name），
+    # 平台前端只认 UUID。直接打开会落到「未找到技能详情」，而那个页面本身返回 200，
+    # 所以必须看浏览器地址栏，不能只看「点开了没有」。
+    qname="$(curl -s -m 30 -X POST "$API/api/market/search" \
+      -H 'Content-Type: application/json' \
+      -d '{"query":"qwenpaw","provider_pages":{"qwenpaw":1},"limit":5,"lang":"zh"}' \
+      | python3 -c '
+import json,sys
+try:
+    rows=[r for r in json.load(sys.stdin)["results"] if r["source"]=="qwenpaw"]
+    print(rows[0]["name"] if rows else "")
+except Exception:
+    print("")')"
+    if [ -n "$qname" ]; then
+      if tap_text 'class="android.widget.EditText"'; then
+        sleep 1
+        "${ADB[@]}" shell input keyevent 123
+        for _ in $(seq 1 20); do "${ADB[@]}" shell input keyevent 67; done
+        "${ADB[@]}" shell input text "qwenpaw"
+        sleep 1
+        "${ADB[@]}" shell input keyevent 111
+        sleep 1
+        tap_text 'text="搜索"' >/dev/null 2>&1 || true
+        sleep 22
+        if tap_text "text=\"$qname\""; then
+          sleep 5
+          shot 38-d4-qwenpaw-jump
+          # 从 dumpsys 读顶层 Activity 的 dat=：浏览器分两种实现（完整浏览器或
+          # WebView Shell），地址栏的控件名各不相同，读 intent 数据才是通用判据。
+          landed="$("${ADB[@]}" shell dumpsys activity activities 2>/dev/null \
+            | grep -oE 'dat=https://platform\.agentscope\.io[^ }]*' | head -1 \
+            | sed 's/^dat=//')"
+          if [ -z "$landed" ]; then
+            echo "  [警告] 没有读到浏览器地址栏，跳过来源跳转校验"
+          elif echo "$landed" | grep -qE 'platform\.agentscope\.io/skills/[0-9a-fA-F]{8}-'; then
+            echo "  [通过] QwenPaw 来源打开的是 UUID 详情页"
+          elif echo "$landed" | grep -q '@'; then
+            echo "  [失败] QwenPaw 来源仍在打开安装用地址：$landed"
+          else
+            echo "  [提示] 打开的是 $landed（可能是回退到平台列表）"
+          fi
+          # 从浏览器返回应用。
+          "${ADB[@]}" shell input keyevent 4
+          sleep 3
+          "${ADB[@]}" shell input keyevent 4
+          sleep 3
+        else
+          echo "  [警告] 搜索结果里点不到「$qname」"
+        fi
+      fi
+    fi
+    if tap_text 'text="插件目录"'; then
+      sleep 5
+      shot 37-d4-plugins
+      if screen_has 'text="官方插件目录"'; then
+        echo "  [通过] 插件目录一段可见"
+      else
+        echo "  [失败] 未找到「官方插件目录」"
+      fi
+      if screen_has 'text="无法获取插件目录"'; then
+        echo "  [提示] CDN 不可达，已显示明确说明"
+      fi
+    else
+      echo "  [失败] 无法切到插件目录"
+    fi
+    "${ADB[@]}" shell input keyevent 4
+    sleep 3
+  else
+    echo "  [失败] 无法打开扩展市场页"
   fi
 fi
 

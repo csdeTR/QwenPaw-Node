@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET }
 
 @Composable
 private fun QwenPawNav(
@@ -191,6 +191,9 @@ private fun QwenPawNav(
     val settingsStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val usageState by viewModel.usage.state.collectAsState()
     val modelsState by viewModel.models.state.collectAsState()
+    val skillsState by viewModel.skills.state.collectAsState()
+    val mcpState by viewModel.mcp.state.collectAsState()
+    val marketState by viewModel.market.state.collectAsState()
     val inboxState by viewModel.inbox.state.collectAsState()
     // 全文检索状态单独一条流，与对话页状态无关。
     val searchState by chatVm.search.collectAsState()
@@ -1012,6 +1015,63 @@ private fun QwenPawNav(
                 )
             }
 
+            Screen.SKILLS -> {
+                // 每次进入重拉：技能可能在 Web 控制台改过，缓存的列表会停在旧状态。
+                LaunchedEffect(Unit) { viewModel.skills.refresh() }
+                io.qwenpaw.node.ui.skills.SkillsScreen(
+                    state = skillsState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onRefresh = viewModel.skills::refresh,
+                    onOpenSkill = viewModel.skills::openSkill,
+                    onOpenPoolSkill = viewModel.skills::openPoolSkill,
+                    onCloseDetail = viewModel.skills::closeDetail,
+                    onSetEnabled = viewModel.skills::setEnabled,
+                    onBeginEdit = viewModel.skills::beginEdit,
+                    onUpdateDraft = viewModel.skills::updateDraft,
+                    onSaveEdit = viewModel.skills::saveEdit,
+                    onCancelEdit = viewModel.skills::cancelEdit,
+                    onCreate = viewModel.skills::create,
+                    onDelete = { name -> viewModel.skills.delete(name) {} },
+                    onDismissNotice = viewModel.skills::dismissNotice,
+                )
+            }
+
+            Screen.MCP -> {
+                LaunchedEffect(Unit) { viewModel.mcp.refresh() }
+                io.qwenpaw.node.ui.mcp.McpScreen(
+                    state = mcpState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onRefresh = viewModel.mcp::refresh,
+                    onSelect = viewModel.mcp::select,
+                    onCloseDetail = viewModel.mcp::closeDetail,
+                    onToggle = viewModel.mcp::toggle,
+                    onToggleTool = viewModel.mcp::toggleTool,
+                    onSaveTools = viewModel.mcp::saveTools,
+                    onSetDefaultEffect = viewModel.mcp::setDefaultEffect,
+                    onSetToolEffect = viewModel.mcp::setToolEffect,
+                    onSavePolicy = viewModel.mcp::savePolicy,
+                    onRetryDetail = {
+                        mcpState.selectedKey?.let(viewModel.mcp::select)
+                    },
+                    onDismissNotice = viewModel.mcp::dismissNotice,
+                )
+            }
+
+            Screen.MARKET -> {
+                io.qwenpaw.node.ui.market.MarketScreen(
+                    state = marketState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = viewModel.market::ensureLoaded,
+                    onSetTab = viewModel.market::setTab,
+                    onQuery = viewModel.market::setQuery,
+                    onCategory = viewModel.market::setCategory,
+                    onSearch = viewModel.market::search,
+                    onPluginQuery = viewModel.market::setPluginQuery,
+                    onSearchPlugins = viewModel.market::searchPlugins,
+                    onOpenResult = viewModel.market::openResult,
+                )
+            }
+
             Screen.INBOX -> {
                 io.qwenpaw.node.ui.inbox.InboxScreen(
                     state = inboxState,
@@ -1044,6 +1104,9 @@ private fun QwenPawNav(
                     onOpenBackup = { screen = Screen.BACKUP },
                     onOpenCheckpoint = { screen = Screen.CHECKPOINT },
                     onOpenModels = { screen = Screen.MODELS },
+                    onOpenSkills = { screen = Screen.SKILLS },
+                    onOpenMcp = { screen = Screen.MCP },
+                    onOpenMarket = { screen = Screen.MARKET },
                     onOpenUsage = {
                         usageOrigin = Screen.SETTINGS
                         viewModel.usage.ensureLoaded()
@@ -1439,8 +1502,9 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.SETTINGS, Screen.ARCHIVED, Screen.INBOX, Screen.SEARCH -> Screen.LIST
     Screen.TOKEN_USAGE -> usageOrigin
     Screen.RUN_LOG -> Screen.SETTINGS
-    // 工作区文件、备份、检查点、模型与提供商都从设置页进入，返回也回设置页。
-    Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS -> Screen.SETTINGS
+    // 工作区文件、备份、检查点、模型与提供商、技能、MCP、扩展市场都从设置页进入，返回也回设置页。
+    Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS,
+    Screen.SKILLS, Screen.MCP, Screen.MARKET -> Screen.SETTINGS
     // 检查点的只读对话页是检查点的下一层，返回直接回到检查点。
     Screen.CHECKPOINT_CHAT -> Screen.CHECKPOINT
     // 原文页从聊天页的气泡进入，返回也回聊天页。

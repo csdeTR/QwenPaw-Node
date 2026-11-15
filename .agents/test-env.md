@@ -226,7 +226,7 @@ AVD 走 QEMU 用户态 NAT，与容器的桥接网络不是同一条路径，
 - 操作界面时坐标一律从 `uiautomator dump` 动态获取，不要凭截图目测。
   截图是缩放的，按截图坐标点击会落空。
 - `adb shell input text` 不支持中文，空格用 `%s`。
-- 验收脚本：`ADB_SERIAL=localhost:5555 ./scripts/e2e_acceptance.sh --only <A1..A7|B1..B6>`。
+- 验收脚本：`ADB_SERIAL=localhost:5555 ./scripts/e2e_acceptance.sh --only <A1..A8|B1..B6|C1..C2|D1..D4>`。
   脚本默认操作 debug 包 `io.qwenpaw.node.debug`，可用 `ADB_PKG` 覆盖。
   A6 断网场景走第 2.4 节的路由黑洞。
   **脚本已移除真机分支**，只按 redroid 维护；`su -c` 免密提权一类的手段不再保留。

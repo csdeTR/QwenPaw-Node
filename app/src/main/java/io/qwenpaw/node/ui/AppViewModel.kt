@@ -1278,6 +1278,33 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { modelsHolder = it }
 
+    /** 技能。技能归属当前智能体，切换实例或智能体时清空。 */
+    private var skillsHolder: io.qwenpaw.node.ui.skills.SkillsViewModel? = null
+
+    val skills: io.qwenpaw.node.ui.skills.SkillsViewModel
+        get() = skillsHolder ?: io.qwenpaw.node.ui.skills.SkillsViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { skillsHolder = it }
+
+    /** MCP。客户端卡片按智能体区分，切换时清空。 */
+    private var mcpHolder: io.qwenpaw.node.ui.mcp.McpViewModel? = null
+
+    val mcp: io.qwenpaw.node.ui.mcp.McpViewModel
+        get() = mcpHolder ?: io.qwenpaw.node.ui.mcp.McpViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { mcpHolder = it }
+
+    /** 扩展市场。市场数据与智能体无关，但换实例后来源配置可能不同，仍然清空。 */
+    private var marketHolder: io.qwenpaw.node.ui.market.MarketViewModel? = null
+
+    val market: io.qwenpaw.node.ui.market.MarketViewModel
+        get() = marketHolder ?: io.qwenpaw.node.ui.market.MarketViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { marketHolder = it }
+
     private fun bind(instance: InstanceConfig) {
         // 用仓库解析出的地址：本次运行已探明能连通的优先，否则用列表第一个。
         val url = repository.resolvedBaseUrl(instance)
@@ -1308,6 +1335,9 @@ class AppViewModel(
             checkpointHolder?.clear()
             usageHolder?.clear()
             modelsHolder?.clear()
+            skillsHolder?.clear()
+            mcpHolder?.clear()
+            marketHolder?.clear()
         }
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。

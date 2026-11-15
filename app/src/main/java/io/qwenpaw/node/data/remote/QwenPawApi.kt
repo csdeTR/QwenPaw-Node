@@ -37,8 +37,18 @@ import io.qwenpaw.node.data.model.InboxPageDto
 import io.qwenpaw.node.data.model.InboxTraceDto
 import io.qwenpaw.node.data.model.LocalWhisperStatusDto
 import io.qwenpaw.node.data.model.LlmToolDailyDto
+import io.qwenpaw.node.data.model.MarketCategoryDto
+import io.qwenpaw.node.data.model.MarketProviderDto
+import io.qwenpaw.node.data.model.MarketSearchResponseDto
+import io.qwenpaw.node.data.model.McpClientDto
+import io.qwenpaw.node.data.model.McpPolicyDto
+import io.qwenpaw.node.data.model.McpToolDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
 import io.qwenpaw.node.data.model.OffloadPolicyDto
+import io.qwenpaw.node.data.model.PluginCatalogDto
+import io.qwenpaw.node.data.model.PluginMarketResponseDto
+import io.qwenpaw.node.data.model.PoolSkillDetailDto
+import io.qwenpaw.node.data.model.PoolSkillDto
 import io.qwenpaw.node.data.model.ProviderDto
 import io.qwenpaw.node.data.model.ProjectDirDto
 import io.qwenpaw.node.data.model.PushMessagesDto
@@ -47,7 +57,11 @@ import io.qwenpaw.node.data.model.RestoreBackupRequestDto
 import io.qwenpaw.node.data.model.RestoreBackupResponseDto
 import io.qwenpaw.node.data.model.RestoreCheckpointRequestDto
 import io.qwenpaw.node.data.model.RestoreResultDto
+import io.qwenpaw.node.data.model.SaveSkillResultDto
 import io.qwenpaw.node.data.model.SearchPageDto
+import io.qwenpaw.node.data.model.SkillConflictDto
+import io.qwenpaw.node.data.model.SkillDetailDto
+import io.qwenpaw.node.data.model.SkillDto
 import io.qwenpaw.node.data.model.SlashCommandDto
 import io.qwenpaw.node.data.model.SnapshotRequestDto
 import io.qwenpaw.node.data.model.SnapshotResultDto
@@ -73,9 +87,13 @@ import io.qwenpaw.node.data.model.WorkspaceSaveResultDto
 import io.qwenpaw.node.data.model.WorkspaceTreeDto
 import io.qwenpaw.node.data.model.WorkspaceUploadResultDto
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -965,6 +983,239 @@ class QwenPawApi(
     fun saveToolConfig(conn: Connection, name: String, values: Map<String, JsonElement>) {
         val body = buildJsonObject { put("config", JsonObject(values)) }
         request(conn, "POST", "/api/tools/$name/config", body)
+    }
+
+    // ---------- 技能 ----------
+
+    /** 工作区技能列表。**已启用的技能也在列表里**，靠 `enabled` 区分。 */
+    fun skills(conn: Connection): List<SkillDto> =
+        decode(
+            request(conn, "GET", "/api/skills"),
+            kotlinx.serialization.builtins.ListSerializer(SkillDto.serializer()),
+        )
+
+    fun skill(conn: Connection, name: String): SkillDetailDto =
+        decode(
+            request(conn, "GET", "/api/skills/${encodeSegment(name)}"),
+            SkillDetailDto.serializer(),
+        )
+
+    /**
+     * 启用技能。
+     *
+     * 服务端会重新扫描技能目录，命中安全策略时回 **422** 且 body 是
+     * `{type:"security_scan_failed", ...}`，不是普通校验错误。调用方按
+     * `ApiException.code == 422` 单独给文案。
+     */
+    fun enableSkill(conn: Connection, name: String): String =
+        request(conn, "POST", "/api/skills/${encodeSegment(name)}/enable")
+
+    fun disableSkill(conn: Connection, name: String): String =
+        request(conn, "POST", "/api/skills/${encodeSegment(name)}/disable")
+
+    /**
+     * 原地保存 `SKILL.md` 正文。
+     *
+     * `mode` 为 `noop` 表示内容与服务端一致，没有写入。**不做改名**：
+     * 改名要传 `source_name` 且会触发 409 冲突，本版不接。
+     */
+    fun saveSkill(conn: Connection, name: String, content: String): SaveSkillResultDto {
+        val body = buildJsonObject {
+            put("name", name)
+            put("content", content)
+        }
+        return decode(
+            request(conn, "PUT", "/api/skills/save", body),
+            SaveSkillResultDto.serializer(),
+        )
+    }
+
+    /**
+     * 新建技能，返回服务端最终使用的名字。
+     *
+     * 重名回 409 且 `detail` 是对象，`ApiException.detail` 此时是被序列化过的字符串，
+     * 调用方用 [skillConflictOf] 取建议名。
+     */
+    fun createSkill(conn: Connection, name: String, content: String): String {
+        val body = buildJsonObject {
+            put("name", name)
+            put("content", content)
+            put("enable", true)
+        }
+        val text = request(conn, "POST", "/api/skills", body)
+        return runCatching {
+            json.parseToJsonElement(text).jsonObject["name"]?.jsonPrimitive?.content
+        }.getOrNull() ?: name
+    }
+
+    /**
+     * 删除技能。
+     *
+     * 服务端自己先停用再删，**不需要客户端先调 [disableSkill]**（实测确认）。
+     * 删除没有回收站，调用方要给二次确认。
+     */
+    fun deleteSkill(conn: Connection, name: String) {
+        request(conn, "DELETE", "/api/skills/${encodeSegment(name)}")
+    }
+
+    /** 技能池列表。池内技能没有 `enabled`，本版只读。 */
+    fun poolSkills(conn: Connection): List<PoolSkillDto> =
+        decode(
+            request(conn, "GET", "/api/skills/pool"),
+            kotlinx.serialization.builtins.ListSerializer(PoolSkillDto.serializer()),
+        )
+
+    fun poolSkill(conn: Connection, name: String): PoolSkillDetailDto =
+        decode(
+            request(conn, "GET", "/api/skills/pool/${encodeSegment(name)}"),
+            PoolSkillDetailDto.serializer(),
+        )
+
+    /**
+     * 从 409 的 `detail` 中取出重名建议。
+     *
+     * `extractDetail` 已把对象序列化成字符串，这里解析回来；解析失败返回 null，
+     * 让调用方按普通 [ApiException] 处理。
+     */
+    fun skillConflictOf(e: ApiException): SkillConflictDto? {
+        val raw = e.detail ?: return null
+        return runCatching {
+            json.decodeFromString(SkillConflictDto.serializer(), raw)
+        }.getOrNull()?.takeIf { it.suggestedName.isNotBlank() }
+    }
+
+    // ---------- MCP ----------
+
+    fun mcpClients(conn: Connection): List<McpClientDto> =
+        decode(
+            request(conn, "GET", "/api/mcp"),
+            kotlinx.serialization.builtins.ListSerializer(McpClientDto.serializer()),
+        )
+
+    /** 切换启用状态。**端点没有请求体**，服务端自行取反，结果以返回值为准。 */
+    fun toggleMcpClient(conn: Connection, key: String): McpClientDto =
+        decode(
+            request(conn, "PATCH", "/api/mcp/toggle/$key"),
+            McpClientDto.serializer(),
+        )
+
+    /**
+     * 某个 MCP 客户端的工具列表。
+     *
+     * **会实时连 MCP 服务端**，连不上回 502；客户端本身被禁用时服务端直接回 `[]`，
+     * 所以空列表要结合 `McpClientDto.enabled` 才能判断是哪种情况。
+     */
+    fun mcpTools(conn: Connection, key: String): List<McpToolDto> =
+        decode(
+            request(conn, "GET", "/api/mcp/tools/$key"),
+            kotlinx.serialization.builtins.ListSerializer(McpToolDto.serializer()),
+        )
+
+    /** 保存工具白名单。`tools` 传 `null` 表示取消白名单、全部启用。 */
+    fun saveMcpTools(conn: Connection, key: String, tools: List<String>?): List<McpToolDto> {
+        val body = buildJsonObject {
+            put("tools", tools?.let { list -> JsonArray(list.map { JsonPrimitive(it) }) } ?: JsonNull)
+        }
+        return decode(
+            request(conn, "PUT", "/api/mcp/tools/$key", body),
+            kotlinx.serialization.builtins.ListSerializer(McpToolDto.serializer()),
+        )
+    }
+
+    /** 访问策略。`GET` 不连 MCP 服务端，可以随时读。 */
+    fun mcpPolicy(conn: Connection, key: String): McpPolicyDto =
+        decode(
+            request(conn, "GET", "/api/mcp/policy/$key"),
+            McpPolicyDto.serializer(),
+        )
+
+    /**
+     * 整份回写访问策略。
+     *
+     * 服务端按 payload 重建托管规则，因此 `client_overrides` 与 `tool_overrides`
+     * 必须原样带回，否则会被清掉。序列化用 `encodeDefaults = true`，
+     * `subject_value` 之类的空串也会写进去——服务端要求这些键存在。
+     */
+    fun saveMcpPolicy(conn: Connection, key: String, policy: McpPolicyDto): McpPolicyDto =
+        decode(
+            requestRaw(conn, "PUT", "/api/mcp/policy/$key", json.encodeToString(policy)),
+            McpPolicyDto.serializer(),
+        )
+
+    // ---------- 市场与插件目录 ----------
+
+    fun marketProviders(conn: Connection): List<MarketProviderDto> =
+        decode(
+            request(conn, "GET", "/api/market/providers"),
+            kotlinx.serialization.builtins.ListSerializer(MarketProviderDto.serializer()),
+        )
+
+    fun marketCategories(conn: Connection, lang: String = "zh"): List<MarketCategoryDto> =
+        decode(
+            request(conn, "GET", "/api/market/categories?lang=$lang"),
+            kotlinx.serialization.builtins.ListSerializer(MarketCategoryDto.serializer()),
+        )
+
+    /**
+     * 搜索技能市场。
+     *
+     * `providerPages` 只能包含 `available == true` 的来源：服务端对未注册的 key 直接回 400。
+     * `limit` 服务端上限 50。实测三个来源一起查约 20 秒，调用方要有「搜索中」状态。
+     */
+    fun marketSearch(
+        conn: Connection,
+        query: String,
+        providerPages: Map<String, Int>,
+        limit: Int,
+        lang: String = "zh",
+        category: String? = null,
+    ): MarketSearchResponseDto {
+        val body = buildJsonObject {
+            put("query", query)
+            put(
+                "provider_pages",
+                JsonObject(providerPages.mapValues { (_, page) -> JsonPrimitive(page) }),
+            )
+            put("limit", limit)
+            put("lang", lang)
+            category?.takeIf { it.isNotBlank() }?.let { put("category", it) }
+        }
+        return decode(
+            request(conn, "POST", "/api/market/search", body),
+            MarketSearchResponseDto.serializer(),
+        )
+    }
+
+    /**
+     * 官方插件目录。
+     *
+     * **CDN 拉不到时服务端仍回 200**，此时 `plugins` 为空且 `error` 非空。
+     * 调用方必须先看 `error`，否则会把「取不到」显示成「没有插件」。
+     */
+    fun pluginCatalog(conn: Connection): PluginCatalogDto =
+        decode(
+            request(conn, "GET", "/api/plugins/catalog"),
+            PluginCatalogDto.serializer(),
+        )
+
+    /** 在线插件市场。服务端代理上游，失败时回 502。 */
+    fun pluginMarketSearch(
+        conn: Connection,
+        search: String,
+        pageNumber: Int = 1,
+        pageSize: Int = 20,
+    ): PluginMarketResponseDto {
+        val url = workspaceUrl(
+            conn,
+            "/api/plugins/market/search",
+            mapOf(
+                "page_number" to pageNumber.toString(),
+                "page_size" to pageSize.toString(),
+                "search" to search.takeIf { it.isNotBlank() },
+            ),
+        )
+        val builder = baseBuilder(conn, url).get()
+        return decode(execute(builder.build()), PluginMarketResponseDto.serializer())
     }
 
     // ---------- 后台策略 ----------

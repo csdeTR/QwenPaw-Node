@@ -46,6 +46,10 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 | `ui/chat/` | 对话页、会话列表与分组、输入条、Markdown 渲染、工具卡片、消息气泡与头像、语音浮层 | 绝大多数界面改动的落点 |
 | `ui/settings/` | 实例连接表单、地址管理、设置页、智能体选择、模型与提供商（`ModelsViewModel` / `ModelsScreen`，含 `ModelCatalog.modelChoicesOf`） | 设置项增删，或连接流程变化时 |
 | `ui/stats/` | 用量统计：`UsageViewModel`（四个端点并行取数、分块报错）、`UsageAggregation`（区间换算、按模型聚合、趋势补齐）、`UsageChart`（Vico 双线折线）、`UsageScreen` | 调整统计口径、换图表库或改范围档位时 |
+| `ui/skills/` | 技能：`SkillsViewModel`（列表 / 池并行拉、启停、正文编辑、新建与删除）、`SkillCopy`（来源标签、frontmatter 判据、扫描拦截文案、`last_updated` 折算）、`SkillsScreen` | 技能端点增删，或服务端校验规则变化时 |
+| `ui/mcp/` | MCP：`McpViewModel`（客户端、工具、策略三段各自独立报错）、`McpPolicyEdit`（整读整写的纯函数）、`McpScreen` | MCP 策略字段增删，或白名单语义变化时 |
+| `ui/market/` | 扩展市场：`MarketViewModel`（来源与分类、技能搜索、插件目录与在线市场）、`MarketScreen`，全部只读 | 市场来源增删，或改落地动作时 |
+| `data/market/` | `MarketLinkResolver`（QwenPaw 来源的详情页地址换算：服务端给的是安装用 URL，平台只认 UUID） | 平台地址规则变化，或服务端补上 `details_url` 后 |
 | `ui/theme/` | 配色、字号缩放、MiSans 字体接入 | 调整视觉 token 或字号体系时 |
 | `ui/log/` | 运行日志页 | 调整日志展示形态时 |
 | `ui/workspace/` | 工作区文件：目录浏览、文本与图片预览、下载计划与进度、SAF 落盘（`SafDownloads`） | 调整文件浏览交互或下载落盘方式时 |

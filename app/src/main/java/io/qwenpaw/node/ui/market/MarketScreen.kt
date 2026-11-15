@@ -1,0 +1,708 @@
+package io.qwenpaw.node.ui.market
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.data.model.MarketProviderDto
+import io.qwenpaw.node.data.model.MarketResultDto
+import io.qwenpaw.node.data.model.PluginCatalogEntryDto
+import io.qwenpaw.node.data.model.PluginMarketEntryDto
+import io.qwenpaw.node.ui.theme.QwenIcons
+
+/**
+ * 扩展市场：技能市场与插件目录，都只读。
+ *
+ * 本版不安装、不下载、不配置。所有落地动作都是「用系统浏览器打开对应页面」，
+ * 与 0.7.0 定下的 App 中心口径一致：第三方内容交给浏览器，
+ * 客户端不注入凭据、也不接管返回键。
+ */
+@Composable
+fun MarketScreen(
+    state: MarketUiState,
+    onBack: () -> Unit,
+    onEnsureLoaded: () -> Unit,
+    onSetTab: (MarketTab) -> Unit,
+    onQuery: (String) -> Unit,
+    onCategory: (String?) -> Unit,
+    onSearch: () -> Unit,
+    onPluginQuery: (String) -> Unit,
+    onSearchPlugins: () -> Unit,
+    onOpenResult: (MarketResultDto, onOpen: (String) -> Unit, onNote: (String) -> Unit) -> Unit,
+) {
+    val context = LocalContext.current
+    // 解析失败等一次性说明。放在 Nav 之上而不是状态里：它只描述「这一次点击」，
+    // 留着会让用户下次进页面还看到上次的提示。
+    var note by remember { mutableStateOf<String?>(null) }
+
+    // 进入页面就拉基础数据：来源、分类与插件目录。三者互不依赖。
+    androidx.compose.runtime.LaunchedEffect(Unit) { onEnsureLoaded() }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.background)
+                    .statusBarsPadding(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onBack),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = QwenIcons.arrowLeft,
+                            contentDescription = "返回",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "扩展市场",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "只读",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TabChip("技能市场", state.tab == MarketTab.SKILLS) { onSetTab(MarketTab.SKILLS) }
+                    TabChip("插件目录", state.tab == MarketTab.PLUGINS) { onSetTab(MarketTab.PLUGINS) }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant),
+                )
+            }
+        },
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            when (state.tab) {
+                MarketTab.SKILLS -> SkillMarket(
+                    state = state,
+                    onQuery = onQuery,
+                    onCategory = onCategory,
+                    onSearch = onSearch,
+                    onOpen = { url -> openUrl(context, url) },
+                    onOpenResult = { result ->
+                        onOpenResult(result, { url -> openUrl(context, url) }) { reason ->
+                            note = reason
+                        }
+                    },
+                )
+
+                MarketTab.PLUGINS -> PluginMarket(
+                    state = state,
+                    onQuery = onPluginQuery,
+                    onSearch = onSearchPlugins,
+                    onOpen = { url -> openUrl(context, url) },
+                )
+            }
+        }
+    }
+
+    note?.let { text ->
+        AlertDialog(
+            onDismissRequest = { note = null },
+            title = { Text("无法直达详情") },
+            text = {
+                Text(
+                    text = "$text。可在平台页面内搜索技能名，或改用其它来源。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                Text(
+                    text = "知道了",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.clickable { note = null }.padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun SkillMarket(
+    state: MarketUiState,
+    onQuery: (String) -> Unit,
+    onCategory: (String?) -> Unit,
+    onSearch: () -> Unit,
+    onOpen: (String) -> Unit,
+    onOpenResult: (MarketResultDto) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedTextField(
+            value = state.query,
+            onValueChange = onQuery,
+            placeholder = { Text("搜索技能，例如 pdf、海报") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (state.metaLoading && state.providers.isEmpty()) {
+            LoadingLine("正在读取市场来源")
+        } else {
+            state.metaError?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (state.providers.isNotEmpty()) {
+                Text(
+                    text = "来源",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // 不可用的来源保留在列表里但不可点：用户需要知道「有这个来源、只是没配好」，
+                // 直接隐藏会让人以为市场只有这几家。
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.providers.forEach { provider ->
+                        ProviderChip(provider)
+                    }
+                }
+                state.providers.filter { !it.available }.forEach { provider ->
+                    Text(
+                        text = "${provider.label} 不可用：${provider.reason.orEmpty()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (state.categories.isNotEmpty()) {
+                Text(
+                    text = "分类",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TabChip("全部", state.selectedCategory == null) { onCategory(null) }
+                    state.categories.take(CATEGORY_PREVIEW).forEach { category ->
+                        TabChip(category.label, state.selectedCategory == category.id) {
+                            onCategory(category.id)
+                        }
+                    }
+                }
+            }
+        }
+
+        SearchButton(
+            label = if (state.searching) "搜索中" else "搜索",
+            enabled = !state.searching && state.searchableProviders.isNotEmpty(),
+            onClick = onSearch,
+        )
+
+        state.searchError?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        state.resultErrors.forEach { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        when {
+            state.searching -> LoadingLine("正在搜索，多个来源并行，通常需要十几秒")
+
+            state.searched && state.results.isEmpty() && state.searchError == null ->
+                Text(
+                    text = "没有匹配的技能。可换一个更通用的关键词，或先清空分类。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+            state.results.isNotEmpty() -> {
+                CardBox {
+                    state.results.forEachIndexed { index, result ->
+                        MarketRow(
+                            result = result,
+                            resolving = state.resolvingSource != null,
+                            onOpen = { onOpenResult(result) },
+                        )
+                        if (index != state.results.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                        }
+                    }
+                }
+                if (state.truncated) {
+                    Text(
+                        text = "结果已截断，更具体的关键词能减少无关条目。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = "技能市场只做浏览。安装、启停与配置请在 Web 控制台或通过技能页完成。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PluginMarket(
+    state: MarketUiState,
+    onQuery: (String) -> Unit,
+    onSearch: () -> Unit,
+    onOpen: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "官方插件目录",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        CardBox {
+            when {
+                state.catalogLoading && state.catalog == null -> Text(
+                    text = "正在读取插件目录",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
+                )
+
+                // 目录「成功但 error 非空」表示 CDN 拉不到，此时不能报成「没有插件」。
+                state.catalogError != null -> Text(
+                    text = "无法获取插件目录：${state.catalogError}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
+                )
+
+                state.catalog?.plugins.isNullOrEmpty() -> Text(
+                    text = "插件目录为空",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
+                )
+
+                else -> {
+                    val entries = state.catalog?.plugins.orEmpty()
+                    entries.forEachIndexed { index, entry ->
+                        CatalogRow(entry = entry, onOpen = onOpen)
+                        if (index != entries.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                        }
+                    }
+                }
+            }
+        }
+        state.catalog?.updatedAt?.let {
+            Text(
+                text = "目录更新时间：$it",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Text(
+            text = "在线插件市场",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = state.pluginQuery,
+            onValueChange = onQuery,
+            placeholder = { Text("搜索平台上的插件") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SearchButton(
+            label = if (state.pluginSearching) "搜索中" else "搜索",
+            enabled = !state.pluginSearching,
+            onClick = onSearch,
+        )
+        state.pluginError?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        when {
+            state.pluginSearching -> LoadingLine("正在读取在线插件市场")
+            state.pluginResults.isNotEmpty() -> CardBox {
+                state.pluginResults.forEachIndexed { index, entry ->
+                    PluginMarketRow(entry = entry, onOpen = onOpen)
+                    if (index != state.pluginResults.lastIndex) {
+                        HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                    }
+                }
+            }
+
+            state.pluginSearched && state.pluginError == null -> Text(
+                text = "没有匹配的插件",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Text(
+            text = "安装插件请使用 Web 控制台或服务端的插件安装命令；本页不下载、不安装。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun MarketRow(result: MarketResultDto, resolving: Boolean, onOpen: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 解析期间整列不可点：连点会让同一行发起多次解析，也看不出哪一次生效。
+            .clickable(enabled = result.sourceUrl.isNotBlank() && !resolving, onClick = onOpen)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = result.name.ifBlank { result.slug },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = result.sourceLabel ?: result.source,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        result.author?.takeIf { it.isNotBlank() }?.let { author ->
+            Text(
+                text = author,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        result.description?.takeIf { it.isNotBlank() }?.let { description ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        result.version?.takeIf { it.isNotBlank() }?.let { version ->
+            Text(
+                text = "版本 $version",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CatalogRow(entry: PluginCatalogEntryDto, onOpen: (String) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = entry.installUrl.isNotBlank()) { onOpen(entry.installUrl) }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = entry.name.ifBlank { entry.pluginId },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = buildString {
+                    if (entry.installed) {
+                        append("已安装")
+                        if (entry.upgradeAvailable) append(" · 可升级")
+                    } else {
+                        append("未安装")
+                    }
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (entry.upgradeAvailable) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        if (entry.description.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = entry.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = buildString {
+                if (entry.author.isNotBlank()) append(entry.author)
+                if (entry.version.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append("版本 ${entry.version}")
+                }
+                if (entry.size.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append(entry.size)
+                }
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PluginMarketRow(entry: PluginMarketEntryDto, onOpen: (String) -> Unit) {
+    // 中文本地化优先，没有时用英文：平台的两个 locale 都可能缺。
+    val locale = entry.locales?.get("zh") ?: entry.locales?.get("en")
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = entry.detailsUrl.isNotBlank()) { onOpen(entry.detailsUrl) }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = entry.displayName.ifBlank { entry.id },
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        locale?.description?.takeIf { it.isNotBlank() }?.let { description ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = buildString {
+                if (entry.developer.isNotBlank()) append(entry.developer)
+                if (entry.version.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append("版本 ${entry.version}")
+                }
+                if (entry.downloads > 0) {
+                    if (isNotEmpty()) append(" · ")
+                    append("${entry.downloads} 次下载")
+                }
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ProviderChip(provider: MarketProviderDto) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (provider.available) MaterialTheme.colorScheme.surface
+                else MaterialTheme.colorScheme.surfaceVariant,
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = provider.label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (provider.available) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
+
+@Composable
+private fun TabChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surface,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
+
+@Composable
+private fun SearchButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (enabled) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surface,
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+}
+
+@Composable
+private fun LoadingLine(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun CardBox(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface),
+    ) { content() }
+}
+
+/**
+ * 用系统浏览器打开一个地址。
+ *
+ * 失败只当无事发生：市场里的地址来自第三方，格式不对是常见情况，
+ * 抛出来会让用户在一个只读页面上看到崩溃。
+ */
+private fun openUrl(context: android.content.Context, url: String) {
+    val target = url.trim()
+    if (target.isEmpty()) return
+    runCatching {
+        context.startActivity(
+            android.content.Intent(
+                android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse(target),
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+}
+
+/** 分类只展示前几项：实测服务端有十几项，一屏放不下，全列出来会把搜索结果挤出屏幕。 */
+private const val CATEGORY_PREVIEW = 6

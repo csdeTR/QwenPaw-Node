@@ -1326,3 +1326,365 @@ data class ResetCheckpointsDto(
     val reset: Boolean = false,
     @SerialName("auto_enabled") val autoEnabled: Boolean = false,
 )
+
+// ---------------- 技能 ----------------
+
+/**
+ * 工作区技能，对应 `GET /api/skills` 的元素。
+ *
+ * 列表里**已启用的技能也在**，靠 `enabled` 区分；这与「技能池只有未启用的」直觉相反。
+ * `last_updated` 实测是带 `Z` 的 ISO 串（`2026-11-01T01:08:08.599528Z`），
+ * 因此展示前要按 UTC 折算本地。
+ */
+@Serializable
+data class SkillDto(
+    val name: String = "",
+    val description: String = "",
+    @SerialName("version_text") val versionText: String = "",
+    val source: String = "customized",
+    val emoji: String = "",
+    val enabled: Boolean = false,
+    val channels: List<String> = emptyList(),
+    val preload: Boolean = false,
+    val tags: List<String> = emptyList(),
+    @SerialName("last_updated") val lastUpdated: String = "",
+)
+
+/**
+ * 技能详情，对应 `GET /api/skills/{name}`。
+ *
+ * 与列表的差别只有四项，因此单独声明而不是继承：[requirements] 只在详情里有，
+ * 列表里的 `last_updated` 与详情同形。`content` 就是 `SKILL.md` 全文，
+ * 保存时原样回传，不做任何裁剪。
+ */
+@Serializable
+data class SkillDetailDto(
+    val name: String = "",
+    val description: String = "",
+    @SerialName("version_text") val versionText: String = "",
+    val source: String = "customized",
+    val emoji: String = "",
+    val enabled: Boolean = false,
+    val channels: List<String> = emptyList(),
+    val preload: Boolean = false,
+    val tags: List<String> = emptyList(),
+    @SerialName("last_updated") val lastUpdated: String = "",
+    val content: String = "",
+    @SerialName("installed_from") val installedFrom: String = "",
+    val requirements: SkillRequirementsDto = SkillRequirementsDto(),
+)
+
+/** 技能声明的运行依赖。三项都是字符串列表，缺省时为空。 */
+@Serializable
+data class SkillRequirementsDto(
+    @SerialName("require_bins") val requireBins: List<String> = emptyList(),
+    @SerialName("require_envs") val requireEnvs: List<String> = emptyList(),
+    @SerialName("require_mcps") val requireMcps: List<String> = emptyList(),
+) {
+    val isEmpty: Boolean
+        get() = requireBins.isEmpty() && requireEnvs.isEmpty() && requireMcps.isEmpty()
+}
+
+/**
+ * 技能池条目，对应 `GET /api/skills/pool` 的元素。
+ *
+ * **没有 `enabled`**：开关的对象是「某个工作区里的某个技能」，池内技能本身没有启停状态。
+ * `sync_status` 是与各工作区的同步结论（`synced` 等），本版只显示不解释。
+ */
+@Serializable
+data class PoolSkillDto(
+    val name: String = "",
+    val description: String = "",
+    @SerialName("version_text") val versionText: String = "",
+    val source: String = "customized",
+    val emoji: String = "",
+    val external: Boolean = false,
+    @SerialName("external_path") val externalPath: String = "",
+    @SerialName("sync_status") val syncStatus: String = "",
+    val tags: List<String> = emptyList(),
+    @SerialName("last_updated") val lastUpdated: String = "",
+    @SerialName("auto_sync") val autoSync: Boolean = false,
+    @SerialName("auto_update") val autoUpdate: Boolean = false,
+)
+
+/** 技能池详情，对应 `GET /api/skills/pool/{name}`。 */
+@Serializable
+data class PoolSkillDetailDto(
+    val name: String = "",
+    val description: String = "",
+    @SerialName("version_text") val versionText: String = "",
+    val source: String = "customized",
+    val emoji: String = "",
+    val external: Boolean = false,
+    @SerialName("external_path") val externalPath: String = "",
+    @SerialName("sync_status") val syncStatus: String = "",
+    val tags: List<String> = emptyList(),
+    @SerialName("last_updated") val lastUpdated: String = "",
+    @SerialName("auto_sync") val autoSync: Boolean = false,
+    @SerialName("auto_update") val autoUpdate: Boolean = false,
+    val content: String = "",
+    @SerialName("installed_from") val installedFrom: String = "",
+    val requirements: SkillRequirementsDto = SkillRequirementsDto(),
+    @SerialName("builtin_language") val builtinLanguage: String = "",
+)
+
+/** `PUT /api/skills/save` 的结果。`mode` 取 `edit` 或 `noop`（内容未变）。 */
+@Serializable
+data class SaveSkillResultDto(
+    val success: Boolean = false,
+    val mode: String = "",
+    val name: String = "",
+)
+
+/**
+ * `POST /api/skills` 重名时的 `detail`。
+ *
+ * 服务端回 409 且 `detail` 是对象，`ApiException.detail` 已被序列化成字符串，
+ * 需要再解析回来才能拿到建议名。
+ */
+@Serializable
+data class SkillConflictDto(
+    val reason: String = "",
+    @SerialName("suggested_name") val suggestedName: String = "",
+)
+
+// ---------------- MCP ----------------
+
+/**
+ * 一个 MCP 客户端，对应 `GET /api/mcp` 的元素。
+ *
+ * `tools` 为 `null` 表示「未设白名单，全部启用」，是**语义上的区别而不是缺值**，
+ * 因此必须声明成可空列表；声明成非空集合会让整份列表解析失败。
+ * `env` 与 `headers` 里可能有凭据，界面不展示。
+ */
+@Serializable
+data class McpClientDto(
+    val key: String = "",
+    val name: String = "",
+    val description: String = "",
+    val enabled: Boolean = false,
+    val transport: String = "stdio",
+    val url: String = "",
+    val command: String = "",
+    val args: List<String> = emptyList(),
+    @SerialName("http_timeout") val httpTimeout: Double? = null,
+    val tools: List<String>? = null,
+    @SerialName("oauth_status") val oauthStatus: McpOAuthStatusDto? = null,
+    @SerialName("access_summary") val accessSummary: McpAccessSummaryDto = McpAccessSummaryDto(),
+)
+
+/** MCP 客户端的 OAuth 状态。未配置 OAuth 时服务端给 `null`。 */
+@Serializable
+data class McpOAuthStatusDto(
+    val authorized: Boolean = false,
+    @SerialName("expires_at") val expiresAt: Double = 0.0,
+    val scope: String = "",
+    @SerialName("client_id") val clientId: String = "",
+)
+
+/** MCP 访问策略摘要，挂在客户端卡片上。 */
+@Serializable
+data class McpAccessSummaryDto(
+    @SerialName("default_effect") val defaultEffect: String = "deny",
+    @SerialName("overrides_count") val overridesCount: Int = 0,
+)
+
+/**
+ * 一个 MCP 工具，对应 `GET|PUT /api/mcp/tools/{key}` 的元素。
+ *
+ * `enabled` 是「是否通过白名单」，服务端按卡片里的 `tools` 逐个算出来，
+ * 客户端不需要自己再比一遍。`input_schema` 本版不渲染（表单在手机上无法审阅）。
+ */
+@Serializable
+data class McpToolDto(
+    val name: String = "",
+    val description: String = "",
+    val enabled: Boolean = true,
+    @SerialName("input_schema") val inputSchema: JsonObject? = null,
+)
+
+/**
+ * MCP 访问策略，对应 `GET|PUT /api/mcp/policy/{key}`。
+ *
+ * **整读整写**：服务端按这份 payload 重建「控制台托管」的规则，
+ * `client_overrides` 与 `tool_overrides` 若不原样带回就会被清掉。
+ * 本版的可编辑面只有 [defaultEffect] 与 [toolDefaults] 两处，其余原样回传。
+ */
+@Serializable
+data class McpPolicyDto(
+    @SerialName("default_effect") val defaultEffect: String = "deny",
+    @SerialName("client_overrides") val clientOverrides: List<McpAccessRuleDto> = emptyList(),
+    @SerialName("tool_defaults") val toolDefaults: List<McpToolDefaultDto> = emptyList(),
+    @SerialName("tool_overrides") val toolOverrides: List<McpToolOverrideDto> = emptyList(),
+    @SerialName("unmanaged_rules_count") val unmanagedRulesCount: Int = 0,
+)
+
+/**
+ * 一条来源与对象维度的规则。
+ *
+ * 五维分别是 `source_type`（实测只有 `channel`）、`source_value`、`subject_type`
+ * （`all` / `user`）、`subject_value`、`effect`。规则表在手机上无法审阅，本版只回传。
+ */
+@Serializable
+data class McpAccessRuleDto(
+    @SerialName("source_type") val sourceType: String = "channel",
+    @SerialName("source_value") val sourceValue: String = "",
+    @SerialName("subject_type") val subjectType: String = "all",
+    @SerialName("subject_value") val subjectValue: String = "",
+    val effect: String = "deny",
+)
+
+/** 单个工具的默认效果。 */
+@Serializable
+data class McpToolDefaultDto(
+    @SerialName("tool_name") val toolName: String = "",
+    val effect: String = "deny",
+)
+
+/** 单个工具在某个来源/对象下的效果，比 [McpAccessRuleDto] 多一个工具名。 */
+@Serializable
+data class McpToolOverrideDto(
+    @SerialName("tool_name") val toolName: String = "",
+    @SerialName("source_type") val sourceType: String = "channel",
+    @SerialName("source_value") val sourceValue: String = "",
+    @SerialName("subject_type") val subjectType: String = "all",
+    @SerialName("subject_value") val subjectValue: String = "",
+    val effect: String = "deny",
+)
+
+// ---------------- 市场与插件目录 ----------------
+
+/** 技能市场的一个来源，对应 `GET /api/market/providers`。 */
+@Serializable
+data class MarketProviderDto(
+    val key: String = "",
+    val label: String = "",
+    val available: Boolean = true,
+    /** 不可用时的原因，服务端会给英文原文（例如缺少哪些环境变量）。 */
+    val reason: String? = null,
+    @SerialName("supports_browse") val supportsBrowse: Boolean = true,
+)
+
+/** 技能市场的一个分类，对应 `GET /api/market/categories?lang=zh`。 */
+@Serializable
+data class MarketCategoryDto(
+    val id: String = "",
+    val label: String = "",
+)
+
+/**
+ * 一条市场搜索结果。
+ *
+ * `stats` 实测为 `null`，只有部分来源会填；界面不能假设它有键。
+ * `source_url` 是本版唯一的落地动作：用系统浏览器打开。
+ */
+@Serializable
+data class MarketResultDto(
+    val source: String = "",
+    @SerialName("source_label") val sourceLabel: String? = null,
+    val slug: String = "",
+    val name: String = "",
+    val description: String? = null,
+    @SerialName("source_url") val sourceUrl: String = "",
+    val version: String? = null,
+    val author: String? = null,
+    @SerialName("icon_url") val iconUrl: String? = null,
+    val stats: Map<String, JsonElement>? = null,
+)
+
+/** 某个来源的分页信息。 */
+@Serializable
+data class ProviderPageInfoDto(
+    @SerialName("has_more") val hasMore: Boolean = false,
+    val total: Int = 0,
+)
+
+/** 一个来源的失败原因。`provider` 是来源 key，客户端按 key 换成显示名。 */
+@Serializable
+data class MarketSearchErrorDto(
+    val provider: String = "",
+    val message: String = "",
+)
+
+/** `POST /api/market/search` 的响应。 */
+@Serializable
+data class MarketSearchResponseDto(
+    val results: List<MarketResultDto> = emptyList(),
+    val errors: List<MarketSearchErrorDto> = emptyList(),
+    @SerialName("by_provider") val byProvider: Map<String, ProviderPageInfoDto> = emptyMap(),
+)
+
+/**
+ * 插件目录，对应 `GET /api/plugins/catalog`。
+ *
+ * **CDN 拉不到时仍回 200**，此时 `plugins` 为空、`error` 非空。
+ * 界面必须优先看 `error`，否则会把「取不到」显示成「没有插件」。
+ */
+@Serializable
+data class PluginCatalogDto(
+    @SerialName("updated_at") val updatedAt: String? = null,
+    val plugins: List<PluginCatalogEntryDto> = emptyList(),
+    val error: String? = null,
+)
+
+/** 插件目录中的一个条目。`installed_version` 在未安装时为 `null`。 */
+@Serializable
+data class PluginCatalogEntryDto(
+    val id: String = "",
+    @SerialName("plugin_id") val pluginId: String = "",
+    val name: String = "",
+    val description: String = "",
+    @SerialName("description_i18n") val descriptionI18n: Map<String, String>? = null,
+    val version: String = "",
+    val author: String = "",
+    /** 插件类别，实测取值如 `apps`。 */
+    val kind: String = "",
+    val size: String = "",
+    @SerialName("install_url") val installUrl: String = "",
+    val installed: Boolean = false,
+    @SerialName("installed_version") val installedVersion: String? = null,
+    @SerialName("upgrade_available") val upgradeAvailable: Boolean = false,
+)
+
+/**
+ * 在线插件市场（`platform.agentscope.io`）的一个条目。
+ *
+ * 该接口由服务端透传上游 JSON，外层是 `{success, message, data:{total, plugins}}`。
+ * 字段名与插件目录完全不同，因此单独一组 DTO，不复用 [PluginCatalogEntryDto]。
+ */
+@Serializable
+data class PluginMarketEntryDto(
+    val id: String = "",
+    val developer: String = "",
+    val owner: String = "",
+    val version: String = "",
+    val downloads: Long = 0,
+    val locales: Map<String, PluginMarketLocaleDto>? = null,
+    @SerialName("display_name") val displayName: String = "",
+    @SerialName("view_count") val viewCount: Long = 0,
+    @SerialName("details_url") val detailsUrl: String = "",
+    @SerialName("is_featured") val isFeatured: Boolean = false,
+    @SerialName("qwenpaw_compat_labels") val compatLabels: List<String> = emptyList(),
+)
+
+/** 在线插件市场的本地化字段。`en` 与 `zh` 实测都有，但都可能缺。 */
+@Serializable
+data class PluginMarketLocaleDto(
+    val description: String = "",
+    val category: String = "",
+)
+
+/** 在线插件市场的外层响应。 */
+@Serializable
+data class PluginMarketResponseDto(
+    val success: Boolean = false,
+    val message: String = "",
+    val data: PluginMarketDataDto = PluginMarketDataDto(),
+)
+
+/** 在线插件市场的 `data` 段。 */
+@Serializable
+data class PluginMarketDataDto(
+    val total: Int = 0,
+    val plugins: List<PluginMarketEntryDto> = emptyList(),
+)

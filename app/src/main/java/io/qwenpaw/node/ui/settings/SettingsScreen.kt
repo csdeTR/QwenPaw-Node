@@ -80,6 +80,12 @@ fun SettingsScreen(
     onOpenCheckpoint: () -> Unit = {},
     /** 打开设置页下的「模型与提供商」。 */
     onOpenModels: () -> Unit = {},
+    /** 打开设置页下的「技能」。 */
+    onOpenSkills: () -> Unit = {},
+    /** 打开设置页下的「MCP」。 */
+    onOpenMcp: () -> Unit = {},
+    /** 打开设置页下的「扩展市场」。 */
+    onOpenMarket: () -> Unit = {},
     /** 打开用量统计。从设置进入时，返回也回设置页。 */
     onOpenUsage: () -> Unit = {},
     onSwitch: (String) -> Unit,
@@ -697,6 +703,27 @@ fun SettingsScreen(
                                 title = "模型与提供商",
                                 subtitle = "默认模型与连通性测试",
                                 onClick = onOpenModels,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.sparkles,
+                                title = "技能",
+                                subtitle = "浏览、启停与编辑 SKILL.md",
+                                onClick = onOpenSkills,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.blocks,
+                                title = "MCP",
+                                subtitle = "客户端开关、工具白名单与策略",
+                                onClick = onOpenMcp,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.library,
+                                title = "扩展市场",
+                                subtitle = "技能市场与插件目录，只读",
+                                onClick = onOpenMarket,
                             )
                             Divider()
                             NavRow(

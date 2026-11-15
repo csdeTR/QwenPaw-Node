@@ -170,7 +170,7 @@ Compose 内部还会走 debug 断言路径。实测对话页滚动的主线程�
 ### 4.3 端到端验收脚本
 
 ```bash
-./scripts/e2e_acceptance.sh               # 全部场景 A1–A7、B1–B6
+./scripts/e2e_acceptance.sh               # 全部场景 A1–A8、B1–B6、C1–C2、D1–D4
 ./scripts/e2e_acceptance.sh --only A4     # 只跑单个场景，推荐
 ```
 
@@ -361,6 +361,18 @@ QwenPaw-Node-<tag>-no-sherpa-<abi>.apk    # nosherpa
 ### 7.2 体积现状
 
 实测命令：`find app/build/outputs/apk -path "*/release/*.apk" -printf "%s %p\n"`。
+
+0.5.0 实测（`full` / `nosherpa`，取自本轮 `assembleRelease` 的产物）：
+
+| 架构 | `full` | `nosherpa` | `full` 包内 native |
+| --- | --- | --- | --- |
+| `arm64-v8a` | 25,486,334（约 25.5MB） | 2,930,327（约 2.93MB） | `libsherpa-onnx-jni.so` 22.4MB |
+| `armeabi-v7a` | 18,257,154（约 18.3MB） | 2,927,485 | 同上量级 |
+| `x86_64` | 28,432,624（约 28.4MB） | 2,930,988 | 同上 |
+| `x86` | 39,437,833（约 39.4MB） | 2,929,509 | 另带 `libonnxruntime.so` |
+
+**相对 0.4.2 每个包增加约 82KB**（`nosherpa` arm64 由 2,848,411 增至 2,930,327），
+来源是技能、MCP 与市场三页的代码与文案。本轮没有新增依赖，因此不需要补 keep 规则。
 
 0.4.2 实测（`full` / `nosherpa`，取自 `v0.4.2` 的 Release 产物）：
 

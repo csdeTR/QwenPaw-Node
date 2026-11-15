@@ -1,0 +1,782 @@
+package io.qwenpaw.node.ui.skills
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.ui.chat.MarkdownText
+import io.qwenpaw.node.ui.common.DestructiveActionDialog
+import io.qwenpaw.node.ui.common.PlainTextEditor
+import io.qwenpaw.node.ui.theme.QwenIcons
+import io.qwenpaw.node.ui.theme.qwenSwitchColors
+
+/** 页内层级。技能详情属于本页的下一级，不占顶层 `Screen`。 */
+private enum class SkillPage { LIST, DETAIL }
+
+/**
+ * 技能：当前智能体的技能与技能池。
+ *
+ * 两段信息都来自「一屏能扫完」的量级（实测各 16 条），因此不做搜索与筛选。
+ * 技能池只读：池内技能没有 `enabled`，启停的对象是工作区里的那一份。
+ */
+@Composable
+fun SkillsScreen(
+    state: SkillsUiState,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenSkill: (String) -> Unit,
+    onOpenPoolSkill: (String) -> Unit,
+    onCloseDetail: () -> Unit,
+    onSetEnabled: (String, Boolean) -> Unit,
+    onBeginEdit: () -> Unit,
+    onUpdateDraft: (String) -> Unit,
+    onSaveEdit: () -> Unit,
+    onCancelEdit: () -> Unit,
+    onCreate: (String, String, onResult: (Boolean) -> Unit) -> Unit,
+    onDelete: (String) -> Unit,
+    onDismissNotice: () -> Unit,
+) {
+    var page by remember { mutableStateOf(SkillPage.LIST) }
+    var creating by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<String?>(null) }
+
+    // 详情被清空（例如删除后）要退回列表，否则会停在一个空白的详情页。
+    // 用派生判定而不是在组合期写状态：组合期写 `page` 会额外触发一轮重组，
+    // 且一旦条件持续为真就会不断重组。
+    val detailName = state.detail?.name ?: state.poolDetail?.name
+    val showDetail = page == SkillPage.DETAIL &&
+        (detailName != null || state.edit != null || state.detailLoading)
+
+    BackHandler {
+        when {
+            state.edit != null -> Unit // 编辑器自己处理返回与未保存确认
+            page == SkillPage.DETAIL -> {
+                page = SkillPage.LIST
+                onCloseDetail()
+            }
+            else -> onBack()
+        }
+    }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.background)
+                    .statusBarsPadding(),
+            ) {
+                PageTopBar(
+                    title = if (page == SkillPage.LIST) "技能" else "技能详情",
+                    onBack = {
+                        if (page == SkillPage.DETAIL) {
+                            page = SkillPage.LIST
+                            onCloseDetail()
+                        } else {
+                            onBack()
+                        }
+                    },
+                    action = if (page == SkillPage.LIST) "新建" else null,
+                    onAction = { creating = true },
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant),
+                )
+            }
+        },
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            when {
+                // 编辑态整页交给编辑器：它有顶栏与保存按钮，再套一层页面壳会多出一条返回。
+                state.edit != null -> PlainTextEditor(
+                    title = state.edit.name,
+                    backDescription = "返回技能详情",
+                    draft = state.edit.draft,
+                    dirty = state.edit.dirty,
+                    saving = state.edit.saving,
+                    saved = state.edit.saved,
+                    error = state.edit.error,
+                    onDraftChange = onUpdateDraft,
+                    onSave = onSaveEdit,
+                    onExit = onCancelEdit,
+                    hint = SkillCopy.frontmatterHint(state.edit.draft),
+                )
+
+                showDetail -> SkillDetail(
+                    state = state,
+                    onBeginEdit = onBeginEdit,
+                    onDelete = { name -> deleting = name },
+                )
+
+                state.loading && !state.loaded -> CenterBox { CircularProgressIndicator() }
+
+                else -> SkillList(
+                    state = state,
+                    onRefresh = onRefresh,
+                    onOpenSkill = { name ->
+                        onOpenSkill(name)
+                        page = SkillPage.DETAIL
+                    },
+                    onOpenPoolSkill = { name ->
+                        onOpenPoolSkill(name)
+                        page = SkillPage.DETAIL
+                    },
+                    onSetEnabled = onSetEnabled,
+                )
+            }
+        }
+    }
+
+    if (creating) {
+        CreateSkillDialog(
+            onDismiss = { creating = false },
+            onCreate = { name, content, onResult ->
+                onCreate(name, content) { ok ->
+                    if (ok) creating = false
+                    onResult(ok)
+                }
+            },
+        )
+    }
+
+    state.notice?.let { text ->
+        AlertDialog(
+            onDismissRequest = onDismissNotice,
+            title = { Text("提示") },
+            text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = {
+                Text(
+                    text = "知道了",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier
+                        .clickable(onClick = onDismissNotice)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            },
+        )
+    }
+
+    deleting?.let { name ->
+        DestructiveActionDialog(
+            title = "删除技能「$name」？",
+            message = "技能目录与其中的文件会一并删除，服务端没有回收站。",
+            impacts = listOf("技能目录 $name 下的全部文件", "该技能在当前智能体上的启用状态"),
+            undoable = false,
+            confirmLabel = "删除",
+            onConfirm = {
+                deleting = null
+                onDelete(name)
+            },
+            onDismiss = { deleting = null },
+        )
+    }
+}
+
+@Composable
+private fun SkillList(
+    state: SkillsUiState,
+    onRefresh: () -> Unit,
+    onOpenSkill: (String) -> Unit,
+    onOpenPoolSkill: (String) -> Unit,
+    onSetEnabled: (String, Boolean) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionTitle("当前智能体", "${state.skills.size} 个")
+        CardBox {
+            if (state.skills.isEmpty()) {
+                EmptyLine(
+                    text = when {
+                        state.loading -> "正在加载"
+                        state.error != null -> "加载失败：${state.error}"
+                        else -> "当前智能体没有技能"
+                    },
+                    error = state.error != null,
+                    onClick = onRefresh,
+                )
+            } else {
+                state.skills.forEachIndexed { index, skill ->
+                    SkillRow(
+                        emoji = skill.emoji,
+                        name = skill.name,
+                        subtitle = buildString {
+                            append(SkillCopy.sourceLabel(skill.source))
+                            skill.versionText.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                            skill.description.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                        },
+                        enabled = skill.enabled,
+                        onClick = { onOpenSkill(skill.name) },
+                        onToggle = { onSetEnabled(skill.name, !skill.enabled) },
+                        error = state.rowErrors[skill.name],
+                    )
+                    if (index != state.skills.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                }
+            }
+        }
+
+        SectionTitle("技能池", "只读")
+        CardBox {
+            if (state.pool.isEmpty()) {
+                EmptyLine(
+                    text = when {
+                        state.loading -> "正在加载"
+                        state.poolError != null -> "加载失败：${state.poolError}"
+                        else -> "技能池为空"
+                    },
+                    error = state.poolError != null,
+                    onClick = onRefresh,
+                )
+            } else {
+                state.pool.forEachIndexed { index, skill ->
+                    SkillRow(
+                        emoji = skill.emoji,
+                        name = skill.name,
+                        subtitle = buildString {
+                            append(SkillCopy.sourceLabel(skill.source))
+                            SkillCopy.syncStatusLabel(skill.syncStatus).takeIf { it.isNotBlank() }
+                                ?.let { append(" · $it") }
+                            skill.description.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                        },
+                        enabled = null,
+                        // 池内技能没有启停，点一行就是看详情。
+                        onClick = { onOpenPoolSkill(skill.name) },
+                        onToggle = null,
+                        error = null,
+                    )
+                    if (index != state.pool.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                }
+                HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                Text(
+                    text = "技能池的导入、广播与自动同步请在 Web 控制台操作。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkillDetail(
+    state: SkillsUiState,
+    onBeginEdit: () -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    val detail = state.detail
+    val poolDetail = state.poolDetail
+
+    if (state.detailLoading) {
+        CenterBox { CircularProgressIndicator() }
+        return
+    }
+    state.detailError?.let { message ->
+        CenterBox {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        return
+    }
+    if (detail == null && poolDetail == null) {
+        CenterBox {
+            Text(
+                text = "没有可显示的技能",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+
+    val name = detail?.name ?: poolDetail!!.name
+    val description = detail?.description ?: poolDetail!!.description
+    val source = detail?.source ?: poolDetail!!.source
+    val versionText = detail?.versionText ?: poolDetail!!.versionText
+    val channels = detail?.channels ?: emptyList()
+    val preload = detail?.preload ?: false
+    val updated = detail?.lastUpdated ?: poolDetail!!.lastUpdated
+    val content = detail?.content ?: poolDetail!!.content
+    val requirements = detail?.requirements ?: poolDetail!!.requirements
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CardBox {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (description.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                MetaLine("来源", SkillCopy.sourceLabel(source))
+                if (versionText.isNotBlank()) MetaLine("版本", versionText)
+                if (detail != null) MetaLine("通道", SkillCopy.channelsLabel(channels))
+                if (detail != null) MetaLine("预加载", if (preload) "已开启" else "未开启")
+                val updatedLabel = SkillCopy.updatedLabel(updated)
+                if (updatedLabel.isNotBlank()) MetaLine("更新时间", updatedLabel)
+            }
+        }
+
+        if (!requirements.isEmpty) {
+            CardBox {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    // 需求是「跑这个技能需要什么」，用户在启用前就该看到，
+                    // 否则只会在一次失败的调用之后才发现少了一个命令行工具。
+                    Text(
+                        text = "运行依赖",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    RequirementLine("命令行工具", requirements.requireBins)
+                    RequirementLine("环境变量", requirements.requireEnvs)
+                    RequirementLine("MCP 客户端", requirements.requireMcps)
+                }
+            }
+        }
+
+        // 操作放在正文之前：正文可以很长（实测 SKILL.md 常有两三百行），
+        // 放在后面等于把「编辑」「删除」藏到滚动末尾。
+        if (detail != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ActionButton(
+                    text = "编辑正文",
+                    primary = true,
+                    modifier = Modifier.weight(1f),
+                    onClick = onBeginEdit,
+                )
+                ActionButton(
+                    text = "删除",
+                    primary = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onDelete(name) },
+                )
+            }
+        } else {
+            Text(
+                text = "技能池内的技能只读。需要启停或修改，请先从 Web 控制台分发到工作区。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        CardBox {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "SKILL.md",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (content.isBlank()) {
+                    Text(
+                        text = "没有正文",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    MarkdownText(markdown = content)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * 新建技能。
+ *
+ * 正文预填一段最小的合法 frontmatter：服务端要求 `name` 与 `description` 都非空，
+ * 空白正文会让第一次创建必然失败。名称仍由用户填写，预填只解决「照着写」的问题。
+ */
+@Composable
+private fun CreateSkillDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String, String, onResult: (Boolean) -> Unit) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var content by remember {
+        mutableStateOf(
+            "---\nname: \ndescription: \n---\n\n# 技能说明\n",
+        )
+    }
+    var submitting by remember { mutableStateOf(false) }
+
+    val hint = when {
+        name.isBlank() -> "请先填写技能名称"
+        else -> SkillCopy.frontmatterHint(content)
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = { Text("新建技能") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                )
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("SKILL.md 正文") },
+                    minLines = 6,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 12.sp,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                hint?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Text(
+                text = if (submitting) "创建中" else "创建",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (hint == null && !submitting) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier
+                    .clickable(enabled = hint == null && !submitting) {
+                        submitting = true
+                        // frontmatter 里 name 留空时用输入框的名称补上：
+                        // 服务端校验的是 frontmatter，界面上填的名字只是目录名。
+                        val filled = content.replaceFirst("name: ", "name: $name")
+                        onCreate(name.trim(), filled) { submitting = false }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        },
+        dismissButton = {
+            Text(
+                text = "取消",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clickable(enabled = !submitting, onClick = onDismiss)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        },
+    )
+}
+
+@Composable
+private fun SkillRow(
+    emoji: String,
+    name: String,
+    subtitle: String,
+    enabled: Boolean?,
+    onClick: () -> Unit,
+    onToggle: (() -> Unit)?,
+    error: String?,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (emoji.isNotBlank()) {
+                    Text(text = emoji, fontSize = 18.sp)
+                } else {
+                    Icon(
+                        imageVector = QwenIcons.sparkles,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (enabled == false) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (enabled == false) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (onToggle != null && enabled != null) {
+                Spacer(Modifier.width(8.dp))
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { onToggle() },
+                    colors = qwenSwitchColors(),
+                )
+            }
+        }
+        error?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 52.dp, end = 14.dp, bottom = 8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RequirementLine(title: String, items: List<String>) {
+    if (items.isEmpty()) return
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(88.dp),
+        )
+        Text(
+            text = items.joinToString("、"),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun MetaLine(title: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(88.dp),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun ActionButton(text: String, primary: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (primary) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surface,
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (primary) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+        )
+    }
+}
+
+@Composable
+private fun PageTopBar(
+    title: String,
+    onBack: () -> Unit,
+    action: String?,
+    onAction: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = QwenIcons.arrowLeft,
+                contentDescription = "返回",
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        action?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, trailing: String?) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CardBox(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface),
+    ) { content() }
+}
+
+@Composable
+private fun EmptyLine(text: String, error: Boolean, onClick: () -> Unit) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (error) MaterialTheme.colorScheme.error
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+    )
+}
+
+@Composable
+private fun CenterBox(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}
