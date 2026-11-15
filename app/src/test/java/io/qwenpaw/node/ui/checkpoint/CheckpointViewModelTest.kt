@@ -34,7 +34,17 @@ class CheckpointViewModelTest {
     private lateinit var server: MockWebServer
     private lateinit var vm: CheckpointViewModel
     private val routes = mutableMapOf<String, () -> MockResponse>()
-    private val requests = mutableListOf<RecordedRequest>()
+
+    /**
+     * 请求记录。
+     *
+     * dispatcher 在 MockWebServer 自己的线程里追加，测试线程同时可能在遍历，
+     * 普通 `ArrayList` 会抛 `ConcurrentModificationException`。
+     * 写入在 dispatcher 线程，读取一律走 [recorded] 的同步快照。
+     */
+    private val requests = java.util.Collections.synchronizedList(mutableListOf<RecordedRequest>())
+
+    private fun recorded(): List<RecordedRequest> = synchronized(requests) { requests.toList() }
 
     @Before
     fun setUp() {
@@ -147,7 +157,7 @@ class CheckpointViewModelTest {
         val state = await { it.notice != null }
 
         assertTrue(state.notice!!.contains("已回滚"))
-        val apply = requests.last { it.path.orEmpty().endsWith("/checkpoints/restore") }
+        val apply = recorded().last { it.path.orEmpty().endsWith("/checkpoints/restore") }
         val body = apply.body.readUtf8()
         assertTrue(body.contains("\"commit\":\"abcdef1234567890\""))
         assertTrue(body.contains("\"files\":[\"a.md\"]"))
@@ -173,7 +183,7 @@ class CheckpointViewModelTest {
         val state = vm.state.value
         assertFalse(state.restoreApplying)
         // 没有任何请求打到执行端点。
-        assertTrue(requests.none { it.path.orEmpty() == "/api/workspace/checkpoints/restore" })
+        assertTrue(recorded().none { it.path.orEmpty() == "/api/workspace/checkpoints/restore" })
     }
 
     @Test
@@ -198,7 +208,7 @@ class CheckpointViewModelTest {
         val state = await { it.notice != null }
 
         assertTrue(state.notice!!.contains("已清理"))
-        val apply = requests.last { it.path.orEmpty() == "/api/workspace/checkpoints/gc" }
+        val apply = recorded().last { it.path.orEmpty() == "/api/workspace/checkpoints/gc" }
         val body = apply.body.readUtf8()
         assertTrue(body.contains("\"keep_count\":20"))
         assertTrue(body.contains("\"pre_restore_days\":7"))
@@ -221,7 +231,7 @@ class CheckpointViewModelTest {
         assertEquals("已删除全部检查点", state.notice)
         assertFalse(state.autoEnabled)
         assertTrue(state.groups.isEmpty())
-        val reset = requests.last { it.method == "DELETE" }
+        val reset = recorded().last { it.method == "DELETE" }
         assertEquals("/api/workspace/checkpoints", reset.path.orEmpty().substringBefore("?"))
     }
 
@@ -264,7 +274,7 @@ class CheckpointViewModelTest {
         assertEquals("已创建检查点", state.notice)
         assertEquals(null, state.viewingSession)
         assertEquals(null, state.snapshotSession)
-        val snapshot = requests.first { it.path.orEmpty().contains("/snapshot") }
+        val snapshot = recorded().first { it.path.orEmpty().contains("/snapshot") }
         assertTrue(snapshot.body.readUtf8().contains("\"name\":\"手动\""))
     }
 
@@ -324,6 +334,6 @@ class CheckpointViewModelTest {
 
         val state = vm.state.value
         assertNotNull(state.gcError)
-        assertTrue(requests.none { it.method == "PATCH" && it.path.orEmpty().endsWith("/gc/settings") })
+        assertTrue(recorded().none { it.method == "PATCH" && it.path.orEmpty().endsWith("/gc/settings") })
     }
 }
