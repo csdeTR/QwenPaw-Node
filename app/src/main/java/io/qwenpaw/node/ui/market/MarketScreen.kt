@@ -2,6 +2,7 @@ package io.qwenpaw.node.ui.market
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -225,7 +226,13 @@ private fun SkillMarket(
                 )
                 // 不可用的来源保留在列表里但不可点：用户需要知道「有这个来源、只是没配好」，
                 // 直接隐藏会让人以为市场只有这几家。
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // 与分类行同理：来源标签由服务端返回，长度不可控，溢出时同样会压成竖线。
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     state.providers.forEach { provider ->
                         ProviderChip(provider)
                     }
@@ -244,7 +251,14 @@ private fun SkillMarket(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // 服务端实测 13 个分类，截断后仍有 7 个 chip，一屏放不下。
+                        // 不滚动时最后一个只分到接近 0 的宽度，文字逐字换行会渲染成一条竖线。
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     TabChip("全部", state.selectedCategory == null) { onCategory(null) }
                     state.categories.take(CATEGORY_PREVIEW).forEach { category ->
                         TabChip(category.label, state.selectedCategory == category.id) {
