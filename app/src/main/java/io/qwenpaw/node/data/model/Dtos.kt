@@ -174,9 +174,227 @@ data class AgentDto(
     val name: String = "",
     val description: String = "",
     val enabled: Boolean = true,
+    val pinned: Boolean = false,
+    @SerialName("workspace_dir") val workspaceDir: String = "",
+    val backend: String = "qwenpaw",
+    @SerialName("available_in_chat") val availableInChat: Boolean = true,
     @SerialName("startup_status") val startupStatus: String? = null,
     @SerialName("active_model") val activeModel: ActiveModelDto? = null,
 )
+
+/** 智能体运行时状态，对应 `GET /api/agents/{id}/agent-status`。 */
+@Serializable
+data class AgentStatusDto(
+    val status: String = "idle",
+    @SerialName("running_task_count") val runningTaskCount: Int = 0,
+    @SerialName("last_run_at") val lastRunAt: String? = null,
+    @SerialName("last_finish_at") val lastFinishAt: String? = null,
+)
+
+/** 新建或复制智能体的返回，对应 `POST /api/agents` 与 `POST /api/agents/{id}/copy`。 */
+@Serializable
+data class AgentRefDto(
+    val id: String = "",
+    @SerialName("workspace_dir") val workspaceDir: String = "",
+    val enabled: Boolean = true,
+    val pinned: Boolean = false,
+)
+
+/** ACP Node 运行时状态，对应 `GET|PUT /api/config/acp/node-runtime`。 */
+@Serializable
+data class AcpNodeRuntimeDto(
+    @SerialName("node_path") val nodePath: String = "",
+    @SerialName("effective_node_path") val effectiveNodePath: String = "",
+    val candidates: List<AcpNodeCandidateDto> = emptyList(),
+)
+
+/** 一个可用的 Node 运行时候选。 */
+@Serializable
+data class AcpNodeCandidateDto(
+    val key: String = "",
+    val label: String = "",
+    @SerialName("node_path") val nodePath: String = "",
+    @SerialName("npx_path") val npxPath: String = "",
+    @SerialName("node_version") val nodeVersion: String = "",
+    @SerialName("npx_version") val npxVersion: String = "",
+    val available: Boolean = false,
+    @SerialName("reason_code") val reasonCode: String = "",
+    val reason: String = "",
+)
+
+/** 一个外部智能体后端（Codex / Qoder 等），对应 `GET /api/harnesses` 的 providers 元素。 */
+@Serializable
+data class HarnessProviderDto(
+    val id: String = "",
+    val name: String = "",
+    val available: Boolean = false,
+    @SerialName("coming_soon") val comingSoon: Boolean = false,
+    val installed: Boolean = false,
+    val authenticated: Boolean = false,
+    val account: JsonObject? = null,
+    @SerialName("runtime_path") val runtimePath: String? = null,
+    @SerialName("runtime_source") val runtimeSource: String? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class HarnessesDto(
+    val providers: List<HarnessProviderDto> = emptyList(),
+)
+
+/** 一个可导入的来源（Codex / Qoder）。 */
+@Serializable
+data class PortabilitySourceDto(
+    val source: String = "",
+    val name: String = "",
+    val detected: Boolean = false,
+)
+
+/** 一次导入中每个来源的资产选择。字段与插件契约一致。 */
+@Serializable
+data class PortabilitySelectionDto(
+    val sessions: Boolean = true,
+    val memory: List<String> = emptyList(),
+    val cron: List<String> = emptyList(),
+    val skills: List<String> = emptyList(),
+    val mcp: List<String> = emptyList(),
+    val plugins: List<String> = emptyList(),
+)
+
+/** 一项可导入资产。 */
+@Serializable
+data class PortabilityAssetDto(
+    @SerialName("asset_type") val assetType: String = "",
+    @SerialName("source_id") val sourceId: String = "",
+    val name: String = "",
+    val state: String = "pending",
+    val enabled: Boolean? = null,
+    val message: String = "",
+    @SerialName("requires_sessions") val requiresSessions: Boolean = false,
+    @SerialName("blocked_reason") val blockedReason: String = "",
+)
+
+/** 导入任务里一个来源的进度。 */
+@Serializable
+data class PortabilityProviderDto(
+    val source: String = "",
+    val state: String = "scanning",
+    @SerialName("plan_id") val planId: String = "",
+    @SerialName("sessions_total") val sessionsTotal: Int = 0,
+    @SerialName("sessions_processed") val sessionsProcessed: Int = 0,
+    @SerialName("sessions_imported") val sessionsImported: Int = 0,
+    val selection: PortabilitySelectionDto = PortabilitySelectionDto(),
+    val assets: List<PortabilityAssetDto> = emptyList(),
+    val error: String = "",
+)
+
+/** `GET /api/pawapps`。 */
+@Serializable
+data class PawAppsDto(
+    val apps: List<PawAppDto> = emptyList(),
+    val total: Int = 0,
+)
+
+/** 一个已安装的 PawApp。 */
+@Serializable
+data class PawAppDto(
+    val id: String = "",
+    val name: String = "",
+    val version: String = "0.0.0",
+    val description: String = "",
+    @SerialName("description_i18n") val descriptionI18n: Map<String, String>? = null,
+    val author: String = "",
+    val category: String = "",
+    val icon: String = "",
+    @SerialName("icon_url") val iconUrl: String = "",
+    @SerialName("entry_page") val entryPage: String = "",
+    @SerialName("launch_scope") val launchScope: String = "page",
+    val status: String = "installed",
+)
+
+/** 插件安装结果，对应 `POST /api/plugins/upload` 与 `/install`。 */
+@Serializable
+data class PluginInstallResultDto(
+    val id: String = "",
+    val name: String = "",
+    val version: String = "",
+    val description: String = "",
+    val author: String = "",
+    val loaded: Boolean = false,
+    val message: String? = null,
+)
+
+/** 技能 zip 导入的冲突项。 */
+@Serializable
+data class SkillImportConflictDto(
+    val reason: String = "",
+    @SerialName("skill_name") val skillName: String = "",
+    @SerialName("suggested_name") val suggestedName: String? = null,
+)
+
+/** 技能 zip 导入结果，对应 `POST /api/skills/upload` 与 `/pool/upload-zip`。 */
+@Serializable
+data class SkillImportResultDto(
+    val imported: List<String> = emptyList(),
+    val count: Int = 0,
+    val enabled: Boolean = true,
+    val conflicts: List<SkillImportConflictDto> = emptyList(),
+)
+
+/** 技能广播的冲突项。工作区名与建议名都可能为空。 */
+@Serializable
+data class BroadcastConflictDto(
+    val reason: String = "",
+    @SerialName("skill_name") val skillName: String = "",
+    @SerialName("suggested_name") val suggestedName: String? = null,
+    @SerialName("workspace_id") val workspaceId: String = "",
+    @SerialName("workspace_name") val workspaceName: String = "",
+    val name: String = "",
+)
+
+@Serializable
+data class BroadcastDownloadDto(
+    @SerialName("workspace_id") val workspaceId: String = "",
+    @SerialName("workspace_name") val workspaceName: String = "",
+    val name: String = "",
+)
+
+/** 技能广播结果。全有或全无：有冲突时 `downloaded` 为空。 */
+@Serializable
+data class BroadcastResultDto(
+    val downloaded: List<BroadcastDownloadDto> = emptyList(),
+    val conflicts: List<BroadcastConflictDto> = emptyList(),
+)
+
+/** 技能中心安装任务。 */
+@Serializable
+data class HubInstallTaskDto(
+    @SerialName("task_id") val taskId: String = "",
+    @SerialName("bundle_url") val bundleUrl: String = "",
+    val version: String = "",
+    val enable: Boolean = true,
+    val status: String = "pending",
+    val error: String? = null,
+    val result: SkillImportResultDto? = null,
+) {
+    val isTerminal: Boolean
+        get() = status == "completed" || status == "failed" || status == "cancelled"
+}
+
+/** 一次导入任务的快照。 */
+@Serializable
+data class PortabilityJobDto(
+    @SerialName("job_id") val jobId: String = "",
+    @SerialName("agent_id") val agentId: String = "",
+    val state: String = "scanning",
+    val seq: Int = 0,
+    val providers: List<PortabilityProviderDto> = emptyList(),
+    val logs: List<String> = emptyList(),
+) {
+    val isTerminal: Boolean
+        get() = state == "completed" || state == "completed_with_issues" ||
+            state == "failed" || state == "interrupted" || state == "cancelled"
+}
 
 @Serializable
 data class ActiveModelDto(
@@ -710,6 +928,48 @@ data class EnvCatalogDto(
 @Serializable
 data class OffloadPolicyDto(
     @SerialName("default_action") val defaultAction: String = "keep_foreground",
+)
+
+/** `GET|PUT /api/settings/language`。合法值见 [io.qwenpaw.node.ui.settings.SERVER_LANGUAGES]。 */
+@Serializable
+data class ServerLanguageDto(
+    val language: String = "en",
+)
+
+/** 一条内置工具防护规则，对应 `GET /api/config/security/tool-guard/builtin-rules`。 */
+@Serializable
+data class ToolGuardRuleDto(
+    val id: String = "",
+    val tools: List<String> = emptyList(),
+    val params: List<String> = emptyList(),
+    val category: String = "",
+    val severity: String = "",
+    val patterns: List<String> = emptyList(),
+    @SerialName("exclude_patterns") val excludePatterns: List<String> = emptyList(),
+    val description: String = "",
+    val remediation: String = "",
+)
+
+/** 文件防护设置，对应 `GET|PUT /api/config/security/file-guard`。 */
+@Serializable
+data class FileGuardDto(
+    val enabled: Boolean = false,
+    val paths: List<String> = emptyList(),
+    @SerialName("allow_preview_outside_workspace")
+    val allowPreviewOutsideWorkspace: Boolean = false,
+)
+
+/**
+ * 沙箱状态，对应 `GET|PUT /api/config/security/sandbox`。
+ *
+ * `enabled` 是配置值，`effective` 是当前机器上真正生效的结果；两者可能不同，
+ * 例如宿主机缺少所需能力时 `reason` 会给出原因。
+ */
+@Serializable
+data class SandboxStatusDto(
+    val enabled: Boolean = false,
+    val effective: Boolean = false,
+    val reason: String? = null,
 )
 
 /** 一条可补全的斜杠命令，对应 `GET /api/workspace/commands/available` 的元素。 */

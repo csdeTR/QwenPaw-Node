@@ -88,6 +88,16 @@ fun SettingsScreen(
     onOpenMarket: () -> Unit = {},
     /** 打开用量统计。从设置进入时，返回也回设置页。 */
     onOpenUsage: () -> Unit = {},
+    /** 打开运行配置。 */
+    onOpenRunningConfig: () -> Unit = {},
+    /** 打开安全页。 */
+    onOpenSecurity: () -> Unit = {},
+    /** 打开智能体管理。 */
+    onOpenAgents: () -> Unit = {},
+    /** 打开运行时（ACP 与 Harness）。 */
+    onOpenRuntime: () -> Unit = {},
+    /** 打开 App 中心。 */
+    onOpenAppCenter: () -> Unit = {},
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
     onEdit: (InstanceConfig) -> Unit,
@@ -231,6 +241,7 @@ fun SettingsScreen(
     // 添加实例的两种方式：null 表示在方式选择页，否则是具体形态。
     var addMode by remember { mutableStateOf<AddMode?>(null) }
     var editing by remember { mutableStateOf<InstanceConfig?>(null) }
+    var languagePicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // 每次进入设置页核对一次服务端头像。不做轮询：头像不是时效性数据，
@@ -280,6 +291,17 @@ fun SettingsScreen(
             SettingsPage.TRUSTED -> section = SettingsPage.SERVER
             else -> section = SettingsPage.MAIN
         }
+    }
+
+    if (languagePicker && config != null) {
+        LanguagePickerDialog(
+            current = config.serverSettings.language,
+            onPick = { code ->
+                languagePicker = false
+                config.onSetServerLanguage(code)
+            },
+            onDismiss = { languagePicker = false },
+        )
     }
 
     // 移除实例的确认。不提供撤销：服务端与本机都没有回收站，
@@ -707,6 +729,27 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.sparkles,
+                                title = "智能体管理",
+                                subtitle = "新建、复制、启停、排序与导出",
+                                onClick = onOpenAgents,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.workflow,
+                                title = "运行时",
+                                subtitle = "ACP 命令、Node 运行时与外部智能体登录",
+                                onClick = onOpenRuntime,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.blocks,
+                                title = "App 中心",
+                                subtitle = "查看已安装的 PawApp 并在浏览器打开",
+                                onClick = onOpenAppCenter,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.sparkles,
                                 title = "技能",
                                 subtitle = "浏览、启停与编辑 SKILL.md",
                                 onClick = onOpenSkills,
@@ -758,6 +801,45 @@ fun SettingsScreen(
                                 onClick = {
                                     config.onLoadOffload()
                                     section = SettingsPage.OFFLOAD
+                                },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.settings,
+                                title = "运行配置",
+                                subtitle = "最大迭代、输入长度与上下文压缩",
+                                onClick = {
+                                    config.onLoadRunningConfig()
+                                    onOpenRunningConfig()
+                                },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.shieldCheck,
+                                title = "安全",
+                                subtitle = "工具与文件防护、沙箱、技能扫描",
+                                onClick = {
+                                    config.onLoadSecurity()
+                                    onOpenSecurity()
+                                },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.languages,
+                                title = "服务端界面语言",
+                                subtitle = serverLanguageLabel(config.serverSettings.language),
+                                onClick = {
+                                    config.onLoadServerSettings()
+                                    languagePicker = true
+                                },
+                            )
+                            Divider()
+                            SettingLabel(
+                                title = "上传上限",
+                                subtitle = when {
+                                    !config.serverSettings.loaded -> "尚未读取"
+                                    config.serverSettings.uploadLimitMb == null -> "不限制"
+                                    else -> "${config.serverSettings.uploadLimitMb} MB"
                                 },
                             )
                             Divider()
@@ -1425,6 +1507,13 @@ data class SettingsConfig(
     val tools: ToolsUiState = ToolsUiState(),
     val envs: EnvsUiState = EnvsUiState(),
     val offload: OffloadUiState = OffloadUiState(),
+    val runningConfig: RunningConfigUiState = RunningConfigUiState(),
+    val security: SecurityUiState = SecurityUiState(),
+    val serverSettings: ServerSettingsUiState = ServerSettingsUiState(),
+    val onLoadRunningConfig: () -> Unit = {},
+    val onLoadSecurity: () -> Unit = {},
+    val onLoadServerSettings: () -> Unit = {},
+    val onSetServerLanguage: (String) -> Unit = {},
     val onLoadTools: () -> Unit = {},
     val onToggleTool: (String) -> Unit = {},
     val onToolAsync: (String, Boolean) -> Unit = { _, _ -> },

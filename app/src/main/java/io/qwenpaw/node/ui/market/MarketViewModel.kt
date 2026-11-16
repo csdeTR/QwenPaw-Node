@@ -7,8 +7,13 @@ import io.qwenpaw.node.data.model.MarketResultDto
 import io.qwenpaw.node.data.model.PluginCatalogDto
 import io.qwenpaw.node.data.model.PluginMarketEntryDto
 import io.qwenpaw.node.data.remote.Connection
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import io.qwenpaw.node.data.remote.ErrorText
+import io.qwenpaw.node.data.model.SkillImportResultDto
+import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.data.remote.SafZipSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +27,30 @@ import kotlinx.coroutines.withContext
 
 /** 市场页的两段。 */
 enum class MarketTab { SKILLS, PLUGINS }
+
+/** 插件安装的界面状态。`conflictSource` 非空时展示「覆盖 / 取消」。 */
+data class PluginInstallUi(
+    val label: String,
+    val stage: String = "installing",
+    val read: Long = 0,
+    val total: Long? = null,
+    val error: String? = null,
+    val conflictSource: String? = null,
+)
+
+/** 技能 URL 导入的异步任务。 */
+data class HubInstallUi(
+    val taskId: String,
+    val bundleUrl: String,
+    val providerKey: String? = null,
+    val version: String = "",
+    val status: String = "pending",
+    val error: String? = null,
+    val result: SkillImportResultDto? = null,
+) {
+    val isTerminal: Boolean
+        get() = status == "completed" || status == "failed" || status == "cancelled"
+}
 
 /**
  * 扩展市场页状态。
@@ -56,6 +85,9 @@ data class MarketUiState(
     val pluginError: String? = null,
     /** 正在解析落地地址的那条结果（QwenPaw 来源需要先换出 UUID）。 */
     val resolvingSource: String? = null,
+    val pluginInstall: PluginInstallUi? = null,
+    val hubInstall: HubInstallUi? = null,
+    val notice: String? = null,
 ) {
     /** 可参与搜索的来源。不可用的来源不能出现在 `provider_pages` 里，否则服务端回 400。 */
     val searchableProviders: List<MarketProviderDto>
@@ -77,6 +109,10 @@ class MarketViewModel(
 
     private val _state = MutableStateFlow(MarketUiState())
     val state: StateFlow<MarketUiState> = _state.asStateFlow()
+
+    private var pendingPluginSource: SafZipSource? = null
+    private var pendingPluginUrl: String? = null
+    private var hubPollJob: Job? = null
 
     /** 三个基础请求一起拉：来源、分类、插件目录。任一段失败只影响自己。 */
     fun ensureLoaded() {
@@ -262,7 +298,187 @@ class MarketViewModel(
         }
     }
 
+    // ---------- 安装与导入 ----------
+
+    fun installPluginFromFile(source: SafZipSource) {
+        pendingPluginSource = source
+        pendingPluginUrl = null
+        doPluginInstall(force = false)
+    }
+
+    fun installPluginFromUrl(source: String) {
+        val url = source.trim()
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            _state.update { it.copy(notice = "安装地址必须是 http(s) 的 zip 链接") }
+            return
+        }
+        pendingPluginSource = null
+        pendingPluginUrl = url
+        doPluginInstall(force = false)
+    }
+
+    fun forcePluginInstall() {
+        doPluginInstall(force = true)
+    }
+
+    private fun doPluginInstall(force: Boolean) {
+        val conn = connection() ?: return
+        val source = pendingPluginSource
+        val url = pendingPluginUrl
+        if (source == null && url.isNullOrBlank()) return
+        val label = source?.fileName ?: url.orEmpty()
+        _state.update {
+            it.copy(
+                pluginInstall = PluginInstallUi(label = label),
+                notice = null,
+            )
+        }
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    if (source != null) {
+                        api.uploadPlugin(conn, source, force) { read, total ->
+                            _state.update { state ->
+                                state.copy(
+                                    pluginInstall = state.pluginInstall?.copy(read = read, total = total),
+                                )
+                            }
+                        }
+                    } else {
+                        api.installPlugin(conn, url.orEmpty(), force)
+                    }
+                }
+                source?.cleanup()
+                pendingPluginSource = null
+                pendingPluginUrl = null
+                _state.update {
+                    it.copy(
+                        pluginInstall = it.pluginInstall?.copy(stage = "done"),
+                        notice = buildString {
+                            append("已安装插件「")
+                            append(result.name.ifBlank { result.id })
+                            append("」")
+                            if (!result.loaded) {
+                                append("，需重启服务端后生效")
+                            }
+                        },
+                        catalogLoaded = false,
+                    )
+                }
+                ensureLoaded()
+            } catch (e: Exception) {
+                if (e is ApiException && e.code == 409) {
+                    _state.update {
+                        it.copy(pluginInstall = it.pluginInstall?.copy(conflictSource = label))
+                    }
+                } else {
+                    val message = ErrorText.of(e)
+                    _state.update {
+                        it.copy(
+                            pluginInstall = it.pluginInstall?.copy(
+                                stage = "failed",
+                                error = message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun dismissPluginInstall() {
+        pendingPluginSource?.cleanup()
+        pendingPluginSource = null
+        pendingPluginUrl = null
+        _state.update { it.copy(pluginInstall = null) }
+    }
+
+    /** 从技能市场导入当前智能体。异步任务，1 秒轮询，离开页面时调用 [stopHubPolling]。 */
+    fun startHubInstall(result: MarketResultDto) {
+        val conn = connection() ?: return
+        val url = result.sourceUrl.trim()
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            _state.update { it.copy(notice = "该条目没有可用的导入地址") }
+            return
+        }
+        scope.launch {
+            try {
+                val task = withContext(Dispatchers.IO) {
+                    api.hubInstallStart(
+                        conn = conn,
+                        bundleUrl = url,
+                        providerKey = result.source,
+                        version = result.version.orEmpty(),
+                    )
+                }
+                _state.update {
+                    it.copy(
+                        hubInstall = HubInstallUi(
+                            taskId = task.taskId,
+                            bundleUrl = url,
+                            providerKey = result.source,
+                            version = result.version.orEmpty(),
+                            status = task.status,
+                            error = task.error,
+                        ),
+                    )
+                }
+                pollHubInstall(task.taskId)
+            } catch (e: Exception) {
+                _state.update { it.copy(notice = "导入失败：${ErrorText.of(e)}") }
+            }
+        }
+    }
+
+    fun cancelHubInstall() {
+        val conn = connection() ?: return
+        val taskId = _state.value.hubInstall?.taskId ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.hubInstallCancel(conn, taskId) } }
+        }
+    }
+
+    fun dismissHubInstall() {
+        hubPollJob?.cancel()
+        _state.update { it.copy(hubInstall = null) }
+    }
+
+    fun stopHubPolling() {
+        hubPollJob?.cancel()
+    }
+
+    private fun pollHubInstall(taskId: String) {
+        val conn = connection() ?: return
+        hubPollJob?.cancel()
+        hubPollJob = scope.launch {
+            repeat(600) {
+                delay(1_000)
+                val task = runCatching {
+                    withContext(Dispatchers.IO) { api.hubInstallStatus(conn, taskId) }
+                }.getOrNull() ?: return@repeat
+                _state.update {
+                    it.copy(
+                        hubInstall = it.hubInstall?.copy(
+                            status = task.status,
+                            error = task.error,
+                            result = task.result,
+                        ),
+                    )
+                }
+                if (task.isTerminal) return@launch
+            }
+        }
+    }
+
+    fun dismissNotice() {
+        _state.update { it.copy(notice = null) }
+    }
+
     fun clear() {
+        hubPollJob?.cancel()
+        pendingPluginSource?.cleanup()
+        pendingPluginSource = null
+        pendingPluginUrl = null
         _state.value = MarketUiState()
     }
 

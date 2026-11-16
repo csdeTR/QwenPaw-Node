@@ -24,7 +24,7 @@ import java.io.InputStream
  * 每次重试（覆盖确认、信任确认）都要重新上传，因此 [newBody] 可以调用
  * 多次，每次返回一个独立请求体。
  */
-class BackupImportSource private constructor(
+class SafZipSource private constructor(
     val fileName: String,
     private val length: Long,
     private val openStream: () -> InputStream,
@@ -43,9 +43,13 @@ class BackupImportSource private constructor(
          * 读取所选 URI 的名称与大小。大小未知时复制到缓存目录并返回临时文件，
          * 复制工作在线程池执行，避免阻塞界面。
          */
-        suspend fun prepare(context: Context, uri: Uri): BackupImportSource = withContext(Dispatchers.IO) {
+        suspend fun prepare(
+            context: Context,
+            uri: Uri,
+            defaultName: String = "upload.zip",
+        ): SafZipSource = withContext(Dispatchers.IO) {
             val resolver = context.contentResolver
-            var displayName = "backup.zip"
+            var displayName = defaultName
             var size = -1L
             resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
                 ?.use { cursor ->
@@ -61,7 +65,7 @@ class BackupImportSource private constructor(
                     }
                 }
             if (size >= 0) {
-                return@withContext BackupImportSource(
+                return@withContext SafZipSource(
                     fileName = displayName,
                     length = size,
                     openStream = {
@@ -80,7 +84,7 @@ class BackupImportSource private constructor(
                 temp.delete()
                 throw e
             }
-            BackupImportSource(
+            SafZipSource(
                 fileName = displayName,
                 length = temp.length(),
                 openStream = { FileInputStream(temp) },
@@ -93,7 +97,7 @@ class BackupImportSource private constructor(
             fileName: String,
             length: Long,
             openStream: () -> InputStream,
-        ): BackupImportSource = BackupImportSource(fileName, length, openStream, null)
+        ): SafZipSource = SafZipSource(fileName, length, openStream, null)
     }
 }
 

@@ -1,9 +1,12 @@
 package io.qwenpaw.node.data.remote
 
+import io.qwenpaw.node.data.model.AcpNodeRuntimeDto
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.AgentListDto
 import io.qwenpaw.node.data.model.AgentProfileDto
+import io.qwenpaw.node.data.model.AgentRefDto
 import io.qwenpaw.node.data.model.AgentStatsSummaryDto
+import io.qwenpaw.node.data.model.AgentStatusDto
 import io.qwenpaw.node.data.model.ApprovalDto
 import io.qwenpaw.node.data.model.ApprovalListDto
 import io.qwenpaw.node.data.model.AuthStatusDto
@@ -30,9 +33,12 @@ import io.qwenpaw.node.data.model.CronJobViewDto
 import io.qwenpaw.node.data.model.DeleteBackupsResultDto
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
+import io.qwenpaw.node.data.model.FileGuardDto
 import io.qwenpaw.node.data.model.GcRequestDto
 import io.qwenpaw.node.data.model.GcResultDto
 import io.qwenpaw.node.data.model.GcSettingsDto
+import io.qwenpaw.node.data.model.HarnessesDto
+import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.data.model.InboxPageDto
 import io.qwenpaw.node.data.model.InboxTraceDto
 import io.qwenpaw.node.data.model.LocalWhisperStatusDto
@@ -43,12 +49,23 @@ import io.qwenpaw.node.data.model.MarketSearchResponseDto
 import io.qwenpaw.node.data.model.McpClientDto
 import io.qwenpaw.node.data.model.McpPolicyDto
 import io.qwenpaw.node.data.model.McpToolDto
+import io.qwenpaw.node.data.model.SandboxStatusDto
+import io.qwenpaw.node.data.model.ServerLanguageDto
+import io.qwenpaw.node.data.model.SkillImportResultDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
 import io.qwenpaw.node.data.model.OffloadPolicyDto
+import io.qwenpaw.node.data.model.BroadcastResultDto
+import io.qwenpaw.node.data.model.HubInstallTaskDto
+import io.qwenpaw.node.data.model.PawAppDto
+import io.qwenpaw.node.data.model.PawAppsDto
 import io.qwenpaw.node.data.model.PluginCatalogDto
+import io.qwenpaw.node.data.model.PluginInstallResultDto
 import io.qwenpaw.node.data.model.PluginMarketResponseDto
 import io.qwenpaw.node.data.model.PoolSkillDetailDto
 import io.qwenpaw.node.data.model.PoolSkillDto
+import io.qwenpaw.node.data.model.PortabilityJobDto
+import io.qwenpaw.node.data.model.PortabilitySelectionDto
+import io.qwenpaw.node.data.model.PortabilitySourceDto
 import io.qwenpaw.node.data.model.ProviderDto
 import io.qwenpaw.node.data.model.ProjectDirDto
 import io.qwenpaw.node.data.model.PushMessagesDto
@@ -73,6 +90,7 @@ import io.qwenpaw.node.data.model.ToolCallInfoDto
 import io.qwenpaw.node.data.model.ToolCallListDto
 import io.qwenpaw.node.data.model.ToolCallOutputDto
 import io.qwenpaw.node.data.model.ToolDto
+import io.qwenpaw.node.data.model.ToolGuardRuleDto
 import io.qwenpaw.node.data.model.TranscribeResultDto
 import io.qwenpaw.node.data.model.TranscriptionProvidersDto
 import io.qwenpaw.node.data.model.TranscriptionProviderTypeDto
@@ -413,9 +431,459 @@ class QwenPawApi(
         }
     }
 
+    // ---------- portability（经配套插件） ----------
+
+    fun portabilitySources(conn: Connection): List<PortabilitySourceDto> = decode(
+        request(conn, "GET", "$BRIDGE_PORTABILITY_PATH/sources"),
+        kotlinx.serialization.builtins.ListSerializer(PortabilitySourceDto.serializer()),
+    )
+
+    fun portabilityCreateJob(conn: Connection, sources: List<String>): PortabilityJobDto {
+        val body = buildJsonObject {
+            putJsonArray("sources") { sources.forEach { add(it) } }
+        }
+        return decode(
+            request(conn, "POST", "$BRIDGE_PORTABILITY_PATH/jobs", body),
+            PortabilityJobDto.serializer(),
+        )
+    }
+
+    /** `GET .../jobs/current`。没有可恢复任务时服务端返回 JSON `null`。 */
+    fun portabilityCurrentJob(conn: Connection): PortabilityJobDto? {
+        val text = request(conn, "GET", "$BRIDGE_PORTABILITY_PATH/jobs/current")
+        if (text.isBlank() || text.trim() == "null") return null
+        return decode(text, PortabilityJobDto.serializer())
+    }
+
+    fun portabilityJob(conn: Connection, jobId: String): PortabilityJobDto = decode(
+        request(conn, "GET", "$BRIDGE_PORTABILITY_PATH/jobs/${encodeSegment(jobId)}"),
+        PortabilityJobDto.serializer(),
+    )
+
+    fun portabilityStartJob(
+        conn: Connection,
+        jobId: String,
+        selections: Map<String, PortabilitySelectionDto>,
+        allowPluginExecution: Boolean,
+    ): PortabilityJobDto = portabilityAction(
+        conn,
+        jobId,
+        "start",
+        selections,
+        allowPluginExecution,
+    )
+
+    fun portabilityRetryJob(
+        conn: Connection,
+        jobId: String,
+        selections: Map<String, PortabilitySelectionDto>,
+        allowPluginExecution: Boolean,
+    ): PortabilityJobDto = portabilityAction(
+        conn,
+        jobId,
+        "retry",
+        selections,
+        allowPluginExecution,
+    )
+
+    private fun portabilityAction(
+        conn: Connection,
+        jobId: String,
+        action: String,
+        selections: Map<String, PortabilitySelectionDto>,
+        allowPluginExecution: Boolean,
+    ): PortabilityJobDto {
+        val selectionObject = buildJsonObject {
+            selections.forEach { (source, selection) ->
+                put(source, json.encodeToJsonElement(PortabilitySelectionDto.serializer(), selection))
+            }
+        }
+        val body = buildJsonObject {
+            put("selections", selectionObject)
+            put("allow_plugin_execution", allowPluginExecution)
+        }
+        return decode(
+            request(
+                conn,
+                "POST",
+                "$BRIDGE_PORTABILITY_PATH/jobs/${encodeSegment(jobId)}/$action",
+                body,
+            ),
+            PortabilityJobDto.serializer(),
+        )
+    }
+
+    fun portabilityCancelJob(conn: Connection, jobId: String): PortabilityJobDto = decode(
+        request(conn, "POST", "$BRIDGE_PORTABILITY_PATH/jobs/${encodeSegment(jobId)}/cancel", buildJsonObject { }),
+        PortabilityJobDto.serializer(),
+    )
+
+    // ---------- App 中心 ----------
+
+    /** `GET /api/pawapps`。已安装的 PawApp 列表；服务端未安装时是空数组。 */
+    fun pawApps(conn: Connection): PawAppsDto = decode(
+        request(conn, "GET", "/api/pawapps"),
+        PawAppsDto.serializer(),
+    )
+
+    // ---------- 市场安装与技能导入 ----------
+
+    /** `POST /api/plugins/upload`。同名目录已存在时服务端回 409，需 `force=true` 重试。 */
+    fun uploadPlugin(
+        conn: Connection,
+        source: SafZipSource,
+        force: Boolean = false,
+        onProgress: (read: Long, total: Long?) -> Unit = { _, _ -> },
+    ): PluginInstallResultDto {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", source.fileName, source.newBody(onProgress))
+            .build()
+        val url = connUrl(conn, "/api/plugins/upload").newBuilder()
+            .addQueryParameter("force", force.toString())
+            .build()
+        return decode(
+            execute(baseBuilder(conn, url).post(body).build()),
+            PluginInstallResultDto.serializer(),
+        )
+    }
+
+    /** `POST /api/plugins/install`。`source` 只接受 http(s) zip 或服务端本地目录。 */
+    fun installPlugin(
+        conn: Connection,
+        source: String,
+        force: Boolean = false,
+    ): PluginInstallResultDto {
+        val body = buildJsonObject {
+            put("source", source)
+            put("force", force)
+        }
+        return decode(
+            request(conn, "POST", "/api/plugins/install", body),
+            PluginInstallResultDto.serializer(),
+        )
+    }
+
+    /**
+     * `POST /api/skills/upload` 或 `/api/skills/pool/upload-zip`。
+     *
+     * 409 的 `detail` 就是 `{imported, count, conflicts}`，这里直接解析成结果返回，
+     * 让界面能列出冲突并引导改名，而不是只看到一句「请求冲突」。
+     */
+    fun uploadSkillZip(
+        conn: Connection,
+        toPool: Boolean,
+        source: SafZipSource,
+        enable: Boolean = true,
+        targetName: String = "",
+        renameMap: Map<String, String>? = null,
+        onProgress: (read: Long, total: Long?) -> Unit = { _, _ -> },
+    ): SkillImportResultDto {
+        val path = if (toPool) "/api/skills/pool/upload-zip" else "/api/skills/upload"
+        val url = workspaceUrl(
+            conn,
+            path,
+            mapOf(
+                "enable" to enable.toString(),
+                "target_name" to targetName.takeIf { it.isNotBlank() },
+                "rename_map" to renameMap?.takeIf { it.isNotEmpty() }?.let { map ->
+                    buildJsonObject {
+                        map.forEach { (key, value) -> put(key, value) }
+                    }.toString()
+                },
+            ),
+        )
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", source.fileName, source.newBody(onProgress))
+            .build()
+        val request = baseBuilder(conn, url).post(body).build()
+        return executeSkillResult(request)
+    }
+
+    /** `POST /api/skills/hub/install/start`，异步任务。 */
+    fun hubInstallStart(
+        conn: Connection,
+        bundleUrl: String,
+        providerKey: String? = null,
+        version: String = "",
+        enable: Boolean = true,
+        targetName: String = "",
+    ): HubInstallTaskDto {
+        val body = buildJsonObject {
+            providerKey?.takeIf { it.isNotBlank() }?.let { put("provider_key", it) }
+            put("bundle_url", bundleUrl)
+            put("version", version)
+            put("enable", enable)
+            put("target_name", targetName)
+        }
+        return decode(
+            request(conn, "POST", "/api/skills/hub/install/start", body),
+            HubInstallTaskDto.serializer(),
+        )
+    }
+
+    fun hubInstallStatus(conn: Connection, taskId: String): HubInstallTaskDto = decode(
+        request(conn, "GET", "/api/skills/hub/install/status/${encodeSegment(taskId)}"),
+        HubInstallTaskDto.serializer(),
+    )
+
+    fun hubInstallCancel(conn: Connection, taskId: String) {
+        request(conn, "POST", "/api/skills/hub/install/cancel/${encodeSegment(taskId)}", buildJsonObject { })
+    }
+
+    /** `POST /api/skills/pool/download`。全有或全无；409 的 detail 带冲突工作区。 */
+    fun broadcastSkill(
+        conn: Connection,
+        skillName: String,
+        targets: List<String>,
+        allWorkspaces: Boolean = false,
+        overwrite: Boolean = false,
+    ): BroadcastResultDto {
+        val body = buildJsonObject {
+            put("skill_name", skillName)
+            putJsonArray("targets") {
+                targets.forEach { add(buildJsonObject { put("workspace_id", it) }) }
+            }
+            put("all_workspaces", allWorkspaces)
+            put("overwrite", overwrite)
+            put("preview_only", false)
+        }
+        val request = baseBuilder(conn, connUrl(conn, "/api/skills/pool/download"))
+            .post(body.toString().toRequestBody(JSON_MEDIA))
+            .build()
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.isSuccessful) return decode(text, BroadcastResultDto.serializer())
+            if (response.code == 409) {
+                val detail = runCatching {
+                    json.parseToJsonElement(text).jsonObject["detail"]
+                }.getOrNull()
+                if (detail is JsonObject) {
+                    return decode(detail.toString(), BroadcastResultDto.serializer())
+                }
+            }
+            throw failureOf(response.code, text, response.header("WWW-Authenticate"), tokenSentOf(request))
+        }
+    }
+
+    private fun executeSkillResult(request: Request): SkillImportResultDto =
+        client.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.isSuccessful) {
+                return decode(text, SkillImportResultDto.serializer())
+            }
+            if (response.code == 409) {
+                val detail = runCatching {
+                    json.parseToJsonElement(text).jsonObject["detail"]
+                }.getOrNull()
+                if (detail is JsonObject) {
+                    return decode(detail.toString(), SkillImportResultDto.serializer())
+                }
+            }
+            throw failureOf(response.code, text, response.header("WWW-Authenticate"), tokenSentOf(request))
+        }
+
     // ---------- 智能体 ----------
     fun agents(conn: Connection): List<AgentDto> =
         decode(request(conn, "GET", "/api/agents"), AgentListDto.serializer()).agents
+
+    /** `POST /api/agents`。`id` 留空由服务端生成。 */
+    fun createAgent(
+        conn: Connection,
+        name: String,
+        description: String = "",
+        id: String? = null,
+    ): AgentRefDto {
+        val body = buildJsonObject {
+            put("name", name)
+            if (description.isNotBlank()) put("description", description)
+            id?.trim()?.takeIf { it.isNotEmpty() }?.let { put("id", it) }
+        }
+        return decode(
+            request(conn, "POST", "/api/agents", body),
+            AgentRefDto.serializer(),
+        )
+    }
+
+    /** `POST /api/agents/{id}/copy`。只复制配置，不复制会话与媒体。 */
+    fun copyAgent(
+        conn: Connection,
+        sourceId: String,
+        name: String? = null,
+        copySkills: Boolean = false,
+        copyJobs: Boolean = false,
+    ): AgentRefDto {
+        val body = buildJsonObject {
+            name?.trim()?.takeIf { it.isNotEmpty() }?.let { put("name", it) }
+            put("copy_md_files", true)
+            put("copy_skills", copySkills)
+            put("copy_jobs", copyJobs)
+        }
+        return decode(
+            request(conn, "POST", "/api/agents/${encodeSegment(sourceId)}/copy", body),
+            AgentRefDto.serializer(),
+        )
+    }
+
+    /** `DELETE /api/agents/{id}`。default 不可删。 */
+    fun deleteAgent(conn: Connection, agentId: String) {
+        request(conn, "DELETE", "/api/agents/${encodeSegment(agentId)}")
+    }
+
+    /** `PATCH /api/agents/{id}/toggle`。default 不可禁用。 */
+    fun setAgentEnabled(conn: Connection, agentId: String, enabled: Boolean) {
+        val body = buildJsonObject { put("enabled", enabled) }
+        request(conn, "PATCH", "/api/agents/${encodeSegment(agentId)}/toggle", body)
+    }
+
+    /** `PATCH /api/agents/{id}/pin`。default 不可取消置顶。 */
+    fun setAgentPinned(conn: Connection, agentId: String, pinned: Boolean) {
+        val body = buildJsonObject { put("pinned", pinned) }
+        request(conn, "PATCH", "/api/agents/${encodeSegment(agentId)}/pin", body)
+    }
+
+    /** `PUT /api/agents/order`。提交完整列表；服务端校验 default 第一、置顶在前。 */
+    fun reorderAgents(conn: Connection, agentIds: List<String>) {
+        val body = buildJsonObject {
+            putJsonArray("agent_ids") { agentIds.forEach { add(it) } }
+        }
+        request(conn, "PUT", "/api/agents/order", body)
+    }
+
+    /** `GET /api/agents/{id}/agent-status`。 */
+    fun agentStatus(conn: Connection, agentId: String): AgentStatusDto = decode(
+        request(conn, "GET", "/api/agents/${encodeSegment(agentId)}/agent-status"),
+        AgentStatusDto.serializer(),
+    )
+
+    /**
+     * 修改名称与描述。
+     *
+     * `PUT /api/agents/{id}` 要求完整配置，因此先读原始对象、只替换两项再写回；
+     * 与 [setApprovalLevel] 同一条路径。
+     */
+    fun updateAgentProfile(
+        conn: Connection,
+        agentId: String,
+        name: String,
+        description: String,
+    ): AgentProfileDto {
+        val path = "/api/agents/${encodeSegment(agentId)}"
+        val obj = json.parseToJsonElement(request(conn, "GET", path)).jsonObject
+        val body = buildJsonObject {
+            obj.forEach { (k, v) ->
+                if (k != "name" && k != "description") put(k, v)
+            }
+            put("name", name)
+            put("description", description)
+        }
+        return decode(request(conn, "PUT", path, body), AgentProfileDto.serializer())
+    }
+
+    // ---------- ACP ----------
+
+    /** `GET /api/config/acp`。整个 ACP 配置，含 node_path 与四个内置 agent。 */
+    fun acpConfig(conn: Connection): JsonObject =
+        json.parseToJsonElement(request(conn, "GET", "/api/config/acp")).jsonObject
+
+    fun saveAcpConfig(conn: Connection, config: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/config/acp", config),
+        ).jsonObject
+
+    /** `GET /api/config/acp/node-runtime`。 */
+    fun acpNodeRuntime(conn: Connection): AcpNodeRuntimeDto = decode(
+        request(conn, "GET", "/api/config/acp/node-runtime"),
+        AcpNodeRuntimeDto.serializer(),
+    )
+
+    /** `PUT /api/config/acp/node-runtime`。路径不可用时服务端回 400，detail 是对象。 */
+    fun saveAcpNodeRuntime(conn: Connection, nodePath: String): AcpNodeRuntimeDto {
+        val body = buildJsonObject { put("node_path", nodePath) }
+        return decode(
+            request(conn, "PUT", "/api/config/acp/node-runtime", body),
+            AcpNodeRuntimeDto.serializer(),
+        )
+    }
+
+    /** `GET /api/config/acp/{agent_name}`。返回原始对象，避免七个字段之外的项被抹掉。 */
+    fun acpAgentConfig(conn: Connection, agentName: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/config/acp/${encodeSegment(agentName)}"),
+        ).jsonObject
+
+    fun saveAcpAgentConfig(
+        conn: Connection,
+        agentName: String,
+        config: JsonObject,
+    ): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/config/acp/${encodeSegment(agentName)}", config),
+        ).jsonObject
+
+    // ---------- Harness ----------
+
+    /** `GET /api/harnesses`。 */
+    fun harnesses(conn: Connection): List<HarnessProviderDto> = decode(
+        request(conn, "GET", "/api/harnesses"),
+        HarnessesDto.serializer(),
+    ).providers
+
+    /** `GET /api/harnesses/{id}/models`。各 provider 的返回形状不同，保留原始 JSON。 */
+    fun harnessModels(conn: Connection, providerId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/harnesses/${encodeSegment(providerId)}/models"),
+        ).jsonObject
+
+    fun harnessMcp(conn: Connection, providerId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/harnesses/${encodeSegment(providerId)}/mcp"),
+        ).jsonObject
+
+    fun harnessSkills(conn: Connection, providerId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/harnesses/${encodeSegment(providerId)}/skills"),
+        ).jsonObject
+
+    /** `POST /api/harnesses/{id}/status`，用未保存的设置探测一次。 */
+    fun harnessStatus(
+        conn: Connection,
+        providerId: String,
+        settings: JsonObject = JsonObject(emptyMap()),
+    ): HarnessProviderDto {
+        val body = buildJsonObject { put("settings", settings) }
+        return decode(
+            request(conn, "POST", "/api/harnesses/${encodeSegment(providerId)}/status", body),
+            HarnessProviderDto.serializer(),
+        )
+    }
+
+    /**
+     * `POST /api/harnesses/{id}/login`。
+     *
+     * codex 支持设备码，返回里带用户码与验证地址；qoder 忽略 `device_code`，
+     * 返回 `{type:"external", command}`。调用方按字段是否存在分别呈现。
+     */
+    fun harnessLogin(
+        conn: Connection,
+        providerId: String,
+        deviceCode: Boolean = true,
+    ): JsonObject {
+        val body = buildJsonObject {
+            put("device_code", deviceCode)
+            put("settings", JsonObject(emptyMap()))
+        }
+        return json.parseToJsonElement(
+            request(conn, "POST", "/api/harnesses/${encodeSegment(providerId)}/login", body),
+        ).jsonObject
+    }
+
+    /** `POST /api/harnesses/{id}/logout`。 */
+    fun harnessLogout(conn: Connection, providerId: String) {
+        val body = buildJsonObject { put("settings", JsonObject(emptyMap())) }
+        request(conn, "POST", "/api/harnesses/${encodeSegment(providerId)}/logout", body)
+    }
 
     // ---------- 会话 ----------
 
@@ -1953,6 +2421,99 @@ class QwenPawApi(
         ResetCheckpointsDto.serializer(),
     )
 
+    // ---------- 运行配置、安全与服务端设置 ----------
+
+    /**
+     * `GET /api/workspace/running-config`。
+     *
+     * 返回原始对象而不是 22 字段 DTO：PUT 要求整份回写，而客户端只改其中几项；
+     * 用 DTO 往返会把客户端未识别的嵌套字段一起抹掉。GET 里记忆后端的密钥是
+     * `***`，原样回写时服务端会还原旧值。
+     */
+    fun runningConfig(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/workspace/running-config"),
+        ).jsonObject
+
+    /** `PUT /api/workspace/running-config`，body 必须是完整对象。 */
+    fun saveRunningConfig(conn: Connection, config: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/workspace/running-config", config),
+        ).jsonObject
+
+    /** `GET /api/config/security/tool-guard`。规则编辑留 Web，客户端只改 `enabled`。 */
+    fun toolGuard(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/config/security/tool-guard"),
+        ).jsonObject
+
+    fun saveToolGuard(conn: Connection, config: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/config/security/tool-guard", config),
+        ).jsonObject
+
+    /** `GET /api/config/security/tool-guard/builtin-rules`。 */
+    fun toolGuardBuiltinRules(conn: Connection): List<ToolGuardRuleDto> = decode(
+        request(conn, "GET", "/api/config/security/tool-guard/builtin-rules"),
+        kotlinx.serialization.builtins.ListSerializer(ToolGuardRuleDto.serializer()),
+    )
+
+    /** `GET /api/config/security/file-guard`。 */
+    fun fileGuard(conn: Connection): FileGuardDto = decode(
+        request(conn, "GET", "/api/config/security/file-guard"),
+        FileGuardDto.serializer(),
+    )
+
+    /** `PUT /api/config/security/file-guard`。该端点允许只提交 `enabled`。 */
+    fun setFileGuardEnabled(conn: Connection, enabled: Boolean): FileGuardDto {
+        val body = buildJsonObject { put("enabled", enabled) }
+        return decode(
+            request(conn, "PUT", "/api/config/security/file-guard", body),
+            FileGuardDto.serializer(),
+        )
+    }
+
+    /** `GET /api/config/security/sandbox`。 */
+    fun sandboxStatus(conn: Connection): SandboxStatusDto = decode(
+        request(conn, "GET", "/api/config/security/sandbox"),
+        SandboxStatusDto.serializer(),
+    )
+
+    /** `PUT /api/config/security/sandbox`。 */
+    fun setSandboxEnabled(conn: Connection, enabled: Boolean): SandboxStatusDto {
+        val body = buildJsonObject { put("enabled", enabled) }
+        return decode(
+            request(conn, "PUT", "/api/config/security/sandbox", body),
+            SandboxStatusDto.serializer(),
+        )
+    }
+
+    /** `GET /api/config/security/skill-scanner`。客户端只改 `mode`。 */
+    fun skillScanner(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/config/security/skill-scanner"),
+        ).jsonObject
+
+    fun saveSkillScanner(conn: Connection, config: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/config/security/skill-scanner", config),
+        ).jsonObject
+
+    /** `GET /api/settings/language`。这是服务端 Web 控制台的语言，不是客户端语言。 */
+    fun serverLanguage(conn: Connection): String = decode(
+        request(conn, "GET", "/api/settings/language"),
+        ServerLanguageDto.serializer(),
+    ).language
+
+    /** `PUT /api/settings/language`。非法值服务端回 400。 */
+    fun setServerLanguage(conn: Connection, language: String): String {
+        val body = buildJsonObject { put("language", language) }
+        return decode(
+            request(conn, "PUT", "/api/settings/language", body),
+            ServerLanguageDto.serializer(),
+        ).language
+    }
+
     private fun checkpointRestore(
         conn: Connection,
         req: RestoreCheckpointRequestDto,
@@ -2308,6 +2869,9 @@ class QwenPawApi(
 
         /** 插件事件流端点（SSE）。 */
         const val BRIDGE_EVENTS_PATH = "/api/plugins/qwenpaw-node-bridge/events"
+
+        /** portability 导入转发端点。 */
+        const val BRIDGE_PORTABILITY_PATH = "/api/plugins/qwenpaw-node-bridge/portability"
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             // 流式对话可能持续很久，读超时给足；其余请求单次不会超过这个值。

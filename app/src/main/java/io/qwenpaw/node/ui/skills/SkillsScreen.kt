@@ -1,6 +1,8 @@
 package io.qwenpaw.node.ui.skills
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,10 +30,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,11 +44,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.chat.MarkdownText
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.common.PlainTextEditor
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.theme.qwenSwitchColors
+import kotlinx.coroutines.launch
 
 /** 页内层级。技能详情属于本页的下一级，不占顶层 `Screen`。 */
 private enum class SkillPage { LIST, DETAIL }
@@ -71,10 +77,33 @@ fun SkillsScreen(
     onCreate: (String, String, onResult: (Boolean) -> Unit) -> Unit,
     onDelete: (String) -> Unit,
     onDismissNotice: () -> Unit,
+    onImportZip: (toPool: Boolean, source: SafZipSource) -> Unit = { _, _ -> },
+    onRetryImport: (Map<String, String>) -> Unit = {},
+    onDismissImportConflicts: () -> Unit = {},
+    onOpenBroadcast: (String) -> Unit = {},
+    onToggleBroadcastTarget: (String) -> Unit = {},
+    onRunBroadcast: (Boolean) -> Unit = {},
+    onDismissBroadcast: () -> Unit = {},
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var page by remember { mutableStateOf(SkillPage.LIST) }
     var creating by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<String?>(null) }
+    var importDialog by remember { mutableStateOf(false) }
+    var importToPool by remember { mutableStateOf(false) }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val source = runCatching {
+                    SafZipSource.prepare(context, uri, "skill.zip")
+                }.getOrNull()
+                if (source != null) onImportZip(importToPool, source)
+            }
+        }
+    }
 
     // 详情被清空（例如删除后）要退回列表，否则会停在一个空白的详情页。
     // 用派生判定而不是在组合期写状态：组合期写 `page` 会额外触发一轮重组，
@@ -152,6 +181,8 @@ fun SkillsScreen(
 
                 else -> SkillList(
                     state = state,
+                    onImport = { importDialog = true },
+                    onBroadcast = onOpenBroadcast,
                     onRefresh = onRefresh,
                     onOpenSkill = { name ->
                         onOpenSkill(name)
@@ -211,11 +242,142 @@ fun SkillsScreen(
             onDismiss = { deleting = null },
         )
     }
+
+    if (importDialog) {
+        AlertDialog(
+            onDismissRequest = { importDialog = false },
+            title = { Text("导入技能 zip") },
+            text = { Text("选择导入到当前智能体，或导入到技能池。") },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = {
+                        importDialog = false
+                        importToPool = false
+                        importLauncher.launch("application/zip")
+                    }) { Text("当前智能体") }
+                    TextButton(onClick = {
+                        importDialog = false
+                        importToPool = true
+                        importLauncher.launch("application/zip")
+                    }) { Text("技能池") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { importDialog = false }) { Text("取消") } },
+        )
+    }
+
+    if (state.importConflicts.isNotEmpty()) {
+        var names by remember(state.importConflicts) {
+            mutableStateOf(
+                state.importConflicts.associate {
+                    it.skillName to (it.suggestedName ?: it.skillName)
+                },
+            )
+        }
+        AlertDialog(
+            onDismissRequest = onDismissImportConflicts,
+            title = { Text("技能已存在") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .height(360.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        "以下技能与已有技能同名。改名后可重新导入；不存在的目标会按原名写入。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    state.importConflicts.forEach { conflict ->
+                        OutlinedTextField(
+                            value = names[conflict.skillName].orEmpty(),
+                            onValueChange = { value ->
+                                names = names + (conflict.skillName to value)
+                            },
+                            label = { Text("原名 ${conflict.skillName} 的新名字") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { onRetryImport(names.filterValues { it.isNotBlank() }) }) {
+                    Text("改名导入")
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismissImportConflicts) { Text("取消") } },
+        )
+    }
+
+    state.broadcast?.let { broadcast ->
+        AlertDialog(
+            onDismissRequest = onDismissBroadcast,
+            title = { Text("广播「${broadcast.skillName}」") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .height(400.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (state.agentOptions.isEmpty()) {
+                        Text("没有可选的智能体", style = MaterialTheme.typography.bodySmall)
+                    }
+                    state.agentOptions.forEach { agent ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggleBroadcastTarget(agent.id) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            androidx.compose.material3.Checkbox(
+                                checked = agent.id in broadcast.targets,
+                                onCheckedChange = { onToggleBroadcastTarget(agent.id) },
+                            )
+                            Text(
+                                text = agent.name.ifBlank { agent.id },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                    broadcast.error?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (broadcast.conflicts.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "冲突工作区：${broadcast.conflicts.joinToString { it.workspaceName.ifBlank { it.workspaceId } }}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Text(
+                            "广播是全有或全无；覆盖会替换目标工作区里的同名技能。",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (broadcast.conflicts.isNotEmpty()) {
+                    TextButton(enabled = !broadcast.running, onClick = { onRunBroadcast(true) }) {
+                        Text("覆盖并重试")
+                    }
+                } else {
+                    TextButton(enabled = !broadcast.running, onClick = { onRunBroadcast(false) }) {
+                        Text("广播")
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismissBroadcast) { Text("取消") } },
+        )
+    }
 }
 
 @Composable
 private fun SkillList(
     state: SkillsUiState,
+    onImport: () -> Unit,
+    onBroadcast: (String) -> Unit,
     onRefresh: () -> Unit,
     onOpenSkill: (String) -> Unit,
     onOpenPoolSkill: (String) -> Unit,
@@ -228,6 +390,9 @@ private fun SkillList(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onImport) { Text("导入 zip") }
+        }
         SectionTitle("当前智能体", "${state.skills.size} 个")
         CardBox {
             if (state.skills.isEmpty()) {
@@ -289,11 +454,17 @@ private fun SkillList(
                         onToggle = null,
                         error = null,
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { onBroadcast(skill.name) }) { Text("广播") }
+                    }
                     if (index != state.pool.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 14.dp))
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 14.dp))
                 Text(
-                    text = "技能池的导入、广播与自动同步请在 Web 控制台操作。",
+                    text = "技能池的广播在手机上完成；自动同步与配置仍在 Web 控制台。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

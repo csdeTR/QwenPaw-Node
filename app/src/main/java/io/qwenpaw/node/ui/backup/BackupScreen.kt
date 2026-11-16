@@ -49,7 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.data.model.BackupMetaDto
 import io.qwenpaw.node.data.model.BackupScopeDto
-import io.qwenpaw.node.data.remote.BackupImportSource
+import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.TimeLabels
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.settings.Card
@@ -96,7 +96,7 @@ data class BackupActions(
  * 备份：创建、列表、导出、导入、删除与恢复。
  *
  * SAF 的选择器必须由界面启动，因此两个 launcher 放在本文件内；请求体由
- * [BackupImportSource] 生成，确认覆盖与信任确认时由 `newBody` 重新打开输入流。
+ * [SafZipSource] 生成，确认覆盖与信任确认时由 `newBody` 重新打开输入流。
  */
 @Composable
 fun BackupScreen(
@@ -106,7 +106,7 @@ fun BackupScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var importSource by remember { mutableStateOf<BackupImportSource?>(null) }
+    var importSource by remember { mutableStateOf<SafZipSource?>(null) }
     var pendingExport by remember { mutableStateOf<BackupMetaDto?>(null) }
 
     LaunchedEffect(state.notice) {
@@ -136,7 +136,7 @@ fun BackupScreen(
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            val prepared = runCatching { BackupImportSource.prepare(context, uri) }
+            val prepared = runCatching { SafZipSource.prepare(context, uri, "backup.zip") }
                 .getOrElse {
                     android.widget.Toast.makeText(
                         context,

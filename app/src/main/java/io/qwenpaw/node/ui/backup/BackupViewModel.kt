@@ -24,6 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,6 +32,22 @@ import okhttp3.RequestBody
 
 /** 导出进度。`total` 来自响应的 `Content-Length`，未知时为 null。 */
 data class BackupTransfer(val read: Long = 0, val total: Long? = null)
+
+/**
+ * 「导出此智能体」的一次性流程。
+ *
+ * 这条流程会创建一条临时备份，导出成功后删除它；失败或取消时保留，
+ * 让用户能在备份页重试或自行删除。
+ */
+data class AgentExportUiState(
+    val agentId: String,
+    val agentName: String,
+    /** creating / building / exporting / done / failed / cancelled */
+    val stage: String = "creating",
+    val error: String? = null,
+) {
+    val busy: Boolean get() = stage == "creating" || stage == "building" || stage == "exporting"
+}
 
 /** 导入流程的阶段。冲突与信任确认都保留已上传文件的上下文以便重试。 */
 sealed interface ImportState {
@@ -103,6 +120,7 @@ data class BackupUiState(
     val restoreApplying: Boolean = false,
     val restoreError: String? = null,
     val notice: String? = null,
+    val agentExport: AgentExportUiState? = null,
 )
 
 /**
@@ -131,6 +149,7 @@ class BackupViewModel(
     private var loadJob: Job? = null
     private var streamJob: Job? = null
     private var exportJob: Job? = null
+    private var agentExportJob: Job? = null
     private var importJob: Job? = null
     private var pendingImportBody: (() -> RequestBody)? = null
 
@@ -448,6 +467,108 @@ class BackupViewModel(
 
     fun dismissExportError() {
         _state.update { it.copy(exportError = null) }
+    }
+
+    /**
+     * 导出单个智能体：创建临时备份 → 等待完成 → 导出 → 删除临时备份。
+     *
+     * 导出成功后必须删掉这条备份，否则「导出」会在备份列表里留下一条用户没主动
+     * 创建过的条目。失败或取消时保留，并写明可以在备份页重试或删除。
+     */
+    fun startAgentExport(agentId: String, agentName: String, sink: DownloadSink) {
+        val conn = connection() ?: return
+        if (agentExportJob?.isActive == true) return
+        val gen = generation
+        _state.update {
+            it.copy(
+                agentExport = AgentExportUiState(agentId = agentId, agentName = agentName),
+                error = null,
+                notice = null,
+            )
+        }
+        agentExportJob = scope.launch {
+            var backupId: String? = null
+            val label = agentName.ifBlank { agentId }
+            try {
+                val request = CreateBackupRequestDto(
+                    name = "导出-$label-${System.currentTimeMillis()}",
+                    description = "临时导出，成功后自动删除",
+                    scope = BackupScopeDto(
+                        includeAgents = true,
+                        includeGlobalConfig = false,
+                        includeSecrets = false,
+                        includeSkillPool = false,
+                    ),
+                    agents = listOf(agentId),
+                )
+                val job = withContext(Dispatchers.IO) { api.startBackupJob(conn, request) }
+                backupId = job.backupId
+                _state.update { it.copy(agentExport = it.agentExport?.copy(stage = "building")) }
+                val terminal = jobStream.open(conn, job.jobId)
+                    .firstOrNull { it.isTerminal }
+                    ?: error("备份任务没有返回终态")
+                if (terminal.status != "completed") {
+                    error(terminal.error ?: "备份任务未完成：${terminal.status}")
+                }
+
+                _state.update { it.copy(agentExport = it.agentExport?.copy(stage = "exporting")) }
+                val out = sink.open() ?: error("无法写入所选位置")
+                out.use { stream ->
+                    downloadClient.download(api.exportBackupRequest(conn, backupId), stream)
+                }
+
+                val result = withContext(Dispatchers.IO) {
+                    api.deleteBackups(conn, listOf(backupId))
+                }
+                val failed = result.failed.firstOrNull()
+                _state.update {
+                    it.copy(
+                        agentExport = it.agentExport?.copy(
+                            stage = "done",
+                            error = failed?.let { item ->
+                                "导出成功，但临时备份删除失败：${item.error.orEmpty().ifBlank { "服务端未返回原因" }}"
+                            },
+                        ),
+                        notice = if (failed == null) "已导出，临时备份已清理" else null,
+                    )
+                }
+            } catch (e: CancellationException) {
+                withContext(NonCancellable) { runCatching { sink.discard() } }
+                if (gen == generation) {
+                    _state.update {
+                        it.copy(
+                            agentExport = it.agentExport?.copy(
+                                stage = "cancelled",
+                                error = if (backupId != null) "导出已取消，临时备份已保留" else null,
+                            ),
+                        )
+                    }
+                }
+                throw e
+            } catch (e: Exception) {
+                withContext(NonCancellable) { runCatching { sink.discard() } }
+                if (gen != generation) return@launch
+                val keepHint = if (backupId != null) {
+                    "。临时备份已保留，可在备份页重试或删除"
+                } else {
+                    ""
+                }
+                _state.update {
+                    it.copy(
+                        agentExport = it.agentExport?.copy(
+                            stage = "failed",
+                            error = "导出失败：${backupError(e)}$keepHint",
+                        ),
+                    )
+                }
+            } finally {
+                if (gen == generation) refresh()
+            }
+        }
+    }
+
+    fun dismissAgentExport() {
+        _state.update { it.copy(agentExport = null) }
     }
 
     // ---------- 导入 ----------

@@ -2,8 +2,11 @@ package io.qwenpaw.node.ui.settings
 
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
+import io.qwenpaw.node.data.model.FileGuardDto
 import io.qwenpaw.node.data.model.OffloadPolicyDto
+import io.qwenpaw.node.data.model.SandboxStatusDto
 import io.qwenpaw.node.data.model.ToolDto
+import io.qwenpaw.node.data.model.ToolGuardRuleDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -16,7 +19,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /** 工具页状态。 */
 data class ToolsUiState(
@@ -43,6 +51,46 @@ data class OffloadUiState(
     val loaded: Boolean = false,
 )
 
+/** 运行配置页状态。原始 JSON 必须保留，保存时整份回写。 */
+data class RunningConfigUiState(
+    val raw: JsonObject? = null,
+    val form: RunningConfigForm = RunningConfigForm(),
+    val loading: Boolean = false,
+    val saving: Boolean = false,
+    val error: String? = null,
+    val notice: String? = null,
+    val loaded: Boolean = false,
+)
+
+/** 安全页状态。四组配置各自保留原始形状，只改开关或模式。 */
+data class SecurityUiState(
+    val toolGuard: JsonObject? = null,
+    val toolGuardEnabled: Boolean = false,
+    val rules: List<ToolGuardRuleDto> = emptyList(),
+    val fileGuard: FileGuardDto? = null,
+    val sandbox: SandboxStatusDto? = null,
+    val skillScanner: JsonObject? = null,
+    val skillScannerMode: String = SKILL_SCANNER_WARN,
+    val loading: Boolean = false,
+    val saving: Boolean = false,
+    val error: String? = null,
+    val notice: String? = null,
+    val loaded: Boolean = false,
+)
+
+/** 服务端级设置：Web 控制台语言与上传上限。 */
+data class ServerSettingsUiState(
+    val language: String = "en",
+    val uploadLimitMb: Long? = null,
+    val loading: Boolean = false,
+    val error: String? = null,
+    val loaded: Boolean = false,
+)
+
+internal const val SKILL_SCANNER_BLOCK = "block"
+internal const val SKILL_SCANNER_WARN = "warn"
+internal const val SKILL_SCANNER_OFF = "off"
+
 /**
  * 设置页下三张配置表单的状态与动作。
  *
@@ -63,6 +111,15 @@ class SettingsConfigViewModel(
 
     private val _offload = MutableStateFlow(OffloadUiState())
     val offload: StateFlow<OffloadUiState> = _offload.asStateFlow()
+
+    private val _runningConfig = MutableStateFlow(RunningConfigUiState())
+    val runningConfig: StateFlow<RunningConfigUiState> = _runningConfig.asStateFlow()
+
+    private val _security = MutableStateFlow(SecurityUiState())
+    val security: StateFlow<SecurityUiState> = _security.asStateFlow()
+
+    private val _serverSettings = MutableStateFlow(ServerSettingsUiState())
+    val serverSettings: StateFlow<ServerSettingsUiState> = _serverSettings.asStateFlow()
 
     // ---------------- 工具 ----------------
 
@@ -223,10 +280,253 @@ class SettingsConfigViewModel(
         }
     }
 
+    // ---------------- 运行配置 ----------------
+
+    fun loadRunningConfig(force: Boolean = false) {
+        if (!force && (_runningConfig.value.loaded || _runningConfig.value.loading)) return
+        val conn = connection() ?: return
+        _runningConfig.update { it.copy(loading = true, error = null, notice = null) }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.runningConfig(conn) } }
+                .onSuccess { raw ->
+                    _runningConfig.value = RunningConfigUiState(
+                        raw = raw,
+                        form = RunningConfigEdit.fromJson(raw),
+                        loaded = true,
+                    )
+                }
+                .onFailure { e ->
+                    _runningConfig.update {
+                        it.copy(loading = false, loaded = true, error = ErrorText.of(e))
+                    }
+                }
+        }
+    }
+
+    fun saveRunningConfig(form: RunningConfigForm) {
+        RunningConfigEdit.validate(form)?.let { message ->
+            _runningConfig.update { it.copy(error = message, notice = null) }
+            return
+        }
+        val conn = connection() ?: return
+        val raw = _runningConfig.value.raw ?: return
+        _runningConfig.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.saveRunningConfig(conn, RunningConfigEdit.apply(raw, form))
+                }
+            }.onSuccess { saved ->
+                _runningConfig.value = RunningConfigUiState(
+                    raw = saved,
+                    form = RunningConfigEdit.fromJson(saved),
+                    loaded = true,
+                    notice = "已保存",
+                )
+            }.onFailure { e ->
+                _runningConfig.update {
+                    it.copy(saving = false, error = ErrorText.of(e))
+                }
+            }
+        }
+    }
+
+    fun dismissRunningNotice() {
+        _runningConfig.update { it.copy(notice = null, error = null) }
+    }
+
+    // ---------------- 安全 ----------------
+
+    fun loadSecurity(force: Boolean = false) {
+        if (!force && (_security.value.loaded || _security.value.loading)) return
+        val conn = connection() ?: return
+        _security.update { it.copy(loading = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val toolGuard = api.toolGuard(conn)
+                    // 规则表拿不到不影响开关；单独兜底，避免整页变成错误态。
+                    val rules = runCatching { api.toolGuardBuiltinRules(conn) }
+                        .getOrDefault(emptyList<io.qwenpaw.node.data.model.ToolGuardRuleDto>())
+                    SecuritySnapshot(
+                        toolGuard = toolGuard,
+                        rules = rules,
+                        fileGuard = api.fileGuard(conn),
+                        sandbox = api.sandboxStatus(conn),
+                        skillScanner = api.skillScanner(conn),
+                    )
+                }
+            }.onSuccess { snap ->
+                _security.value = SecurityUiState(
+                    toolGuard = snap.toolGuard,
+                    toolGuardEnabled = snap.toolGuard["enabled"]?.jsonPrimitive?.booleanOrNull ?: true,
+                    rules = snap.rules,
+                    fileGuard = snap.fileGuard,
+                    sandbox = snap.sandbox,
+                    skillScanner = snap.skillScanner,
+                    skillScannerMode = snap.skillScanner["mode"]?.jsonPrimitive?.contentOrNull
+                        ?: SKILL_SCANNER_WARN,
+                    loaded = true,
+                )
+            }.onFailure { e ->
+                _security.update {
+                    it.copy(loading = false, loaded = true, error = ErrorText.of(e))
+                }
+            }
+        }
+    }
+
+    fun saveToolGuardEnabled(enabled: Boolean) {
+        val conn = connection() ?: return
+        val raw = _security.value.toolGuard ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.saveToolGuard(conn, raw.with("enabled", JsonPrimitive(enabled)))
+                }
+            }.onSuccess { saved ->
+                _security.update {
+                    it.copy(
+                        toolGuard = saved,
+                        toolGuardEnabled = saved["enabled"]?.jsonPrimitive?.booleanOrNull ?: enabled,
+                        saving = false,
+                        notice = if (enabled) "工具防护已开启" else "工具防护已关闭",
+                    )
+                }
+            }.onFailure { e ->
+                _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun saveFileGuardEnabled(enabled: Boolean) {
+        val conn = connection() ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.setFileGuardEnabled(conn, enabled) } }
+                .onSuccess { guard ->
+                    _security.update {
+                        it.copy(
+                            fileGuard = guard,
+                            saving = false,
+                            notice = if (enabled) "文件防护已开启" else "文件防护已关闭",
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+                }
+        }
+    }
+
+    fun saveSandboxEnabled(enabled: Boolean) {
+        val conn = connection() ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.setSandboxEnabled(conn, enabled) } }
+                .onSuccess { status ->
+                    _security.update {
+                        it.copy(
+                            sandbox = status,
+                            saving = false,
+                            notice = if (enabled) "沙箱已开启" else "沙箱已关闭",
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+                }
+        }
+    }
+
+    fun saveSkillScannerMode(mode: String) {
+        val conn = connection() ?: return
+        val raw = _security.value.skillScanner ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.saveSkillScanner(conn, raw.with("mode", JsonPrimitive(mode)))
+                }
+            }.onSuccess { saved ->
+                _security.update {
+                    it.copy(
+                        skillScanner = saved,
+                        skillScannerMode = saved["mode"]?.jsonPrimitive?.contentOrNull ?: mode,
+                        saving = false,
+                        notice = "技能扫描模式已更新",
+                    )
+                }
+            }.onFailure { e ->
+                _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun dismissSecurityNotice() {
+        _security.update { it.copy(notice = null, error = null) }
+    }
+
+    // ---------------- 服务端设置（语言 / 上传上限） ----------------
+
+    fun loadServerSettings(force: Boolean = false) {
+        if (!force && (_serverSettings.value.loaded || _serverSettings.value.loading)) return
+        val conn = connection() ?: return
+        _serverSettings.update { it.copy(loading = true, error = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val language = api.serverLanguage(conn)
+                    // 上传上限可能为 null（不限制），与「取不到」共用同一个返回值，
+                    // 因此单独取一次并记录成功标志。
+                    val limit = api.workspaceUploadLimit(conn)
+                    language to limit
+                }
+            }.onSuccess { (language, limit) ->
+                _serverSettings.value = ServerSettingsUiState(
+                    language = language,
+                    uploadLimitMb = limit,
+                    loaded = true,
+                )
+            }.onFailure { e ->
+                _serverSettings.update { it.copy(loading = false, loaded = true, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun setServerLanguage(language: String) {
+        val conn = connection() ?: return
+        _serverSettings.update { it.copy(loading = true, error = null) }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.setServerLanguage(conn, language) } }
+                .onSuccess { saved ->
+                    _serverSettings.update { it.copy(language = saved, loading = false) }
+                }
+                .onFailure { e ->
+                    _serverSettings.update { it.copy(loading = false, error = ErrorText.of(e)) }
+                }
+        }
+    }
+
+    private data class SecuritySnapshot(
+        val toolGuard: JsonObject,
+        val rules: List<ToolGuardRuleDto>,
+        val fileGuard: FileGuardDto,
+        val sandbox: SandboxStatusDto,
+        val skillScanner: JsonObject,
+    )
+
+    private fun JsonObject.with(key: String, value: JsonElement): JsonObject =
+        JsonObject(this + (key to value))
+
     /** 换实例或换智能体后清空，下次进入重新拉取。 */
     fun clear() {
         _tools.value = ToolsUiState()
         _envs.value = EnvsUiState()
         _offload.value = OffloadUiState()
+        _runningConfig.value = RunningConfigUiState()
+        _security.value = SecurityUiState()
+        _serverSettings.value = ServerSettingsUiState()
     }
 }

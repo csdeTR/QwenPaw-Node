@@ -1,5 +1,7 @@
 package io.qwenpaw.node.ui.market
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -29,10 +31,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,13 +50,15 @@ import io.qwenpaw.node.data.model.MarketProviderDto
 import io.qwenpaw.node.data.model.MarketResultDto
 import io.qwenpaw.node.data.model.PluginCatalogEntryDto
 import io.qwenpaw.node.data.model.PluginMarketEntryDto
+import io.qwenpaw.node.data.remote.SafZipSource
+import kotlinx.coroutines.launch
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
- * 扩展市场：技能市场与插件目录，都只读。
+ * 扩展市场：技能市场与插件目录。
  *
- * 本版不安装、不下载、不配置。所有落地动作都是「用系统浏览器打开对应页面」，
- * 与 0.7.0 定下的 App 中心口径一致：第三方内容交给浏览器，
+ * 安装/导入在本版放开：插件支持 zip 与 URL，技能支持从市场导入当前智能体。
+ * 配置表单、插件启停仍留 Web 控制台；PawApp 页面仍交给系统浏览器，
  * 客户端不注入凭据、也不接管返回键。
  */
 @Composable
@@ -67,14 +73,41 @@ fun MarketScreen(
     onPluginQuery: (String) -> Unit,
     onSearchPlugins: () -> Unit,
     onOpenResult: (MarketResultDto, onOpen: (String) -> Unit, onNote: (String) -> Unit) -> Unit,
+    onInstallPluginFile: (SafZipSource) -> Unit = {},
+    onInstallPluginUrl: (String) -> Unit = {},
+    onForcePluginInstall: () -> Unit = {},
+    onDismissPluginInstall: () -> Unit = {},
+    onImportSkill: (MarketResultDto) -> Unit = {},
+    onCancelHubInstall: () -> Unit = {},
+    onDismissHubInstall: () -> Unit = {},
+    onDismissNotice: () -> Unit = {},
+    onStopHubPolling: () -> Unit = {},
 ) {
     val context = LocalContext.current
     // 解析失败等一次性说明。放在 Nav 之上而不是状态里：它只描述「这一次点击」，
     // 留着会让用户下次进页面还看到上次的提示。
     var note by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    var pluginUrlDialog by remember { mutableStateOf(false) }
+    var pluginUrl by remember { mutableStateOf("") }
+    val pluginFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val prepared = runCatching {
+                    SafZipSource.prepare(context, uri, "plugin.zip")
+                }.getOrNull()
+                if (prepared != null) onInstallPluginFile(prepared) else note = "无法读取所选文件"
+            }
+        }
+    }
 
     // 进入页面就拉基础数据：来源、分类与插件目录。三者互不依赖。
     androidx.compose.runtime.LaunchedEffect(Unit) { onEnsureLoaded() }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { onStopHubPolling() }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -148,6 +181,7 @@ fun MarketScreen(
                             note = reason
                         }
                     },
+                    onImport = onImportSkill,
                 )
 
                 MarketTab.PLUGINS -> PluginMarket(
@@ -155,9 +189,140 @@ fun MarketScreen(
                     onQuery = onPluginQuery,
                     onSearch = onSearchPlugins,
                     onOpen = { url -> openUrl(context, url) },
+                    onInstallFromFile = { pluginFileLauncher.launch("application/zip") },
+                    onInstallFromUrl = { pluginUrlDialog = true },
+                    onInstallCatalog = { entry -> onInstallPluginUrl(entry.installUrl) },
                 )
             }
         }
+    }
+
+    if (pluginUrlDialog) {
+        AlertDialog(
+            onDismissRequest = { pluginUrlDialog = false },
+            title = { Text("从网址安装插件") },
+            text = {
+                OutlinedTextField(
+                    value = pluginUrl,
+                    onValueChange = { pluginUrl = it },
+                    label = { Text("zip 地址") },
+                    placeholder = { Text("https://…/plugin.zip") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = pluginUrl.trim().startsWith("http"),
+                    onClick = {
+                        pluginUrlDialog = false
+                        onInstallPluginUrl(pluginUrl)
+                        pluginUrl = ""
+                    },
+                ) { Text("安装") }
+            },
+            dismissButton = { TextButton(onClick = { pluginUrlDialog = false }) { Text("取消") } },
+        )
+    }
+
+    state.pluginInstall?.let { install ->
+        AlertDialog(
+            onDismissRequest = onDismissPluginInstall,
+            title = {
+                Text(
+                    when {
+                        install.conflictSource != null -> "已存在同名插件"
+                        install.stage == "done" -> "安装完成"
+                        install.stage == "failed" -> "安装失败"
+                        else -> "正在安装"
+                    },
+                )
+            },
+            text = {
+                Column {
+                    Text(install.label, style = MaterialTheme.typography.bodyMedium)
+                    if (install.conflictSource != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "服务端已有同名插件目录。覆盖会替换原有文件。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (install.total != null && install.total > 0 && install.stage != "done") {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "已上传 ${install.read}/${install.total} 字节",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    install.error?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                when {
+                    install.conflictSource != null -> TextButton(onClick = onForcePluginInstall) { Text("覆盖") }
+                    else -> TextButton(onClick = onDismissPluginInstall) { Text("关闭") }
+                }
+            },
+            dismissButton = {
+                if (install.conflictSource != null) {
+                    TextButton(onClick = onDismissPluginInstall) { Text("取消") }
+                }
+            },
+        )
+    }
+
+    state.hubInstall?.let { task ->
+        AlertDialog(
+            onDismissRequest = onDismissHubInstall,
+            title = { Text(if (task.isTerminal) "导入结果" else "正在导入") },
+            text = {
+                Column {
+                    Text(task.bundleUrl, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(6.dp))
+                    Text("状态：${task.status}", style = MaterialTheme.typography.bodyMedium)
+                    task.error?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    task.result?.let { result ->
+                        if (result.imported.isNotEmpty()) {
+                            Text("已导入：${result.imported.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (result.conflicts.isNotEmpty()) {
+                            Text(
+                                "冲突：${result.conflicts.joinToString { it.skillName }}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!task.isTerminal) {
+                    TextButton(onClick = onCancelHubInstall) { Text("取消任务") }
+                } else {
+                    TextButton(onClick = onDismissHubInstall) { Text("关闭") }
+                }
+            },
+            dismissButton = {
+                if (!task.isTerminal) {
+                    TextButton(onClick = onDismissHubInstall) { Text("隐藏") }
+                }
+            },
+        )
+    }
+
+    if (state.notice != null) {
+        AlertDialog(
+            onDismissRequest = onDismissNotice,
+            title = { Text("提示") },
+            text = { Text(state.notice) },
+            confirmButton = { TextButton(onClick = onDismissNotice) { Text("知道了") } },
+        )
     }
 
     note?.let { text ->
@@ -190,6 +355,7 @@ private fun SkillMarket(
     onSearch: () -> Unit,
     onOpen: (String) -> Unit,
     onOpenResult: (MarketResultDto) -> Unit,
+    onImport: (MarketResultDto) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -307,6 +473,7 @@ private fun SkillMarket(
                             result = result,
                             resolving = state.resolvingSource != null,
                             onOpen = { onOpenResult(result) },
+                            onImport = { onImport(result) },
                         )
                         if (index != state.results.lastIndex) {
                             HorizontalDivider(Modifier.padding(horizontal = 14.dp))
@@ -324,7 +491,7 @@ private fun SkillMarket(
         }
 
         Text(
-            text = "技能市场只做浏览。安装、启停与配置请在 Web 控制台或通过技能页完成。",
+            text = "「导入」会把技能安装到当前智能体；导入结果与冲突在弹窗中显示。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -337,6 +504,9 @@ private fun PluginMarket(
     onQuery: (String) -> Unit,
     onSearch: () -> Unit,
     onOpen: (String) -> Unit,
+    onInstallFromFile: () -> Unit,
+    onInstallFromUrl: () -> Unit,
+    onInstallCatalog: (PluginCatalogEntryDto) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -345,6 +515,10 @@ private fun PluginMarket(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onInstallFromFile) { Text("从文件安装") }
+            TextButton(onClick = onInstallFromUrl) { Text("从网址安装") }
+        }
         Text(
             text = "官方插件目录",
             style = MaterialTheme.typography.labelLarge,
@@ -377,7 +551,7 @@ private fun PluginMarket(
                 else -> {
                     val entries = state.catalog?.plugins.orEmpty()
                     entries.forEachIndexed { index, entry ->
-                        CatalogRow(entry = entry, onOpen = onOpen)
+                        CatalogRow(entry = entry, onOpen = onOpen, onInstall = { onInstallCatalog(entry) })
                         if (index != entries.lastIndex) {
                             HorizontalDivider(Modifier.padding(horizontal = 14.dp))
                         }
@@ -446,7 +620,12 @@ private fun PluginMarket(
 }
 
 @Composable
-private fun MarketRow(result: MarketResultDto, resolving: Boolean, onOpen: () -> Unit) {
+private fun MarketRow(
+    result: MarketResultDto,
+    resolving: Boolean,
+    onOpen: () -> Unit,
+    onImport: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -463,6 +642,10 @@ private fun MarketRow(result: MarketResultDto, resolving: Boolean, onOpen: () ->
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            TextButton(
+                enabled = (result.sourceUrl.startsWith("http")) && !resolving,
+                onClick = onImport,
+            ) { Text("导入") }
             Text(
                 text = result.sourceLabel ?: result.source,
                 style = MaterialTheme.typography.labelSmall,
@@ -497,7 +680,11 @@ private fun MarketRow(result: MarketResultDto, resolving: Boolean, onOpen: () ->
 }
 
 @Composable
-private fun CatalogRow(entry: PluginCatalogEntryDto, onOpen: (String) -> Unit) {
+private fun CatalogRow(
+    entry: PluginCatalogEntryDto,
+    onOpen: (String) -> Unit,
+    onInstall: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -513,6 +700,11 @@ private fun CatalogRow(entry: PluginCatalogEntryDto, onOpen: (String) -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (entry.installUrl.isNotBlank()) {
+                TextButton(onClick = onInstall) {
+                    Text(if (entry.installed) "升级" else "安装")
+                }
+            }
             Text(
                 text = buildString {
                     if (entry.installed) {

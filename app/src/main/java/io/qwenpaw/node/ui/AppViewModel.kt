@@ -1203,6 +1203,73 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { configHolder = it }
 
+    /** 智能体管理。列表属于整个服务端，不随当前智能体变化。 */
+    private var agentsHolder: io.qwenpaw.node.ui.agents.AgentsViewModel? = null
+
+    val agents: io.qwenpaw.node.ui.agents.AgentsViewModel
+        get() = agentsHolder ?: io.qwenpaw.node.ui.agents.AgentsViewModel(
+            api = api,
+            connection = ::activeConnection,
+            onAgentDeleted = ::handleAgentDeleted,
+            onUseAgent = ::useAgentForActiveInstance,
+        ).also { agentsHolder = it }
+
+    /**
+     * 删除智能体后的本地回退。
+     *
+     * 被删的智能体可能正被某个实例使用；不回退的话实例会一直指向一个不存在的 id，
+     * 重连时才以「智能体不存在」的形式暴露，排查成本很高。
+     */
+    private fun handleAgentDeleted(deletedId: String) {
+        instances.value.forEach { instance ->
+            val fallback = io.qwenpaw.node.ui.agents.fallbackAgentId(instance.agentId, deletedId)
+            if (fallback != instance.agentId) {
+                editInstance(instance.copy(agentId = fallback))
+            }
+        }
+        agentsHolder?.setCurrentAgent(instances.value.firstOrNull {
+            it.id == repository.activeId.value
+        }?.agentId)
+    }
+
+    /** 把当前实例切换到指定智能体。 */
+    private fun useAgentForActiveInstance(agentId: String) {
+        val active = repository.active() ?: return
+        editInstance(active.copy(agentId = agentId))
+        agentsHolder?.setCurrentAgent(agentId)
+    }
+
+    /** ACP 与 Harness 运行时配置。 */
+    private var runtimeHolder: io.qwenpaw.node.ui.settings.RuntimeConfigViewModel? = null
+
+    val runtime: io.qwenpaw.node.ui.settings.RuntimeConfigViewModel
+        get() = runtimeHolder ?: io.qwenpaw.node.ui.settings.RuntimeConfigViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { runtimeHolder = it }
+
+    /** App 中心。 */
+    private var appCenterHolder: io.qwenpaw.node.ui.apps.AppCenterViewModel? = null
+
+    val appCenter: io.qwenpaw.node.ui.apps.AppCenterViewModel
+        get() = appCenterHolder ?: io.qwenpaw.node.ui.apps.AppCenterViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { appCenterHolder = it }
+
+    /** 当前实例的根地址，用于打开 Web 控制台或 PawApp 页面。 */
+    fun activeBaseUrl(): String? =
+        repository.active()?.let { repository.resolvedBaseUrl(it) }
+
+    /** 从其他客户端导入。 */
+    private var portabilityHolder: io.qwenpaw.node.ui.agents.PortabilityViewModel? = null
+
+    val portability: io.qwenpaw.node.ui.agents.PortabilityViewModel
+        get() = portabilityHolder ?: io.qwenpaw.node.ui.agents.PortabilityViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { portabilityHolder = it }
+
     /** 定时任务。任务归属当前智能体，切换实例或智能体时一并清空。 */
     private var cronHolder: io.qwenpaw.node.ui.settings.CronViewModel? = null
 
@@ -1338,7 +1405,12 @@ class AppViewModel(
             skillsHolder?.clear()
             mcpHolder?.clear()
             marketHolder?.clear()
+            agentsHolder?.clear()
+            runtimeHolder?.clear()
+            portabilityHolder?.clear()
+            appCenterHolder?.clear()
         }
+        agentsHolder?.setCurrentAgent(instance.agentId)
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
         // 这一次开销很小；换实例后旧头像属于别的服务器，必须换掉。
         refreshServerAvatar()

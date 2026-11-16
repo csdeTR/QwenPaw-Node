@@ -1,5 +1,9 @@
 package io.qwenpaw.node.ui.skills
 
+import io.qwenpaw.node.data.model.AgentDto
+import io.qwenpaw.node.data.model.BroadcastConflictDto
+import io.qwenpaw.node.data.model.SkillImportConflictDto
+import io.qwenpaw.node.data.model.SkillImportResultDto
 import io.qwenpaw.node.data.model.PoolSkillDetailDto
 import io.qwenpaw.node.data.model.PoolSkillDto
 import io.qwenpaw.node.data.model.SkillDetailDto
@@ -8,6 +12,7 @@ import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.data.remote.SafZipSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,6 +65,19 @@ data class SkillsUiState(
     val rowErrors: Map<String, String> = emptyMap(),
     /** 一次性提示，例如「已启用」或「扫描拦截」。 */
     val notice: String? = null,
+    val importing: Boolean = false,
+    val importConflicts: List<SkillImportConflictDto> = emptyList(),
+    val broadcast: BroadcastUi? = null,
+    val agentOptions: List<AgentDto> = emptyList(),
+)
+
+/** 技能池广播的状态。冲突时保留选择，便于用户改选或覆盖重试。 */
+data class BroadcastUi(
+    val skillName: String,
+    val targets: Set<String> = emptySet(),
+    val running: Boolean = false,
+    val conflicts: List<BroadcastConflictDto> = emptyList(),
+    val error: String? = null,
 )
 
 /**
@@ -76,6 +94,9 @@ class SkillsViewModel(
 
     private val _state = MutableStateFlow(SkillsUiState())
     val state: StateFlow<SkillsUiState> = _state.asStateFlow()
+
+    private var pendingImportSource: SafZipSource? = null
+    private var pendingImportToPool = false
 
     /** 拉列表。两个请求并行，池失败不影响主体。 */
     fun refresh() {
@@ -293,7 +314,173 @@ class SkillsViewModel(
     fun dismissRowError(name: String) = clearRowError(name)
 
     /** 换实例或换智能体后清空，下次进入重新拉取。 */
+    // ---------- zip 导入 ----------
+
+    fun importZip(toPool: Boolean, source: SafZipSource) {
+        val conn = connection() ?: return
+        pendingImportSource = source
+        pendingImportToPool = toPool
+        _state.update { it.copy(importing = true, importConflicts = emptyList(), notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.uploadSkillZip(conn, toPool, source)
+                }
+            }.onSuccess { result ->
+                if (result.conflicts.isNotEmpty()) {
+                    _state.update {
+                        it.copy(importing = false, importConflicts = result.conflicts)
+                    }
+                } else {
+                    source.cleanup()
+                    pendingImportSource = null
+                    _state.update {
+                        it.copy(
+                            importing = false,
+                            notice = if (result.imported.isEmpty()) {
+                                "没有导入任何技能"
+                            } else {
+                                "已导入：${result.imported.joinToString()}"
+                            },
+                        )
+                    }
+                    refresh()
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(importing = false, notice = "导入失败：${ErrorText.of(e)}") }
+            }
+        }
+    }
+
+    /** 按冲突项的建议名或用户输入改名后重试。 */
+    fun retryImport(renameMap: Map<String, String>) {
+        val conn = connection() ?: return
+        val source = pendingImportSource ?: return
+        _state.update { it.copy(importing = true, importConflicts = emptyList()) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.uploadSkillZip(
+                        conn = conn,
+                        toPool = pendingImportToPool,
+                        source = source,
+                        renameMap = renameMap,
+                    )
+                }
+            }.onSuccess { result ->
+                if (result.conflicts.isNotEmpty()) {
+                    _state.update {
+                        it.copy(importing = false, importConflicts = result.conflicts)
+                    }
+                } else {
+                    source.cleanup()
+                    pendingImportSource = null
+                    _state.update {
+                        it.copy(
+                            importing = false,
+                            notice = "已导入：${result.imported.joinToString()}",
+                        )
+                    }
+                    refresh()
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(importing = false, notice = "导入失败：${ErrorText.of(e)}") }
+            }
+        }
+    }
+
+    fun dismissImportConflicts() {
+        pendingImportSource?.cleanup()
+        pendingImportSource = null
+        _state.update { it.copy(importConflicts = emptyList(), importing = false) }
+    }
+
+    // ---------- 广播 ----------
+
+    fun loadAgentOptions() {
+        val conn = connection() ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.agents(conn) } }
+                .onSuccess { list -> _state.update { it.copy(agentOptions = list) } }
+        }
+    }
+
+    fun openBroadcast(skillName: String) {
+        _state.update {
+            it.copy(broadcast = BroadcastUi(skillName = skillName))
+        }
+        loadAgentOptions()
+    }
+
+    fun toggleBroadcastTarget(agentId: String) {
+        _state.update { state ->
+            val current = state.broadcast ?: return@update state
+            val targets = if (agentId in current.targets) {
+                current.targets - agentId
+            } else {
+                current.targets + agentId
+            }
+            state.copy(broadcast = current.copy(targets = targets, conflicts = emptyList(), error = null))
+        }
+    }
+
+    fun runBroadcast(overwrite: Boolean = false) {
+        val conn = connection() ?: return
+        val current = _state.value.broadcast ?: return
+        if (current.targets.isEmpty()) {
+            _state.update { it.copy(broadcast = current.copy(error = "请至少选择一个智能体")) }
+            return
+        }
+        _state.update { it.copy(broadcast = current.copy(running = true, error = null)) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.broadcastSkill(
+                        conn = conn,
+                        skillName = current.skillName,
+                        targets = current.targets.toList(),
+                        overwrite = overwrite,
+                    )
+                }
+            }.onSuccess { result ->
+                if (result.conflicts.isNotEmpty()) {
+                    _state.update {
+                        it.copy(
+                            broadcast = it.broadcast?.copy(
+                                running = false,
+                                conflicts = result.conflicts,
+                            ),
+                        )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(
+                            broadcast = null,
+                            notice = "已广播到 ${result.downloaded.size} 个智能体",
+                        )
+                    }
+                    refresh()
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        broadcast = it.broadcast?.copy(
+                            running = false,
+                            error = ErrorText.of(e),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissBroadcast() {
+        _state.update { it.copy(broadcast = null) }
+    }
+
     fun clear() {
+        pendingImportSource?.cleanup()
+        pendingImportSource = null
         _state.value = SkillsUiState()
     }
 

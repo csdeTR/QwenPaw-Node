@@ -58,7 +58,7 @@ class BackupImportBodyTest {
 
     @Test
     fun `source can produce independent bodies for retries`() {
-        val source = BackupImportSource.fromStream(
+        val source = SafZipSource.fromStream(
             fileName = "night.zip",
             length = payload.size.toLong(),
         ) { ByteArrayInputStream(payload) }

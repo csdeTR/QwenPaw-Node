@@ -1962,3 +1962,107 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 4. **新增 SSH 库要走依赖门禁**：`proguard-rules.pro` 补 keep 规则，并复核两个变体 × 四个 ABI 的体积。
 
 **为什么还值得做**：本地 PTY 的渲染依赖客户端自己写的 VT 子集，全屏程序不保证；SSH 拿到的是真正的 `xterm-256color` PTY。另外它能连服务端可到达的其它主机。
+
+---
+
+## 32、运行配置与安全
+
+2026-11-16 在 2.2.2.post1 源码与 qp-test 上核对。**运行配置与 tool-guard / skill-scanner 都必须整份回写**：服务端 Pydantic 模型会把缺失字段补成默认值，只提交改动项等于把其余字段重置。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET / PUT | `/api/workspace/running-config` | 22 字段完整对象；GET 的记忆后端密钥为 `***`，PUT 原样回写时服务端会还原旧值 |
+| GET / PUT | `/api/config/security/tool-guard` | 完整配置；客户端只改 `enabled` |
+| GET | `/api/config/security/tool-guard/builtin-rules` | 只读规则表 |
+| GET / PUT | `/api/config/security/file-guard` | PUT 允许只提交 `enabled`，响应含 `paths` 与 `allow_preview_outside_workspace` |
+| GET / PUT | `/api/config/security/sandbox` | PUT body `{"enabled":...}`；响应含 `effective` / `reason` |
+| GET / PUT | `/api/config/security/skill-scanner` | 完整配置；`mode` 取 `block` / `warn` / `off` |
+| GET / PUT | `/api/settings/language` | 7 个合法值：`en` / `zh` / `ja` / `ru` / `pt-BR` / `id` / `vi` |
+| GET | `/api/settings/upload-limit` | `null` 表示不限制 |
+
+运行配置里客户端实际暴露的字段：`max_iters`、`max_input_length`、`history_max_length`、`shell_command_timeout`、`llm_retry_enabled`、`llm_max_retries`、`approval_level`（STRICT / SMART / AUTO / OFF）、`light_context_config.context_compact_config.compact_threshold_ratio`。
+
+**沙箱的 `enabled` 与 `effective` 是两件事**：前者是配置值，后者是当前机器上真正生效的结果；宿主机缺少所需能力时 `reason` 会给出原因，界面必须分开显示。
+
+**服务端界面语言不是客户端语言。** 客户端文案只有中文；这一项只改 Web 控制台。
+
+---
+
+## 33、智能体、ACP 与 Harness
+
+**智能体列表** `GET /api/agents` 返回 `{agents:[...]}`，每项含 `id` / `name` / `description` / `workspace_dir` / `enabled` / `pinned` / `startup_status` / `backend` / `available_in_chat`。
+
+| 方法 | 路径 | 要点 |
+| --- | --- | --- |
+| POST | `/api/agents` | `{name, description?, id?}`；id 2–64、字母数字下划线连字符、不可 `default` |
+| PUT | `/api/agents/{id}` | 完整配置；改名/改描述也要整读整写 |
+| DELETE | `/api/agents/{id}` | `default` 不可删；删除会连工作区一起删 |
+| PATCH | `/api/agents/{id}/toggle` | body `{enabled}`；`default` 不可禁用 |
+| PATCH | `/api/agents/{id}/pin` | body `{pinned}`；`default` 不可取消置顶 |
+| PUT | `/api/agents/order` | `{agent_ids}`；必须包含全部 id，且 default 第一、置顶在前 |
+| POST | `/api/agents/{id}/copy` | `{name?, copy_md_files, copy_skills, copy_jobs}` |
+| GET | `/api/agents/{id}/agent-status` | `{status, running_task_count, last_run_at, last_finish_at}` |
+
+**删除当前实例正在使用的智能体后必须回退到 `default`**，否则实例会指向一个不存在的 id，直到下次重连才以「智能体不存在」暴露。
+
+**ACP `tool_parse_mode` 只有三个值**：`call_title`、`update_detail`、`call_detail`。传非法值时 400 的 `detail` 直接列出允许值。`PUT /api/config/acp/node-runtime` 的 400 `detail` 是对象 `{reason_code, reason}`，与上一条不同。
+
+**Harness 登录形态按 provider 不同**：
+
+- codex 支持 `device_code=true`，返回里带用户码与验证地址；
+- qoder 忽略 `device_code`，返回 `{type:"external", command:"... login"}`，只能在服务端执行命令完成登录。
+
+**「未安装」与「未登录」是两种状态**。实测 codex 返回 `available:true, installed:false`，界面必须分开呈现，否则用户会去登录一个不存在的运行时。
+
+---
+
+## 34、App 中心与市场安装
+
+**PawApp** `GET /api/pawapps` 返回 `{apps, total}`，条目含 `id` / `name` / `version` / `description` / `description_i18n` / `author` / `category` / `icon` / `icon_url` / `entry_page` / `launch_scope` / `status`。客户端只做列表与 `http://<host>/apps/{id}` 跳转，不内嵌 WebView。
+
+**插件安装**
+
+| 方法 | 路径 | 要点 |
+| --- | --- | --- |
+| POST | `/api/plugins/upload` | multipart `file` + query `force`；同名 409 `Plugin installation target already exists` |
+| POST | `/api/plugins/install` | `{source, force}`；source 只接受 http(s) zip 或服务端目录 |
+
+上传后服务端会热加载，返回 `loaded` 表示是否已加载；安装失败时 `message` 带服务端原因。
+
+**技能导入**
+
+| 方法 | 路径 | 要点 |
+| --- | --- | --- |
+| POST | `/api/skills/upload` | multipart `file`；query `enable` / `target_name` / `rename_map` |
+| POST | `/api/skills/pool/upload-zip` | 同上，目标为技能池 |
+| POST | `/api/skills/hub/install/start` | `{bundle_url, provider_key, version, enable, target_name}`，异步 |
+| GET | `/api/skills/hub/install/status/{task_id}` | `pending` / `importing` / `completed` / `failed` / `cancelled` |
+| POST | `/api/skills/hub/install/cancel/{task_id}` | 取消 |
+
+**同名冲突以 409 的 `detail` 为准**：`{imported:[], count:0, conflicts:[{reason, skill_name, suggested_name}]}`。`suggested_name` 可用于改名重试；`rename_map` 只在 zip 上传端点存在。
+
+**技能广播** `POST /api/skills/pool/download`：body `{skill_name, targets:[{workspace_id}], all_workspaces, overwrite, preview_only}`。全有或全无；409 的 `detail` 带 `{downloaded:[], conflicts:[{workspace_id, workspace_name, name, suggested_name}]}`。`preview_only` 仍以 409 报冲突，不是成功预览。
+
+---
+
+## 35、portability 导入与离线推送（插件 v0.3.0）
+
+**portability 只有导入，没有导出。** 2.2.2.post1 与 2.3.0b2 都只有 `/portability/imports/*`；客户端「导出智能体」走 0.3.2 的备份，导出成功后删除临时备份条目。
+
+核心导入端点在 `/api/agents/{id}/portability/imports/*`，由 `_local_only` 限制为回环地址；插件在服务端进程内运行，直接调用任务管理器，不经过该判定。插件对外路径：
+
+```
+GET  /api/plugins/qwenpaw-node-bridge/portability/sources
+POST /api/plugins/qwenpaw-node-bridge/portability/jobs
+GET  /api/plugins/qwenpaw-node-bridge/portability/jobs/current
+GET  /api/plugins/qwenpaw-node-bridge/portability/jobs/{job_id}
+POST /api/plugins/qwenpaw-node-bridge/portability/jobs/{job_id}/start
+POST /api/plugins/qwenpaw-node-bridge/portability/jobs/{job_id}/retry
+POST /api/plugins/qwenpaw-node-bridge/portability/jobs/{job_id}/cancel
+```
+
+`ImportRun` 形状：`{job_id, agent_id, state, seq, providers:[{source,state,plan_id,sessions_total,sessions_processed,sessions_imported,selection,assets[],error}], logs[]}`；`state` 含 `scanning` / `ready` / `running` / `completed` / `completed_with_issues` / `failed` / `interrupted`。`ImportSelection` 字段：`sessions`、`memory`、`cron`、`skills`、`mcp`、`plugins`。含插件资产的导入必须显式传 `allow_plugin_execution=true`。
+
+**离线推送 channel**：插件注册 `qwenpaw_node_push`，把收件箱未读数与待审批数的上升推到 ntfy / Bark / Telegram。事件源与 `/events` 相同；启动时取一次基线，不补推历史。配置项：provider、target、token、server_url、notify_inbox、notify_approval、min_interval_seconds。令牌只写不读，日志不打印 URL 与 token。
+
+**协议版本保持 1**：新增能力只追加 `capabilities`；旧客户端只按能力名开关功能。只有既有端点形状发生不兼容变化时才递增。

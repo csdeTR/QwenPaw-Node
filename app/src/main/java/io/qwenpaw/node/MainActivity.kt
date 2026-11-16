@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER }
 
 @Composable
 private fun QwenPawNav(
@@ -201,6 +201,14 @@ private fun QwenPawNav(
     val toolsState by viewModel.settingsConfig.tools.collectAsState()
     val envsState by viewModel.settingsConfig.envs.collectAsState()
     val offloadState by viewModel.settingsConfig.offload.collectAsState()
+    val runningConfigState by viewModel.settingsConfig.runningConfig.collectAsState()
+    val securityState by viewModel.settingsConfig.security.collectAsState()
+    val serverSettingsState by viewModel.settingsConfig.serverSettings.collectAsState()
+    val agentsState by viewModel.agents.state.collectAsState()
+    val acpState by viewModel.runtime.acp.collectAsState()
+    val harnessState by viewModel.runtime.harness.collectAsState()
+    val portabilityState by viewModel.portability.state.collectAsState()
+    val appCenterState by viewModel.appCenter.state.collectAsState()
     val cronState by viewModel.cron.state.collectAsState()
     // 工作区文件的状态单独一条流，与设置页无关。
     val workspaceState by viewModel.workspace.state.collectAsState()
@@ -999,6 +1007,124 @@ private fun QwenPawNav(
                 )
             }
 
+            Screen.PORTABILITY -> {
+                io.qwenpaw.node.ui.agents.PortabilityImportScreen(
+                    state = portabilityState,
+                    onBack = { screen = Screen.AGENTS },
+                    onEnsureLoaded = viewModel.portability::load,
+                    onToggleSource = viewModel.portability::toggleSource,
+                    onCreateJob = viewModel.portability::createJob,
+                    onToggleAsset = viewModel.portability::toggleAsset,
+                    onSessions = viewModel.portability::setSessions,
+                    onAllowPluginExecution = viewModel.portability::setAllowPluginExecution,
+                    onStartImport = viewModel.portability::startImport,
+                    onRetryFailed = viewModel.portability::retryFailed,
+                    onCancel = viewModel.portability::cancel,
+                    onStopPolling = viewModel.portability::stopPolling,
+                    onDismissNotice = viewModel.portability::dismissNotice,
+                )
+            }
+
+            Screen.APP_CENTER -> {
+                val base = viewModel.activeBaseUrl()
+                io.qwenpaw.node.ui.apps.AppCenterScreen(
+                    state = appCenterState,
+                    baseUrl = base,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = { viewModel.appCenter.refresh() },
+                    onOpenConsole = {
+                        base?.let {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(it),
+                                ),
+                            )
+                        }
+                    },
+                )
+            }
+
+            Screen.RUNTIME -> {
+                LaunchedEffect(Unit) {
+                    viewModel.runtime.loadAcp()
+                    viewModel.runtime.loadHarness()
+                }
+                io.qwenpaw.node.ui.settings.RuntimeScreen(
+                    acp = acpState,
+                    harness = harnessState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = {},
+                    onSaveNodePath = viewModel.runtime::saveNodePath,
+                    onSaveAcpAgent = viewModel.runtime::saveAcpAgent,
+                    onProbeHarness = viewModel.runtime::probe,
+                    onLoginHarness = viewModel.runtime::login,
+                    onLogoutHarness = viewModel.runtime::logout,
+                    onOpenHarnessDetail = viewModel.runtime::openDetail,
+                    onDismissHarnessLogin = viewModel.runtime::dismissLogin,
+                    onDismissHarnessDetail = viewModel.runtime::dismissDetail,
+                    onDismissAcpNotice = viewModel.runtime::dismissAcpNotice,
+                    onDismissHarnessNotice = viewModel.runtime::dismissHarnessNotice,
+                )
+            }
+
+            Screen.AGENTS -> {
+                LaunchedEffect(Unit) {
+                    viewModel.agents.setCurrentAgent(
+                        instances.firstOrNull { it.id == activeId }?.agentId,
+                    )
+                    viewModel.agents.refresh()
+                }
+                val bridge = appState.bridgeStatus
+                val portabilityReady = appState.bridgeFeaturesEnabled &&
+                    bridge is io.qwenpaw.node.data.plugin.BridgeStatus.Ready &&
+                    bridge.info.supports("portability")
+                io.qwenpaw.node.ui.agents.AgentsScreen(
+                    state = agentsState,
+                    exportState = backupState.agentExport,
+                    portabilityReady = portabilityReady,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = {},
+                    onCreate = viewModel.agents::create,
+                    onCopy = viewModel.agents::copy,
+                    onRename = viewModel.agents::rename,
+                    onSetEnabled = viewModel.agents::setEnabled,
+                    onSetPinned = viewModel.agents::setPinned,
+                    onMove = viewModel.agents::move,
+                    onDelete = viewModel.agents::delete,
+                    onUseAsCurrent = viewModel.agents::useAsCurrent,
+                    onExport = { agent, sink ->
+                        viewModel.backup.startAgentExport(agent.id, agent.name, sink)
+                    },
+                    onDismissExport = viewModel.backup::dismissAgentExport,
+                    onOpenPortability = { screen = Screen.PORTABILITY },
+                    onDismissNotice = viewModel.agents::dismissNotice,
+                )
+            }
+
+            Screen.RUNNING_CONFIG -> {
+                io.qwenpaw.node.ui.settings.RunningConfigScreen(
+                    state = runningConfigState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = { viewModel.settingsConfig.loadRunningConfig() },
+                    onSave = viewModel.settingsConfig::saveRunningConfig,
+                    onDismissNotice = viewModel.settingsConfig::dismissRunningNotice,
+                )
+            }
+
+            Screen.SECURITY -> {
+                io.qwenpaw.node.ui.settings.SecurityScreen(
+                    state = securityState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = { viewModel.settingsConfig.loadSecurity() },
+                    onToolGuard = viewModel.settingsConfig::saveToolGuardEnabled,
+                    onFileGuard = viewModel.settingsConfig::saveFileGuardEnabled,
+                    onSandbox = viewModel.settingsConfig::saveSandboxEnabled,
+                    onSkillScanner = viewModel.settingsConfig::saveSkillScannerMode,
+                    onDismissNotice = viewModel.settingsConfig::dismissSecurityNotice,
+                )
+            }
+
             Screen.MODELS -> {
                 // 每次进入重拉：默认模型可能在别处改过（聊天页切模型、Web 控制台），
                 // 用 ensureLoaded 会一直显示上次进入时的值。
@@ -1033,6 +1159,13 @@ private fun QwenPawNav(
                     onCreate = viewModel.skills::create,
                     onDelete = { name -> viewModel.skills.delete(name) {} },
                     onDismissNotice = viewModel.skills::dismissNotice,
+                    onImportZip = viewModel.skills::importZip,
+                    onRetryImport = viewModel.skills::retryImport,
+                    onDismissImportConflicts = viewModel.skills::dismissImportConflicts,
+                    onOpenBroadcast = viewModel.skills::openBroadcast,
+                    onToggleBroadcastTarget = viewModel.skills::toggleBroadcastTarget,
+                    onRunBroadcast = viewModel.skills::runBroadcast,
+                    onDismissBroadcast = viewModel.skills::dismissBroadcast,
                 )
             }
 
@@ -1069,6 +1202,15 @@ private fun QwenPawNav(
                     onPluginQuery = viewModel.market::setPluginQuery,
                     onSearchPlugins = viewModel.market::searchPlugins,
                     onOpenResult = viewModel.market::openResult,
+                    onInstallPluginFile = viewModel.market::installPluginFromFile,
+                    onInstallPluginUrl = viewModel.market::installPluginFromUrl,
+                    onForcePluginInstall = viewModel.market::forcePluginInstall,
+                    onDismissPluginInstall = viewModel.market::dismissPluginInstall,
+                    onImportSkill = viewModel.market::startHubInstall,
+                    onCancelHubInstall = viewModel.market::cancelHubInstall,
+                    onDismissHubInstall = viewModel.market::dismissHubInstall,
+                    onDismissNotice = viewModel.market::dismissNotice,
+                    onStopHubPolling = viewModel.market::stopHubPolling,
                 )
             }
 
@@ -1112,6 +1254,11 @@ private fun QwenPawNav(
                         viewModel.usage.ensureLoaded()
                         screen = Screen.TOKEN_USAGE
                     },
+                    onOpenRunningConfig = { screen = Screen.RUNNING_CONFIG },
+                    onOpenSecurity = { screen = Screen.SECURITY },
+                    onOpenAgents = { screen = Screen.AGENTS },
+                    onOpenRuntime = { screen = Screen.RUNTIME },
+                    onOpenAppCenter = { screen = Screen.APP_CENTER },
                     onSwitch = { id -> viewModel.switchTo(id) },
                     onRemove = viewModel::remove,
                     onEdit = viewModel::editInstance,
@@ -1252,6 +1399,13 @@ private fun QwenPawNav(
                         onResetEnv = viewModel.settingsConfig::resetEnv,
                         onLoadOffload = { viewModel.settingsConfig.loadOffload() },
                         onSetOffload = viewModel.settingsConfig::setOffload,
+                        runningConfig = runningConfigState,
+                        security = securityState,
+                        serverSettings = serverSettingsState,
+                        onLoadRunningConfig = { viewModel.settingsConfig.loadRunningConfig() },
+                        onLoadSecurity = { viewModel.settingsConfig.loadSecurity() },
+                        onLoadServerSettings = { viewModel.settingsConfig.loadServerSettings() },
+                        onSetServerLanguage = viewModel.settingsConfig::setServerLanguage,
                         cron = cronState,
                         onLoadCron = viewModel.cron::refresh,
                         onToggleCron = viewModel.cron::setEnabled,
@@ -1504,7 +1658,8 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.RUN_LOG -> Screen.SETTINGS
     // 工作区文件、备份、检查点、模型与提供商、技能、MCP、扩展市场都从设置页进入，返回也回设置页。
     Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS,
-    Screen.SKILLS, Screen.MCP, Screen.MARKET -> Screen.SETTINGS
+    Screen.SKILLS, Screen.MCP, Screen.MARKET, Screen.RUNNING_CONFIG, Screen.SECURITY,
+    Screen.AGENTS, Screen.RUNTIME, Screen.PORTABILITY, Screen.APP_CENTER -> Screen.SETTINGS
     // 检查点的只读对话页是检查点的下一层，返回直接回到检查点。
     Screen.CHECKPOINT_CHAT -> Screen.CHECKPOINT
     // 原文页从聊天页的气泡进入，返回也回聊天页。
