@@ -49,6 +49,9 @@
 | `qp-test-prerelease` | `10.10.0.220:8088` | `2.3.0b2` | 预发布版，用于提前发现破坏性变更 |
 
 - 启动、停止、探活、`lxdbr0` 排查、审批档位与还原核对：见[internal/test-env.md](internal/test-env.md) 第 1 节。
+- **在 Qoder 沙箱里用 `scripts/lxd.sh` 代替 `lxc`**：`/snap/bin/lxc` 会先走
+  `snap-confine`，沙箱缺少 `cap_dac_override` 会直接失败；wrapper 调用 snap 内部的
+  真实客户端并指向正在运行的 daemon。原因与用法见 test-env 第 1.1 节。
 - 两个版本的端点差异、404 与 405 的判据、无数据实例上的 `null` 形状：见[docs/protocol.md](docs/protocol.md) 第 17 节。客户端实际使用的路径在两版完全一致（2026-11-01 比对 33 条；0.3.2 又逐文件比对了备份与检查点的路由与模型），因此**不做运行时版本分支**。
 
 ## 3、测试设备
