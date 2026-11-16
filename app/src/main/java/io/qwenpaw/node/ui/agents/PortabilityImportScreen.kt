@@ -197,7 +197,7 @@ private fun InventoryStep(
     }
     val hasPlugins = job.providers.any { provider ->
         provider.assets.any {
-            it.assetType == "plugins" && assetKey(provider.source, it) in state.selectedAssets
+            selectionField(it.assetType) == "plugins" && assetKey(provider.source, it) in state.selectedAssets
         }
     }
     job.providers.forEach { provider ->
@@ -251,7 +251,7 @@ private fun ProviderInventory(
                 checked = sessions,
                 onCheckedChange = onSessions,
             )
-            provider.assets.groupBy { it.assetType }.forEach { (type, assets) ->
+            provider.assets.groupBy { selectionField(it.assetType) ?: it.assetType }.forEach { (type, assets) ->
                 Text(
                     text = assetTypeLabel(type),
                     style = MaterialTheme.typography.labelMedium,
@@ -390,9 +390,9 @@ private fun ResultStep(
 
 private fun assetTypeLabel(type: String): String = when (type) {
     "memory" -> "记忆"
-    "cron" -> "定时任务"
-    "skills" -> "技能"
+    "cron", "scheduled_task" -> "定时任务"
+    "skill", "skills" -> "技能"
     "mcp" -> "MCP"
-    "plugins" -> "插件"
+    "plugin", "plugins" -> "插件"
     else -> type
 }

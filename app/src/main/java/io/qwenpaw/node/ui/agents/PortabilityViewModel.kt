@@ -284,8 +284,8 @@ internal fun buildSelections(
 ): Map<String, PortabilitySelectionDto> {
     return job.providers.associate { provider ->
         val assets = provider.assets.filter { assetKey(provider.source, it) in selected }
-        fun ids(type: String): List<String> =
-            assets.filter { it.assetType == type }.map { it.sourceId }
+        fun ids(field: String): List<String> =
+            assets.filter { selectionField(it.assetType) == field }.map { it.sourceId }
         provider.source to PortabilitySelectionDto(
             sessions = sessions[provider.source] ?: true,
             memory = ids("memory"),
@@ -295,6 +295,20 @@ internal fun buildSelections(
             plugins = ids("plugins"),
         )
     }
+}
+
+/**
+ * 服务端资产的 `asset_type` 是单数（`skill` / `plugin` / `scheduled_task`），
+ * `ImportSelection` 的字段却是复数（`skills` / `plugins` / `cron`）。
+ * 这里做唯一映射；两边的写法都接受，避免服务端归一化后再次对不上。
+ */
+internal fun selectionField(assetType: String): String? = when (assetType) {
+    "memory" -> "memory"
+    "cron", "scheduled_task" -> "cron"
+    "skill", "skills" -> "skills"
+    "mcp" -> "mcp"
+    "plugin", "plugins" -> "plugins"
+    else -> null
 }
 
 internal fun resultNotice(job: PortabilityJobDto): String = when (job.state) {

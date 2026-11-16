@@ -55,6 +55,40 @@ class PortabilitySelectionTest {
     }
 
     @Test
+    fun `server singular asset types map to plural selection fields`() {
+        val provider = PortabilityProviderDto(
+            source = "codex",
+            state = "ready",
+            assets = listOf(
+                asset("memory", "m2"),
+                asset("scheduled_task", "c2"),
+                asset("skill", "s2"),
+                asset("mcp", "mcp2"),
+                asset("plugin", "p2"),
+            ),
+        )
+        val job = job(provider)
+        val selections = buildSelections(job, defaultAssetKeys(job), mapOf("codex" to true))
+        val selection = selections.getValue("codex")
+        assertEquals(listOf("m2"), selection.memory)
+        assertEquals(listOf("c2"), selection.cron)
+        assertEquals(listOf("s2"), selection.skills)
+        assertEquals(listOf("mcp2"), selection.mcp)
+        assertEquals(listOf("p2"), selection.plugins)
+    }
+
+    @Test
+    fun `selection field accepts both singular and plural asset types`() {
+        assertEquals("skills", selectionField("skill"))
+        assertEquals("skills", selectionField("skills"))
+        assertEquals("plugins", selectionField("plugin"))
+        assertEquals("plugins", selectionField("plugins"))
+        assertEquals("cron", selectionField("scheduled_task"))
+        assertEquals("cron", selectionField("cron"))
+        assertEquals(null, selectionField("unknown"))
+    }
+
+    @Test
     fun `build selections groups by asset type`() {
         val keys = defaultAssetKeys(job(codex))
         val selections = buildSelections(job(codex), keys, mapOf("codex" to false))
