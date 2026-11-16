@@ -1,12 +1,8 @@
 # 服务端协议与已知坑
 
-本文记录 QwenPaw Android 客户端与服务端之间所有已实测的接口形状、字段语义与失败模式。
-记录基准为 **2.2.2.post1** 与 **2.3.0b2** 两个版本（LXC 容器 `qp-test` / `qp-test-prerelease`），
-两版差异单独列在第 17 节。文中每一条都来自实际抓包、源码阅读或设备联调，
-不存在仅凭官方文档推断的内容。
+本文记录 QwenPaw Android 客户端与服务端之间所有已实测的接口形状、字段语义与失败模式。记录基准为 **2.2.2.post1** 与 **2.3.0b2** 两个版本（LXC 容器 `qp-test` / `qp-test-prerelease`），两版差异单独列在第 17 节。文中每一条都来自实际抓包、源码阅读或设备联调，不存在仅凭官方文档推断的内容。
 
-阅读约定：客户端实现**以本文为准**；服务端升级后应逐条回归本文，再决定是否需要改代码。
-分层结构与状态流转见 [architecture.md](architecture.md)。
+阅读约定：客户端实现**以本文为准**；服务端升级后应逐条回归本文，再决定是否需要改代码。分层结构与状态流转见 [architecture.md](architecture.md)。
 
 ---
 
@@ -22,19 +18,15 @@
 {"enabled": false, "has_users": false}
 ```
 
-`enabled` 为 `false` 时，所有业务接口直接可用，请求不需要携带任何凭据。
-这是本机开发的默认状态，也是客户端首次连接时最简单的路径。
+`enabled` 为 `false` 时，所有业务接口直接可用，请求不需要携带任何凭据。这是本机开发的默认状态，也是客户端首次连接时最简单的路径。
 
 ### 登录
 
-开启鉴权后，客户端调用 `POST /api/auth/login` 换取 token，
-之后每个请求都要带上请求头 `Authorization: Bearer <token>`。
-token 失效时服务端返回 401，客户端需要清除凭据并回到连接页。
+开启鉴权后，客户端调用 `POST /api/auth/login` 换取 token，之后每个请求都要带上请求头 `Authorization: Bearer <token>`。token 失效时服务端返回 401，客户端需要清除凭据并回到连接页。
 
 ### 401 的四种成因
 
-服务端的 401 只有一句话是不够用的：登录密码打错、token 过期、反向代理拦下
-这三种情况的处置完全不同。实测三种 `detail` 与一种响应头：
+服务端的 401 只有一句话是不够用的：登录密码打错、token 过期、反向代理拦下这三种情况的处置完全不同。实测三种 `detail` 与一种响应头：
 
 | 来源 | 响应 | 判据 |
 | --- | --- | --- |
@@ -43,34 +35,26 @@ token 失效时服务端返回 401，客户端需要清除凭据并回到连接�
 | 鉴权中间件 | 401 + `{"detail":"Invalid or expired token"}` | detail 含 `Invalid or expired token` |
 | 鉴权中间件（未带凭据） | 401 + `{"detail":"Not authenticated"}` | detail 含 `Not authenticated` |
 
-**`WWW-Authenticate` 必须优先于 detail。** 这个头只有反代会加，服务端自身从不发
-（`AuthMiddleware` 的两处 401 都是裸 `Response`，不带该头）。反代拦下时 detail
-可能是反代自己的 HTML 或空串，按 detail 猜必然猜错。
+**`WWW-Authenticate` 必须优先于 detail。** 这个头只有反代会加，服务端自身从不发（`AuthMiddleware` 的两处 401 都是裸 `Response`，不带该头）。反代拦下时 detail可能是反代自己的 HTML 或空串，按 detail 猜必然猜错。
 
-「未带凭据」与「凭据过期」在客户端要分开：前者是「还没登录」，后者是「登录失效」。
-判据是这次请求有没有带过 token。
+「未带凭据」与「凭据过期」在客户端要分开：前者是「还没登录」，后者是「登录失效」。判据是这次请求有没有带过 token。
 
 ### 反向代理的 Basic 与 Bearer 争用同一个头
 
-nginx / openresty 的 `auth_basic` 从 `Authorization: Basic …` 取值，QwenPaw 自身
-读 `Authorization: Bearer …`。**一个请求只能带一个 `Authorization`。**
-核对 `AuthMiddleware._extract_token`（`qwenpaw/app/auth.py`）后确认，服务端支持的提取顺序是：
+nginx / openresty 的 `auth_basic` 从 `Authorization: Basic …` 取值，QwenPaw 自身读 `Authorization: Bearer …`。**一个请求只能带一个 `Authorization`。**核对 `AuthMiddleware._extract_token`（`qwenpaw/app/auth.py`）后确认，服务端支持的提取顺序是：
 
 1. `Authorization: Bearer <token>`；
 2. 请求头 `connection` 含 `upgrade` 时读 `?token=`；
 3. 其余情况读 `?token=`。
 
-因此两层同时开启时，客户端把 `Authorization` 让给 Basic，QwenPaw 的 token 走查询参数
-`?token=<token>`。**没有** `X-` 形式的独立 token 头可用。
+因此两层同时开启时，客户端把 `Authorization` 让给 Basic，QwenPaw 的 token 走查询参数`?token=<token>`。**没有** `X-` 形式的独立 token 头可用。
 
 | 层 | 凭据 | 位置 |
 | --- | --- | --- |
 | 反向代理 | Basic 账号密码 | `Authorization: Basic <base64(user:password)>` |
 | QwenPaw | 登录 token | `?token=<token>` |
 
-**代价：token 会出现在反代的 access log 里。** 不开反代时不走这条路，
-token 仍只在 `Authorization` 头里，不进 URL。客户端自身的 `RunLog` 不记录 query，
-不受影响。
+**代价：token 会出现在反代的 access log 里。** 不开反代时不走这条路，token 仍只在 `Authorization` 头里，不进 URL。客户端自身的 `RunLog` 不记录 query，不受影响。
 
 四处请求必须一起改，漏一处的表现各不相同：
 
@@ -81,38 +65,21 @@ token 仍只在 `Authorization` 头里，不进 URL。客户端自身的 `RunLog
 | 验证阶段的 `versionWith` / `authStatus` | 验证看不到真实的登录状态 |
 | `QwenPawApi.login`（登录换 token） | 登录页报「用户名或密码不正确」，反代 access log 里用户字段是 `-` |
 
-**`/api/auth/status` 与 `/api/auth/login` 也在反代之后。** 这两条是鉴权中间件的公开路径，
-但 `auth_basic` 拦在更前面，公开与否不影响反代先要凭据。2026-11-06 的判定
-`POST /api/auth/login` 实测就是 401（反代），客户端却把它翻译成密码错——
-区分方法见下一段。
+**`/api/auth/status` 与 `/api/auth/login` 也在反代之后。** 这两条是鉴权中间件的公开路径，但 `auth_basic` 拦在更前面，公开与否不影响反代先要凭据。2026-11-06 的判定`POST /api/auth/login` 实测就是 401（反代），客户端却把它翻译成密码错——区分方法见下一段。
 
-**`Not authenticated` 是三句合一。** 服务端对「没带 token」「token 过期」「token 被吊销」
-返回同一个 detail，客户端只能靠这次请求是否带过 token 来分：没带就是「还没登录」，
-带了才是「登录已失效」。把两者合并成一句「登录已失效」会让从没登录过的用户去找一个不存在的失效状态。
+**`Not authenticated` 是三句合一。** 服务端对「没带 token」「token 过期」「token 被吊销」返回同一个 detail，客户端只能靠这次请求是否带过 token 来分：没带就是「还没登录」，带了才是「登录已失效」。把两者合并成一句「登录已失效」会让从没登录过的用户去找一个不存在的失效状态。
 
-反代拦下时**不是「地址不可达」**：换下一个地址同样会被拦，做地址回退没有意义。
-客户端的 `verify` 因此把它单独判成 `proxyAuthRequired`，就地展开凭据输入。
+反代拦下时**不是「地址不可达」**：换下一个地址同样会被拦，做地址回退没有意义。客户端的 `verify` 因此把它单独判成 `proxyAuthRequired`，就地展开凭据输入。
 
 ### 客户端存储
 
-token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Android Keystore 托管。
-部分设备在 Keystore 初始化时会抛出异常（常见于系统刚恢复出厂或生物识别凭据被重置），
-因此实现上保留了降级路径：捕获该异常后改用普通 `SharedPreferences` 存储。
-降级意味着凭据以明文落盘，这是可用性优先于机密性的取舍，只在此类设备上发生。
+token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Android Keystore 托管。部分设备在 Keystore 初始化时会抛出异常（常见于系统刚恢复出厂或生物识别凭据被重置），因此实现上保留了降级路径：捕获该异常后改用普通 `SharedPreferences` 存储。降级意味着凭据以明文落盘，这是可用性优先于机密性的取舍，只在此类设备上发生。
 
-反向代理的 Basic 账号与密码同样存在这份加密偏好里（`basicUser` / `basicPassword`），
-与 QwenPaw 的 `username` / `token` 是两套独立字段。**两个都非空才生效**：
-只填一项视为未配置，让请求直接打到服务端，而不是拿半组凭据反复撞 401。
+反向代理的 Basic 账号与密码同样存在这份加密偏好里（`basicUser` / `basicPassword`），与 QwenPaw 的 `username` / `token` 是两套独立字段。**两个都非空才生效**：只填一项视为未配置，让请求直接打到服务端，而不是拿半组凭据反复撞 401。
 
-**登录接口的 404 多半不是「没有这个端点」。** 服务端部署在 openresty 之后时，
-`http://<域名>` 会被 301 跳到 https。OkHttp 跟随 301 会把 POST 改写成 GET
-并丢弃请求体，`POST /api/auth/login` 于是变成 `GET /api/auth/login`，
-服务端对这个方法没有路由，返回 404。客户端因此把登录 404 单独归为
-「请求未落到登录端点」，文案指向地址与协议，而不是复用 `GET /api/chats/{id}`
-的 404 文案。
+**登录接口的 404 多半不是「没有这个端点」。** 服务端部署在 openresty 之后时，`http://<域名>` 会被 301 跳到 https。OkHttp 跟随 301 会把 POST 改写成 GET并丢弃请求体，`POST /api/auth/login` 于是变成 `GET /api/auth/login`，服务端对这个方法没有路由，返回 404。客户端因此把登录 404 单独归为「请求未落到登录端点」，文案指向地址与协议，而不是复用 `GET /api/chats/{id}`的 404 文案。
 
-同一现象也解释了验证地址时为什么要按主机判协议：公网域名默认走 https，
-内网地址默认走 http，写错时表现为 404 或连接失败，而不是明确的协议错误。
+同一现象也解释了验证地址时为什么要按主机判协议：公网域名默认走 https，内网地址默认走 http，写错时表现为 404 或连接失败，而不是明确的协议错误。
 
 ---
 
@@ -131,20 +98,13 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 | `PATCH /api/chats/{id}` | 重命名 | 与置顶共用同一路径，见第 7 节 |
 | `DELETE /api/chats/{id}` | 删除会话 | — |
 
-> 同一路径 `/api/chats/{id}` 上，重命名记录为 `PATCH`，置顶与分组记录为 `PUT`。
-> 两者都作用于同一个资源，实现上以实测可用的动词为准；改动这一处前应重新抓包确认。
+> 同一路径 `/api/chats/{id}` 上，重命名记录为 `PATCH`，置顶与分组记录为 `PUT`。两者都作用于同一个资源，实现上以实测可用的动词为准；改动这一处前应重新抓包确认。
 
 ### 两个必须注意的语义
 
-**第一，列表顺序不可依赖。** 服务端返回的会话列表没有稳定的排序保证，
-运行中的会话有可能排在很靠后的位置。客户端因此不能直接采用服务端顺序，
-而应自行排序：先按 `status == "running"` 置顶，再按 `updated_at` 倒序。
-若省掉这一步，用户会看到正在生成回复的会话沉在列表底部，误以为任务丢失。
+**第一，列表顺序不可依赖。** 服务端返回的会话列表没有稳定的排序保证，运行中的会话有可能排在很靠后的位置。客户端因此不能直接采用服务端顺序，而应自行排序：先按 `status == "running"` 置顶，再按 `updated_at` 倒序。若省掉这一步，用户会看到正在生成回复的会话沉在列表底部，误以为任务丢失。
 
-**第二，`session_id` 与 chat id 可能不是同一个值。**
-客户端在新建会话时传入形如 `mobile-xxxxxxxx` 的 `session_id`，
-它才是发起 SSE 对话时真正要使用的标识；而 `GET/DELETE` 等管理类端点用的是 chat id。
-把两者混用会得到 404，或把消息发进一个不存在的会话。
+**第二，`session_id` 与 chat id 可能不是同一个值。**客户端在新建会话时传入形如 `mobile-xxxxxxxx` 的 `session_id`，它才是发起 SSE 对话时真正要使用的标识；而 `GET/DELETE` 等管理类端点用的是 chat id。把两者混用会得到 404，或把消息发进一个不存在的会话。
 
 ---
 
@@ -163,8 +123,7 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 }
 ```
 
-`reconnect` 的用法见第 4 节。`input` 为数组，可以同时携带文本与附件块，
-附件的字段形状见第 8 节。
+`reconnect` 的用法见第 4 节。`input` 为数组，可以同时携带文本与附件块，附件的字段形状见第 8 节。
 
 ### 帧类型
 
@@ -181,23 +140,11 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 
 ### 三个容易写错的点
 
-**增量帧不携带类型。** `object=content` 的增量帧只有 `msg_id`、`index` 与 `text`，
-无法从帧本身判断这段文字属于正文、思考还是工具输出。
-类型必须由先前到达的 `object=message` 帧声明，客户端据此维护 `msg_id → Kind` 映射，
-后续增量再按 `msg_id` 查表。若忽略这一步，所有内容都会被当成正文，
-思考过程会混进回复里显示。
+**增量帧不携带类型。** `object=content` 的增量帧只有 `msg_id`、`index` 与 `text`，无法从帧本身判断这段文字属于正文、思考还是工具输出。类型必须由先前到达的 `object=message` 帧声明，客户端据此维护 `msg_id → Kind` 映射，后续增量再按 `msg_id` 查表。若忽略这一步，所有内容都会被当成正文，思考过程会混进回复里显示。
 
-**`rate_limited` 自带 `error` 字段。** 这一帧本身含有 `error`，
-如果解析器的通用 `error` 分支写在类型判断之前，限流帧会被误判为整轮失败，
-界面上直接显示错误气泡，而实际服务端仍在正常排队。
-因此类型判断必须优先于通用错误判断。
+**`rate_limited` 自带 `error` 字段。** 这一帧本身含有 `error`，如果解析器的通用 `error` 分支写在类型判断之前，限流帧会被误判为整轮失败，界面上直接显示错误气泡，而实际服务端仍在正常排队。因此类型判断必须优先于通用错误判断。
 
-**历史里的 `msg_id` 会重复。** 同一个 `msg_id` 在 `GET /api/chats/{id}` 的返回中可能出现多次，
-成因是 reasoning 与正文共用同一 id，或一条 assistant 消息被拆成多条记录。
-直接把 `msg_id` 用作 `LazyColumn` 的 key，会抛出
-`IllegalArgumentException: Key ... was already used` 并导致崩溃。
-客户端的处理是在 `HistoryMapper.uniqueIds` 中为重复 id 追加序号，
-保证映射后的渲染单元 id 唯一。
+**历史里的 `msg_id` 会重复。** 同一个 `msg_id` 在 `GET /api/chats/{id}` 的返回中可能出现多次，成因是 reasoning 与正文共用同一 id，或一条 assistant 消息被拆成多条记录。直接把 `msg_id` 用作 `LazyColumn` 的 key，会抛出`IllegalArgumentException: Key ... was already used` 并导致崩溃。客户端的处理是在 `HistoryMapper.uniqueIds` 中为重复 id 追加序号，保证映射后的渲染单元 id 唯一。
 
 ### 工具调用的数据结构
 
@@ -206,8 +153,7 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 - `plugin_call` → `{call_id, name, arguments}`
 - `plugin_call_output` → `{call_id, name, output}`
 
-两者按 `call_id` 配对，渲染为一张卡片。配对失败（例如只收到 `plugin_call`
-而输出帧尚未到达）时应显示「执行中」而不是空白卡片。
+两者按 `call_id` 配对，渲染为一张卡片。配对失败（例如只收到 `plugin_call`而输出帧尚未到达）时应显示「执行中」而不是空白卡片。
 
 ---
 
@@ -215,27 +161,19 @@ token 与实例凭据存放在 `EncryptedSharedPreferences` 中，密钥由 Andr
 
 ### 客户端断开不影响服务端
 
-SSE 连接断开后，服务端仍会继续把这一轮跑完。这一点决定了重连的实现方式：
-重新进入会话时，用 `reconnect: true` 再发一次 `input` 为空的请求，即可挂回正在运行的流，
-已生成的内容会继续推过来。若误以为断开等于任务中止而在客户端本地标记完成，
-用户会看到一条被截断的回复。
+SSE 连接断开后，服务端仍会继续把这一轮跑完。这一点决定了重连的实现方式：重新进入会话时，用 `reconnect: true` 再发一次 `input` 为空的请求，即可挂回正在运行的流，已生成的内容会继续推过来。若误以为断开等于任务中止而在客户端本地标记完成，用户会看到一条被截断的回复。
 
 ### 停止之后必须重拉历史
 
 `POST /api/console/chat/stop?chat_id=<chat id>` 返回 `{"stopped": true}`。
 
-停止后服务端保留了用户消息与已经生成的部分内容。因此客户端在停止后**必须重新拉取一次历史**
-再渲染；如果只把本地状态改成「已停止」，那些已经落库的部分内容在界面上就会消失，
-用户下次进入会话时又会突然出现，造成内容不一致的错觉。
+停止后服务端保留了用户消息与已经生成的部分内容。因此客户端在停止后**必须重新拉取一次历史**再渲染；如果只把本地状态改成「已停止」，那些已经落库的部分内容在界面上就会消失，用户下次进入会话时又会突然出现，造成内容不一致的错觉。
 
 ### 取消协程时的收尾位置
 
-取消承载流的 `Job` 会抛出 `CancellationException`。协程取消后，
-写在取消点之后的常规收尾逻辑不会继续执行，`running = false` 这一步就永远不生效，
-发送按钮会一直停留在「停止」状态。
+取消承载流的 `Job` 会抛出 `CancellationException`。协程取消后，写在取消点之后的常规收尾逻辑不会继续执行，`running = false` 这一步就永远不生效，发送按钮会一直停留在「停止」状态。
 
-正确的做法是把收尾逻辑放进一个新启动的协程（例如 `CoroutineScope(Dispatchers.Main).launch`
-或注入的独立作用域），由它负责复位状态。
+正确的做法是把收尾逻辑放进一个新启动的协程（例如 `CoroutineScope(Dispatchers.Main).launch`或注入的独立作用域），由它负责复位状态。
 
 ### 「无法连接服务器，显示本地缓存」的三种成因
 
@@ -247,10 +185,7 @@ SSE 连接断开后，服务端仍会继续把这一轮跑完。这一点决定�
 | 响应解析失败 | 特定对话失败，其它正常 | 服务端日志正常，curl 能拿到 200 |
 | 对话 id 不匹配（404） | 打开后落到空对话并提示断线 | 请求的 id 不是 `/api/chats` 的 `id` |
 
-实测「杂谈」（`ba703f01-646e-4e3c-a565-e3892b367b52`，231 条消息、928 KB、
-响应约 1.7 s）在 2.2.2.post1 上正常返回并能在客户端完整渲染，说明大响应本身不是诱因；
-该对话的 221 个 usage 对象里 `cache_hit_rate` 都是数值而非 `null`。
-排查同类问题应先区分上表三类，再看 `GET /api/chats/{id}` 的实际状态码。
+实测「杂谈」（`ba703f01-646e-4e3c-a565-e3892b367b52`，231 条消息、928 KB、响应约 1.7 s）在 2.2.2.post1 上正常返回并能在客户端完整渲染，说明大响应本身不是诱因；该对话的 221 个 usage 对象里 `cache_hit_rate` 都是数值而非 `null`。排查同类问题应先区分上表三类，再看 `GET /api/chats/{id}` 的实际状态码。
 
 ---
 
@@ -264,8 +199,7 @@ SSE 连接断开后，服务端仍会继续把这一轮跑完。这一点决定�
 {"detail": "A task is already running for this chat. Wait for it to finish or use a different session_id."}
 ```
 
-客户端在 `running == true` 时直接拦截，不依赖服务端返回 409。
-这样既少一次无效请求，也能在离线状态下给出即时反馈。
+客户端在 `running == true` 时直接拦截，不依赖服务端返回 409。这样既少一次无效请求，也能在离线状态下给出即时反馈。
 
 ### 连接失败的文案不统一
 
@@ -274,9 +208,7 @@ OkHttp 在连接失败时抛出的异常与文案并不一致，实测至少两�
 - 端口拒绝：`Failed to connect to /10.0.2.2:8088`
 - 丢包超时：`failed to connect to /10.0.2.2 (port 8088) from /10.0.2.15 (port x) after 20000ms`
 
-第二种情况**不会**抛出 `ConnectException`。只按异常类型分支判断会漏掉这一整类失败，
-用户只会看到一句毫无意义的技术异常。因此实现上必须同时匹配文案，
-并把两类失败统一映射为中文提示。
+第二种情况**不会**抛出 `ConnectException`。只按异常类型分支判断会漏掉这一整类失败，用户只会看到一句毫无意义的技术异常。因此实现上必须同时匹配文案，并把两类失败统一映射为中文提示。
 
 ---
 
@@ -284,29 +216,21 @@ OkHttp 在连接失败时抛出的异常与文案并不一致，实测至少两�
 
 ### 端点
 
-- `GET /api/approval/list` → `{"pending_approvals":[...], "count":n}`
-  列表项包含 `requestId`、`sessionId`、工具名与摘要。
+- `GET /api/approval/list` → `{"pending_approvals":[...], "count":n}`列表项包含 `requestId`、`sessionId`、工具名与摘要。
 - `POST /api/approval/approve`
 - `POST /api/approval/deny`
 
 ### 没有推送通道，只能轮询
 
-QwenPaw 不提供推送能力，官方 Console 自身也是每 2.5 秒轮询一次
-`GET /api/console/push-messages`。客户端采用同样的节奏轮询审批列表。
+QwenPaw 不提供推送能力，官方 Console 自身也是每 2.5 秒轮询一次`GET /api/console/push-messages`。客户端采用同样的节奏轮询审批列表。
 
-轮询实现有一个必要的细节：若本轮返回的审批集合与上一轮完全一致，
-就不应更新 state。否则每 2.5 秒都会产生一个新的 UI 状态对象，
-导致整个界面周期性重组，表现为界面在空闲时也持续掉帧。
+轮询实现有一个必要的细节：若本轮返回的审批集合与上一轮完全一致，就不应更新 state。否则每 2.5 秒都会产生一个新的 UI 状态对象，导致整个界面周期性重组，表现为界面在空闲时也持续掉帧。
 
 ### 联调时的注意事项
 
-审批级别写在 `~/.qwenpaw/workspaces/default/agent.json` 的 `approval_level` 字段。
-合法取值只有 `STRICT`、`SMART`、`AUTO`、`OFF`，服务端默认 `AUTO`，
-其中 `AUTO` 下只有 `guarded_tools` 名单里的工具才触发审批。
+审批级别写在 `~/.qwenpaw/workspaces/default/agent.json` 的 `approval_level` 字段。合法取值只有 `STRICT`、`SMART`、`AUTO`、`OFF`，服务端默认 `AUTO`，其中 `AUTO` 下只有 `guarded_tools` 名单里的工具才触发审批。
 
-**不存在 `ASK` 这个档位。** `qwenpaw/security/tool_guard/execution_level.py` 的
-`ToolExecutionLevel.from_config` 对无法解析的值一律回退成 `AUTO`，既不报错也不打日志，
-因此写错档位只能靠现场表现察觉。需要每条工具调用都审批时改 `STRICT`。
+**不存在 `ASK` 这个档位。** `qwenpaw/security/tool_guard/execution_level.py` 的`ToolExecutionLevel.from_config` 对无法解析的值一律回退成 `AUTO`，既不报错也不打日志，因此写错档位只能靠现场表现察觉。需要每条工具调用都审批时改 `STRICT`。
 
 修改前应先备份该文件，测完用 `diff` 核对后还原；忘记还原会让后续所有真实使用都带审批弹窗。
 
@@ -316,8 +240,7 @@ QwenPaw 不提供推送能力，官方 Console 自身也是每 2.5 秒轮询一�
 
 ### 置顶
 
-`PUT /api/chats/{id}`，请求体 `{"pinned": true|false}`。
-该端点与重命名共用，因此只传 `pinned` 时不会影响名称。
+`PUT /api/chats/{id}`，请求体 `{"pinned": true|false}`。该端点与重命名共用，因此只传 `pinned` 时不会影响名称。
 
 客户端排序因此变为三段：置顶、运行中、最近活跃。
 
@@ -331,9 +254,7 @@ QwenPaw 不提供推送能力，官方 Console 自身也是每 2.5 秒轮询一�
 
 ### 分组
 
-`GET /api/chats/groups` 返回三个内置分组：`default`、`cron`、`subagents`。
-实测响应字段为 `id` / `name` / `order` / `kind` / `source` / `pinned`；
-`kind=default` 表示未分类，`cron` 为定时任务，`subagents` 为子代理，用户自建的为 `custom`。
+`GET /api/chats/groups` 返回三个内置分组：`default`、`cron`、`subagents`。实测响应字段为 `id` / `name` / `order` / `kind` / `source` / `pinned`；`kind=default` 表示未分类，`cron` 为定时任务，`subagents` 为子代理，用户自建的为 `custom`。
 
 排序按 `pinned` 优先、其次 `order` 升序，与服务端内部 `_ordered_groups()` 一致。
 
@@ -349,19 +270,13 @@ QwenPaw 不提供推送能力，官方 Console 自身也是每 2.5 秒轮询一�
 
 三处实测约束：
 
-1. **内置分组（`kind` 为 `default` / `cron` / `subagents`）不可改名或置顶。**
-   服务端不会给出可读的报错，客户端必须先自行判断 `kind`。
+1. **内置分组（`kind` 为 `default` / `cron` / `subagents`）不可改名或置顶。**服务端不会给出可读的报错，客户端必须先自行判断 `kind`。
 2. **`PUT` 至少要带一个字段**，否则返回 400。
-3. **新建后必得 `custom` 且 `source` 为 `null`。** 删除只会移除分组本身，
-   组内会话回到 `default`，不会被一并删除。
+3. **新建后必得 `custom` 且 `source` 为 `null`。** 删除只会移除分组本身，组内会话回到 `default`，不会被一并删除。
 
-**空的自建分组必须显示。** 用户刚建完必然还没有会话，列表里藏起来看起来像建失败。
-客户端的分组渲染因此对内置分组过滤空桶，对 `custom` 保留。
+**空的自建分组必须显示。** 用户刚建完必然还没有会话，列表里藏起来看起来像建失败。客户端的分组渲染因此对内置分组过滤空桶，对 `custom` 保留。
 
-QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其打包产物
-`assets/zh-*.js` 中的 `groupByTime`、`groupBySource`、`groupByNone` 三个键，
-单击按钮循环切换，顺序为 时间 → 来源 → 不分组。客户端与之一致。
-时间分档同样是三档：今天、近 7 天、更早。
+QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其打包产物`assets/zh-*.js` 中的 `groupByTime`、`groupBySource`、`groupByNone` 三个键，单击按钮循环切换，顺序为 时间 → 来源 → 不分组。客户端与之一致。时间分档同样是三档：今天、近 7 天、更早。
 
 ---
 
@@ -375,8 +290,7 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 {"url": "/home/<user>/.qwenpaw/workspaces/default/media/..."}
 ```
 
-注意这是一个**服务器本地绝对路径**，不是可访问的 HTTP 地址。
-客户端不能直接拿它当 URL 加载。
+注意这是一个**服务器本地绝对路径**，不是可访问的 HTTP 地址。客户端不能直接拿它当 URL 加载。
 
 ### 请求侧字段形状（最容易踩的坑）
 
@@ -388,8 +302,7 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 
 而**不是**老协议里那种嵌套结构 `{"type":"image","source":{"url":...}}`。
 
-早期版本按嵌套结构发送，服务端会**静默丢弃**该内容块：没有任何错误返回，
-图片进不了模型上下文，历史里也只剩一段文字。排查过程完全是靠读服务端源码才定位到。
+早期版本按嵌套结构发送，服务端会**静默丢弃**该内容块：没有任何错误返回，图片进不了模型上下文，历史里也只剩一段文字。排查过程完全是靠读服务端源码才定位到。
 
 正确的请求形状：
 
@@ -407,13 +320,11 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 {"type": "image", "image_url": "data:image/png;base64,..."}
 ```
 
-服务端通过 `_resolve_content_url` 与其 base64 分支，把本地文件内联成 data URI。
-如果是外链，则原样返回 `http(s)://` 地址。
+服务端通过 `_resolve_content_url` 与其 base64 分支，把本地文件内联成 data URI。如果是外链，则原样返回 `http(s)://` 地址。
 
 ### 渲染
 
-客户端没有引入 Coil。理由是只需要支持三种地址形态（data URI、HTTP、服务端本地路径），
-引入图片库带来的依赖体积与配置成本不成正比，而 `BitmapFactory` 已足够。
+客户端没有引入 Coil。理由是只需要支持三种地址形态（data URI、HTTP、服务端本地路径），引入图片库带来的依赖体积与配置成本不成正比，而 `BitmapFactory` 已足够。
 
 `ChatImageLoader` 的行为：
 
@@ -421,8 +332,7 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 - `http(s)://` → 直接下载
 - 其余 → 当作服务端本地绝对路径，走 `GET /api/files/preview/{绝对路径}`
 
-该预览端点实测返回 200。它带有 FileGuard 敏感路径检查，只允许读取 `WORKING_DIR` 内的文件，
-因此传入任意绝对路径并不会变成任意文件读取。
+该预览端点实测返回 200。它带有 FileGuard 敏感路径检查，只允许读取 `WORKING_DIR` 内的文件，因此传入任意绝对路径并不会变成任意文件读取。
 
 大图先读取尺寸，再用 `inSampleSize` 采样，避免整张原图解码导致 OOM。
 
@@ -430,13 +340,11 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 
 ### 实测记录
 
-上传一张 64×64 的纯蓝 PNG，模型调用 `view_image` 后正确答出 RGB(74,107,181)，
-说明扁平字段的图片确实进入了模型上下文。
+上传一张 64×64 的纯蓝 PNG，模型调用 `view_image` 后正确答出 RGB(74,107,181)，说明扁平字段的图片确实进入了模型上下文。
 
 ### 工具交付的文件（`send_file_to_user`）
 
-服务端**没有「已交付文件」列表接口**。智能体调用 `send_file_to_user` 时，
-文件字节以 base64 内联在该次工具调用的输出里，历史消息中形如：
+服务端**没有「已交付文件」列表接口**。智能体调用 `send_file_to_user` 时，文件字节以 base64 内联在该次工具调用的输出里，历史消息中形如：
 
 ```json
 {"type":"plugin_call","role":"assistant","content":[{"type":"data","data":{
@@ -450,17 +358,11 @@ QwenPaw 网页版的分组三态（按时间 / 按来源 / 不分组）来自其
 
 三个要点：
 
-1. **`output` 里没有文件名。** 文件名只能取 `arguments.file_path` 的 basename，
-   调用与输出必须按 `call_id` 配对。SSE 的 `plugin_call_output` 事件同样带
-   `name` 与 `output`，两条路径可以共用一个解析器（`DeliveredFiles.parse`）。
-2. **`output` 是 JSON 字符串里再套一段 JSON。** 第一次解析得到的是字符串，
-   还需要再解一层，取 `[0].source.data`，`source.type` 不是 `base64` 时忽略。
-3. **`arguments.file_path` 由服务端写入，可能是绝对路径**，且不同工作区前缀不同。
-   客户端只用它取文件名与展示路径，不据此拼接任何下载地址。
+1. **`output` 里没有文件名。** 文件名只能取 `arguments.file_path` 的 basename，调用与输出必须按 `call_id` 配对。SSE 的 `plugin_call_output` 事件同样带`name` 与 `output`，两条路径可以共用一个解析器（`DeliveredFiles.parse`）。
+2. **`output` 是 JSON 字符串里再套一段 JSON。** 第一次解析得到的是字符串，还需要再解一层，取 `[0].source.data`，`source.type` 不是 `base64` 时忽略。
+3. **`arguments.file_path` 由服务端写入，可能是绝对路径**，且不同工作区前缀不同。客户端只用它取文件名与展示路径，不据此拼接任何下载地址。
 
-非图片类型不解码字节：客户端只显示文件名、路径与「已发送」，
-把几 MB 到几十 MB 的 base64 解进内存没有用途。图片拼成 `data:<mime>;base64,<data>`，
-交给 `ChatImageLoader` 的 data URI 分支解码。
+非图片类型不解码字节：客户端只显示文件名、路径与「已发送」，把几 MB 到几十 MB 的 base64 解进内存没有用途。图片拼成 `data:<mime>;base64,<data>`，交给 `ChatImageLoader` 的 data URI 分支解码。
 
 解析完成后工具卡上的原始 `output` 会被置空，避免整份 base64 留在界面状态里。
 
@@ -490,36 +392,23 @@ SSE 的 `turn_usage` 帧里，`context_usage` 与 `usage` **平级**：
 
 三个必须记住的点：
 
-1. **`context_usage_ratio` 是百分数**（实测 `10.54` 表示 10.54%，`0.2014` 表示 0.2%）。
-   客户端统一用 `estimated_tokens / max_input_length` 折算，比字段本身更稳。
-2. **`cache_hit_rate` 也是百分数**（实测 `74.99633806943021` 表示 75%）。
-   解析时除以 100，避免界面与日志两处各折一次、结果不一致。
-3. **服务端没有首字耗时字段。** 源码中不存在 `first_token`、`ttft`、`latency` 一类字段，
-   客户端不显示该指标。
+1. **`context_usage_ratio` 是百分数**（实测 `10.54` 表示 10.54%，`0.2014` 表示 0.2%）。客户端统一用 `estimated_tokens / max_input_length` 折算，比字段本身更稳。
+2. **`cache_hit_rate` 也是百分数**（实测 `74.99633806943021` 表示 75%）。解析时除以 100，避免界面与日志两处各折一次、结果不一致。
+3. **服务端没有首字耗时字段。** 源码中不存在 `first_token`、`ttft`、`latency` 一类字段，客户端不显示该指标。
 
-`GET /api/chats/{id}` 的历史消息把同一组数据放在
-`metadata.metadata.qwenpaw_turn_usage.usage`，结构完全相同。
+`GET /api/chats/{id}` 的历史消息把同一组数据放在`metadata.metadata.qwenpaw_turn_usage.usage`，结构完全相同。
 
-**但挂载范围与直觉不同：整轮的 `qwenpaw_turn_usage` 会重复出现在该轮的每一条
-assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都带，而不只是收尾那条。
-实测一个 9 条消息的回合里，前 8 条与最后一条的 `prompt_tokens`/`completion_tokens`
-完全一致。原样渲染会让多步回合的每段正文下面都重复同一组数字，因此客户端在
-`HistoryMapper.markTurnEnd()` 里按回合去重，只让该轮最后一条正文保留统计。
+**但挂载范围与直觉不同：整轮的 `qwenpaw_turn_usage` 会重复出现在该轮的每一条assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都带，而不只是收尾那条。实测一个 9 条消息的回合里，前 8 条与最后一条的 `prompt_tokens`/`completion_tokens`完全一致。原样渲染会让多步回合的每段正文下面都重复同一组数字，因此客户端在`HistoryMapper.markTurnEnd()` 里按回合去重，只让该轮最后一条正文保留统计。
 
-服务端**只提供整轮粒度**，没有按消息拆分的用量数据。
-客户端的「用量明细」面板因此展示总量与进度条，并按字符数估算各消息的占比，
-界面上明确标注为估算，不伪装成精确值。
+服务端**只提供整轮粒度**，没有按消息拆分的用量数据。客户端的「用量明细」面板因此展示总量与进度条，并按字符数估算各消息的占比，界面上明确标注为估算，不伪装成精确值。
 
 ### 思考模式
 
 `GET /api/chats/{id}/thinking` 与 `PUT` 同一路径。
 
-响应中的 `control.kind` 描述模型是否可调，取值有四种：
-`effort`、`budget`、`unsupported`、`unknown`。`control.efforts` 列出可选项。
-`level = inherit` 表示跟随模型默认值。模型不支持时 `PUT` 返回 422。
+响应中的 `control.kind` 描述模型是否可调，取值有四种：`effort`、`budget`、`unsupported`、`unknown`。`control.efforts` 列出可选项。`level = inherit` 表示跟随模型默认值。模型不支持时 `PUT` 返回 422。
 
-客户端只在 `efforts` 非空或 `supports_off` 为真时才显示入口，
-否则会给用户一个点了没有反应的开关。
+客户端只在 `efforts` 非空或 `supports_off` 为真时才显示入口，否则会给用户一个点了没有反应的开关。
 
 ### 模型切换
 
@@ -534,8 +423,7 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
 | `{"provider_id": "", "model": ""}` | 同上 |
 | `{}` | 同上 |
 
-因此「恢复默认」不能靠传空值，正确做法是先读 `GET /api/models/active`
-拿到全局默认，再把它显式 `PUT` 到会话上：
+因此「恢复默认」不能靠传空值，正确做法是先读 `GET /api/models/active`拿到全局默认，再把它显式 `PUT` 到会话上：
 
 ```json
 {"active_llm": {"provider_id": "a2a", "model": "CodeArts/deepseek-v4.1-flash-1017"},
@@ -546,22 +434,13 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
 
 查询侧：`GET /api/models` 列出供应商。
 
-**不要用 `GET /api/models/{provider_id}/pool` 取会话可切换的模型列表。**
-本机部署下该端点返回空数组，依赖它会得到「没有可用模型」的错误结论。
-可选模型分散在 `GET /api/models` 每个供应商的三个数组里：
-`models`（配置里写明的）、`extra_models`（额外添加的）、`discovered_models`（探测到的）。
-客户端按此顺序合并、按 id 去重，并跳过 `enabled = false` 的供应商。
+**不要用 `GET /api/models/{provider_id}/pool` 取会话可切换的模型列表。**本机部署下该端点返回空数组，依赖它会得到「没有可用模型」的错误结论。可选模型分散在 `GET /api/models` 每个供应商的三个数组里：`models`（配置里写明的）、`extra_models`（额外添加的）、`discovered_models`（探测到的）。客户端按此顺序合并、按 id 去重，并跳过 `enabled = false` 的供应商。
 
 ### 智能体审批模式
 
-`GET /api/agents/{id}` 返回的 `approval_level` 是该智能体的审批模式，
-取值 `STRICT` / `SMART` / `AUTO` / `OFF`。这是**智能体级**配置，
-改动影响该智能体的全部会话，不存在会话级覆盖端点。
+`GET /api/agents/{id}` 返回的 `approval_level` 是该智能体的审批模式，取值 `STRICT` / `SMART` / `AUTO` / `OFF`。这是**智能体级**配置，改动影响该智能体的全部会话，不存在会话级覆盖端点。
 
-`PUT /api/agents/{id}` **要求提交完整的 `AgentProfileConfig`**。
-本机实测该对象有 30 个字段（含 `channels`、`backend`、`workspace_dir`、`project_dirs` 等），
-只提交 `{"approval_level": "..."}` 会把其余字段抹掉。客户端因此先 `GET` 原对象，
-用原始 JSON 替换掉 `approval_level` 后整体 `PUT` 回去。
+`PUT /api/agents/{id}` **要求提交完整的 `AgentProfileConfig`**。本机实测该对象有 30 个字段（含 `channels`、`backend`、`workspace_dir`、`project_dirs` 等），只提交 `{"approval_level": "..."}` 会把其余字段抹掉。客户端因此先 `GET` 原对象，用原始 JSON 替换掉 `approval_level` 后整体 `PUT` 回去。
 
 ### 工作区目录
 
@@ -572,11 +451,9 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
  "workspace_dir": "/home/u/.qwenpaw/workspaces/default", "exists": true}
 ```
 
-`PUT` 同一路径，body 为 `{"path": "/abs/path"}`；`path` 传 JSON `null` 恢复工作区默认目录。
-路径不存在或不是目录时返回 400。这里的路径是**服务端**上的绝对路径，与手机本地文件系统无关。
+`PUT` 同一路径，body 为 `{"path": "/abs/path"}`；`path` 传 JSON `null` 恢复工作区默认目录。路径不存在或不是目录时返回 400。这里的路径是**服务端**上的绝对路径，与手机本地文件系统无关。
 
-`path` 与 `workspace_dir` 的区别：处于默认目录时 `path` 可能为空，
-此时客户端应回退显示 `workspace_dir`，否则输入框空白让人不知道该填什么。
+`path` 与 `workspace_dir` 的区别：处于默认目录时 `path` 可能为空，此时客户端应回退显示 `workspace_dir`，否则输入框空白让人不知道该填什么。
 
 ---
 
@@ -600,37 +477,27 @@ assistant 消息上**——reasoning、plugin_call、plugin_call_output 全都�
 
 ### `cache_hit_rate` 是百分数，且可以是 `null`
 
-`cache_hit_rate` 在 OpenAPI 里声明为 `number | null`：无缓存命中时返回 `null`，
-有命中时返回 **0–100 的百分数**（实测对话里有 `1.709`、`45.54`），不是 0–1 的比例。
-客户端按比例渲染会把 45.54 显示成 4554%，按百分比渲染才对。
+`cache_hit_rate` 在 OpenAPI 里声明为 `number | null`：无缓存命中时返回 `null`，有命中时返回 **0–100 的百分数**（实测对话里有 `1.709`、`45.54`），不是 0–1 的比例。客户端按比例渲染会把 45.54 显示成 4554%，按百分比渲染才对。
 
-`null` 这一形状只在干净实例上出现。客户端 DTO 若把它声明为非空 `Double`，
-kotlinx.serialization 会抛 `SerializationException`；该异常若与「连不上」共用一条
-`runCatching` 分支，就会被误报成「无法连接服务器」。解析失败与请求失败必须分开处理：
-前者说明服务端在线但响应形状超出预期，后者才是网络或地址问题。
+`null` 这一形状只在干净实例上出现。客户端 DTO 若把它声明为非空 `Double`，kotlinx.serialization 会抛 `SerializationException`；该异常若与「连不上」共用一条`runCatching` 分支，就会被误报成「无法连接服务器」。解析失败与请求失败必须分开处理：前者说明服务端在线但响应形状超出预期，后者才是网络或地址问题。
 
 ---
 
 ## 11、会话摘要与预览
 
-服务端的 `ChatSpec` **没有 summary 字段**，也不存在现成的预览文本接口。
-因此列表页的摘要完全是客户端行为：
+服务端的 `ChatSpec` **没有 summary 字段**，也不存在现成的预览文本接口。因此列表页的摘要完全是客户端行为：
 
 1. 列表刷新后，对最近 20 个会话各拉一次 `GET /api/chats/{id}`；
 2. 从映射后的消息中取最后一条有内容的消息，截取前 60 字作为预览；
 3. 结果放进内存 map，只在 `updated_at` 变化时刷新。
 
-若每轮刷新都为全部会话打详情请求，首屏请求量会随会话数线性增长，
-因此只取前 20 个并做变化判断。
+若每轮刷新都为全部会话打详情请求，首屏请求量会随会话数线性增长，因此只取前 20 个并做变化判断。
 
-另有一个需要跳过的干扰项：带附件的消息，服务端会注入一行
-「用户上传文件，已经下载到 &lt;路径&gt;」，这一行既不是用户原话也不是助手回复。
-预览时按该前缀跳过，否则列表里每条带附件的会话都显示同一句模板文字。
+另有一个需要跳过的干扰项：带附件的消息，服务端会注入一行「用户上传文件，已经下载到 &lt;路径&gt;」，这一行既不是用户原话也不是助手回复。预览时按该前缀跳过，否则列表里每条带附件的会话都显示同一句模板文字。
 
 ### 会话标题的自动生成
 
-服务端会在首轮对话结束后向模型要一个 ≤ 6 个词的标题，但触发条件很窄。
-`console.py` 的两处判断缺一不可：
+服务端会在首轮对话结束后向模型要一个 ≤ 6 个词的标题，但触发条件很窄。`console.py` 的两处判断缺一不可：
 
 ```python
 # 1) 把占位名换成首条消息
@@ -641,23 +508,13 @@ if first_text and chat.name == name:
     asyncio.create_task(generate_and_update_title(..., placeholder_name=name))
 ```
 
-`name` 来自 `_extract_placeholder_name(content_parts)`：首块文本非空时返回
-`(first_text, first_text)`，否则返回 `("Media Message", "")`。
+`name` 来自 `_extract_placeholder_name(content_parts)`：首块文本非空时返回`(first_text, first_text)`，否则返回 `("Media Message", "")`。
 
-**结论：客户端新建会话时必须写 `meta.console_placeholder_name`，且值与 `name` 相同。**
-否则两处判断同时落空，标题永远不会生成，会话长期停在截断后的名称上
-（客户端此前传的是 `trimmed.take(20)`）。
+**结论：客户端新建会话时必须写 `meta.console_placeholder_name`，且值与 `name` 相同。**否则两处判断同时落空，标题永远不会生成，会话长期停在截断后的名称上（客户端此前传的是 `trimmed.take(20)`）。
 
-实测（2026-11-01，`10.10.0.211:8088`）：带该字段建会话、跑完一轮对话后，
-`GET /api/chats` 里的名字从「帮我检查网络是否通」变成「一句话说明助手能力」。
-不带该字段时名字不变。
+实测（2026-11-01，`10.10.0.211:8088`）：带该字段建会话、跑完一轮对话后，`GET /api/chats` 里的名字从「帮我检查网络是否通」变成「一句话说明助手能力」。不带该字段时名字不变。
 
-生成是 `asyncio.create_task` 起的后台任务，不走推送、没有回调，
-因此客户端只能刷新列表来发现。它还要先做一次模型调用，
-超时由 `auto_title_config.timeout_seconds` 控制（默认 30 秒），
-`finishRun` 里那一次立即刷新通常赶不上，需要按
-「列表里的名字是否仍等于占位名」再补一次。这个判据由
-`needsTitleRefresh` 实现，只补一轮，不轮询。
+生成是 `asyncio.create_task` 起的后台任务，不走推送、没有回调，因此客户端只能刷新列表来发现。它还要先做一次模型调用，超时由 `auto_title_config.timeout_seconds` 控制（默认 30 秒），`finishRun` 里那一次立即刷新通常赶不上，需要按「列表里的名字是否仍等于占位名」再补一次。这个判据由`needsTitleRefresh` 实现，只补一轮，不轮询。
 
 ---
 
@@ -665,13 +522,9 @@ if first_text and chat.name == name:
 
 QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
-触发条件：进程内收到 `completed` 帧，且 `AppVisibility.visibleCount == 0`
-（即应用不在前台）时，发一条「回复已完成」通知。
-应用在前台时不发，避免在用户正看着屏幕时打扰。
+触发条件：进程内收到 `completed` 帧，且 `AppVisibility.visibleCount == 0`（即应用不在前台）时，发一条「回复已完成」通知。应用在前台时不发，避免在用户正看着屏幕时打扰。
 
-由此产生一个必然的边界：应用进程被系统杀掉后不会再有任何提醒。
-草稿与历史仍可从服务端补齐，但「后台完成提醒」这个能力在进程存活之外无法提供。
-这是放弃实时推送的代价，属于有意识的取舍而非缺陷。
+由此产生一个必然的边界：应用进程被系统杀掉后不会再有任何提醒。草稿与历史仍可从服务端补齐，但「后台完成提醒」这个能力在进程存活之外无法提供。这是放弃实时推送的代价，属于有意识的取舍而非缺陷。
 
 ---
 
@@ -681,23 +534,15 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ### 头像
 
-服务端**没有消息级或用户级头像接口**。`MessageMetadataDto` 只有
-`timestamp` / `finished_at` / `original_id` / `original_name` / `metadata`，
-没有任何图片引用。
+服务端**没有消息级或用户级头像接口**。`MessageMetadataDto` 只有`timestamp` / `finished_at` / `original_id` / `original_name` / `metadata`，没有任何图片引用。
 
-因此头像完全存在客户端：`filesDir/avatars/` 下 `user.png|gif` 与 `agent.png|gif`。
-静态图裁剪成正方形并压到 500×500；GIF 原样保存，由 Coil 的逐帧解码器播放。
-头像不会上传，也不会随实例同步。
+因此头像完全存在客户端：`filesDir/avatars/` 下 `user.png|gif` 与 `agent.png|gif`。静态图裁剪成正方形并压到 500×500；GIF 原样保存，由 Coil 的逐帧解码器播放。头像不会上传，也不会随实例同步。
 
 ### 运行日志
 
-客户端另有「运行日志」，记录**本机客户端**的事件（网络请求、流建立与中断、
-轮询失败、存储操作、语音），与 QwenPaw 服务端日志分开记录。
+客户端另有「运行日志」，记录**本机客户端**的事件（网络请求、流建立与中断、轮询失败、存储操作、语音），与 QwenPaw 服务端日志分开记录。
 
-日志只存在进程内的环形缓冲（上限 2000 条），默认关闭，关闭时所有写入是空操作。
-导出格式固定为 `HH:mm:ss.SSS [类别] tag · 内容`，导入按同样格式解析，
-无法识别的行原样保留为界面条目。敏感信息在写入前脱敏：
-`Authorization: Bearer <token>` 与 URL 中的 `token=` / `access_token=` 一律替换为 `***`。
+日志只存在进程内的环形缓冲（上限 2000 条），默认关闭，关闭时所有写入是空操作。导出格式固定为 `HH:mm:ss.SSS [类别] tag · 内容`，导入按同样格式解析，无法识别的行原样保留为界面条目。敏感信息在写入前脱敏：`Authorization: Bearer <token>` 与 URL 中的 `token=` / `access_token=` 一律替换为 `***`。
 
 ---
 
@@ -723,8 +568,7 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 | 标准包（`full`） | 本地识别与服务端转写二选一，**默认本地识别** | 25.0MB |
 | `-no-sherpa` 包 | 只能服务端转写 | 2.45MB |
 
-两个包的 `applicationId` 相同，可以互相覆盖升级；后缀只出现在文件名与
-`versionName`（`0.4.0-no-sherpa`）上，不改变数据目录。
+两个包的 `applicationId` 相同，可以互相覆盖升级；后缀只出现在文件名与`versionName`（`0.4.0-no-sherpa`）上，不改变数据目录。
 
 服务端转写的端点、四种失败形状与可用性判定见第 28 节。
 
@@ -732,63 +576,40 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 隔离靠 Gradle 源码集，不是运行时开关：
 
-- `app/src/main/.../voice/LocalAsr.kt` 定义 `LocalAsr`、`LocalEngine`、`LocalModelState`，
-  `main` 里的界面与 ViewModel 只依赖这三个类型。
-- `app/src/full/.../voice/` 提供 `SherpaAsr`（模型下载与安装）、`SherpaEngine`
-  （`OnlineRecognizer` 的包装）与返回它们的 `LocalAsrProvider`。
-- `app/src/nosherpa/.../voice/LocalAsrProvider.kt` 只有一个返回 `LocalAsr.Disabled`
-  的同名对象。
+- `app/src/main/.../voice/LocalAsr.kt` 定义 `LocalAsr`、`LocalEngine`、`LocalModelState`，`main` 里的界面与 ViewModel 只依赖这三个类型。
+- `app/src/full/.../voice/` 提供 `SherpaAsr`（模型下载与安装）、`SherpaEngine`（`OnlineRecognizer` 的包装）与返回它们的 `LocalAsrProvider`。
+- `app/src/nosherpa/.../voice/LocalAsrProvider.kt` 只有一个返回 `LocalAsr.Disabled`的同名对象。
 
-`sherpa-onnx` 的 AAR 与解压模型用的 `commons-compress` 都声明为
-`fullImplementation`。`nosherpa` 既不编译上述类，也不合并那两份依赖，
-四个 ABI 的包里都只有 `libandroidx.graphics.path.so`。
-「在同一个类里加一个布尔开关」做不到这一点：`.so` 仍会被打进包，体积不会降。
+`sherpa-onnx` 的 AAR 与解压模型用的 `commons-compress` 都声明为`fullImplementation`。`nosherpa` 既不编译上述类，也不合并那两份依赖，四个 ABI 的包里都只有 `libandroidx.graphics.path.so`。「在同一个类里加一个布尔开关」做不到这一点：`.so` 仍会被打进包，体积不会降。
 
 ### 本地识别
 
-端上引擎是 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 的流式识别，
-模型为 `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30`（tar.bz2，约 150MB），
-由用户按需下载到应用私有目录后解压。识别全程在手机上，不需要网络。
+端上引擎是 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 的流式识别，模型为 `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30`（tar.bz2，约 150MB），由用户按需下载到应用私有目录后解压。识别全程在手机上，不需要网络。
 
-它支持边说边出字（浮层实时显示已识别片段），也支持「说完自动停止」：
-靠 `OnlineRecognizer` 的 `isEndpoint` 判定，静音一段时间后自动收尾，
-只在「转写来源＝本地识别」且「触发方式＝点一下」时可用。
+它支持边说边出字（浮层实时显示已识别片段），也支持「说完自动停止」：靠 `OnlineRecognizer` 的 `isEndpoint` 判定，静音一段时间后自动收尾，只在「转写来源＝本地识别」且「触发方式＝点一下」时可用。
 
 ### 采集与封装
 
-两种来源共用一条采集循环：`AudioRecord` 以 16kHz 单声道 16 位读取，
-每次 100ms 一块。差别在块交出去之后去哪：
+两种来源共用一条采集循环：`AudioRecord` 以 16kHz 单声道 16 位读取，每次 100ms 一块。差别在块交出去之后去哪：
 
-- **本地识别**：直接 `acceptWaveform` 交给 `OnlineRecognizer`，不落盘，
-  实时片段推给浮层。
-- **服务端转写**：原样写入缓存目录下的裸 PCM，结束时由 `WavWriter`
-  在文件开头补 44 字节 RIFF/WAVE 头。
+- **本地识别**：直接 `acceptWaveform` 交给 `OnlineRecognizer`，不落盘，实时片段推给浮层。
+- **服务端转写**：原样写入缓存目录下的裸 PCM，结束时由 `WavWriter`在文件开头补 44 字节 RIFF/WAVE 头。
 
-**先写裸数据、收尾补头**是刻意的：边录边写头要在开头预留位置并在收尾回填长度，
-而内存里攒满 90 秒约 2.9MB。`RandomAccessFile` 一次读取后重写即可，峰值内存是文件大小。
+**先写裸数据、收尾补头**是刻意的：边录边写头要在开头预留位置并在收尾回填长度，而内存里攒满 90 秒约 2.9MB。`RandomAccessFile` 一次读取后重写即可，峰值内存是文件大小。
 
 若设备实际采样率与 16kHz 不同，先用 `LinearResampler` 折回再交给引擎或写盘。
 
-**头字段写错时服务端不会报错**（它只看文件名后缀），错误要到播放或识别阶段才暴露，
-因此 `WavWriterTest` 逐字段断言，而不是只验「文件能打开」。
+**头字段写错时服务端不会报错**（它只看文件名后缀），错误要到播放或识别阶段才暴露，因此 `WavWriterTest` 逐字段断言，而不是只验「文件能打开」。
 
 ### 收尾
 
-用户松手或再点一次时，只调用 `AudioRecord.stop()` 并置停止标志，
-让采集协程自己走到收尾这一步：本地识别调 `inputFinished` 取最后一段文本，
-服务端转写补头并交文件出来。
-**服务端路径上不能直接取消采集协程**——取消会跳过补头，产出没有头的文件，
-服务端仍会接受上传，但识别结果为空。
+用户松手或再点一次时，只调用 `AudioRecord.stop()` 并置停止标志，让采集协程自己走到收尾这一步：本地识别调 `inputFinished` 取最后一段文本，服务端转写补头并交文件出来。**服务端路径上不能直接取消采集协程**——取消会跳过补头，产出没有头的文件，服务端仍会接受上传，但识别结果为空。
 
 ### 入口开关与可用性
 
-设置项为「显示语音按钮」只决定按钮是否渲染，与来源和可用性无关。
-`full` 包的来源可在「本地识别」与「服务端转写」之间切换，默认本地识别；
-`-no-sherpa` 包没有这一组选项，恒为服务端转写。
+设置项为「显示语音按钮」只决定按钮是否渲染，与来源和可用性无关。`full` 包的来源可在「本地识别」与「服务端转写」之间切换，默认本地识别；`-no-sherpa` 包没有这一组选项，恒为服务端转写。
 
-点麦克风时的判定按来源分开：本地识别要求模型已下载，否则弹「需要先下载识别模型」；
-服务端转写要求 `TranscriptionProbe`（第 28 节）判定为 `Ready`，
-否则弹窗说明原因，两者都不会开始录音。
+点麦克风时的判定按来源分开：本地识别要求模型已下载，否则弹「需要先下载识别模型」；服务端转写要求 `TranscriptionProbe`（第 28 节）判定为 `Ready`，否则弹窗说明原因，两者都不会开始录音。
 
 ---
 
@@ -807,15 +628,9 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 这一轮调整后 debug APK 为 **40.6MB**（原 133.65MB，降幅约 70%）。
 
-> **后续变化**：现在改为 `splits.abi` 按架构拆包，四个架构各出一个 APK，
-> 都不再是单包。体积与实测状态见 发版记录 7.1、7.2 节。
-> `splits.abi` 与 `ndk.abiFilters` 二选一，同时存在时后者被忽略。
+> **后续变化**：现在改为 `splits.abi` 按架构拆包，四个架构各出一个 APK，都不再是单包。体积与实测状态见 发版记录 7.1、7.2 节。`splits.abi` 与 `ndk.abiFilters` 二选一，同时存在时后者被忽略。
 
-> **当前实测值**（0.4.0 拆成两个变体之后）：标准包按架构是 17.8–39.0MB，
-> 其中 arm64 为 25.0MB、`x86` 为 39.0MB（多一份 `libonnxruntime.so`）；
-> `-no-sherpa` 的四个包都在 2.45MB 左右，包内只剩 `libandroidx.graphics.path.so`（约 10KB）。
-> 两套数字的差额就是 `libsherpa-onnx-jni.so`（arm64 上 22.4MB）。
-> 数字会随功能增长而变化，引用时以实测为准。
+> **当前实测值**（0.4.0 拆成两个变体之后）：标准包按架构是 17.8–39.0MB，其中 arm64 为 25.0MB、`x86` 为 39.0MB（多一份 `libonnxruntime.so`）；`-no-sherpa` 的四个包都在 2.45MB 左右，包内只剩 `libandroidx.graphics.path.so`（约 10KB）。两套数字的差额就是 `libsherpa-onnx-jni.so`（arm64 上 22.4MB）。数字会随功能增长而变化，引用时以实测为准。
 
 ---
 
@@ -825,42 +640,32 @@ QwenPaw 没有推送通道，客户端只实现**本地**通知。
 
 ### 行为
 
-- 默认使用系统字体。设置页「使用 MiSans 字体」开关**默认关闭**，
-  且字体未下载时该开关置灰不可点。
-- 点击「下载」（约 16MB）后落到 `files/fonts/`。两个字重分别对应
-  `MiSans-Static.ttf`（`usWeightClass = 400`）与 `MiSans.ttf`（`usWeightClass = 500`）。
-- 下载策略：两个字重先都下载到 `.tmp`，**全部成功后再原子改名**。
-  这样做是为了避免只完成一半的文件被后续逻辑误判为「已安装」；
-  任一失败则清空全部临时文件并回到未安装状态。
+- 默认使用系统字体。设置页「使用 MiSans 字体」开关**默认关闭**，且字体未下载时该开关置灰不可点。
+- 点击「下载」（约 16MB）后落到 `files/fonts/`。两个字重分别对应`MiSans-Static.ttf`（`usWeightClass = 400`）与 `MiSans.ttf`（`usWeightClass = 500`）。
+- 下载策略：两个字重先都下载到 `.tmp`，**全部成功后再原子改名**。这样做是为了避免只完成一半的文件被后续逻辑误判为「已安装」；任一失败则清空全部临时文件并回到未安装状态。
 
 ### 字体如何接入 Compose
 
-Theme 侧不再引用 `R.font.*`，而是把运行时的 `File` 包成 Compose 字体：
-`Font(file, weight)`，对应 `AndroidFontKt.Font-Ej4NQ78` 重载。
+Theme 侧不再引用 `R.font.*`，而是把运行时的 `File` 包成 Compose 字体：`Font(file, weight)`，对应 `AndroidFontKt.Font-Ej4NQ78` 重载。
 
 ### 来源与许可
 
 字体来自 GitHub 镜像仓库 `adivenxnataly/MiSans`，版权归小米科技有限责任公司所有。
 
-MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**。
-因此本仓库不提交字体文件，应用也不随包分发，只在用户主动点击时从其 GitHub 原址下载，
-并在设置页与关于页标注出处。仓库的 `.gitignore` 已排除 `res/font/*.ttf`，避免误提交。
+MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**。因此本仓库不提交字体文件，应用也不随包分发，只在用户主动点击时从其 GitHub 原址下载，并在设置页与关于页标注出处。仓库的 `.gitignore` 已排除 `res/font/*.ttf`，避免误提交。
 
 ---
 
 ## 17、跨版本适配：2.2.2.post1 与 2.3.0b2
 
-服务端没有能力发现端口。`/api/capabilities`、`/api/features`、`/healthz` 一类路径
-在两个版本上都不存在，`/api/status` 与 `/api/health` 返回 404。
-唯一的版本信息来自 `GET /api/version`：
+服务端没有能力发现端口。`/api/capabilities`、`/api/features`、`/healthz` 一类路径在两个版本上都不存在，`/api/status` 与 `/api/health` 返回 404。唯一的版本信息来自 `GET /api/version`：
 
 ```json
 {"version": "2.2.2.post1"}
 {"version": "2.3.0b2"}
 ```
 
-因此适配只有两条可用路径：**按版本号分支**，或**按状态码兜底**。
-本节记录两个版本的实际差异，以及客户端据此定下的规则。
+因此适配只有两条可用路径：**按版本号分支**，或**按状态码兜底**。本节记录两个版本的实际差异，以及客户端据此定下的规则。
 
 ### 版本差了多少
 
@@ -876,17 +681,10 @@ MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**
 
 - 33 条的路径与 HTTP 方法在两版**完全一致**；
 - 8 个关键端点的 `200` 响应 schema 完全相同；
-- 只有两条端点的**参数**有差异，且都是新增可选参数，不影响既有调用：
-  `POST /api/console/chat/stop` 多出 `initiator`（默认空串），
-  `GET /api/models/{provider_id}/pool` 多出 `model_type`（可空）。
+- 只有两条端点的**参数**有差异，且都是新增可选参数，不影响既有调用：`POST /api/console/chat/stop` 多出 `initiator`（默认空串），`GET /api/models/{provider_id}/pool` 多出 `model_type`（可空）。
 - 移除的 5 条里没有一条被客户端调用。
 
-新增的 33 条集中在四块：插件管理（`config` / `enabled` / `unload` /
-`repair-dependencies` / `dependency-upgrades`）、技能池下载任务、
-ChatGPT 提供商 OAuth、`/api/runtime/*`，另有 `/api/advisor-mode`、
-`/api/chats/resolve`、`/api/chats/{id}/decision-settings`。
-这些都属于尚未接入的新能力，不需要为旧版本做降级——功能本身在 2.2.2 上不存在，
-说明「当前服务端不支持」即可。
+新增的 33 条集中在四块：插件管理（`config` / `enabled` / `unload` /`repair-dependencies` / `dependency-upgrades`）、技能池下载任务、ChatGPT 提供商 OAuth、`/api/runtime/*`，另有 `/api/advisor-mode`、`/api/chats/resolve`、`/api/chats/{id}/decision-settings`。这些都属于尚未接入的新能力，不需要为旧版本做降级——功能本身在 2.2.2 上不存在，说明「当前服务端不支持」即可。
 
 ### 被移除的 5 条
 
@@ -898,36 +696,22 @@ ChatGPT 提供商 OAuth、`/api/runtime/*`，另有 `/api/advisor-mode`、
 | `POST /api/agents/{agentId}/workspace/upload` | 422 | 405 |
 | `POST /api/desktop/shutdown` | 404 | 404 |
 
-注意后两条的**表现不同**：删掉的路由在 2.3.0b2 上返回 404，而方法不匹配返回 405。
-`POST /api/workspace/upload` 之所以是 405 而不是 404，是因为同一路径下
-`file-upload` 系的路由仍以其它方法存在，FastAPI 的路由表对这种情况回 405。
-由此得出第一条判据：**405 不能当作「端点不存在」**，
-而 404 也不能反推「端点被删」——路径拼错同样返回 404。
+注意后两条的**表现不同**：删掉的路由在 2.3.0b2 上返回 404，而方法不匹配返回 405。`POST /api/workspace/upload` 之所以是 405 而不是 404，是因为同一路径下`file-upload` 系的路由仍以其它方法存在，FastAPI 的路由表对这种情况回 405。由此得出第一条判据：**405 不能当作「端点不存在」**，而 404 也不能反推「端点被删」——路径拼错同样返回 404。
 
 ### 客户端据此定的规则
 
 **不依赖任何可被移除的整包端点。** 需要整包能力时改走逐文件路径：
 
-- 目录下载：`GET /api/workspace/tree` 按游标翻完，再对每个文件调
-  `GET /api/workspace/file-download?path=&root=`。两个版本都支持，
-  代价是多几次请求。`tree` 要翻到 `has_more` 为假为止，
-  否则大目录会被静默截断（实测 `digest` 目录返回 `entries` 为空而 `has_more` 为假）。
-- 整包上传：改用 `POST /api/workspace/file-upload`（多文件表单）或
-  `POST /api/workspace/project-directory/upload-zip`（整目录 zip）。
-  两者在两版都存在，字段形状也一致。
+- 目录下载：`GET /api/workspace/tree` 按游标翻完，再对每个文件调`GET /api/workspace/file-download?path=&root=`。两个版本都支持，代价是多几次请求。`tree` 要翻到 `has_more` 为假为止，否则大目录会被静默截断（实测 `digest` 目录返回 `entries` 为空而 `has_more` 为假）。
+- 整包上传：改用 `POST /api/workspace/file-upload`（多文件表单）或`POST /api/workspace/project-directory/upload-zip`（整目录 zip）。两者在两版都存在，字段形状也一致。
 
 **不做运行时版本分支。** 理由有三条：
 
 1. 客户端当前**没有**任何调用落在被删的 5 条上，分支没有作用对象。
-2. 版本号不是稳定的能力标识：`2.3.0b2` 是预发布版的写法，正式版会是 `2.3.0`，
-   靠字符串前缀比较迟早出错；而服务端不提供「这个版本有哪些端点」的接口。
-3. 分支一旦引入就必须为每条分支维护一条回归路径，而两版共用的 33 条路径
-   目前完全一致，分支只会增加未被覆盖的代码。
+2. 版本号不是稳定的能力标识：`2.3.0b2` 是预发布版的写法，正式版会是 `2.3.0`，靠字符串前缀比较迟早出错；而服务端不提供「这个版本有哪些端点」的接口。
+3. 分支一旦引入就必须为每条分支维护一条回归路径，而两版共用的 33 条路径目前完全一致，分支只会增加未被覆盖的代码。
 
-**遇到 404 时按上下文给出说明，而不是按版本猜测。** 现有做法已经符合这一条：
-登录接口的 404 单独映射成「请求未落到登录端点」（见第 1 节），
-其余 404 统一为「会话不存在或已被删除」。若将来接入某个只在 2.3.0b2 存在的能力，
-调用方应就近给出「当前服务端版本不支持该功能」的文案，而不是让用户看到 404 原文。
+**遇到 404 时按上下文给出说明，而不是按版本猜测。** 现有做法已经符合这一条：登录接口的 404 单独映射成「请求未落到登录端点」（见第 1 节），其余 404 统一为「会话不存在或已被删除」。若将来接入某个只在 2.3.0b2 存在的能力，调用方应就近给出「当前服务端版本不支持该功能」的文案，而不是让用户看到 404 原文。
 
 ### 字段层面的两处实际差异
 
@@ -938,15 +722,9 @@ ChatGPT 提供商 OAuth、`/api/runtime/*`，另有 `/api/advisor-mode`、
 | `GET /api/token-usage` 的 `cache_hit_rate` | 有调用时为数字 | 无调用时为 `null` | 声明为 `Double?`，界面显示「暂无数据」 |
 | `GET /api/models/active` | 只有 `active_llm` | 多出 `default_models` | 忽略未知字段即可，无需建模 |
 
-`cache_hit_rate` 一项要紧：OpenAPI 把它声明为 `number | null`，两版一致，
-但 2.2.2 在有调用时恰好总是有值，此前把 DTO 写成非空 `Double` 一直没暴露。
-在干净实例（2.3.0b2 容器首次启动）上拿到 `null` 后，整个响应解析失败，
-界面报「加载用量失败」。这类「同一字段在空数据时才为 null」的形状
-只能靠干净实例覆盖，用有数据的实例回归是测不出来的。
+`cache_hit_rate` 一项要紧：OpenAPI 把它声明为 `number | null`，两版一致，但 2.2.2 在有调用时恰好总是有值，此前把 DTO 写成非空 `Double` 一直没暴露。在干净实例（2.3.0b2 容器首次启动）上拿到 `null` 后，整个响应解析失败，界面报「加载用量失败」。这类「同一字段在空数据时才为 null」的形状只能靠干净实例覆盖，用有数据的实例回归是测不出来的。
 
-同理，`GET /api/agents/{agentId}` 的响应在 2.3.0b2 上多出 `advisor_mode` 整块、
-少了 `tools.builtin_tools.ast_search` 条目；客户端只读 `approval_level`，
-多余字段由 `ignoreUnknownKeys` 吸收，不需要处理。
+同理，`GET /api/agents/{agentId}` 的响应在 2.3.0b2 上多出 `advisor_mode` 整块、少了 `tools.builtin_tools.ast_search` 条目；客户端只读 `approval_level`，多余字段由 `ignoreUnknownKeys` 吸收，不需要处理。
 
 ---
 
@@ -961,24 +739,15 @@ ChatGPT 提供商 OAuth、`/api/runtime/*`，另有 `/api/advisor-mode`、
 | `PUT /api/profile/avatars/selection` | 切换当前头像 |
 | `POST /api/profile/avatars` | 上传新头像（multipart） |
 
-**只有一个 owner，固定为 `"console"`。** `qwenpaw/user_assets/avatar_routes.py` 里
-`avatar_owner()` 不读取任何请求参数，一律返回 `"console"`；服务端也没有按智能体
-或按渠道区分的头像端点。因此客户端只能把这张图用于用户侧，智能体头像继续走本地存储。
+**只有一个 owner，固定为 `"console"`。** `qwenpaw/user_assets/avatar_routes.py` 里`avatar_owner()` 不读取任何请求参数，一律返回 `"console"`；服务端也没有按智能体或按渠道区分的头像端点。因此客户端只能把这张图用于用户侧，智能体头像继续走本地存储。
 
-服务端上限（`qwenpaw/user_assets/avatars.py`）：单张 2 MB，支持 PNG / JPEG / WEBP / GIF，
-最长边 16384，历史保留 12 张。客户端不展示历史，只在 `selected` 变化时重新取图。
+服务端上限（`qwenpaw/user_assets/avatars.py`）：单张 2 MB，支持 PNG / JPEG / WEBP / GIF，最长边 16384，历史保留 12 张。客户端不展示历史，只在 `selected` 变化时重新取图。
 
-两个容器初次查询都返回 `{"selected":null,"history":[]}`，即默认未设置头像。
-这条空数据形状是必须覆盖的：功能在「服务端没有头像」时不能改变任何现有表现。
+两个容器初次查询都返回 `{"selected":null,"history":[]}`，即默认未设置头像。这条空数据形状是必须覆盖的：功能在「服务端没有头像」时不能改变任何现有表现。
 
-**图片端点不能走字符串通道。** `QwenPawApi` 的常规请求把响应体读成 `String`，
-二进制图会按字符集转换而损坏；为此单独开了 `requestBytes`，与 `execute` 同构，
-只把 `body.string()` 换成 `body.bytes()`。
+**图片端点不能走字符串通道。** `QwenPawApi` 的常规请求把响应体读成 `String`，二进制图会按字符集转换而损坏；为此单独开了 `requestBytes`，与 `execute` 同构，只把 `body.string()` 换成 `body.bytes()`。
 
-**不判定 `Cache-Control`，自己按 id 缓存。** 服务端对图片响应写了
-`private, no-store`，意味着每次请求都会真的走网络；而客户端要在冷启动与断网时都能
-显示上次的头像，因此把图片落到 `filesDir/server-avatar/{selectedId}.img`，
-用 id 做文件名，`index.txt` 记当前选中项。id 未变时不重复下载（单张上限 2 MB）。
+**不判定 `Cache-Control`，自己按 id 缓存。** 服务端对图片响应写了`private, no-store`，意味着每次请求都会真的走网络；而客户端要在冷启动与断网时都能显示上次的头像，因此把图片落到 `filesDir/server-avatar/{selectedId}.img`，用 id 做文件名，`index.txt` 记当前选中项。id 未变时不重复下载（单张上限 2 MB）。
 
 ### 回归方法
 
@@ -993,42 +762,29 @@ curl -s http://10.10.0.211:8088/api/version
 curl -s http://10.10.0.220:8088/api/version
 ```
 
-动手改头像缓存逻辑时，注意「换 id 后旧文件必须被清掉」这条——服务端单张上限 2 MB，
-攒几张就很可观，而旧 id 的图片在客户端没有任何用处。
+动手改头像缓存逻辑时，注意「换 id 后旧文件必须被清掉」这条——服务端单张上限 2 MB，攒几张就很可观，而旧 id 的图片在客户端没有任何用处。
 
 ### 通用回归方法
 
 改协议相关代码后，对两个容器各跑一遍版本探测，再按需切设备侧场景：
 
-设备侧用 `QWENPAW_HOST=10.10.0.220:8088 ./scripts/e2e_acceptance.sh --only A4`
-切到预发布版跑单个场景。**不要在干净实例上跳过用量、列表这类「空数据」页面**，
-上面那处 `null` 就只在干净实例上出现。
+设备侧用 `QWENPAW_HOST=10.10.0.220:8088 ./scripts/e2e_acceptance.sh --only A4`切到预发布版跑单个场景。**不要在干净实例上跳过用量、列表这类「空数据」页面**，上面那处 `null` 就只在干净实例上出现。
 
 ### 若将来必须放弃某项功能
 
 判断标准是「在最新版本上是否仍有等价路径」：
 
 1. 有等价端点（如整包下载 → 逐文件下载）：**改造，不放弃**。
-2. 只有旧版本有、且无等价路径：**放弃该功能**，在本文与
-   待办清单 对应条目里写明「2.3.0 起服务端已移除」，
-   并注明最后一次可用版本，避免下一轮重新设计。
-3. 只有新版本有、旧版本没有（如插件管理）：**接入，旧版本上按 404 说明不支持**，
-   不做功能降级。「说明不支持」时给安装指引而不是「去启用」——插件被禁用后
-   与未安装不可区分，见第 19 节。
+2. 只有旧版本有、且无等价路径：**放弃该功能**，在本文与待办清单 对应条目里写明「2.3.0 起服务端已移除」，并注明最后一次可用版本，避免下一轮重新设计。
+3. 只有新版本有、旧版本没有（如插件管理）：**接入，旧版本上按 404 说明不支持**，不做功能降级。「说明不支持」时给安装指引而不是「去启用」——插件被禁用后与未安装不可区分，见第 19 节。
 
 ---
 
 ## 19、插件探测
 
-客户端需要判断服务端有没有装配套插件（id `qwenpaw-node-bridge`），并据此决定
-功能入口是禁用还是走替代路径。本节记录 2026-11-03 在两个容器上的实测。
+客户端需要判断服务端有没有装配套插件（id `qwenpaw-node-bridge`），并据此决定功能入口是禁用还是走替代路径。本节记录 2026-11-03 在两个容器上的实测。
 
-**id 与 HTTP 前缀是两段不同的字符串。** 插件 id 为 `qwenpaw-node-bridge`，
-但插件路由的 prefix 取 `qwenpaw-node-bridge` 会得到
-`/api/plugins/qwenpaw-node-bridge/...`，与核心 `plugins.py` 的
-`/{plugin_id}/status`、`/{plugin_id}/files/{path}` 同层，容易撞车（见下文同名规则）。
-两端约定插件统一用 prefix `/plugins/qwenpaw-node-bridge`，端点路径因此是
-`GET /api/plugins/qwenpaw-node-bridge/info`，与 id 保持一致，不再出现缩写形式。
+**id 与 HTTP 前缀是两段不同的字符串。** 插件 id 为 `qwenpaw-node-bridge`，但插件路由的 prefix 取 `qwenpaw-node-bridge` 会得到`/api/plugins/qwenpaw-node-bridge/...`，与核心 `plugins.py` 的`/{plugin_id}/status`、`/{plugin_id}/files/{path}` 同层，容易撞车（见下文同名规则）。两端约定插件统一用 prefix `/plugins/qwenpaw-node-bridge`，端点路径因此是`GET /api/plugins/qwenpaw-node-bridge/info`，与 id 保持一致，不再出现缩写形式。
 
 ### 端点与两版差异
 
@@ -1049,39 +805,21 @@ curl -s http://10.10.0.220:8088/api/version
  "frontend_entry":null}
 ```
 
-2.3.0b2 在同一形状上多出 `status: "active"` 与 `diagnostics: []`。
-源码见 `qwenpaw/app/routers/plugins.py` 的 `list_plugins` 与 `get_plugin_status`。
+2.3.0b2 在同一形状上多出 `status: "active"` 与 `diagnostics: []`。源码见 `qwenpaw/app/routers/plugins.py` 的 `list_plugins` 与 `get_plugin_status`。
 
 ### 判定规则
 
-**以插件自己的 `GET /api/plugins/qwenpaw-node-bridge/info` 为准：200 即可用，404 即未检测到。**
-不查核心的 `GET /api/plugins` 列表，理由如下。
+**以插件自己的 `GET /api/plugins/qwenpaw-node-bridge/info` 为准：200 即可用，404 即未检测到。**不查核心的 `GET /api/plugins` 列表，理由如下。
 
-1. **列表判定的两种麻烦，`/info` 都没有。** 查列表要区分 `enabled` 与 `loaded`：
-   loader 尚未初始化时走磁盘扫描（`_list_plugins_from_disk`），返回
-   `enabled: true, loaded: false`，把它当「已启用」会在启动竞态时误判；
-   2.3 上还要再加 `status == "active"`。`/info` 返回 200 本身就说明该插件的
-   router 已注册成功，比列表里的 `loaded: true` 证明力更强。
-2. **不要用 `GET /api/plugins/{id}` 查单插件。** 该路由在 2.2.2.post1 不存在（404），
-   2.3.0b2 才有（200）。用它做判定会让稳定版上所有插件都显示为未安装，
-   而 2.2 恰恰是当前基线版本。
-3. **不能比 `qwenpaw_version`。** 列表与 `/status` 响应都不含该字段，`plugin.json` 里的
-   `qwenpaw_version.min` 只在安装校验时由服务端读取
-   （`plugins/loader.py` 载入 manifest 后交给 `PluginApi`），不回传到列表。
+1. **列表判定的两种麻烦，`/info` 都没有。** 查列表要区分 `enabled` 与 `loaded`：loader 尚未初始化时走磁盘扫描（`_list_plugins_from_disk`），返回`enabled: true, loaded: false`，把它当「已启用」会在启动竞态时误判；2.3 上还要再加 `status == "active"`。`/info` 返回 200 本身就说明该插件的router 已注册成功，比列表里的 `loaded: true` 证明力更强。
+2. **不要用 `GET /api/plugins/{id}` 查单插件。** 该路由在 2.2.2.post1 不存在（404），2.3.0b2 才有（200）。用它做判定会让稳定版上所有插件都显示为未安装，而 2.2 恰恰是当前基线版本。
+3. **不能比 `qwenpaw_version`。** 列表与 `/status` 响应都不含该字段，`plugin.json` 里的`qwenpaw_version.min` 只在安装校验时由服务端读取（`plugins/loader.py` 载入 manifest 后交给 `PluginApi`），不回传到列表。
 
-**未注册的插件路径返回 404，不是 SPA 页面。** 本机 2.2.2.post1 实测
-`GET /api/plugins/qwenpaw-node-bridge/info` → 404 `{"detail":"Not Found"}`；
-`GET /api/plugins/qwenpaw-node-bridge/status` → 404 `Plugin 'qwenpaw-node-bridge' not found.`。
-`_app.py` 的 SPA catch-all 里有 `if full_path.startswith("api/")` 直接抛 404 的分支，
-因此客户端不必再判断响应体是不是 HTML。
+**未注册的插件路径返回 404，不是 SPA 页面。** 本机 2.2.2.post1 实测`GET /api/plugins/qwenpaw-node-bridge/info` → 404 `{"detail":"Not Found"}`；`GET /api/plugins/qwenpaw-node-bridge/status` → 404 `Plugin 'qwenpaw-node-bridge' not found.`。`_app.py` 的 SPA catch-all 里有 `if full_path.startswith("api/")` 直接抛 404 的分支，因此客户端不必再判断响应体是不是 HTML。
 
-**插件路由不在鉴权白名单里。** `auth.py` 的 `_PUBLIC_PATHS` 与 `_PUBLIC_PREFIXES`
-都不含 `/api/plugins`，服务端开启登录后访问插件路由需要 token。探测因此只能排在
-登录之后；验证阶段拿到 401 应记为「待重探」，不能当成未安装。
+**插件路由不在鉴权白名单里。** `auth.py` 的 `_PUBLIC_PATHS` 与 `_PUBLIC_PREFIXES`都不含 `/api/plugins`，服务端开启登录后访问插件路由需要 token。探测因此只能排在登录之后；验证阶段拿到 401 应记为「待重探」，不能当成未安装。
 
-**插件路由与核心路由同名时命中核心的那条，已实测。** 插件 prefix 被 `registry.py`
-拼成 `/api` + prefix，核心 `plugins.py` 在模块级先注册，插件路由随后插入。
-在未安装插件的实例上请求同一前缀下的四个子路径，结果分成两类：
+**插件路由与核心路由同名时命中核心的那条，已实测。** 插件 prefix 被 `registry.py`拼成 `/api` + prefix，核心 `plugins.py` 在模块级先注册，插件路由随后插入。在未安装插件的实例上请求同一前缀下的四个子路径，结果分成两类：
 
 ```
 GET /api/plugins/qwenpaw-node-bridge/status    → 404 Plugin 'qwenpaw-node-bridge' not found.
@@ -1090,21 +828,13 @@ GET /api/plugins/qwenpaw-node-bridge/info      → 404 {"detail":"Not Found"}
 GET /api/plugins/qwenpaw-node-bridge/search    → 404 {"detail":"Not Found"}
 ```
 
-前两条的参数化 detail 说明请求已进入核心 router；后两条连核心路由都没匹配上，
-落到通用 404。因此 `/status` 与 `/files/**` 这两个子路径**不能给插件用**，
-插件定义同名路由也收不到请求。插件只用 `/info`、`/search`、`/events` 这类子路径。
+前两条的参数化 detail 说明请求已进入核心 router；后两条连核心路由都没匹配上，落到通用 404。因此 `/status` 与 `/files/**` 这两个子路径**不能给插件用**，插件定义同名路由也收不到请求。插件只用 `/info`、`/search`、`/events` 这类子路径。
 
 ### 禁用与未安装不可区分
 
-禁用插件的方式是把目录改名加 `.disabled` 后缀，发现阶段直接跳过
-（`plugins/loader.py` 的 `_is_disabled_plugin_dir`）。实测：把 `clawhub-hub` 改名为
-`clawhub-hub.disabled` 后，运行中的实例仍报告 `loaded: true`——已加载的实例在内存里，
-要重启才生效；重启后列表只剩 3 个插件，`GET /api/plugins/clawhub-hub/status`
-返回 404 `Plugin 'clawhub-hub' not found.`，与从未安装的表现完全相同。
+禁用插件的方式是把目录改名加 `.disabled` 后缀，发现阶段直接跳过（`plugins/loader.py` 的 `_is_disabled_plugin_dir`）。实测：把 `clawhub-hub` 改名为`clawhub-hub.disabled` 后，运行中的实例仍报告 `loaded: true`——已加载的实例在内存里，要重启才生效；重启后列表只剩 3 个插件，`GET /api/plugins/clawhub-hub/status`返回 404 `Plugin 'clawhub-hub' not found.`，与从未安装的表现完全相同。
 
-因此客户端只设「已检测到」与「未检测到」两态。对未检测到的情况给安装指引，
-**不要给「去启用」**——对 2.2 而言禁用的插件没有可用的启用开关，
-把用户引过去只会看到一个不存在的入口。
+因此客户端只设「已检测到」与「未检测到」两态。对未检测到的情况给安装指引，**不要给「去启用」**——对 2.2 而言禁用的插件没有可用的启用开关，把用户引过去只会看到一个不存在的入口。
 
 ### 插件能力自述
 
@@ -1117,18 +847,11 @@ GET /api/plugins/qwenpaw-node-bridge/info
  "capabilities":["info","search"]}
 ```
 
-客户端按 capability 名开关功能，不按插件版本推断。端点挂在插件自己的 router 上
-（`api.register_http_router(prefix="/plugins/qwenpaw-node-bridge")`），返回 404 即视为不可用。
-`protocol_version` 用于将来契约变更时拒绝不兼容的旧插件，客户端只接受 `1`。
+客户端按 capability 名开关功能，不按插件版本推断。端点挂在插件自己的 router 上（`api.register_http_router(prefix="/plugins/qwenpaw-node-bridge")`），返回 404 即视为不可用。`protocol_version` 用于将来契约变更时拒绝不兼容的旧插件，客户端只接受 `1`。
 
-`plugin_version` 由插件读 `api.manifest["version"]`，即 `plugin.json` 的 `version`，
-不另存常量。`server_version` 由插件读 `qwenpaw.__version__`（该模块只有一行版本常量），
-只用于排查两端配错版本，客户端不据此分支。两个版本号**都只用于展示与排查**。
+`plugin_version` 由插件读 `api.manifest["version"]`，即 `plugin.json` 的 `version`，不另存常量。`server_version` 由插件读 `qwenpaw.__version__`（该模块只有一行版本常量），只用于排查两端配错版本，客户端不据此分支。两个版本号**都只用于展示与排查**。
 
-**这条形状仍是两端约定的草案，尚未实现。** 判定以 `/info` 为准、404 的形状、
-鉴权与路由冲突四条来自实测与源码；`/info` 的字段名与 capability 取值由本仓库
-与插件仓库共同商定，落地前不属于「已实测」的内容。插件实现后需补齐一次真实响应
-到本节，并把「草案」二字去掉。
+**这条形状仍是两端约定的草案，尚未实现。** 判定以 `/info` 为准、404 的形状、鉴权与路由冲突四条来自实测与源码；`/info` 的字段名与 capability 取值由本仓库与插件仓库共同商定，落地前不属于「已实测」的内容。插件实现后需补齐一次真实响应到本节，并把「草案」二字去掉。
 
 ### 回归方法
 
@@ -1142,14 +865,12 @@ curl -s http://10.10.0.211:8088/api/plugins | head -c 200
 curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/status
 ```
 
-测禁用态时改完目录必须重启服务端（`screen -S qwenpaw -X quit` 后重开），
-否则内存里的实例仍报告已加载。测完把目录名改回去再重启一次。
+测禁用态时改完目录必须重启服务端（`screen -S qwenpaw -X quit` 后重开），否则内存里的实例仍报告已加载。测完把目录名改回去再重启一次。
 ---
 
 ## 20、分页的三种形态
 
-服务端的列表类端点有三种分页写法，客户端的 `data/remote/Paging.kt` 把三者归一成
-「取下一页 / 是否还有更多 / 追加到已有列表」，界面只看条目与 `hasMore`。
+服务端的列表类端点有三种分页写法，客户端的 `data/remote/Paging.kt` 把三者归一成「取下一页 / 是否还有更多 / 追加到已有列表」，界面只看条目与 `hasMore`。
 
 | 形态 | 代表端点 | 请求参数 | 响应字段 | 结束判据 |
 | --- | --- | --- | --- | --- |
@@ -1160,21 +881,16 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 三条公共护栏，写在 `settle()` 一处：
 
 1. **空页且无游标视为结束。** 服务端已经给不出内容。
-2. **游标与上一页相同视为结束。** 服务端没推进游标，继续请求只会死循环；
-   本页已取到的条目保留，不因为游标缺陷丢数据。
-3. **空白响应归为结束。** `QwenPawApi.decode` 对空 body 抛 `ApiException(204)`，
-   真正的 HTTP 204 与「200 空 body」在这一层无法区分。干净实例上的「0 条事件」
-   不该弹「服务端返回了空响应」，因此 204 按空页处理；其余异常照原样上抛。
+2. **游标与上一页相同视为结束。** 服务端没推进游标，继续请求只会死循环；本页已取到的条目保留，不因为游标缺陷丢数据。
+3. **空白响应归为结束。** `QwenPawApi.decode` 对空 body 抛 `ApiException(204)`，真正的 HTTP 204 与「200 空 body」在这一层无法区分。干净实例上的「0 条事件」不该弹「服务端返回了空响应」，因此 204 按空页处理；其余异常照原样上抛。
 
-`limit`/`offset` 端点**没有 `has_more`**，这一点容易按 cursor 形态写错：
-按「有没有下一页字段」实现会永远判成结束，列表只显示第一页。
+`limit`/`offset` 端点**没有 `has_more`**，这一点容易按 cursor 形态写错：按「有没有下一页字段」实现会永远判成结束，列表只显示第一页。
 
 ---
 
 ## 21、收件箱
 
-服务端把 cron 执行、自动记忆写入一类的系统消息写进 `WORKING_DIR/inbox_events.json`
-（上限 5000 条），由 console router 对外提供。以下形状在 2.2.2.post1 实测。
+服务端把 cron 执行、自动记忆写入一类的系统消息写进 `WORKING_DIR/inbox_events.json`（上限 5000 条），由 console router 对外提供。以下形状在 2.2.2.post1 实测。
 
 ### 端点
 
@@ -1201,22 +917,13 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 
 审批事件走 `/api/console/push-messages`，不写这五个来源。
 
-**筛选后的计数。** `total` 与 `unread_count` 都是应用 `agent_id`、`status`、
-`source_type(s)` 之后的数字；`unread_only=true` 只影响 `events`，`unread_count` 不变。
-因此筛选生效时，顶栏的未读数是「筛选范围内的未读」，不是全局未读；
-插件 SSE 推来的全局计数此时不能直接覆盖它。
+**筛选后的计数。** `total` 与 `unread_count` 都是应用 `agent_id`、`status`、`source_type(s)` 之后的数字；`unread_only=true` 只影响 `events`，`unread_count` 不变。因此筛选生效时，顶栏的未读数是「筛选范围内的未读」，不是全局未读；插件 SSE 推来的全局计数此时不能直接覆盖它。
 
-**标记已读不分范围。** `POST /api/console/inbox/read` 带 `all: true` 会清除整库未读，
-不接受来源或智能体条件。客户端因此在筛选生效时隐藏「全部已读」。
+**标记已读不分范围。** `POST /api/console/inbox/read` 带 `all: true` 会清除整库未读，不接受来源或智能体条件。客户端因此在筛选生效时隐藏「全部已读」。
 
-**定时任务不是自动全量写入。** `append_event(source_type="cron", event_type="cron_result")`
-只在 `job.save_result_to_inbox` 为 true 时执行；该字段为 `null` 时按
-`not (task_type == "text" and schedule.type == "cron")` 解析，即消息内容类周期任务默认不存。
-普通执行失败不写事件，只有超时（`cron_timeout`）与投递失败（`cron_delivery_failed_fallback`）会写。
+**定时任务不是自动全量写入。** `append_event(source_type="cron", event_type="cron_result")`只在 `job.save_result_to_inbox` 为 true 时执行；该字段为 `null` 时按`not (task_type == "text" and schedule.type == "cron")` 解析，即消息内容类周期任务默认不存。普通执行失败不写事件，只有超时（`cron_timeout`）与投递失败（`cron_delivery_failed_fallback`）会写。
 
-2026-11-08 在 `qp-test`（2.2.2.post1）实测：`source_type=memory` 得 3 条、
-`source_type=cron` 得 1 条、`agent_id` 指向不存在的智能体得 0 条，
-`total` 与 `unread_count` 随筛选同步变化。2.3.0b2 的参数一致性尚未回归。
+2026-11-08 在 `qp-test`（2.2.2.post1）实测：`source_type=memory` 得 3 条、`source_type=cron` 得 1 条、`agent_id` 指向不存在的智能体得 0 条，`total` 与 `unread_count` 随筛选同步变化。2.3.0b2 的参数一致性尚未回归。
 
 ### 响应形状
 
@@ -1224,8 +931,7 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 {"events": [...], "total": 0, "unread_count": 0}
 ```
 
-**没有 `has_more`。** `total` 与 `unread_count` 都是**过滤之后**的计数：
-`unread_count` 在 `unread_only=true` 时与 `total` 相等，因此客户端不应在本地推算未读。
+**没有 `has_more`。** `total` 与 `unread_count` 都是**过滤之后**的计数：`unread_count` 在 `unread_only=true` 时与 `total` 相等，因此客户端不应在本地推算未读。
 
 ### 事件结构
 
@@ -1236,17 +942,13 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
  "created_at": 1793679546.0410624}
 ```
 
-**`created_at` 是浮点秒**（服务端 `time.time()`），不是 ISO 字符串，也不是毫秒。
-按 1000 乘后交 `Instant.ofEpochMilli` 格式化；时区必须显式传入，
-否则本地通过、CI 失败。
+**`created_at` 是浮点秒**（服务端 `time.time()`），不是 ISO 字符串，也不是毫秒。按 1000 乘后交 `Instant.ofEpochMilli` 格式化；时区必须显式传入，否则本地通过、CI 失败。
 
-轨迹形状：`{run_id, created_at, completed_at, status, meta, events[{at, event}], error?}`，
-`events[].at` 同样是浮点秒，`event` 是服务端原样的任意结构。
+轨迹形状：`{run_id, created_at, completed_at, status, meta, events[{at, event}], error?}`，`events[].at` 同样是浮点秒，`event` 是服务端原样的任意结构。
 
 ### 删除的连带效果
 
-删除事件时若该 `run_id` 不再被其它事件引用，服务端会同时删掉轨迹，
-响应返回 `{deleted, trace_deleted, run_id}`。客户端不需要自己判断引用关系。
+删除事件时若该 `run_id` 不再被其它事件引用，服务端会同时删掉轨迹，响应返回 `{deleted, trace_deleted, run_id}`。客户端不需要自己判断引用关系。
 
 ---
 
@@ -1266,8 +968,7 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 
 全部走 `X-Agent-Id` 归属。
 
-工具字段：`name`、`enabled`、`source_plugin_id`、`source_plugin_name`、`category`、
-`description`、`async_execution`、`icon`、`requires_config`、`config_fields`、`config_values`。
+工具字段：`name`、`enabled`、`source_plugin_id`、`source_plugin_name`、`category`、`description`、`async_execution`、`icon`、`requires_config`、`config_fields`、`config_values`。
 
 **两处 `null` 会让整份响应解析失败**（实测）：
 
@@ -1275,24 +976,13 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 {"name": "read_file", ..., "category": null, "config_fields": null, "config_values": null}
 ```
 
-无配置项的工具返回 `config_fields: null` 与 `config_values: null`，不是空数组/空对象；
-非 select 类型的字段返回 `"options": null`。把任一字段声明成非空集合，
-整份 `/api/tools` 反序列化失败，页面上表现为「没有可用的工具」——从响应看不出异常。
+无配置项的工具返回 `config_fields: null` 与 `config_values: null`，不是空数组/空对象；非 select 类型的字段返回 `"options": null`。把任一字段声明成非空集合，整份 `/api/tools` 反序列化失败，页面上表现为「没有可用的工具」——从响应看不出异常。
 
-`config_values` 里的密码类字段已被服务端替换成 `***`。那是占位符不是真值，
-原样提交会把密钥写成三个星号，客户端必须当作空处理。
+`config_values` 里的密码类字段已被服务端替换成 `***`。那是占位符不是真值，原样提交会把密钥写成三个星号，客户端必须当作空处理。
 
-**`toggle` 是取反，不是设置目标值。** 批量还原状态时若按「设为启用」的思路调用，
-会把本就启用的工具逐个关掉；正确做法是先读当前状态，只对与目标不一致的项取反。
-设置异步走 `/async-execution`，body 必须是 `{"async_execution": bool}`，
-写成 `{"enabled": bool}` 会得到 422。
+**`toggle` 是取反，不是设置目标值。** 批量还原状态时若按「设为启用」的思路调用，会把本就启用的工具逐个关掉；正确做法是先读当前状态，只对与目标不一致的项取反。设置异步走 `/async-execution`，body 必须是 `{"async_execution": bool}`，写成 `{"enabled": bool}` 会得到 422。
 
-**`category` 只在插件工具上有意义。** 内置工具的 `category` 为 `null`，
-`icon` 服务端下发的是 emoji（如 `🔧`）。官方 Console 的界面分组与图标都不依赖这两个字段：
-它有一张 `TOOL_PRESENTATION` 静态表（`console/assets/toolPresentation-*.js`），
-按 `name` 给出分组与一个 lucide 组件；只有 `source_plugin_id` 非空的工具才用 `category`，
-且 `category` 不在 `files / web / media / agents / runtime / migration` 之列时归入 `other`。
-客户端照此表实现，见 `docs/ui-guidelines.md` 9.16。
+**`category` 只在插件工具上有意义。** 内置工具的 `category` 为 `null`，`icon` 服务端下发的是 emoji（如 `🔧`）。官方 Console 的界面分组与图标都不依赖这两个字段：它有一张 `TOOL_PRESENTATION` 静态表（`console/assets/toolPresentation-*.js`），按 `name` 给出分组与一个 lucide 组件；只有 `source_plugin_id` 非空的工具才用 `category`，且 `category` 不在 `files / web / media / agents / runtime / migration` 之列时归入 `other`。客户端照此表实现，见 `docs/ui-guidelines.md` 9.16。
 
 ### 环境变量
 
@@ -1305,16 +995,11 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 | DELETE | `/api/envs/{key}` | 只删自定义变量 |
 | POST | `/api/envs/{key}/reset` | 内置变量恢复继承值 |
 
-**`GET /api/envs` 在局域网内直接返回明文密钥。** 服务端只在落盘时加密、读取时透明解密，
-当前实例 `auth.status.enabled=false` 时任何能连上的人都看得到。客户端默认遮罩，
-点击才显示，离开页面恢复遮罩；遮罩长度固定，不跟随原值长度。
+**`GET /api/envs` 在局域网内直接返回明文密钥。** 服务端只在落盘时加密、读取时透明解密，当前实例 `auth.status.enabled=false` 时任何能连上的人都看得到。客户端默认遮罩，点击才显示，离开页面恢复遮罩；遮罩长度固定，不跟随原值长度。
 
 **`PATCH /api/envs` 是集合级，不是 `/{key}`。** body 是扁平字典，不是 `[{key, value}]` 数组。
 
-**内置变量不能删除，只能重置。** 对 `catalog` 里出现过的 key 调 DELETE 返回
-400 `Known variable must be reset`；客户端因此只给内置变量提供「恢复默认」。
-`catalog` 里 `editable=false` 的项连编辑都不允许。实测对
-`QWENPAW_LLM_MAX_RETRIES` 发 `PATCH` 返回 400 `Environment variable is read-only: …`。
+**内置变量不能删除，只能重置。** 对 `catalog` 里出现过的 key 调 DELETE 返回400 `Known variable must be reset`；客户端因此只给内置变量提供「恢复默认」。`catalog` 里 `editable=false` 的项连编辑都不允许。实测对`QWENPAW_LLM_MAX_RETRIES` 发 `PATCH` 返回 400 `Environment variable is read-only: …`。
 
 **`catalog` 的元素形状**（`app/routers/envs.py:31-43`，2.2.2.post1 实测 17 项）：
 
@@ -1329,16 +1014,11 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 | `configured` | 布尔 | 该 key 是否已落盘 |
 | `description_key` | 字符串 | i18n 键名，服务端不提供译文正文 |
 
-`startup_only` 的 15 项里，`QWENPAW_WORKING_DIR` 与 `QWENPAW_SECRET_DIR` 属于
-`_PROTECTED_BOOTSTRAP_KEYS`（`envs/registry.py:181`）：`store.py:362` 在把落盘值注入环境时
-会跳过它们，因此 `PATCH` 虽然能写进文件，重启后也不会覆盖启动时的值。
-这两个目录必须先于配置加载确定，只能由启动命令的进程环境变量给出。
+`startup_only` 的 15 项里，`QWENPAW_WORKING_DIR` 与 `QWENPAW_SECRET_DIR` 属于`_PROTECTED_BOOTSTRAP_KEYS`（`envs/registry.py:181`）：`store.py:362` 在把落盘值注入环境时会跳过它们，因此 `PATCH` 虽然能写进文件，重启后也不会覆盖启动时的值。这两个目录必须先于配置加载确定，只能由启动命令的进程环境变量给出。
 
 #### 新增环境变量
 
-**没有 `POST /api/envs`。** 新增走 `PATCH /api/envs`：`store.py` 的 `update_env_vars`
-是 `{**old, **updates}`，提交一个此前不存在的 key 即等于创建，未提交的已有项不受影响，
-响应返回合并后的全量列表。用 `PUT` 会整体替换，省略的 key 会被删掉，不能用于新增。
+**没有 `POST /api/envs`。** 新增走 `PATCH /api/envs`：`store.py` 的 `update_env_vars`是 `{**old, **updates}`，提交一个此前不存在的 key 即等于创建，未提交的已有项不受影响，响应返回合并后的全量列表。用 `PUT` 会整体替换，省略的 key 会被删掉，不能用于新增。
 
 `envs.py` 的 `_validate_updates` 与 `registry.py` 的校验依次为：
 
@@ -1350,16 +1030,11 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 | 与已有项大小写不敏感重名 | `envs.py:52-71` | 400 `Environment variable names conflict: {a}, {b}` |
 | 内置 number / float 项的值格式 | `registry.py:215-230` | 400 `Invalid float value for {key}` 等 |
 
-未知 key 与 `value_type == "string"` 的项**不校验内容**，key 与 value 都没有长度上限。
-提交前服务端只对 key 做 `strip()`，value 原样保存。
+未知 key 与 `value_type == "string"` 的项**不校验内容**，key 与 value 都没有长度上限。提交前服务端只对 key 做 `strip()`，value 原样保存。
 
-客户端在本地做前四条校验，措辞按中文给出；本地拦不住的（例如新增的 key 恰好是
-内置数值型变量、值格式不符）仍然提交，由服务端的 `detail` 显示回页面。
-只读判定排在重名判定之前：`catalog` 列出全部 17 个内置项（含未配置的），
-先查重会让只读项得到「已存在」这句无用提示。
+客户端在本地做前四条校验，措辞按中文给出；本地拦不住的（例如新增的 key 恰好是内置数值型变量、值格式不符）仍然提交，由服务端的 `detail` 显示回页面。只读判定排在重名判定之前：`catalog` 列出全部 17 个内置项（含未配置的），先查重会让只读项得到「已存在」这句无用提示。
 
-**未配置的内置可写项允许新增**，这是覆盖其默认值的唯一入口；
-已配置的内置项仍按重名拦下，应去编辑原值。
+**未配置的内置可写项允许新增**，这是覆盖其默认值的唯一入口；已配置的内置项仍按重名拦下，应去编辑原值。
 
 ### 后台策略
 
@@ -1368,8 +1043,7 @@ curl -s -w " | %{http_code}\n" http://10.10.0.211:8088/api/plugins/qwenpaw-hub/s
 | GET | `/api/settings/offload-policy` | 返回 `{"default_action": "keep_foreground"}` |
 | PUT | `/api/settings/offload-policy` | `{"default_action": "keep_foreground" | "offload"}` |
 
-只有这一个字段，取值经正则限定为两个。写入后服务端会热更
-`coordinator.offload_on_deadline`，不需要重启。
+只有这一个字段，取值经正则限定为两个。写入后服务端会热更`coordinator.offload_on_deadline`，不需要重启。
 
 ---
 
@@ -1379,9 +1053,7 @@ v0.2.0 接入的两组端点。以下形状在 2.2.2.post1 上实测与源码确
 
 ### 定时任务
 
-路由在 `qwenpaw/app/crons/api.py`（前缀 `/cron`），同时以 `/api/cron/*` 与
-`/api/agents/{agentId}/cron/*` 两种方式挂载。客户端统一走全局路径加 `X-Agent-Id` 头
-（`QwenPawApi.baseBuilder` 已注入），不拼 agent 段。
+路由在 `qwenpaw/app/crons/api.py`（前缀 `/cron`），同时以 `/api/cron/*` 与`/api/agents/{agentId}/cron/*` 两种方式挂载。客户端统一走全局路径加 `X-Agent-Id` 头（`QwenPawApi.baseBuilder` 已注入），不拼 agent 段。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -1396,35 +1068,21 @@ v0.2.0 接入的两组端点。以下形状在 2.2.2.post1 上实测与源码确
 | GET | `/api/cron/jobs/{id}/history` | `list[CronExecutionRecord]`，按时间倒序 |
 | GET | `/api/cron/dispatch-targets` | `{channels, items}`，支持 `channel` / `keyword` / `limit` |
 
-**新建时 `id` 由服务端生成**，客户端传了也会被忽略；`PUT` 时 `spec.id` 与路径不符返回 400。
-`GET /cron/jobs` 不含状态，状态只在 `/state` 与详情里，因此列表需要二次逐条拉取。
+**新建时 `id` 由服务端生成**，客户端传了也会被忽略；`PUT` 时 `spec.id` 与路径不符返回 400。`GET /cron/jobs` 不含状态，状态只在 `/state` 与详情里，因此列表需要二次逐条拉取。
 
-**`meta` 与 `request` 必须原样带回。** `request` 是 `extra="allow"` 模型，
-`meta` 里带迁移审阅标记。`PUT` 是整体替换，客户端若只序列化自己认识的字段，
-编辑一次就会抹掉审阅锁与模型覆盖。客户端因此两者都用 `JsonObject` 持有，编辑时只改已知键。
-实测：给任务写入 `meta.model_override` 与 `request.model` / `request.provider_id` 后，
-从客户端编辑并保存一次，四个未知键全部保留。
+**`meta` 与 `request` 必须原样带回。** `request` 是 `extra="allow"` 模型，`meta` 里带迁移审阅标记。`PUT` 是整体替换，客户端若只序列化自己认识的字段，编辑一次就会抹掉审阅锁与模型覆盖。客户端因此两者都用 `JsonObject` 持有，编辑时只改已知键。实测：给任务写入 `meta.model_override` 与 `request.model` / `request.provider_id` 后，从客户端编辑并保存一次，四个未知键全部保留。
 
-**`save_result_to_inbox` 为 null 时由服务端计算**（`not (text && cron)`），客户端不发这个键。
-Kotlin 侧用 `explicitNulls = false` 保证序列化结果里没有该键。
+**`save_result_to_inbox` 为 null 时由服务端计算**（`not (text && cron)`），客户端不发这个键。Kotlin 侧用 `explicitNulls = false` 保证序列化结果里没有该键。
 
-**`timezone` 服务端默认 UTC**，客户端必须显式传。客户端不做国际化，一律按
-`Asia/Shanghai`（UTC+8）创建与展示，不读设备时区，也不跟随服务端：
-跟随设备会让同一份任务在不同设备上得到不同表达式，而服务端的 UTC 默认会让任务在凌晨触发。
+**`timezone` 服务端默认 UTC**，客户端必须显式传。客户端不做国际化，一律按`Asia/Shanghai`（UTC+8）创建与展示，不读设备时区，也不跟随服务端：跟随设备会让同一份任务在不同设备上得到不同表达式，而服务端的 UTC 默认会让任务在凌晨触发。
 
 **`silent` 只对 agent 任务有效**，text 任务带 silent 会被 422 拒绝。
 
-**服务端会把 `dow` 归一化成三字母缩写。** 客户端发 `0 9 * * 1,3`，
-`POST` 的响应里是 `0 9 * * mon,wed`（`app/crons/models.py::_crontab_dow_to_name`）。
-读取自己创建的任务时必须两种写法都认，否则每次编辑都会退化成「直接编辑」。
-`cron` 支持 5 段与可归一化的 4 段、3 段写法，6 段（带秒）返回 422。
+**服务端会把 `dow` 归一化成三字母缩写。** 客户端发 `0 9 * * 1,3`，`POST` 的响应里是 `0 9 * * mon,wed`（`app/crons/models.py::_crontab_dow_to_name`）。读取自己创建的任务时必须两种写法都认，否则每次编辑都会退化成「直接编辑」。`cron` 支持 5 段与可归一化的 4 段、3 段写法，6 段（带秒）返回 422。
 
-**409 有两种含义**：导入任务未审核（`PermissionError: Imported cron job requires explicit
-promotion`）与状态冲突。前者要展示「需先确认」并给「审核通过」入口，不能统一报「操作失败」。
+**409 有两种含义**：导入任务未审核（`PermissionError: Imported cron job requires explicit promotion`）与状态冲突。前者要展示「需先确认」并给「审核通过」入口，不能统一报「操作失败」。
 
-**`promote` 之后任务仍是禁用状态。** 实测 `promote` 的响应 `enabled=false`，
-`meta.portability.requires_review` 变成 false，但顶层 `meta.safety` 仍保留
-`disabled_until_explicit_promotion`。判定是否待审核只能看 `portability.requires_review`。
+**`promote` 之后任务仍是禁用状态。** 实测 `promote` 的响应 `enabled=false`，`meta.portability.requires_review` 变成 false，但顶层 `meta.safety` 仍保留`disabled_until_explicit_promotion`。判定是否待审核只能看 `portability.requires_review`。
 
 | `CronJobSpec` 字段 | 说明 |
 | --- | --- |
@@ -1438,10 +1096,7 @@ promotion`）与状态冲突。前者要展示「需先确认」并给「审核�
 | `runtime` | `max_concurrency=1`、`timeout_seconds=120`、`misfire_grace_seconds=600`、`share_session=false`、`tool_safety=false` |
 | `meta` | 任意字典 |
 
-**服务端时区对照用 `GET /api/config/user-timezone`。** 返回 `{"timezone": "<IANA 名>"}`，
-只读不改。不一致时客户端把同一触发时刻在两个时区下并排列出。
-已保存任务的时间取服务端返回的 `next_run_at`（含偏移，如 `2026-11-04T09:00:00+08:00`），
-不在本地重算；表单里未保存的草稿才在本地按 `Asia/Shanghai` 推算。
+**服务端时区对照用 `GET /api/config/user-timezone`。** 返回 `{"timezone": "<IANA 名>"}`，只读不改。不一致时客户端把同一触发时刻在两个时区下并排列出。已保存任务的时间取服务端返回的 `next_run_at`（含偏移，如 `2026-11-04T09:00:00+08:00`），不在本地重算；表单里未保存的草稿才在本地按 `Asia/Shanghai` 推算。
 
 ### 工具调用控制
 
@@ -1457,32 +1112,23 @@ promotion`）与状态冲突。前者要展示「需先确认」并给「审核�
 | GET | `/api/tool-calls/{session_id}/{id}/output` | `{tool_call_id, is_closed, final_state, content}` |
 | GET | `/api/tool-calls/{session_id}/{id}/stream` | SSE |
 
-**`extend-deadline` 的 body 是 `{seconds?, no_deadline, target}`。**
-`target=offload` 只能用于 running；`target=kill` 对 running 与 offloaded 都可用，
-但超过 `max_internal_timeout_secs` 会被拒绝。成功响应带回最新的
-`offload_remaining` / `kill_remaining` 快照。
+**`extend-deadline` 的 body 是 `{seconds?, no_deadline, target}`。**`target=offload` 只能用于 running；`target=kill` 对 running 与 offloaded 都可用，但超过 `max_internal_timeout_secs` 会被拒绝。成功响应带回最新的`offload_remaining` / `kill_remaining` 快照。
 
-**失败分三档**：404 表示条目不存在或已过缓存期，409 表示状态已变化
-（实测对已结束条目取消返回 409 `Cannot cancel`）。
+**失败分三档**：404 表示条目不存在或已过缓存期，409 表示状态已变化（实测对已结束条目取消返回 409 `Cannot cancel`）。
 
-**`started_at` 是 monotonic 秒，不是 epoch**，只能用于对照 `elapsed`，不能当时间戳显示。
-`offload_remaining` / `kill_remaining` 是取回时的快照，界面倒计时需要自己按已过时间递减。
+**`started_at` 是 monotonic 秒，不是 epoch**，只能用于对照 `elapsed`，不能当时间戳显示。`offload_remaining` / `kill_remaining` 是取回时的快照，界面倒计时需要自己按已过时间递减。
 
-**`/stream` 没有 `event:` 行、没有重放。** 只发
-`data: {"type":"chunk","data":{...}}` 与结尾的 `data: {"type":"done"}`；
-晚订阅只能拿到 `done`。因此实时输出只是加分项，`/output` 才是权威值。
+**`/stream` 没有 `event:` 行、没有重放。** 只发`data: {"type":"chunk","data":{...}}` 与结尾的 `data: {"type":"done"}`；晚订阅只能拿到 `done`。因此实时输出只是加分项，`/output` 才是权威值。
 
 **完成后的条目只在缓存里保留约 60 秒**，之后一律 404。
 
-**`tool_call_id` 就是聊天 SSE 里 `plugin_call` 的 `call_id`**，客户端 `ToolCard.callId`
-已经持有，不需要另加字段。
+**`tool_call_id` 就是聊天 SSE 里 `plugin_call` 的 `call_id`**，客户端 `ToolCard.callId`已经持有，不需要另加字段。
 
 ---
 
 ## 24、配套插件端点
 
-配套插件（`QwenPaw-Node-Bridge` 仓库，id `qwenpaw-node-bridge`）只补核心没有的能力。
-两端之间只有「路径 + 响应形状」这一层契约，版本号各自编号。
+配套插件（`QwenPaw-Node-Bridge` 仓库，id `qwenpaw-node-bridge`）只补核心没有的能力。两端之间只有「路径 + 响应形状」这一层契约，版本号各自编号。
 
 ### 自述端点
 
@@ -1495,8 +1141,7 @@ GET /api/plugins/qwenpaw-node-bridge/info
  "server_version":"2.2.2.post1","capabilities":["info","search","sse"]}
 ```
 
-未安装返回 **404**；服务端开启登录而请求没带 token 返回 **401**。
-两者含义完全不同：前者是「没装」，后者是「现在问不了」。
+未安装返回 **404**；服务端开启登录而请求没带 token 返回 **401**。两者含义完全不同：前者是「没装」，后者是「现在问不了」。
 
 ### 会话全文检索端点
 
@@ -1510,28 +1155,16 @@ GET /api/plugins/qwenpaw-node-bridge/search?q=<关键词>&limit=20&cursor=<偏�
  "next_cursor":20,"total":31}
 ```
 
-`q` 为空白时返回 **400**；`limit` 默认 20、上限 100；`cursor` 是**偏移量**而不是记录 id，
-因为 `seq` 只在单个 `history.db` 内唯一。
+`q` 为空白时返回 **400**；`limit` 默认 20、上限 100；`cursor` 是**偏移量**而不是记录 id，因为 `seq` 只在单个 `history.db` 内唯一。
 
 两条取值规则都由实测确定，都与直觉相反：
 
-1. **`session_id` 是 `history.db` 的 `session_id` 列，不是 `/api/chats` 的对话 `id`。**
-   两者在 `mobile-*` 形态下恰好一一对应，但 Web 端的历史会话会出现一个
-   `session_id` 挂多个对话（实测 `1793496108871-ciozfnb` 对应三个对话）。
-   拿它直接请求 `/api/chats/{id}` 会返回 404 并让客户端误判为断线，必须先到对话列表换出 `id`。
-2. **`msg_id` 取 `dedup_key`（即消息对象的 `metadata.original_id`），不能用消息 `id`。**
-   `GET /api/chats/{id}` 每次请求都会重新生成消息 `id`，同一段内容两次请求拿到的值不同，
-   只有 `original_id` 稳定。滚动定位按它匹配。
+1. **`session_id` 是 `history.db` 的 `session_id` 列，不是 `/api/chats` 的对话 `id`。**两者在 `mobile-*` 形态下恰好一一对应，但 Web 端的历史会话会出现一个`session_id` 挂多个对话（实测 `1793496108871-ciozfnb` 对应三个对话）。拿它直接请求 `/api/chats/{id}` 会返回 404 并让客户端误判为断线，必须先到对话列表换出 `id`。
+2. **`msg_id` 取 `dedup_key`（即消息对象的 `metadata.original_id`），不能用消息 `id`。**`GET /api/chats/{id}` 每次请求都会重新生成消息 `id`，同一段内容两次请求拿到的值不同，只有 `original_id` 稳定。滚动定位按它匹配。
 
-检索走两路：含 CJK 的查询用 `LIKE` 并在插件侧截取片段，其余用 FTS5 的 `snippet()` 与
-`bm25()`（`bm25` 返回负值，插件取负后作为 `score`）。
-`conversation_history_fts` 的 `tokenize='porter unicode61'` 不支持中文分词，
-连续汉字会被当作单个 token，FTS 对中文查询无效。
+检索走两路：含 CJK 的查询用 `LIKE` 并在插件侧截取片段，其余用 FTS5 的 `snippet()` 与`bm25()`（`bm25` 返回负值，插件取负后作为 `score`）。`conversation_history_fts` 的 `tokenize='porter unicode61'` 不支持中文分词，连续汉字会被当作单个 token，FTS 对中文查询无效。
 
-消息范围限定 `kind in ('context_msg','model_turn')`。`history.db` 的 `kind` 只有
-`context_msg`（用户消息）、`model_turn`（助手正文）、`tool_result`（工具输出）三种，
-**没有 `kind='message'`**——那是 API 响应里的 `type` 字段值，照它写条件一条也查不到。
-`tool_result` 体积大且检索价值低，排除。
+消息范围限定 `kind in ('context_msg','model_turn')`。`history.db` 的 `kind` 只有`context_msg`（用户消息）、`model_turn`（助手正文）、`tool_result`（工具输出）三种，**没有 `kind='message'`**——那是 API 响应里的 `type` 字段值，照它写条件一条也查不到。`tool_result` 体积大且检索价值低，排除。
 
 命中片段用 `[` `]` 包裹，客户端把方括号渲染成高亮色，不原样显示。
 
@@ -1553,13 +1186,9 @@ event: approval
 data: {"pending":1}
 ```
 
-连接建立后先发 `ready`，随后各发一次 `inbox` 与 `approval` 的当前值，此后只在数值变化时推送。
-插件每 2.5 秒在连接内部轮询一次 `inbox_store.query_events(limit=1)` 的未读数与
-`approvals.get_approval_service()._pending` 的条数，客户端断开即退出生成器。
+连接建立后先发 `ready`，随后各发一次 `inbox` 与 `approval` 的当前值，此后只在数值变化时推送。插件每 2.5 秒在连接内部轮询一次 `inbox_store.query_events(limit=1)` 的未读数与`approvals.get_approval_service()._pending` 的条数，客户端断开即退出生成器。
 
-**只推这两类，不含 `cron`。** 定时任务的 `CronManager` 按 workspace 隔离，
-取摘要需要请求上下文里的智能体标识，而插件的事件生成器里没有 `Request`，
-拿不到当前 workspace。客户端因此保留原有的定时任务轮询，事件流只覆盖收件箱与审批。
+**只推这两类，不含 `cron`。** 定时任务的 `CronManager` 按 workspace 隔离，取摘要需要请求上下文里的智能体标识，而插件的事件生成器里没有 `Request`，拿不到当前 workspace。客户端因此保留原有的定时任务轮询，事件流只覆盖收件箱与审批。
 
 ### 客户端判定的三态
 
@@ -1569,19 +1198,13 @@ data: {"pending":1}
 | 未检测到 | 404，或 200 但 `protocol_version != 1` | 未检测到配套插件 |
 | 尚未检测 | 401 / 403，或连不上且此前无结论 | 尚未检测 |
 
-**`protocol_version` 更大时按「未检测到」处理**：契约已变更，旧客户端不该继续使用
-该插件的端点。功能开关一律看 `capabilities` 里的名字，不比对 `plugin_version`——
-靠版本号推断能力会让两端各维护一张对照表，迟早对不上。
+**`protocol_version` 更大时按「未检测到」处理**：契约已变更，旧客户端不该继续使用该插件的端点。功能开关一律看 `capabilities` 里的名字，不比对 `plugin_version`——靠版本号推断能力会让两端各维护一张对照表，迟早对不上。
 
-**没有「已禁用」这一态。** 禁用插件是把目录改名为 `.disabled`，发现阶段直接跳过，
-重启后列表里消失、端点返回 404，与从未安装完全一致。因此界面不提供「去启用」。
+**没有「已禁用」这一态。** 禁用插件是把目录改名为 `.disabled`，发现阶段直接跳过，重启后列表里消失、端点返回 404，与从未安装完全一致。因此界面不提供「去启用」。
 
 ### 插件侧的路径约束
 
-核心 `plugins.py` 已经注册了同前缀下的 `/status` 与 `/files` 下任意子路径，
-且**先于插件 router 匹配**：请求 `/api/plugins/qwenpaw-node-bridge/status` 时
-核心会返回 `{"detail":"Plugin 'qwenpaw-node-bridge' not found."}` 的 404，
-请求根本到不了插件。可安全使用的子路径是 `/info`、`/search`、`/events`。
+核心 `plugins.py` 已经注册了同前缀下的 `/status` 与 `/files` 下任意子路径，且**先于插件 router 匹配**：请求 `/api/plugins/qwenpaw-node-bridge/status` 时核心会返回 `{"detail":"Plugin 'qwenpaw-node-bridge' not found."}` 的 404，请求根本到不了插件。可安全使用的子路径是 `/info`、`/search`、`/events`。
 
 三条加载器约束（`qwenpaw/plugins/loader.py` 与 `architecture.py` 核对）：
 
@@ -1591,9 +1214,7 @@ data: {"pending":1}
 
 ### 安装与校验
 
-`qwenpaw plugin validate` 的参数是**目录**而不是 zip：源码里按
-`plugin_path / "plugin.json"` 读取清单，对 zip 执行会报 `plugin.json not found`。
-打包后的 zip 只能在 `plugin install` 时使用。
+`qwenpaw plugin validate` 的参数是**目录**而不是 zip：源码里按`plugin_path / "plugin.json"` 读取清单，对 zip 执行会报 `plugin.json not found`。打包后的 zip 只能在 `plugin install` 时使用。
 
 ---
 
@@ -1603,22 +1224,15 @@ data: {"pending":1}
 
 ### 25.1 运行中的 `GET /api/chats/{id}` 不完整
 
-生成过程中请求会话详情，返回的 `messages` **只包含已落库的轮次**：
-本轮用户消息与正在生成的正文都不在里面，`status` 为 `running`。
+生成过程中请求会话详情，返回的 `messages` **只包含已落库的轮次**：本轮用户消息与正在生成的正文都不在里面，`status` 为 `running`。
 
-实测（2.2.2.post1）：发出消息后立即取详情，`messages` 条数与刷新前一致，
-最新一条仍是上一轮的回答；生成结束后再取，本轮的问与答才出现。
+实测（2.2.2.post1）：发出消息后立即取详情，`messages` 条数与刷新前一致，最新一条仍是上一轮的回答；生成结束后再取，本轮的问与答才出现。
 
-因此客户端不能把 `/api/chats/{id}` 当作「当前界面应该显示的全部内容」：
-刷新、切走再返回、进程重开后，若直接用服务端历史覆盖界面，本轮用户消息会消失。
-正确做法是**以服务端历史为底，再拼本地仍在生成的那一段**，
-并把本地尾部截到最近一条用户消息（见 [ui-guidelines](ui-guidelines.md) 3 节）。
+因此客户端不能把 `/api/chats/{id}` 当作「当前界面应该显示的全部内容」：刷新、切走再返回、进程重开后，若直接用服务端历史覆盖界面，本轮用户消息会消失。正确做法是**以服务端历史为底，再拼本地仍在生成的那一段**，并把本地尾部截到最近一条用户消息（见 [ui-guidelines](ui-guidelines.md) 3 节）。
 
 ### 25.2 分组的默认值
 
-`GET /api/chats/groups` 里，内置分组之一满足 `kind == "default"`，
-其 `id` 为 `default`，`name` 为 `Uncategorized`（客户端显示「未分组」）。
-另外两个内置分组的 `kind` 是 `scheduled` 与 `subagent`。
+`GET /api/chats/groups` 里，内置分组之一满足 `kind == "default"`，其 `id` 为 `default`，`name` 为 `Uncategorized`（客户端显示「未分组」）。另外两个内置分组的 `kind` 是 `scheduled` 与 `subagent`。
 
 把一个会话移回默认分组时，请求必须写默认分组的 `id`：
 
@@ -1627,14 +1241,9 @@ PUT /api/chats/{id}
 {"group_id": "default"}
 ```
 
-写成 `{"group_id": null}` 会被拒绝，返回 **400 `Unknown chat group: None`**。
-客户端原先在「未分组」选项里发 `null`，界面没有报错（错误被 `runCatching` 吞掉），
-表现是「点了没反应」。默认分组的 id 应从 `GET /api/chats/groups` 取，取不到时才退回字面量
-`default`。
+写成 `{"group_id": null}` 会被拒绝，返回 **400 `Unknown chat group: None`**。客户端原先在「未分组」选项里发 `null`，界面没有报错（错误被 `runCatching` 吞掉），表现是「点了没反应」。默认分组的 id 应从 `GET /api/chats/groups` 取，取不到时才退回字面量`default`。
 
-**客户端不再合成前置的「未分组」选项。** 服务端已经返回 `kind == "default"` 的条目，
-再合成一个会让对话框出现两个「未分组」。移动对话框显式过滤 `kind == "default"`，
-用自己的前置项表示「未分组」。
+**客户端不再合成前置的「未分组」选项。** 服务端已经返回 `kind == "default"` 的条目，再合成一个会让对话框出现两个「未分组」。移动对话框显式过滤 `kind == "default"`，用自己的前置项表示「未分组」。
 
 ### 25.3 `send_file_to_user` 的两种输出形状
 
@@ -1645,9 +1254,7 @@ PUT /api/chats/{id}
 | png | `{"type":"base64","media_type":"image/png","data":"…"}` | 字节内联在 JSON 里 |
 | webp | `{"type":"url","url":"file:///tmp/bridgetest.webp"}` | 只有服务端本地路径 |
 
-webp 这种没有内联字节，客户端要自己把 `file://` 绝对路径换成预览端点
-`GET /api/files/preview/{path}` 才能显示缩略图。**不能按 `media_type` 判断是不是图片**：
-webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按文件名扩展名判断。
+webp 这种没有内联字节，客户端要自己把 `file://` 绝对路径换成预览端点`GET /api/files/preview/{path}` 才能显示缩略图。**不能按 `media_type` 判断是不是图片**：webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按文件名扩展名判断。
 
 实测：卡片正常出现，缩略图由预览端点渲染，点击可全屏预览。
 
@@ -1663,27 +1270,20 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 
 这对应 uvicorn 的默认 `--timeout-keep-alive 5`。
 
-**因此「验证连接」这类低频探测不能复用连接池。** 两次验证的间隔通常远超 5 秒，
-池里的连接早已被服务端关闭；复用它只会读到 EOF，把「地址是通的」误报成「网络中断」。
-探测客户端改为不保留连接（`ConnectionPool(0, 1, NANOSECONDS)`），每次重新握手。
-实测：同一实例间隔 60 秒连续验证两次，均返回「连接正常，服务端 2.2.2.post1，QwenPaw Node Bridge v0.1.0」。
+**因此「验证连接」这类低频探测不能复用连接池。** 两次验证的间隔通常远超 5 秒，池里的连接早已被服务端关闭；复用它只会读到 EOF，把「地址是通的」误报成「网络中断」。探测客户端改为不保留连接（`ConnectionPool(0, 1, NANOSECONDS)`），每次重新握手。实测：同一实例间隔 60 秒连续验证两次，均返回「连接正常，服务端 2.2.2.post1，QwenPaw Node Bridge v0.1.0」。
 
 ### 25.5 验证连接时的插件探测需要 token
 
-`GET /api/plugins/qwenpaw-node-bridge/info` 在服务端开启登录且请求没带 token 时返回 401。
-因此：
+`GET /api/plugins/qwenpaw-node-bridge/info` 在服务端开启登录且请求没带 token 时返回 401。因此：
 
 - **编辑已有实例**时，验证连接带上已保存的 `token`，能读到 `plugin_version`（实测 `v0.1.0`）；
-- **新增实例**（填表添加、引导式第 1 步）此时还没有 token，401 只能显示「配套插件状态未能确认」；
-  安装情况在保存后由设置页「配套插件」行给出。
+- **新增实例**（填表添加、引导式第 1 步）此时还没有 token，401 只能显示「配套插件状态未能确认」；安装情况在保存后由设置页「配套插件」行给出。
 
 ---
 
 ## 26、工作区文件
 
-四个读端点、一个目录浏览端点、一个下载端点，以及保存、上传与上传上限三个写侧端点。
-2026-11-10 在 2.2.2.post1 与 2.3.0b2 上逐条实测，两版形状一致，
-客户端因此不做运行时版本分支（`browse-dirs` 只在 2.2.2.post1 上验过）。
+四个读端点、一个目录浏览端点、一个下载端点，以及保存、上传与上传上限三个写侧端点。2026-11-10 在 2.2.2.post1 与 2.3.0b2 上逐条实测，两版形状一致，客户端因此不做运行时版本分支（`browse-dirs` 只在 2.2.2.post1 上验过）。
 
 ### 26.1 目录
 
@@ -1704,12 +1304,9 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 
 三条要点：
 
-1. `preview_kind` 是「能否按文本渲染」的唯一依据，不要按扩展名猜。
-   二进制文件被当作文本读取会得到一段乱码，而不是报错。
+1. `preview_kind` 是「能否按文本渲染」的唯一依据，不要按扩展名猜。二进制文件被当作文本读取会得到一段乱码，而不是报错。
 2. `path` 是相对根的路径，可直接回传给 `file-content` 与 `file-download`。
-3. 未绑定项目目录时 `root=project` **不报错**，会回落为默认工作区；
-   只有 `root=project:<digest>` 才返回 403 `Not a bound project directory`。
-   客户端因此无法区分「已绑定」与「回落」，界面上不显示「未配置项目目录」的错误态。
+3. 未绑定项目目录时 `root=project` **不报错**，会回落为默认工作区；只有 `root=project:<digest>` 才返回 403 `Not a bound project directory`。客户端因此无法区分「已绑定」与「回落」，界面上不显示「未配置项目目录」的错误态。
 
 ### 26.2 文本片段
 
@@ -1718,20 +1315,15 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 响应 `{content, encoding, eof, etag, limit, next_offset, offset, path, truncated}`。
 
 - `limit` 是**字节**上限，不是字符数。
-- 服务端会把 `next_offset` 对齐到 UTF-8 字符边界，可能略大于请求的 `limit`；
-  按 `next_offset` 继续取并直接拼接是无损的。
+- 服务端会把 `next_offset` 对齐到 UTF-8 字符边界，可能略大于请求的 `limit`；按 `next_offset` 继续取并直接拼接是无损的。
 - 读到 `eof == true` 才算结束，不能按「本页短于 limit」判断。
 
 ### 26.3 记忆
 
-- `GET /api/workspace/memory`：响应是**裸数组**，没有外层对象。
-  元素字段为 `filename`（相对记忆根，可含子目录）、`path`（绝对路径）、
-  `size`、`created_time`、`modified_time`。这一版没有分页参数。
-- `GET /api/workspace/memory/{md_path}`：响应 `{content}`，一次给出全文。
-  `md_path` 需要逐段 URL 编码。
+- `GET /api/workspace/memory`：响应是**裸数组**，没有外层对象。元素字段为 `filename`（相对记忆根，可含子目录）、`path`（绝对路径）、`size`、`created_time`、`modified_time`。这一版没有分页参数。
+- `GET /api/workspace/memory/{md_path}`：响应 `{content}`，一次给出全文。`md_path` 需要逐段 URL 编码。
 
-记忆根没有可逐级浏览的目录结构，客户端把它呈现为平铺列表，也不提供下载：
-下载端点没有对应的记忆根依据。
+记忆根没有可逐级浏览的目录结构，客户端把它呈现为平铺列表，也不提供下载：下载端点没有对应的记忆根依据。
 
 ### 26.4 目录浏览
 
@@ -1747,9 +1339,7 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 
 - `current` 是本次实际读取的目录（`~` 会被展开成家目录）；`parent` 到达根时为 `null`。
 - `dirs` 只含子目录，不含文件；`path` 是绝对路径，可直接回传给本端点。
-- **`show_hidden=true` 必须固定传。** 不带这一项时服务端会过滤掉以点开头的目录，
-  而某些工作区目录本身就在隐藏路径下，结果是 `dirs` 为空，界面上看起来像「这个目录下没有子目录」。
-  带上之后两种情况的返回才与用户预期一致。
+- **`show_hidden=true` 必须固定传。** 不带这一项时服务端会过滤掉以点开头的目录，而某些工作区目录本身就在隐藏路径下，结果是 `dirs` 为空，界面上看起来像「这个目录下没有子目录」。带上之后两种情况的返回才与用户预期一致。
 - 路径不存在或没有权限时返回非 200，客户端按失败处理，不改写输入框里的路径。
 - 不能复用 26.1 的 `tree`：`root=project:/tmp` 这种把绝对路径塞进 `root` 的写法返回 403。
 
@@ -1759,8 +1349,7 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 
 - 成功时 200 + `application/octet-stream`，长度由 `content-length` 给出。
 - 失败时返回 JSON `{detail}`，路径不存在是 404。
-- **不要依赖 `Range`。** 响应头带 `accept-ranges: bytes`，但请求带 `Range` 仍返回
-  200 + 完整内容，不会返回 206。因此客户端不做续传，中断后整文件重下。
+- **不要依赖 `Range`。** 响应头带 `accept-ranges: bytes`，但请求带 `Range` 仍返回200 + 完整内容，不会返回 206。因此客户端不做续传，中断后整文件重下。
 - 目录整包下载由客户端逐文件调用本端点完成，不使用整包接口。
 
 ### 26.6 保存
@@ -1780,42 +1369,31 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 - 409：`{"detail":"File changed on disk"}`，文件已被外部改写。
 - 422：`content` 不是字符串。
 
-两条限制来自端点形状而非客户端取舍：写入是整篇覆盖，所以只能在 `eof == true`
-之后编辑，否则写回会把未加载的部分截断；记忆根没有本端点，固定只读。
+两条限制来自端点形状而非客户端取舍：写入是整篇覆盖，所以只能在 `eof == true`之后编辑，否则写回会把未加载的部分截断；记忆根没有本端点，固定只读。
 
 ### 26.7 上传
 
 `POST /api/workspace/file-upload?root=...&path=...&conflict=overwrite|skip`
 
-- 请求是 `multipart/form-data`，字段名 `files`。服务端声明为 `list[UploadFile]`，
-  客户端每个请求只放一个文件，按文件逐个上报进度。
-- 落到服务端的文件名取 multipart 的 `filename`，与本地暂存文件的名字无关；
-  暂存文件在 `cacheDir` 里是随机名，不能拿它的名字直接上传。
-- `conflict` 不传时同名文件返回 409，`detail` 是**对象**而非字符串：
-  `{"code":"upload_conflict","files":["a.txt"]}`。
-- 200：`{"files":[{name,path,size,status}]}`，`status` 为 `uploaded` 或 `skipped`；
-  `conflict=skip` 时同名文件计入 `skipped`。
+- 请求是 `multipart/form-data`，字段名 `files`。服务端声明为 `list[UploadFile]`，客户端每个请求只放一个文件，按文件逐个上报进度。
+- 落到服务端的文件名取 multipart 的 `filename`，与本地暂存文件的名字无关；暂存文件在 `cacheDir` 里是随机名，不能拿它的名字直接上传。
+- `conflict` 不传时同名文件返回 409，`detail` 是**对象**而非字符串：`{"code":"upload_conflict","files":["a.txt"]}`。
+- 200：`{"files":[{name,path,size,status}]}`，`status` 为 `uploaded` 或 `skipped`；`conflict=skip` 时同名文件计入 `skipped`。
 - 目录不存在：404 `Upload directory not found`。
 
 ### 26.8 上传上限
 
 `GET /api/settings/upload-limit` → `{"upload_max_size_mb": null|number}`。
 
-`null` 表示不限制。服务端**不据此拦截**上传，这个值只供客户端提前提示与跳过，
-因此取值失败时不阻断上传。
+`null` 表示不限制。服务端**不据此拦截**上传，这个值只供客户端提前提示与跳过，因此取值失败时不阻断上传。
 
 ---
 
 ## 27、备份与检查点
 
-备份归档与工作区检查点两块，2026-11-11 核对。两个版本的源码逐文件比对无差异：
-`app/routers/backup.py`、`app/routers/checkpoints.py`、`backup/models.py`、
-`checkpoints/models.py`、`backup/_backup_helpers.py`、`backup/_utils/signing/trust.py`
-在 2.2.2.post1 与 2.3.0b2 上完全一致，客户端因此同样不做运行时版本分支。
+备份归档与工作区检查点两块，2026-11-11 核对。两个版本的源码逐文件比对无差异：`app/routers/backup.py`、`app/routers/checkpoints.py`、`backup/models.py`、`checkpoints/models.py`、`backup/_backup_helpers.py`、`backup/_utils/signing/trust.py`在 2.2.2.post1 与 2.3.0b2 上完全一致，客户端因此同样不做运行时版本分支。
 
-运行期实测：`GET /api/backups` 在两版都返回**裸数组**，元素含 `accepted_via_trust`；
-`/status` 在 `qp-test-prerelease` 容器里返回 500，原因是容器内服务进程的 `PATH` 找不到 `git`，
-属于测试环境问题，不改契约结论。
+运行期实测：`GET /api/backups` 在两版都返回**裸数组**，元素含 `accepted_via_trust`；`/status` 在 `qp-test-prerelease` 容器里返回 500，原因是容器内服务进程的 `PATH` 找不到 `git`，属于测试环境问题，不改契约结论。
 
 ### 27.1 备份端点
 
@@ -1835,34 +1413,22 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 | POST | `/api/backups/import` | multipart，字段 `file`、`pending_token`、`trust_mode` |
 | POST | `/api/backups/delete` | `{"ids": [...]}` → `{"deleted": [...], "failed": [{id, error}]}` |
 
-`BackupMeta` 字段：`id`、`name`、`description`、`created_at`（ISO 8601 带偏移）、`version`、
-`scope`、`agent_count`、`qwenpaw_version`、`system_info`、`accepted_via_trust`。
+`BackupMeta` 字段：`id`、`name`、`description`、`created_at`（ISO 8601 带偏移）、`version`、`scope`、`agent_count`、`qwenpaw_version`、`system_info`、`accepted_via_trust`。
 
-`BackupScope`：`include_agents`、`include_global_config`、`include_skill_pool` 默认 `true`，
-`include_secrets` 默认 `false`。
+`BackupScope`：`include_agents`、`include_global_config`、`include_skill_pool` 默认 `true`，`include_secrets` 默认 `false`。
 
-`CreateBackupRequest`：`name`、`description`、`scope`、`agents`。
-**`agents` 必须是显式列表**，即便是「全部智能体」也不能省略；
-`scope.include_agents=false` 时才可为空。
+`CreateBackupRequest`：`name`、`description`、`scope`、`agents`。**`agents` 必须是显式列表**，即便是「全部智能体」也不能省略；`scope.include_agents=false` 时才可为空。
 
-`BackupJobSnapshot`：`job_id`、`backup_id`、`status`（`pending|running|cancel_requested|completed|failed|cancelled`）、
-`phase`（`preparing|agents|finalizing`）、`percent`（整数）、`current_agent`、`agent_index`、
-`total_agents`、`result`、`error`。
+`BackupJobSnapshot`：`job_id`、`backup_id`、`status`（`pending|running|cancel_requested|completed|failed|cancelled`）、`phase`（`preparing|agents|finalizing`）、`percent`（整数）、`current_agent`、`agent_index`、`total_agents`、`result`、`error`。
 
-`RestoreBackupRequest`：`mode`（`full|custom`，默认 `custom`）、`include_agents`、`agent_ids`、
-`include_global_config`、`include_secrets`、`include_skill_pool`、`default_workspace_dir`、
-`preserve_local_protected_config`、`trust_mode`。
+`RestoreBackupRequest`：`mode`（`full|custom`，默认 `custom`）、`include_agents`、`agent_ids`、`include_global_config`、`include_secrets`、`include_skill_pool`、`default_workspace_dir`、`preserve_local_protected_config`、`trust_mode`。
 
 ### 27.2 备份的两类错误体
 
 导入与恢复都要按 `detail` 的类型分流，不能一律取字符串：
 
-- **重名**：409，`{"detail": "backup_conflict", "existing": BackupMeta, "pending_token": "..."}`。
-  用 `pending_token` 重发（**不再上传文件**）即覆盖，服务端删除临时文件。
-- **签名不可信**：400，`detail` 是**对象** `{"code": ..., "message": ...}`。
-  `code` 为 `backup_legacy_unsigned` 或 `backup_signature_mismatch` 时，
-  可分别用 `trust_mode="legacy"` / `"foreign"` 显式信任；
-  `backup_unknown_signature_scheme` 没有信任通路，只能拒绝。
+- **重名**：409，`{"detail": "backup_conflict", "existing": BackupMeta, "pending_token": "..."}`。用 `pending_token` 重发（**不再上传文件**）即覆盖，服务端删除临时文件。
+- **签名不可信**：400，`detail` 是**对象** `{"code": ..., "message": ...}`。`code` 为 `backup_legacy_unsigned` 或 `backup_signature_mismatch` 时，可分别用 `trust_mode="legacy"` / `"foreign"` 显式信任；`backup_unknown_signature_scheme` 没有信任通路，只能拒绝。
 - **忙**：409，`detail` 是字符串（任务与恢复互斥）。
 
 信任会以本机密钥重新签名，之后该备份不再有「未签名」状态，界面必须提前写明。
@@ -1872,17 +1438,14 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 `GET /api/backups/jobs/{job_id}/events`：
 
 - 每个 `data:` 帧是一份完整快照，直接替换状态，不需要合并字段。
-- 每 15 秒一行 `: heartbeat`，是注释行，不产生状态。读取器按空行切帧、只收集 `data:` 行，
-  被忽略的注释行不会打断帧。
+- 每 15 秒一行 `: heartbeat`，是注释行，不产生状态。读取器按空行切帧、只收集 `data:` 行，被忽略的注释行不会打断帧。
 - 终态（`completed` / `failed` / `cancelled`）之后服务端结束流；客户端也应在收到终态后主动停止。
-- 任务状态只在服务端内存里。断流后重新订阅可能 404，此时应以 `GET /jobs/{id}` 的
-  最后一次成功结果为准，并刷新列表，而不是持续报错。
+- 任务状态只在服务端内存里。断流后重新订阅可能 404，此时应以 `GET /jobs/{id}` 的最后一次成功结果为准，并刷新列表，而不是持续报错。
 - 鉴权与其他端点一致走 `Authorization` 头，`Accept: text/event-stream` 固定传。
 
 ### 27.4 检查点端点
 
-前缀 `/api/workspace/checkpoints`，**按智能体隔离**：服务端用 `get_agent_for_request`
-取工作区，客户端靠 `baseBuilder` 注入的 `X-Agent-Id` 命中当前智能体。
+前缀 `/api/workspace/checkpoints`，**按智能体隔离**：服务端用 `get_agent_for_request`取工作区，客户端靠 `baseBuilder` 注入的 `X-Agent-Id` 命中当前智能体。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -1897,41 +1460,29 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 | POST | `/gc` | 同上，`dry_run=false` |
 | DELETE | 前缀本身 | `{reset: true, auto_enabled}` |
 
-节点字段：`ref`、`kind`（`auto|snap|pre-restore|sha`）、`session_key`、`name`、`commit`、
-`sha`（`commit[:12]`）、`timestamp_ms`（epoch 毫秒）、`subject`、`query`、`channel`、
-`restore_index`、`parent_commit`、`is_head`、`user_id`、`session_id`、`session_title`。
+节点字段：`ref`、`kind`（`auto|snap|pre-restore|sha`）、`session_key`、`name`、`commit`、`sha`（`commit[:12]`）、`timestamp_ms`（epoch 毫秒）、`subject`、`query`、`channel`、`restore_index`、`parent_commit`、`is_head`、`user_id`、`session_id`、`session_title`。
 
-`sessions[]`：`session_key`、`session_id`、`user_id`、`channel`、`title`、`archived`。
-`summary`：`total`、`auto`、`snapshots`、`safety`、`heads`。
+`sessions[]`：`session_key`、`session_id`、`user_id`、`channel`、`title`、`archived`。`summary`：`total`、`auto`、`snapshots`、`safety`、`heads`。
 
 三条约束：
 
-1. 回滚目标是 `commit`，不是 `target`；服务端接受完整 commit、≥7 位前缀、`ref` 与 `#序号`，
-   客户端统一传节点上的完整 `commit`。
-2. `RestoreResult` 是 dataclass 的 `asdict`，其中元组序列化为 **JSON 数组**
-   （`restored_paths`、`deleted_paths`、`file_paths`）。
-3. `include_files=true` 且 `files` 为空时 `/restore` 返回 400
-   `Select at least one file before restoring files.`；
-   预览的 `file_paths` 是候选文件，界面据此做多选。
+1. 回滚目标是 `commit`，不是 `target`；服务端接受完整 commit、≥7 位前缀、`ref` 与 `#序号`，客户端统一传节点上的完整 `commit`。
+2. `RestoreResult` 是 dataclass 的 `asdict`，其中元组序列化为 **JSON 数组**（`restored_paths`、`deleted_paths`、`file_paths`）。
+3. `include_files=true` 且 `files` 为空时 `/restore` 返回 400`Select at least one file before restoring files.`；预览的 `file_paths` 是候选文件，界面据此做多选。
 
-`/status` 返回 400 表示该工作区不是 git 仓库。界面应降级为只读并显示服务端原文，
-不猜测原因，也不补自动初始化。
+`/status` 返回 400 表示该工作区不是 git 仓库。界面应降级为只读并显示服务端原文，不猜测原因，也不补自动初始化。
 
 ### 27.5 清理与重置
 
-- `PATCH /gc/settings` 三项范围：`gc_keep_count` 0–1000000、`gc_keep_days` 0–36500、
-  `pre_restore_retention_days` 0–36500。客户端先做整数与范围校验，非法时不发请求。
-- `/gc/preview` 与 `/gc` 的 `compact` 对应「压缩仓库对象」，会改变仓库对象数量，
-  执行前要按破坏性操作确认。
-- `DELETE /api/workspace/checkpoints` 删除当前工作区的全部检查点（自动、手动与恢复前快照），
-  返回 `{reset, auto_enabled}`。`auto_enabled` 保持原值，重置后仍按开关继续产生检查点。
+- `PATCH /gc/settings` 三项范围：`gc_keep_count` 0–1000000、`gc_keep_days` 0–36500、`pre_restore_retention_days` 0–36500。客户端先做整数与范围校验，非法时不发请求。
+- `/gc/preview` 与 `/gc` 的 `compact` 对应「压缩仓库对象」，会改变仓库对象数量，执行前要按破坏性操作确认。
+- `DELETE /api/workspace/checkpoints` 删除当前工作区的全部检查点（自动、手动与恢复前快照），返回 `{reset, auto_enabled}`。`auto_enabled` 保持原值，重置后仍按开关继续产生检查点。
 
 ---
 
 ## 28、语音转写
 
-五个端点，2026-11-14 在 2.2.2.post1 与 2.3.0b2 上逐条实测，形状一致。
-两版唯一差异：`/transcription-providers` 在 2.3.0b2 上多一项 `opencode`，属新增可选条目。
+五个端点，2026-11-14 在 2.2.2.post1 与 2.3.0b2 上逐条实测，形状一致。两版唯一差异：`/transcription-providers` 在 2.3.0b2 上多一项 `opencode`，属新增可选条目。
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
@@ -1942,8 +1493,7 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 | GET | `/api/workspace/local-whisper-status` | `{"available":false,"ffmpeg_installed":false,"whisper_installed":false}` |
 | GET/PUT | `/api/workspace/audio-mode` | `{"audio_mode":"auto"\|"native"}` |
 
-客户端只用前四组；`audio-mode` 是「收到的语音消息如何交给模型」的服务端策略，
-`local-whisper-status` 只用于判定 `local_whisper` 档位是否装齐依赖。
+客户端只用前四组；`audio-mode` 是「收到的语音消息如何交给模型」的服务端策略，`local-whisper-status` 只用于判定 `local_whisper` 档位是否装齐依赖。
 
 ### 28.1 `transcribe` 的四套失败形状
 
@@ -1956,27 +1506,19 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 | 已启用但 provider 不可用 / 调用失败 | 500 | 字符串 `"Transcription failed. Check provider configuration."` |
 | 缺 `file` 字段 | 422 | FastAPI 校验数组 `[{"type":"missing",…}]` |
 
-客户端按状态码 + `detail` 里的 `code` 分流，映射表在 `voice/ServerTranscriber`。
-**500 不能报成网络问题**：它明确指向服务端的 provider 配置，两种处置完全不同。
+客户端按状态码 + `detail` 里的 `code` 分流，映射表在 `voice/ServerTranscriber`。**500 不能报成网络问题**：它明确指向服务端的 provider 配置，两种处置完全不同。
 
-允许的扩展名：`.webm .mp4 .m4a .wav .mp3 .ogg .flac`，服务端对文件名 `lower()` 后比较。
-**文件名没有后缀时会回落成 `.webm`**（`os.path.splitext` 取空 + `or ".webm"`），
-因此客户端必须显式带 `.wav`，否则日志里看不出真实格式。
+允许的扩展名：`.webm .mp4 .m4a .wav .mp3 .ogg .flac`，服务端对文件名 `lower()` 后比较。**文件名没有后缀时会回落成 `.webm`**（`os.path.splitext` 取空 + `or ".webm"`），因此客户端必须显式带 `.wav`，否则日志里看不出真实格式。
 
 ### 28.2 检查顺序
 
-服务端先看 `disabled`，再看扩展名。因此在 `disabled` 的实例上，连 `.xyz` 也只会得到
-`TRANSCRIPTION_DISABLED`——探测阶段看到的永远是第一个原因，不能据此判断格式是否合法。
+服务端先看 `disabled`，再看扩展名。因此在 `disabled` 的实例上，连 `.xyz` 也只会得到`TRANSCRIPTION_DISABLED`——探测阶段看到的永远是第一个原因，不能据此判断格式是否合法。
 
-`transcribe` **不接受任何 query 参数**（`root`、`path` 传了也被忽略），
-`X-Agent-Id` 带上不影响结果：同一个 handler，不按智能体区分。
+`transcribe` **不接受任何 query 参数**（`root`、`path` 传了也被忽略），`X-Agent-Id` 带上不影响结果：同一个 handler，不按智能体区分。
 
 ### 28.3 开关不等于可用
 
-`transcription_provider_type=whisper_api` 只表示「用远端 Whisper」，
-真正生效还要求 `transcription_provider_id` 指向一个有凭据的 provider。
-实测空 `configured_provider_id` 时 `transcribe` 返回 500，而 `/transcription-providers`
-仍会列出 6–7 项 `available:true` 的候选——**只看开关或候选数量都会误判为可用**。
+`transcription_provider_type=whisper_api` 只表示「用远端 Whisper」，真正生效还要求 `transcription_provider_id` 指向一个有凭据的 provider。实测空 `configured_provider_id` 时 `transcribe` 返回 500，而 `/transcription-providers`仍会列出 6–7 项 `available:true` 的候选——**只看开关或候选数量都会误判为可用**。
 
 客户端因此分五态（`TranscriptionProbe`）：
 
@@ -1988,14 +1530,11 @@ webp 这一条会把 `media_type` 标成 `application/octet-stream`，只能按�
 | `Unsupported` | 端点 404（服务端版本没有该路由） |
 | `Unknown` | 401/403（没权限问），或尚未探测 |
 
-401 记 `Unknown` 而不是未配置，理由与第 19 节的插件探测相同：转写路由不在鉴权的公开路径里，
-验证阶段还没有 token 时必然 401。连不上（`IOException`）保留上一次结论。
+401 记 `Unknown` 而不是未配置，理由与第 19 节的插件探测相同：转写路由不在鉴权的公开路径里，验证阶段还没有 token 时必然 401。连不上（`IOException`）保留上一次结论。
 
 ### 28.4 成功路径的验证方式
 
-两个测试容器默认都是 `disabled`，`config.json` 的 `providers` 为空。
-为了让成功路径可验，在 `qp-test` 内起了一个假 ASR（`127.0.0.1:9099`，固定返回一句文本），
-再把 `qwenpaw-local` 指过去：
+两个测试容器默认都是 `disabled`，`config.json` 的 `providers` 为空。为了让成功路径可验，在 `qp-test` 内起了一个假 ASR（`127.0.0.1:9099`，固定返回一句文本），再把 `qwenpaw-local` 指过去：
 
 ```
 PUT /api/models/qwenpaw-local/config            {"enabled":true,"api_key":"sk-test","base_url":"http://127.0.0.1:9099/v1",…}
@@ -2003,20 +1542,15 @@ PUT /api/workspace/transcription-provider       {"provider_id":"qwenpaw-local"}
 PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"whisper_api"}
 ```
 
-随后 `POST transcribe` 即返回 `{"text":"你好，这是一次转写验证"}` 200，两版都验过。
-注意 **providers 路由的前缀是 `/api/models`**，`/api/providers/...` 返回 405。
-这是测试环境手段，客户端不接这两个配置端点。
+随后 `POST transcribe` 即返回 `{"text":"你好，这是一次转写验证"}` 200，两版都验过。注意 **providers 路由的前缀是 `/api/models`**，`/api/providers/...` 返回 405。这是测试环境手段，客户端不接这两个配置端点。
 
-设备端完整链路（录音 → 补 WAV 头 → 上传 → 填入草稿）已在 redroid 上验通，
-细节见 开发日志 第 67 节。
+设备端完整链路（录音 → 补 WAV 头 → 上传 → 填入草稿）已在 redroid 上验通，细节见 开发日志 第 67 节。
 
 ---
 
 ## 29、用量统计与模型管理
 
-三组统计端点与四个模型端点，2026-11-14 在 2.2.2.post1 与 2.3.0b2 上逐条实测，
-路径与字段在两版一致；差异只在 `GET /api/models/active` 的响应多一个
-`default_models` 对象（见第 17 节），客户端忽略未知字段即可。
+三组统计端点与四个模型端点，2026-11-14 在 2.2.2.post1 与 2.3.0b2 上逐条实测，路径与字段在两版一致；差异只在 `GET /api/models/active` 的响应多一个`default_models` 对象（见第 17 节），客户端忽略未知字段即可。
 
 ### 29.1 三组统计的口径不同
 
@@ -2027,47 +1561,27 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | GET | `/api/token-usage/details` | **全局**，一行是「日期 × 智能体 × 供应商 × 模型」 | 同上 |
 | GET | `/api/token-usage` | 全局聚合（第 10 节） | 同上 |
 
-查询参数都是 `start_date` / `end_date`（`YYYY-MM-DD`，**两端都含**）。
-**传反的区间会被服务端自动交换**：`start_date=2026-11-14&end_date=2026-11-12`
-返回的 `start_date` 是 `2026-11-12`。客户端因此不需要自己纠正顺序。
+查询参数都是 `start_date` / `end_date`（`YYYY-MM-DD`，**两端都含**）。**传反的区间会被服务端自动交换**：`start_date=2026-11-14&end_date=2026-11-12`返回的 `start_date` 是 `2026-11-12`。客户端因此不需要自己纠正顺序。
 
-界面上同页并列这几块时必须分别标注范围。实测同一天：
-`agent-stats` 的 `total_tool_calls` 是 32（当前智能体），
-而 `token-usage` 的 `total_calls` 是 87（全局），两个数字放一起不加说明会互相矛盾。
+界面上同页并列这几块时必须分别标注范围。实测同一天：`agent-stats` 的 `total_tool_calls` 是 32（当前智能体），而 `token-usage` 的 `total_calls` 是 87（全局），两个数字放一起不加说明会互相矛盾。
 
 `agent-stats` 带一个不存在的智能体 id 回 **404** `Agent 'NoSuchAgent' not found`。
 
 ### 29.2 `AgentStatsSummary` 的字段
 
-`total_active_sessions`、`total_messages`、`total_user_messages`、
-`total_assistant_messages`、`total_prompt_tokens`、`total_completion_tokens`、
-`total_llm_calls`、`total_tool_calls`、`start_date`、`end_date`，
-外加 `agent_*` 六个：`agent_prompt_tokens`、`agent_completion_tokens`、
-`agent_llm_calls`、`agent_cache_read_tokens`、`agent_cache_eligible_input_tokens`、
-`agent_cache_hit_rate`。
+`total_active_sessions`、`total_messages`、`total_user_messages`、`total_assistant_messages`、`total_prompt_tokens`、`total_completion_tokens`、`total_llm_calls`、`total_tool_calls`、`start_date`、`end_date`，外加 `agent_*` 六个：`agent_prompt_tokens`、`agent_completion_tokens`、`agent_llm_calls`、`agent_cache_read_tokens`、`agent_cache_eligible_input_tokens`、`agent_cache_hit_rate`。
 
-`by_date` 的元素 `DailyStats` 有 14 个字段：`date`、`chats`、`active_sessions`、
-`user_messages`、`assistant_messages`、`total_messages`、`prompt_tokens`、
-`completion_tokens`、`llm_calls`、`tool_calls`，以及 `agent_prompt_tokens`、
-`agent_completion_tokens`、`agent_llm_calls`、`agent_cache_read_tokens`。
-`by_date` 的长度等于区间天数，**无数据的那天也返回一条零值**。
+`by_date` 的元素 `DailyStats` 有 14 个字段：`date`、`chats`、`active_sessions`、`user_messages`、`assistant_messages`、`total_messages`、`prompt_tokens`、`completion_tokens`、`llm_calls`、`tool_calls`，以及 `agent_prompt_tokens`、`agent_completion_tokens`、`agent_llm_calls`、`agent_cache_read_tokens`。`by_date` 的长度等于区间天数，**无数据的那天也返回一条零值**。
 
-`channel_stats` 的元素是 `channel`、`session_count`、`user_messages`、
-`assistant_messages`、`total_messages`。无数据时是 `[]`。
+`channel_stats` 的元素是 `channel`、`session_count`、`user_messages`、`assistant_messages`、`total_messages`。无数据时是 `[]`。
 
-**`agent_cache_hit_rate` 可以是 `null`**，与第 10 节的 `cache_hit_rate` 同形。
-实测空区间（`2020-01-01..2020-01-03`）返回 `"agent_cache_hit_rate": null`，
-其余计数全为 0。声明成非空 `Double` 会让整个响应解析失败，
-用户看到的是「加载失败」而不是一组零值。
+**`agent_cache_hit_rate` 可以是 `null`**，与第 10 节的 `cache_hit_rate` 同形。实测空区间（`2020-01-01..2020-01-03`）返回 `"agent_cache_hit_rate": null`，其余计数全为 0。声明成非空 `Double` 会让整个响应解析失败，用户看到的是「加载失败」而不是一组零值。
 
 ### 29.3 趋势端点已自行补零
 
-`GET /api/agent-stats/llm-tool-trend` 返回**裸数组**，元素是
-`{date, agent_llm_calls, tool_calls}`。
+`GET /api/agent-stats/llm-tool-trend` 返回**裸数组**，元素是`{date, agent_llm_calls, tool_calls}`。
 
-实测 `2026-08-14..2026-11-14`（93 天）返回 **93 条**，其中只有 4 天非零，
-其余都是零值条目——服务端已经把区间补齐。客户端仍做一次幂等补齐：
-补了不变，缺日才填，防止将来版本改回「只返回有数据的日期」时折线跨空档连成直线。
+实测 `2026-08-14..2026-11-14`（93 天）返回 **93 条**，其中只有 4 天非零，其余都是零值条目——服务端已经把区间补齐。客户端仍做一次幂等补齐：补了不变，缺日才填，防止将来版本改回「只返回有数据的日期」时折线跨空档连成直线。
 
 ### 29.4 明细端点
 
@@ -2080,10 +1594,7 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
  "cache_observed_calls":9,"call_count":11}
 ```
 
-**行数等于「有调用的日期 × 智能体 × 模型」，不是区间天数**：
-90 天区间实测只有 4 行。因此不存在「行数过大需要分页」的问题。
-`agent_id` 可以是 `null`（早于服务端智能体归属机制的历史行），客户端不能丢这些行，
-否则明细合计与概览对不上。
+**行数等于「有调用的日期 × 智能体 × 模型」，不是区间天数**：90 天区间实测只有 4 行。因此不存在「行数过大需要分页」的问题。`agent_id` 可以是 `null`（早于服务端智能体归属机制的历史行），客户端不能丢这些行，否则明细合计与概览对不上。
 
 ### 29.5 默认模型的三个作用域
 
@@ -2095,13 +1606,9 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | `global` | 服务端全局默认 | 可省略 |
 | `agent` | 该智能体**配置里显式写下**的模型 | **400** `agent_id is required when scope is 'agent'` |
 
-**`scope=agent` 读的是「写过的值」，不是「生效值」。** 实测 `default` 智能体在
-未写入过时返回 `{"active_llm": null, "effective_max_input_length": null}`，
-而同一时刻 `effective` 返回全局模型。因此界面「当前智能体默认」一行读 `agent`，
-为空时显示「跟随全局」，不能把全局值抄过来当成该智能体的选择。
+**`scope=agent` 读的是「写过的值」，不是「生效值」。** 实测 `default` 智能体在未写入过时返回 `{"active_llm": null, "effective_max_input_length": null}`，而同一时刻 `effective` 返回全局模型。因此界面「当前智能体默认」一行读 `agent`，为空时显示「跟随全局」，不能把全局值抄过来当成该智能体的选择。
 
-`PUT /api/models/active` 的 body 必填三字段：`{provider_id, model, scope}`，
-`scope` 只接受 `global` / `agent`，`scope=agent` 时还要带 `agent_id`。
+`PUT /api/models/active` 的 body 必填三字段：`{provider_id, model, scope}`，`scope` 只接受 `global` / `agent`，`scope=agent` 时还要带 `agent_id`。
 
 | 场景 | 状态码 | `detail` |
 | --- | --- | --- |
@@ -2111,8 +1618,7 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 ### 29.6 供应商连通性测试
 
-`POST /api/models/{provider_id}/test`，body 可省略（服务端声明为
-`Optional[TestProviderRequest]`）。返回：
+`POST /api/models/{provider_id}/test`，body 可省略（服务端声明为`Optional[TestProviderRequest]`）。返回：
 
 ```json
 {"success":true,"message":"Connection successful","status":null,
@@ -2128,50 +1634,36 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 按状态码判断会把「供应商连不上」显示成「测试成功」。失败时直接把 `message` 透给用户。
 
-未知供应商回 **404** `Provider 'nope' not found`（**句末没有句号**，
-与 29.5 的 404 文案不一致，两处都是服务端原文，客户端不做字符串加工）。
+未知供应商回 **404** `Provider 'nope' not found`（**句末没有句号**，与 29.5 的 404 文案不一致，两处都是服务端原文，客户端不做字符串加工）。
 
 ### 29.7 模型级测试单独一条路径
 
-服务端没有 `POST /api/models/{id}/test` 这个「模型级」端点：
-`/{provider_id}/test` 测的是**供应商**连通性。模型级是
-`POST /api/models/{provider_id}/models/test`，body `{model_id}`，
-返回同一个 `TestConnectionResponse`。客户端本期只接供应商级。
+服务端没有 `POST /api/models/{id}/test` 这个「模型级」端点：`/{provider_id}/test` 测的是**供应商**连通性。模型级是`POST /api/models/{provider_id}/models/test`，body `{model_id}`，返回同一个 `TestConnectionResponse`。客户端本期只接供应商级。
 
 ### 29.8 模型池端点不能当列表数据源
 
-`GET /api/models/{provider_id}/pool` 的 `limit` 上限是 **100**
-（`ge=1, le=100`），传 200 回 422：
+`GET /api/models/{provider_id}/pool` 的 `limit` 上限是 **100**（`ge=1, le=100`），传 200 回 422：
 
 ```json
 {"detail":[{"type":"less_than_equal","loc":["query","limit"],
   "msg":"Input should be less than or equal to 100","input":"200","ctx":{"le":100}}]}
 ```
 
-返回 `ModelPoolPage`：`models`、`total`、`selected_count`、`candidate_count`、
-`families`、`offset`、`limit`。
+返回 `ModelPoolPage`：`models`、`total`、`selected_count`、`candidate_count`、`families`、`offset`、`limit`。
 
-**客户端不接这个端点。** 本地部署下它的 `models` 常常是空数组（第 9 节已记），
-模型清单统一取 `GET /api/models` 的三个数组（配置 / 额外 / 探测）。
-0.4.1 顺带删掉了客户端里无调用方、且 `limit` 默认写 200 的 `modelPool` 方法——
-那个默认值一旦被调用必然 422。
+**客户端不接这个端点。** 本地部署下它的 `models` 常常是空数组（第 9 节已记），模型清单统一取 `GET /api/models` 的三个数组（配置 / 额外 / 探测）。0.4.1 顺带删掉了客户端里无调用方、且 `limit` 默认写 200 的 `modelPool` 方法——那个默认值一旦被调用必然 422。
 
 ### 29.9 供应商列表的可用性形状
 
-`GET /api/models` 实测 2.2.2.post1 有 36 个供应商（32 个 enabled），
-但**只有 2 个带模型**（`dashscope` 1 个、`a2a` 1 个）；2.3.0b2 有 38 个，同样 2 个模型。
-大多数 enabled 供应商的模型数组为空（未配凭据或未发现），
-界面必须能表达「已启用但没有模型」，不能把它当成「没有供应商」。
+`GET /api/models` 实测 2.2.2.post1 有 36 个供应商（32 个 enabled），但**只有 2 个带模型**（`dashscope` 1 个、`a2a` 1 个）；2.3.0b2 有 38 个，同样 2 个模型。大多数 enabled 供应商的模型数组为空（未配凭据或未发现），界面必须能表达「已启用但没有模型」，不能把它当成「没有供应商」。
 
-单个 `ModelInfo` 有 50 余个字段，客户端只用 `id` / `name` / `is_free` /
-`is_recommended` / `max_input_length`。
+单个 `ModelInfo` 有 50 余个字段，客户端只用 `id` / `name` / `is_free` /`is_recommended` / `max_input_length`。
 
 ---
 
 ## 30、技能、MCP 与市场
 
-三组端点，2026-11-15 在 2.2.2.post1 上逐条实测。三条路由都同时挂在全局与
-`/api/agents/{agentId}/` 下，客户端一律走全局 + `X-Agent-Id`（第 1 节）。
+三组端点，2026-11-15 在 2.2.2.post1 上逐条实测。三条路由都同时挂在全局与`/api/agents/{agentId}/` 下，客户端一律走全局 + `X-Agent-Id`（第 1 节）。
 
 ### 30.1 技能
 
@@ -2186,33 +1678,20 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | GET | `/api/skills/pool` | 技能池数组，**没有 `enabled`** |
 | GET | `/api/skills/pool/{name}` | 池内详情，多 `builtin_language` 等 |
 
-`SkillSpec` 字段：`name`、`description`、`version_text`、`source`（`customized` / `builtin`）、
-`emoji`、`enabled`、`channels`（默认 `["all"]`）、`preload`、`tags`、`last_updated`。
+`SkillSpec` 字段：`name`、`description`、`version_text`、`source`（`customized` / `builtin`）、`emoji`、`enabled`、`channels`（默认 `["all"]`）、`preload`、`tags`、`last_updated`。
 
 实测四条：
 
-- `last_updated` 是带 `Z` 的 ISO：`"2026-11-01T01:08:08.599528Z"`。展示前按 UTC 折算本地；
-  **没有时区后缀的值不折算**，否则等于替服务端编造精度。
-- `PUT /api/skills/save` 内容未变时回 `{"success":true,"mode":"noop","name":"…"}`，
-  不是错误。客户端据此显示「内容与服务端一致，未写入」。
-- 重名新建回 **409**，且 `detail` 是**对象**不是字符串：
-  `{"detail":{"reason":"conflict","suggested_name":"qpnode_test-20261115044817"}}`。
-  `suggested_name` 带时间戳后缀，可以直接给用户作改名建议。
+- `last_updated` 是带 `Z` 的 ISO：`"2026-11-01T01:08:08.599528Z"`。展示前按 UTC 折算本地；**没有时区后缀的值不折算**，否则等于替服务端编造精度。
+- `PUT /api/skills/save` 内容未变时回 `{"success":true,"mode":"noop","name":"…"}`，不是错误。客户端据此显示「内容与服务端一致，未写入」。
+- 重名新建回 **409**，且 `detail` 是**对象**不是字符串：`{"detail":{"reason":"conflict","suggested_name":"qpnode_test-20261115044817"}}`。`suggested_name` 带时间戳后缀，可以直接给用户作改名建议。
 - `DELETE` 对已启用的技能直接成功（服务端内部先 disable），回 `{"deleted":true}`。
 
-**422 是安全扫描拦截，不是校验错误。** `enable` 与 `save` 都会重新扫描技能目录，
-命中策略时回 422，body 为
-`{type:"security_scan_failed", detail, skill_name, max_severity, findings[]}`。
-`max_severity` 与 `findings` 在 body 顶层，客户端只取 `detail` 与（能解析出的）等级，
-剩下的指向「在 Web 控制台确认扫描规则」。
+**422 是安全扫描拦截，不是校验错误。** `enable` 与 `save` 都会重新扫描技能目录，命中策略时回 422，body 为`{type:"security_scan_failed", detail, skill_name, max_severity, findings[]}`。`max_severity` 与 `findings` 在 body 顶层，客户端只取 `detail` 与（能解析出的）等级，剩下的指向「在 Web 控制台确认扫描规则」。
 
-**`SKILL.md` 必须有 frontmatter。** 缺 `name` 或 `description` 回 400：
-`{"detail":"SKILL.md must include non-empty frontmatter name and description"}`。
-判据在 `validate_skill_content`，与界面上的提交前提示同源（第 30.4 节）。
+**`SKILL.md` 必须有 frontmatter。** 缺 `name` 或 `description` 回 400：`{"detail":"SKILL.md must include non-empty frontmatter name and description"}`。判据在 `validate_skill_content`，与界面上的提交前提示同源（第 30.4 节）。
 
-**技能文件没有列举端点。** 只有 `GET /api/skills/{name}/files/{path}` 按路径单取，
-`SkillDetail` 也不带文件清单。因此客户端无法浏览 `references/` 与 `scripts/`——
-没有列举就只能让用户手输路径。0.5.0 只做 `SKILL.md` 正文的编辑。
+**技能文件没有列举端点。** 只有 `GET /api/skills/{name}/files/{path}` 按路径单取，`SkillDetail` 也不带文件清单。因此客户端无法浏览 `references/` 与 `scripts/`——没有列举就只能让用户手输路径。0.5.0 只做 `SKILL.md` 正文的编辑。
 
 ### 30.2 MCP
 
@@ -2225,30 +1704,17 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | GET | `/api/mcp/policy/{key}` | `MCPAccessPolicy`，**不连 MCP 服务端** |
 | PUT | `/api/mcp/policy/{key}` | 整份 `MCPAccessPolicy` |
 
-`MCPClientInfo` 字段：`key`、`name`、`description`、`enabled`、`transport`
-（`stdio` / `streamable_http` / `sse`）、`url`、`command`、`args`、`headers`、`env`、
-`cwd`、`http_timeout`、`tools`、`oauth_status`、`access_summary`。
+`MCPClientInfo` 字段：`key`、`name`、`description`、`enabled`、`transport`（`stdio` / `streamable_http` / `sse`）、`url`、`command`、`args`、`headers`、`env`、`cwd`、`http_timeout`、`tools`、`oauth_status`、`access_summary`。
 
 三条与直觉相反的行为：
 
-1. **`tools` 为 `null` 是语义，不是缺值。** 它表示「未设白名单，全部启用」。
-   声明成非空集合会让整份 `/api/mcp` 解析失败（与第 22 节 `config_fields: null` 同类）。
-   客户端勾选草稿的起点按它决定：`null` 时先勾满，否则一保存就把全部工具关掉。
-2. **客户端被禁用时 `/tools` 回空数组 + 200，不是 502。** 因此「空列表」有两种含义，
-   必须结合 `MCPClientInfo.enabled` 区分：已停用（提示先启用）与服务端确实没有工具。
-   502 只留给「卡片写得对但连不上那个 MCP 服务端」，文案不能说成「无法连接服务器」。
-3. **`{client_key:path}` 是 path 转换器**，key 里允许 `/`（如 `some/nested/key`）。
-   客户端直接拼原值，不要再编码一层。
+1. **`tools` 为 `null` 是语义，不是缺值。** 它表示「未设白名单，全部启用」。声明成非空集合会让整份 `/api/mcp` 解析失败（与第 22 节 `config_fields: null` 同类）。客户端勾选草稿的起点按它决定：`null` 时先勾满，否则一保存就把全部工具关掉。
+2. **客户端被禁用时 `/tools` 回空数组 + 200，不是 502。** 因此「空列表」有两种含义，必须结合 `MCPClientInfo.enabled` 区分：已停用（提示先启用）与服务端确实没有工具。502 只留给「卡片写得对但连不上那个 MCP 服务端」，文案不能说成「无法连接服务器」。
+3. **`{client_key:path}` 是 path 转换器**，key 里允许 `/`（如 `some/nested/key`）。客户端直接拼原值，不要再编码一层。
 
-`MCPAccessPolicy` 五个字段：`default_effect`（`allow` / `ask` / `deny`，默认 `deny`）、
-`client_overrides`（规则数组）、`tool_defaults`（`[{tool_name, effect}]`）、
-`tool_overrides`（规则 + `tool_name`）、`unmanaged_rules_count`（只读计数）。
-规则是 `source_type`（实测只有 `channel`）× `source_value` × `subject_type`
-（`all` / `user`）× `subject_value` × `effect` 五维。
+`MCPAccessPolicy` 五个字段：`default_effect`（`allow` / `ask` / `deny`，默认 `deny`）、`client_overrides`（规则数组）、`tool_defaults`（`[{tool_name, effect}]`）、`tool_overrides`（规则 + `tool_name`）、`unmanaged_rules_count`（只读计数）。规则是 `source_type`（实测只有 `channel`）× `source_value` × `subject_type`（`all` / `user`）× `subject_value` × `effect` 五维。
 
-**策略是整读整写。** 服务端按提交的 payload 重建全部「控制台托管」规则，
-少的字段就等于删掉一批规则，而界面上完全看不出来。0.5.0 的可编辑面只有
-`default_effect` 与 `tool_defaults`，`client_overrides` / `tool_overrides` 原样带回。
+**策略是整读整写。** 服务端按提交的 payload 重建全部「控制台托管」规则，少的字段就等于删掉一批规则，而界面上完全看不出来。0.5.0 的可编辑面只有`default_effect` 与 `tool_defaults`，`client_overrides` / `tool_overrides` 原样带回。
 
 ### 30.3 市场与插件目录
 
@@ -2262,13 +1728,8 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 实测：
 
-- 四个来源 `qwenpaw` / `clawhub` / `modelscope` / `aliyun`；`aliyun` 的
-  `available: false`，`reason` 为「missing env vars: …」。
-  **`provider_pages` 里出现不可用或未注册的 key 直接回 400**，客户端只填可用来源。
-- **`qwenpaw` 来源的 `source_url` 不是可浏览地址。** 服务端
-  `market/providers/qwenpaw.py` 用稳定 id 拼 `/skills/@owner/name`，注释写明是为了让
-  安装解析器能从 URL 里拆出 owner/name。但平台前端详情路由 `/skills/:skillId` 只认
-  **UUID**（页面内取详情是 `GET /api/v1/skills/{uuid}`）。实测三条：
+- 四个来源 `qwenpaw` / `clawhub` / `modelscope` / `aliyun`；`aliyun` 的`available: false`，`reason` 为「missing env vars: …」。**`provider_pages` 里出现不可用或未注册的 key 直接回 400**，客户端只填可用来源。
+- **`qwenpaw` 来源的 `source_url` 不是可浏览地址。** 服务端`market/providers/qwenpaw.py` 用稳定 id 拼 `/skills/@owner/name`，注释写明是为了让安装解析器能从 URL 里拆出 owner/name。但平台前端详情路由 `/skills/:skillId` 只认**UUID**（页面内取详情是 `GET /api/v1/skills/{uuid}`）。实测三条：
 
   | 地址 | 详情接口 |
   | --- | --- |
@@ -2276,24 +1737,11 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
   | `/skills/qwenpaw-docs-zh` | 404 |
   | `/skills/01a152e1-49ae-7f82-9cba-41aa77f1fd67` | 200 |
 
-  上游列表响应本来就带 `details_url`（UUID），但服务端映射成 `MarketResult` 时丢掉了。
-  客户端只能自己再查一次：`GET https://platform.agentscope.io/openapi/v1/skills
-  ?search=<技能 code>&page_size=20&page_number=1`，按 `id` 与 slug **全等**匹配取
-  `details_url`。**不能用末段比对**：`id` 形如 `@owner/name`，只比 name 会把别人的同名技能
-  也算命中，把人带到错误页面。查不到时退回平台技能列表并说明原因。
-  其余三个来源的 `source_url` 是真实页面，不做这一步。
-- `limit` 上限 50。三个来源并行搜索实测约 20 秒（`modelscope` 有 967 条），
-  界面必须有「搜索中」状态，不能只显示空列表。
-- 搜索结果的 `stats` 实测为 `null`，只有部分来源会填，界面不能假设它有键。
-  `by_provider[key].has_more` 为真只说明「还有更多」，本版不做翻页。
-- `GET /api/plugins/catalog` 回 34 条、`error: null`。**CDN 拉不到时仍回 200**，
-  此时 `plugins: []` 且 `error` 非空——界面必须先看 `error`，
-  否则会把「取不到」显示成「没有插件」。条目字段含 `installed`、`installed_version`、
-  `upgrade_available`，`description_i18n` 可能是 `null`。
-- `GET /api/plugins/market/search` 外层是 `{success, message, data:{total, plugins}}`，
-  条目字段与插件目录完全不同：`id` / `developer` / `owner` / `version` / `downloads` /
-  `locales{en,zh}` / `display_name` / `view_count` / `details_url` / `is_featured` /
-  `qwenpaw_compat_labels`。失败回 502。
+  上游列表响应本来就带 `details_url`（UUID），但服务端映射成 `MarketResult` 时丢掉了。客户端只能自己再查一次：`GET https://platform.agentscope.io/openapi/v1/skills?search=<技能 code>&page_size=20&page_number=1`，按 `id` 与 slug **全等**匹配取`details_url`。**不能用末段比对**：`id` 形如 `@owner/name`，只比 name 会把别人的同名技能也算命中，把人带到错误页面。查不到时退回平台技能列表并说明原因。其余三个来源的 `source_url` 是真实页面，不做这一步。
+- `limit` 上限 50。三个来源并行搜索实测约 20 秒（`modelscope` 有 967 条），界面必须有「搜索中」状态，不能只显示空列表。
+- 搜索结果的 `stats` 实测为 `null`，只有部分来源会填，界面不能假设它有键。`by_provider[key].has_more` 为真只说明「还有更多」，本版不做翻页。
+- `GET /api/plugins/catalog` 回 34 条、`error: null`。**CDN 拉不到时仍回 200**，此时 `plugins: []` 且 `error` 非空——界面必须先看 `error`，否则会把「取不到」显示成「没有插件」。条目字段含 `installed`、`installed_version`、`upgrade_available`，`description_i18n` 可能是 `null`。
+- `GET /api/plugins/market/search` 外层是 `{success, message, data:{total, plugins}}`，条目字段与插件目录完全不同：`id` / `developer` / `owner` / `version` / `downloads` /`locales{en,zh}` / `display_name` / `view_count` / `details_url` / `is_featured` /`qwenpaw_compat_labels`。失败回 502。
 
 `/api/market/*` 前有 `await market_ready`，冷启动可能等几秒。
 
@@ -2302,15 +1750,11 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 1. **技能只编辑 `SKILL.md`**：没有列举端点，无法浏览附件文件。
 2. **技能池只读**：池内没有 `enabled`，启停的对象是「某工作区里的某个技能」。
 3. **MCP 规则表留 Web**：五维规则在手机上无法审阅；只改默认效果与逐工具默认效果。
-4. **白名单的三种提交语义**：全勾 → `null`（取消白名单、全部启用）；
-   部分 → 按服务端工具顺序筛出的列表；一个都不勾 → 空列表（不是 `null`）。
-   三者只允许有一处出口（`McpPolicyEdit.whitelistSelection`），
-   混起来的后果是「取消全部勾选后把所有工具都打开」。
+4. **白名单的三种提交语义**：全勾 → `null`（取消白名单、全部启用）；部分 → 按服务端工具顺序筛出的列表；一个都不勾 → 空列表（不是 `null`）。三者只允许有一处出口（`McpPolicyEdit.whitelistSelection`），混起来的后果是「取消全部勾选后把所有工具都打开」。
 
 ### 30.5 安装、导入与广播（皆为服务端已有能力，0.5.0 客户端未接入）
 
-0.5.0 把扩展市场做成只读，是产品口径的选择，不是服务端缺接口。以下均为 2026-11-15
-在 qp-test（2.2.2.post1）上的实测，供后续放开时直接采用。
+0.5.0 把扩展市场做成只读，是产品口径的选择，不是服务端缺接口。以下均为 2026-11-15在 qp-test（2.2.2.post1）上的实测，供后续放开时直接采用。
 
 **插件安装**
 
@@ -2321,15 +1765,9 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 - `source` 只接受 http(s) 的 ZIP 地址或本地目录绝对路径，**不支持 git 仓库地址**。
 - **上传完立即热加载**，返回 `loaded: true`，无需重启；服务端会后台重载所有 agent。
-- `plugin.json` 的契约：`entry` 必须是对象（`entry.backend` / `entry.frontend`），
-  且模块必须导出名为 `plugin` 的对象。实测三种错误各有明确 detail：
-  `has no entry points declared (entry.backend or entry.frontend)`、
-  `cannot import name 'PluginAPI'`（正确类名是 `PluginApi`）、
-  `must export a 'plugin' object (or a PawApp 'app' instance)`。
-- 同名目录已存在回 **409** `Plugin installation target already exists`，
-  `force=true` 才有覆盖能力。客户端要做覆盖选项，否则重装必失败。
-- URL 下载上限 500 MB。**没有按市场条目 id 安装的端点**，
-  必须先搜出 `install_url` 再调 `/install`。
+- `plugin.json` 的契约：`entry` 必须是对象（`entry.backend` / `entry.frontend`），且模块必须导出名为 `plugin` 的对象。实测三种错误各有明确 detail：`has no entry points declared (entry.backend or entry.frontend)`、`cannot import name 'PluginAPI'`（正确类名是 `PluginApi`）、`must export a 'plugin' object (or a PawApp 'app' instance)`。
+- 同名目录已存在回 **409** `Plugin installation target already exists`，`force=true` 才有覆盖能力。客户端要做覆盖选项，否则重装必失败。
+- URL 下载上限 500 MB。**没有按市场条目 id 安装的端点**，必须先搜出 `install_url` 再调 `/install`。
 
 **技能导入**
 
@@ -2343,16 +1781,10 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | POST | `/api/skills/pool/import` | JSON `{bundle_url}`，同步进池 |
 
 - 上传成功回 `{imported:["name"], count:1, enabled:true, conflicts:[]}`。
-- **重复上传同名技能静默覆盖，`conflicts` 恒为空数组。** 实测连传两次同一个 zip 都回 200，
-  第二次把第一次的覆盖掉。客户端若要防误覆盖，只能自己先比对现有列表。
-- 无 frontmatter 回 **400**，detail 为字符串
-  `SKILL.md must include non-empty frontmatter name and description`。
-- **`pool/import` 失败是裸 500**：`content-type: text/plain`，body 只有
-  `Internal Server Error`，没有 JSON。同组的 `hub/install/start` 相反，
-  把错误包进任务的 `error` 字段（实测失败样例：
-  `Skill hub import failed: Error -3 while decompressing data: incorrect header check`）。
-- `bundle_url` 支持的来源：github / skills-sh / lobehub / qwenpaw / modelscope /
-  aliyun / skillsmp / clawhub 及市场 provider。
+- **重复上传同名技能静默覆盖，`conflicts` 恒为空数组。** 实测连传两次同一个 zip 都回 200，第二次把第一次的覆盖掉。客户端若要防误覆盖，只能自己先比对现有列表。
+- 无 frontmatter 回 **400**，detail 为字符串`SKILL.md must include non-empty frontmatter name and description`。
+- **`pool/import` 失败是裸 500**：`content-type: text/plain`，body 只有`Internal Server Error`，没有 JSON。同组的 `hub/install/start` 相反，把错误包进任务的 `error` 字段（实测失败样例：`Skill hub import failed: Error -3 while decompressing data: incorrect header check`）。
+- `bundle_url` 支持的来源：github / skills-sh / lobehub / qwenpaw / modelscope /aliyun / skillsmp / clawhub 及市场 provider。
 
 **技能广播**
 
@@ -2364,32 +1796,22 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 ```
 
 - 成功回 `{downloaded:[{workspace_id,workspace_name,name}]}`。
-- **全有或全无**：任一目标冲突就 409 并全部回滚，`downloaded` 为空数组。
-  服务端注释写明 `All-or-nothing: if any target conflicts, reject everything`，
-  实测一个成功一个冲突时返回两条 conflicts、什么都没下载。
-- `overwrite: true` 可覆盖。`preview_only` 仍以 **409 + conflicts** 报冲突，
-  不是 200 的预览结构——不要照名字假设它是「预演」。
-- 冲突项带 `suggested_name`（服务端算好的带时间戳名字），
-  但 **`rename_map` 不在这个端点上**，它只出现在 `/skills/upload` 的表单字段里。
-- 语义本质是「从技能池复制到多个工作区」，实现是复制而非软链。
-  技能物理位置为 `workspace_dir/skills/<name>`，多 agent 之间不自动共享。
+- **全有或全无**：任一目标冲突就 409 并全部回滚，`downloaded` 为空数组。服务端注释写明 `All-or-nothing: if any target conflicts, reject everything`，实测一个成功一个冲突时返回两条 conflicts、什么都没下载。
+- `overwrite: true` 可覆盖。`preview_only` 仍以 **409 + conflicts** 报冲突，不是 200 的预览结构——不要照名字假设它是「预演」。
+- 冲突项带 `suggested_name`（服务端算好的带时间戳名字），但 **`rename_map` 不在这个端点上**，它只出现在 `/skills/upload` 的表单字段里。
+- 语义本质是「从技能池复制到多个工作区」，实现是复制而非软链。技能物理位置为 `workspace_dir/skills/<name>`，多 agent 之间不自动共享。
 
-**方法不匹配时返回 404 而不是 405。** 因为 `/api/skills/{name}` 这条路径参数路由会
-抢先匹配 `GET /api/skills/upload` 之类的请求。排查时不要据此判断端点不存在，
-应直接查 `app/routers/skills.py` 的装饰器，或改用 POST 试请求体校验。
+**方法不匹配时返回 404 而不是 405。** 因为 `/api/skills/{name}` 这条路径参数路由会抢先匹配 `GET /api/skills/upload` 之类的请求。排查时不要据此判断端点不存在，应直接查 `app/routers/skills.py` 的装饰器，或改用 POST 试请求体校验。
 
 ---
 
 ## 31、终端、Git、访问控制与外部智能体
 
-2026-11-16 在 qp-test（2.2.2.post1）上实测。这一节记的是「原先被判为不做、
-实测后确认可行」的四组能力，以及各自的反直觉之处。
+2026-11-16 在 qp-test（2.2.2.post1）上实测。这一节记的是「原先被判为不做、实测后确认可行」的四组能力，以及各自的反直觉之处。
 
 ### 31.1 终端
 
-**硬前置：`QWENPAW_AUTH_ENABLED=true`。** 未开启时 `POST /terminals/{group}` 回 403
-`Terminal requires QWENPAW_AUTH_ENABLED=true`。这是刻意设计，不是缺陷：
-终端等于服务器上的任意命令执行。
+**硬前置：`QWENPAW_AUTH_ENABLED=true`。** 未开启时 `POST /terminals/{group}` 回 403`Terminal requires QWENPAW_AUTH_ENABLED=true`。这是刻意设计，不是缺陷：终端等于服务器上的任意命令执行。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -2404,26 +1826,19 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 `output` 返回 `{data, cursor, reset, exited, exit_code}`：
 
-- **`cursor` 是字符游标，不是字节偏移。** 下次带 `after=cursor` 续读，
-  不要自己算长度。
+- **`cursor` 是字符游标，不是字节偏移。** 下次带 `after=cursor` 续读，不要自己算长度。
 - 服务端阻塞最多 **20 秒**。客户端读超时必须大于它，否则每次都空转。
 - `reset: true` 表示游标已失效（输出缓冲区上限 256 KB），须按返回的 `cursor` 重来。
 - 单次最多返回 `MAX_CHUNK = 32768` 字符。
 - `{group}` 是 UUID，由客户端为每个会话生成并持久化；换了它就看不到原来的终端。
 - 上限：每会话 8 个、全局 32 个，超出回 409；空闲 1 小时回收（`DETACHED_TTL`）。
 
-**输出是带 ANSI 转义序列的原始流**，实测提示符形如
-`\x1b[?2004h\x1b]0;csdetr@qp-test: ~\x07\x1b[01;32m…\x1b[00m$ `。
-必须自行解析 VT 子集，不能直接放进文本控件。
+**输出是带 ANSI 转义序列的原始流**，实测提示符形如`\x1b[?2004h\x1b]0;csdetr@qp-test: ~\x07\x1b[01;32m…\x1b[00m$ `。必须自行解析 VT 子集，不能直接放进文本控件。
 
 **两个会把人锁在门外的坑：**
 
-1. **鉴权开关不在进程环境里。** 用 `QWENPAW_AUTH_ENABLED=true` 启动进程无效：
-   包初始化时 `load_envs_into_environ()` 把 `envs.json` 里的持久化值写进 `os.environ`，
-   **覆盖**进程环境。正确路径是 `PUT /api/envs`，body 是**字典**：
-   `{"QWENPAW_AUTH_ENABLED":"true"}`（传数组会 422 `dict_type`）。
-2. **改它立刻生效，且会锁死后续请求。** 实测写入成功后，连 `GET /api/envs`
-   都返回 401。客户端不得提供「一键开启鉴权」的入口。
+1. **鉴权开关不在进程环境里。** 用 `QWENPAW_AUTH_ENABLED=true` 启动进程无效：包初始化时 `load_envs_into_environ()` 把 `envs.json` 里的持久化值写进 `os.environ`，**覆盖**进程环境。正确路径是 `PUT /api/envs`，body 是**字典**：`{"QWENPAW_AUTH_ENABLED":"true"}`（传数组会 422 `dict_type`）。
+2. **改它立刻生效，且会锁死后续请求。** 实测写入成功后，连 `GET /api/envs`都返回 401。客户端不得提供「一键开启鉴权」的入口。
 
 ### 31.2 Git
 
@@ -2438,16 +1853,13 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | GET | `/commit-diff` | 某次提交的 diff |
 | POST | `/stage` \| `/unstage` \| `/commit` \| `/checkout` \| `/discard` \| `/revert` | 各类写操作 |
 
-- **`diff` 是字符串，不是结构化模型。** 客户端按行首字符着色即可
-  （`+` 新增、`-` 删除、`@@` 段落头）。
-- 未跟踪文件服务端用 `git diff --no-index` 现算，**无差异时返回 `{"diff": ""}`**，
-  不要当成失败。
+- **`diff` 是字符串，不是结构化模型。** 客户端按行首字符着色即可（`+` 新增、`-` 删除、`@@` 段落头）。
+- 未跟踪文件服务端用 `git diff --no-index` 现算，**无差异时返回 `{"diff": ""}`**，不要当成失败。
 - `/status` 在非 git 目录返回 400，`detail` 是 git 自己的报错文本。
 
 ### 31.3 访问控制与邮件访问控制
 
-聊天渠道前缀 `/api/access-control`（13 个端点），邮件前缀 `/api/mail-access-control`
-（15 个），结构基本同形。
+聊天渠道前缀 `/api/access-control`（13 个端点），邮件前缀 `/api/mail-access-control`（15 个），结构基本同形。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -2457,18 +1869,13 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | POST | `/whitelist/add` \| `/whitelist/remove` \| `/blacklist/add` \| `/blacklist/remove` | 名单增删 |
 | GET | `/mail-access-control/pending/count` | `{count}`，可做角标 |
 
-`PendingEntry`：`{user_id, channel, timestamp, first_message, remark, username}`。
-三个动作的 body 统一为 `{entries: [...]}`，支持批量。
+`PendingEntry`：`{user_id, channel, timestamp, first_message, remark, username}`。三个动作的 body 统一为 `{entries: [...]}`，支持批量。
 
-**四个动作语义不同，不能合并成一个「关闭」：** 通过进白名单、拒绝进黑名单、
-忽略（dismiss）两边都不改、备注只改 `remark`。
+**四个动作语义不同，不能合并成一个「关闭」：** 通过进白名单、拒绝进黑名单、忽略（dismiss）两边都不改、备注只改 `remark`。
 
-**邮件侧审批后会把该发件人的历史邮件重新投递。** 服务端先把 pending 行移走，
-再把这些消息 UID 放进可重放的 outbox（`mail_access_control.py` 的 approve 分支），
-因此界面上要说明这一点，否则用户会以为「通过」只是放行新邮件。
+**邮件侧审批后会把该发件人的历史邮件重新投递。** 服务端先把 pending 行移走，再把这些消息 UID 放进可重放的 outbox（`mail_access_control.py` 的 approve 分支），因此界面上要说明这一点，否则用户会以为「通过」只是放行新邮件。
 
-**实测空库形状**：`GET /access-control` 与 `/mail-access-control` 都返回 `{}`，
-不是空数组；`pending/all` 返回 `[]`；`pending/count` 返回 `{"count":0}`。
+**实测空库形状**：`GET /access-control` 与 `/mail-access-control` 都返回 `{}`，不是空数组；`pending/all` 返回 `[]`；`pending/count` 返回 `{"count":0}`。
 
 ### 31.4 ACP 与 Harness
 
@@ -2490,12 +1897,9 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 | GET / PUT | `/api/config/acp/node-runtime` | 全局 Node 运行时路径与探测结果 |
 | GET / PUT | `/api/config/acp/{agent_name}` | 单个 agent 的配置 |
 
-- `GET /api/config/acp` 实测返回四个内置 agent：`opencode`、`qwen_code`、
-  `claude_code`、`codex`，`ACPConfig` 的校验器会把缺失的默认项补回来。
-- `tool_parse_mode` 传非法值时回 **400**，`detail` 里直接列出允许值，
-  客户端可据此构造选项而不必硬编码。
-- `PUT /api/config/acp/node-runtime` 传不可用的路径也回 400，
-  `detail` 是 `{reason_code, reason}` 对象——**这一处 detail 是对象**，与上面那条不同。
+- `GET /api/config/acp` 实测返回四个内置 agent：`opencode`、`qwen_code`、`claude_code`、`codex`，`ACPConfig` 的校验器会把缺失的默认项补回来。
+- `tool_parse_mode` 传非法值时回 **400**，`detail` 里直接列出允许值，客户端可据此构造选项而不必硬编码。
+- `PUT /api/config/acp/node-runtime` 传不可用的路径也回 400，`detail` 是 `{reason_code, reason}` 对象——**这一处 detail 是对象**，与上面那条不同。
 
 **Harness 的登录支持设备码，不需要浏览器回跳。**
 
@@ -2507,43 +1911,27 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 | POST | `/api/harnesses/{id}/login` | body 可带 `device_code` |
 | POST | `/api/harnesses/{id}/logout` | 登出 |
 
-实测 `codex`：`available: true, installed: false`，`error` 为
-`Codex runtime not found. Install qwenpaw[codex] or provide a standalone Codex CLI.`。
-**「未安装」与「未登录」是两种状态，界面必须分开**，否则用户会去登录一个
-根本不存在的运行时。
+实测 `codex`：`available: true, installed: false`，`error` 为`Codex runtime not found. Install qwenpaw[codex] or provide a standalone Codex CLI.`。**「未安装」与「未登录」是两种状态，界面必须分开**，否则用户会去登录一个根本不存在的运行时。
 
 ### 31.5 客户端据此定的五条规则
 
-1. **终端入口看 `GET /api/terminals/status`**，`enabled:false` 时置灰并说明需在服务端开鉴权；
-   不提供一键开启。
+1. **终端入口看 `GET /api/terminals/status`**，`enabled:false` 时置灰并说明需在服务端开鉴权；不提供一键开启。
 2. **终端的读超时大于 20 秒**，且 `after` 用服务端返回的 `cursor` 原样回传。
 3. **Git 只做提交链路**：换分支、丢弃改动、反向提交留 Web。
 4. **访问控制的通过 / 拒绝 / 忽略 / 备注四态分开**，不共用「关闭」。
-5. **ACP 的 `command`、`args` 属于在服务端执行任意命令**，改动要有明确说明，
-   不按普通开关处理。
+5. **ACP 的 `command`、`args` 属于在服务端执行任意命令**，改动要有明确说明，不按普通开关处理。
 
 ### 31.6 插件提供的 SSH 通道（源码层确认，未实测）
 
-终端除服务端本地 PTY 外，还能走 SSH。SSH 不在核心 API 里，由配套插件
-`qwenpaw-node-bridge`（≥ v0.4.0，capability `ssh`）提供一条 WebSocket 中继，
-客户端在这条通道上跑标准 SSH 协议。
+终端除服务端本地 PTY 外，还能走 SSH。SSH 不在核心 API 里，由配套插件`qwenpaw-node-bridge`（≥ v0.4.0，capability `ssh`）提供一条 WebSocket 中继，客户端在这条通道上跑标准 SSH 协议。
 
 **三条源码依据**：
 
-1. 插件用 `api.register_http_router(router, prefix=...)` 注册普通 `APIRouter`，
-   宿主在 `plugins/registry.py` 的 `_mount_plugin_http_on_app` 里调
-   `app.include_router(router, prefix=full_path_prefix, tags=tags)`。
-2. FastAPI 的 `include_router` 会保留 `APIWebSocketRoute`
-   （`fastapi/routing.py` 里对 `isinstance(route, APIWebSocketRoute)` 的分支），
-   因此 `@router.websocket("/ssh")` 会挂到 `/api/plugins/qwenpaw-node-bridge/ssh`。
-3. 本服务端已有可用的 WS 端点：`app/routers/voice.py` 的 `@voice_router.websocket("/voice/ws")`，
-   说明 uvicorn 侧无需额外配置。
+1. 插件用 `api.register_http_router(router, prefix=...)` 注册普通 `APIRouter`，宿主在 `plugins/registry.py` 的 `_mount_plugin_http_on_app` 里调`app.include_router(router, prefix=full_path_prefix, tags=tags)`。
+2. FastAPI 的 `include_router` 会保留 `APIWebSocketRoute`（`fastapi/routing.py` 里对 `isinstance(route, APIWebSocketRoute)` 的分支），因此 `@router.websocket("/ssh")` 会挂到 `/api/plugins/qwenpaw-node-bridge/ssh`。
+3. 本服务端已有可用的 WS 端点：`app/routers/voice.py` 的 `@voice_router.websocket("/voice/ws")`，说明 uvicorn 侧无需额外配置。
 
-**鉴权必须由插件自己做。** `AuthMiddleware` 继承 `BaseHTTPMiddleware`
-（`app/auth.py:724`），Starlette 的 `BaseHTTPMiddleware` 只包裹 HTTP 作用域，
-**看不到 WebSocket 连接**。因此 HTTP 那层的登录态不会自动作用在 WS 上，
-插件必须在 handler 里校验令牌再 `accept()`——`voice.py` 正是这么做的
-（先查一次性 token，失败直接 `close(1008)`）。
+**鉴权必须由插件自己做。** `AuthMiddleware` 继承 `BaseHTTPMiddleware`（`app/auth.py:724`），Starlette 的 `BaseHTTPMiddleware` 只包裹 HTTP 作用域，**看不到 WebSocket 连接**。因此 HTTP 那层的登录态不会自动作用在 WS 上，插件必须在 handler 里校验令牌再 `accept()`——`voice.py` 正是这么做的（先查一次性 token，失败直接 `close(1008)`）。
 
 **两端形态**：
 
@@ -2560,28 +1948,17 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 | GET | `/ssh/config` | 脱敏连接信息，客户端读 |
 | GET / PUT | `/ssh/settings` | 控制台读写完整设置，私钥只写不读 |
 
-`GET /ssh/config` 回 `{host, port, user, auth, key_configured, key_source}`。
-**私钥内容与口令永不回传**，只有 `key_configured` 这一个布尔。
-客户端据此决定是否引导用户去控制台补配置。
+`GET /ssh/config` 回 `{host, port, user, auth, key_configured, key_source}`。**私钥内容与口令永不回传**，只有 `key_configured` 这一个布尔。客户端据此决定是否引导用户去控制台补配置。
 
-**设置面板在 Web 控制台，不在手机上。** 插件 `plugin.json` 增加
-`entry.frontend: "ui/index.js"`，Console 通过
-`GET /api/frontend_plugin/{plugin_id}/files/ui/index.js` 动态 import 这个 ESM 模块，
-宿主提供 `window.QwenPaw.host.React` 与 `antd`。字段为地址、端口、用户名、认证方式、
-私钥来源、私钥、口令；私钥来源优先「服务端已有路径」，粘贴方式落盘 `0600`。
+**设置面板在 Web 控制台，不在手机上。** 插件 `plugin.json` 增加`entry.frontend: "ui/index.js"`，Console 通过`GET /api/frontend_plugin/{plugin_id}/files/ui/index.js` 动态 import 这个 ESM 模块，宿主提供 `window.QwenPaw.host.React` 与 `antd`。字段为地址、端口、用户名、认证方式、私钥来源、私钥、口令；私钥来源优先「服务端已有路径」，粘贴方式落盘 `0600`。
 
-**终端页的入口先选方式**：服务端终端 / SSH 连接。未装插件或版本低于 v0.4.0 时
-SSH 项**置灰并给出安装地址，不隐藏**——隐藏会让人以为只有一种终端。
+**终端页的入口先选方式**：服务端终端 / SSH 连接。未装插件或版本低于 v0.4.0 时SSH 项**置灰并给出安装地址，不隐藏**——隐藏会让人以为只有一种终端。
 
 **四条约束（写进实现，不是建议）**：
 
-1. **这是代理，必须收窄范围。** 默认只允许 `127.0.0.1:22`，其它目标走显式白名单，
-   并限制并发连接数。不限制等于给公网开了一个跳板。
-2. **反向代理要支持 WS 升级。** nginx 需要 `proxy_http_version 1.1` 与
-   `Upgrade` / `Connection` 头。握手失败时降级为「只有本地终端」，不要报错。
+1. **这是代理，必须收窄范围。** 默认只允许 `127.0.0.1:22`，其它目标走显式白名单，并限制并发连接数。不限制等于给公网开了一个跳板。
+2. **反向代理要支持 WS 升级。** nginx 需要 `proxy_http_version 1.1` 与`Upgrade` / `Connection` 头。握手失败时降级为「只有本地终端」，不要报错。
 3. **主机密钥不得自动接受。** 首次连接走 TOFU，用户确认指纹后才记住。
-4. **新增 SSH 库要走依赖门禁**：`proguard-rules.pro` 补 keep 规则，
-   并复核两个变体 × 四个 ABI 的体积。
+4. **新增 SSH 库要走依赖门禁**：`proguard-rules.pro` 补 keep 规则，并复核两个变体 × 四个 ABI 的体积。
 
-**为什么还值得做**：本地 PTY 的渲染依赖客户端自己写的 VT 子集，全屏程序不保证；
-SSH 拿到的是真正的 `xterm-256color` PTY。另外它能连服务端可到达的其它主机。
+**为什么还值得做**：本地 PTY 的渲染依赖客户端自己写的 VT 子集，全屏程序不保证；SSH 拿到的是真正的 `xterm-256color` PTY。另外它能连服务端可到达的其它主机。
