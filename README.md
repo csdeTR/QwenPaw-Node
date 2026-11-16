@@ -101,7 +101,6 @@ QwenPaw 官方团队已在开发配套的 Android 客户端，见
 - [协议与已知坑](docs/protocol.md)：服务端接口的实测记录。
 - [UI 约定](docs/ui-guidelines.md)：边到边适配、重组作用域、性能测量口径。
 - [发版流程](docs/release.md)：构建、签名、验收与收尾。
-- [开发日志](docs/devlog.md)：按时间记录的决策过程与走过的弯路。
 - [变更记录](CHANGELOG.md)：各版本的具体改动。
 - [待办清单](待办清单.md)：服务端已提供而客户端尚未接入的能力。
 
