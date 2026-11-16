@@ -2061,6 +2061,8 @@ POST /api/plugins/qwenpaw-node-bridge/portability/jobs/{job_id}/retry
 POST /api/plugins/qwenpaw-node-bridge/portability/jobs/{job_id}/cancel
 ```
 
+**`asset_type` 是单数，选择字段是复数。** 实测 Codex 资产返回 `skill`、`plugin`、`scheduled_task`（`memory` 与 `mcp` 本身一致）；`ImportSelection` 对应字段是 `skills`、`plugins`、`cron`。客户端必须先映射再提交，否则勾选后的资产不会进入导入。
+
 `ImportRun` 形状：`{job_id, agent_id, state, seq, providers:[{source,state,plan_id,sessions_total,sessions_processed,sessions_imported,selection,assets[],error}], logs[]}`；`state` 含 `scanning` / `ready` / `running` / `completed` / `completed_with_issues` / `failed` / `interrupted`。`ImportSelection` 字段：`sessions`、`memory`、`cron`、`skills`、`mcp`、`plugins`。含插件资产的导入必须显式传 `allow_plugin_execution=true`。
 
 **离线推送 channel**：插件注册 `qwenpaw_node_push`，把收件箱未读数与待审批数的上升推到 ntfy / Bark / Telegram。事件源与 `/events` 相同；启动时取一次基线，不补推历史。配置项：provider、target、token、server_url、notify_inbox、notify_approval、min_interval_seconds。令牌只写不读，日志不打印 URL 与 token。
