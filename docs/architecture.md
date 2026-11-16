@@ -63,7 +63,7 @@ MainActivity ──> AppViewModel ──> InstanceRepository ──> InstanceSto
 sherpa 的实现与 `fullImplementation` 的 AAR 都只在 `app/src/full`；
 `app/src/nosherpa` 提供同名 `LocalAsrProvider` 但返回不可用实现。
 因此 `nosherpa` 编译期就不含端上引擎，四个 ABI 的包都不带 `libsherpa-onnx-jni.so`，
-详见 [protocol.md](protocol.md) 第 14 节与 [release.md](release.md) 7.1。
+详见 [protocol.md](protocol.md) 第 14 节与 发版记录 7.1。
 
 ---
 

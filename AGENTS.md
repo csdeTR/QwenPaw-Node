@@ -48,7 +48,7 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 4. **redroid 容器的资源上限固定在 compose 里，不要调高。**
    `mem_limit` / `memswap_limit` 3 GB、`cpus` 2、`pids_limit` 4096。
    实测空闲占用 1.0–1.3 GiB；不设上限时容器曾把 swap 吃满，宿主机随即卡死。
-   参数与依据见 [.agents/test-env.md](.agents/test-env.md) 第 2 节。
+   参数与依据见 [internal/test-env.md](internal/test-env.md) 第 2 节。
 
 5. **优先增量构建。**
    只编译并装包时用 `./gradlew installFullDebug`；只跑单测时用
@@ -77,7 +77,7 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 | `qp-test-prerelease` | `10.10.0.220:8088` | `2.3.0b2` | 预发布版，用于提前发现破坏性变更 |
 
 - 启动、停止、探活、`lxdbr0` 排查、审批档位与还原核对：见
-  [.agents/test-env.md](.agents/test-env.md) 第 1 节。
+  [internal/test-env.md](internal/test-env.md) 第 1 节。
 - 两个版本的端点差异、404 与 405 的判据、无数据实例上的 `null` 形状：见
   [docs/protocol.md](docs/protocol.md) 第 17 节。
   客户端实际使用的路径在两版完全一致（2026-11-01 比对 33 条；0.3.2 又逐文件比对了
@@ -89,12 +89,12 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 两者的显示参数一致：720×1600、280dpi。
 
 - 启动步骤、A6 断网、到服务端的网络路径、验收脚本与截图采样：见
-  [.agents/test-env.md](.agents/test-env.md) 第 2–4 节。
+  [internal/test-env.md](internal/test-env.md) 第 2–4 节。
 - 三条硬性约束留在本文第 1 节：不改 compose 的资源上限、不换回 Android 12 镜像、用完即关。
 
 ## 4、构建与签名
 
-- 技术栈、常用命令与 release 构建的特殊之处见 [docs/release.md](docs/release.md) 1.1–1.4；
+- 技术栈、常用命令与 release 构建的特殊之处见 [internal/release.md](internal/release.md) 1.1–1.4；
   签名密钥的位置与「构建成功不等于包可用」的判据见第 2 节。
 - **新增或升级依赖必做两件事。** 一是补 `app/proguard-rules.pro` 的 keep 规则；
   二是复核两个变体 × 四个 ABI 的包体积（`sherpa-onnx` 的 `.so` 每架构 14–30 MB，
@@ -120,15 +120,16 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 - **改动完成、结论确定之前，不得修改 `docs/`、`README.md`、`CHANGELOG.md`、`待办清单.md`。**
   一边做一边改，被压缩掉的中间状态就会以确定语气留在文档里，
   读者无法分辨哪些是已核实的结论、哪些是中途被推翻的设想。
-- 顺序固定：建草稿 → 编码与验证 → 把结论提炼进正式文档与 `docs/devlog.md` → 删除草稿。
+- 顺序固定：建草稿 → 编码与验证 → 把结论提炼进正式文档与 `internal/devlog.md` → 删除草稿。
   只写草稿而不更新正式文档，等于这一轮没有沉淀。
-- **`docs/devlog.md` 与 `draft/` 一样不进版本管理**（已在 `.gitignore` 里），只保留在本地。
-  它记录的是过程与判断，不作为对外文档发布；因此不要在提交信息或对外文档里
-  依赖它可达。
-- 语体分档、开发日志写法、各文档分工、界面文案：见 [.agents/writing.md](.agents/writing.md)。
+- **`internal/` 整个目录不进版本管理**（已在 `.gitignore` 里），只保留在本地：
+  开发日志、环境操作、写作约定、发版流程与待办清单都在其中。它们记录过程、
+  本机路径与尚未发布的能力，不作为对外文档发布。公开文档需要引用其中的结论时
+  用文字描述（「发版记录」「开发日志第 67 节」），**不要写成链接**。
+- 语体分档、开发日志写法、各文档分工、界面文案：见 [internal/writing.md](internal/writing.md)。
 - **界面文案一律用书面语，副标题与灰字说明同样算界面文案。** 「公式也不渲染」这类口语
   已经反复出现在开关说明里，属于必须回查的一类缺陷；改写方式见
-  [.agents/writing.md](.agents/writing.md) 第 4 节。
+  [internal/writing.md](internal/writing.md) 第 4 节。
 
 ## 6、提交与门禁
 
@@ -158,7 +159,7 @@ swap 被完全占满，桌面因 swap thrash 而失去响应。
 | 任何 `app/src/main` 代码 | `./gradlew :app:testFullDebugUnitTest :app:testNosherpaDebugUnitTest` | 两个变体全部用例通过；新增逻辑补了对应用例 |
 | 依赖、`proguard-rules.pro`、`build.gradle.kts`、版本号 | `./gradlew :app:assembleRelease` | 构建成功，两个变体 × 四个 ABI 共 8 个包都产出，签名配置生效 |
 | 涉及时间、时区、格式化的断言 | 同上单测 + 固定 `ZoneId` | 显式写出时区，不依赖运行环境的默认值 |
-| 任何文档 | 对照 [.agents/writing.md](.agents/writing.md) 的语体规则逐条核对 | 文案与源码字符串一致，链接与节号引用可达 |
+| 任何文档 | 对照 [internal/writing.md](internal/writing.md) 的语体规则逐条核对 | 文案与源码字符串一致，链接与节号引用可达 |
 | 端口、地址、路径类常量 | 实际执行一次相关命令 | 命令能跑通，不是照抄旧记录 |
 
 构建一次只跑一个，两次构建之间留出间隔并检查 `free -h`（见第 1 节）。

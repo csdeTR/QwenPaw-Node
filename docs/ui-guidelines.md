@@ -172,7 +172,7 @@ Compose 的 doFrame 回调在 `performTraversals` 之前完成，
 `AndroidOwner:measureAndLayout`、`Compose:recompose`、`Recomposer:animation`、
 `compose:lazy:prefetch:*`、`TextLayout:initLayout` 这些都不会出现。
 必须写成 `atrace --async_start -a <包名> -c gfx,input,view`。release 包名是
-`io.qwenpaw.node`，debug 包名是 `io.qwenpaw.node.debug`（见 [release.md](release.md) 4.1）。
+`io.qwenpaw.node`，debug 包名是 `io.qwenpaw.node.debug`（见 发版记录 4.1）。
 
 **解析时 `B|<pid>|` 里的 pid 是进程 id，不是线程 id。**
 `tracing_mark_write: B|<pid>|` 中的这个数字标识的是进程，
@@ -503,7 +503,7 @@ minSdk 是 26，两条分支都必须留。静态 PNG 与 GIF 走同一个 `Asyn
 自身提供 `ProvideTextStyle(typography.bodyLarge)`，`ChatFontScale` 作用域内
 `LocalTextStyle` 就是已乘过 chatScale 的 `bodyLarge`，与渲染字号严格一致。
 （`LocalTextStyle` 的字号为 `Unspecified` 的说法不成立，见
-[devlog](devlog.md) 43.2。与之配套，段落、列表、引用三处 `Text` 显式写出
+开发日志 43.2。与之配套，段落、列表、引用三处 `Text` 显式写出
 `style = bodyLarge`，把「基准 = 渲染字号」这条等式固定下来。）
 
 `remember` 的缓存键必须同时包含基准字号与缩放系数。只按 `blocks` 缓存时，

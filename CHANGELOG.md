@@ -2,8 +2,6 @@
 
 每个版本改了什么。版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)，tag 格式为 `v<versionName>`。
 
-发版流程见 [docs/release.md](docs/release.md)。
-
 ## v0.5.0 — 2026-11-15
 
 技能、MCP 与扩展市场。三项都以查看与开关为主，唯一的写操作是技能正文与 MCP 策略。
@@ -258,20 +256,20 @@
   包括 `preview_kind` 的含义、`limit` 按字节计、`project` 根静默回落，以及 `Range` 无效。
 - [docs/guide.md](docs/guide.md) 新增第 10 节，说明三个根、预览与下载的使用方式。
 - [docs/architecture.md](docs/architecture.md) 补充 `ui/workspace/` 与 `DownloadClient` 的职责。
-- [docs/devlog.md](docs/devlog.md) 新增第 59 节。
+- 开发日志新增第 59 节。
 - [docs/guide.md](docs/guide.md) 补充输入区、受信任的连接、实例页停留与收件箱筛选的说明。
-- [docs/devlog.md](docs/devlog.md) 新增第 60 节，记录输入区重做与受信任连接的过程。
+- 开发日志新增第 60 节，记录输入区重做与受信任连接的过程。
 - [docs/protocol.md](docs/protocol.md) 第 26 节补充 `browse-dirs` 的返回结构与
   `show_hidden` 必传的原因。
 - [docs/guide.md](docs/guide.md) 补充全屏输入、工作区目录浏览与消息渲染开关。
 - [docs/ui-guidelines.md](docs/ui-guidelines.md) 记录「+」菜单的固定顺序、脑图路径来源与
   全屏输入不使用 `Dialog` 的原因。
-- [docs/devlog.md](docs/devlog.md) 新增第 61 节。
+- 开发日志新增第 61 节。
 - [docs/guide.md](docs/guide.md) 补充「魔法命令」与「审批模式」改名后的输入区说明。
 - [docs/ui-guidelines.md](docs/ui-guidelines.md) 9.21 补「审批模式」的两行排布、
   「魔法命令」的弹窗规格与长按详情。
 - [AGENTS.md](AGENTS.md) 第 5 节增加「界面文案一律用书面语」，写明副标题与灰字说明同样适用。
-- [docs/devlog.md](docs/devlog.md) 新增第 62 节。
+- 开发日志新增第 62 节。
 
 ## v0.2.2 — 2026-11-08
 
@@ -769,8 +767,7 @@
 - 单元测试从 56 个增加到 80 个。
 - 文档重新组织。原先散落在对话记录中的技术内容迁入 `docs/` 目录，
   拆分为[架构说明](docs/architecture.md)、[协议与已知坑](docs/protocol.md)、
-  [UI 约定](docs/ui-guidelines.md)、[发版流程](docs/release.md)、
-  [开发日志](docs/devlog.md)，并新增[使用手册](docs/guide.md)与[LICENSE](LICENSE)。
+  [UI 约定](docs/ui-guidelines.md)，并新增[使用手册](docs/guide.md)与[LICENSE](LICENSE)。
 
 </details>
 

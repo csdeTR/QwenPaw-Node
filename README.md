@@ -90,9 +90,8 @@ QwenPaw 官方团队已在开发配套的 Android 客户端，见
 ./gradlew :app:testFullDebugUnitTest     # 运行 JVM 单测
 ```
 
-构建、签名、发版与验收的完整流程见 [docs/release.md](docs/release.md)。
 改动代码前建议先读 [AGENTS.md](AGENTS.md)，其中记录了本机的资源硬约束、
-服务端与设备的使用判据、提交门禁；环境操作步骤见 [.agents/test-env.md](.agents/test-env.md)。
+服务端与设备的使用判据与提交门禁。
 
 ### 文档
 
@@ -100,9 +99,7 @@ QwenPaw 官方团队已在开发配套的 Android 客户端，见
 - [架构说明](docs/architecture.md)：分层结构、目录职责、状态流转。
 - [协议与已知坑](docs/protocol.md)：服务端接口的实测记录。
 - [UI 约定](docs/ui-guidelines.md)：边到边适配、重组作用域、性能测量口径。
-- [发版流程](docs/release.md)：构建、签名、验收与收尾。
 - [变更记录](CHANGELOG.md)：各版本的具体改动。
-- [待办清单](待办清单.md)：服务端已提供而客户端尚未接入的能力。
 
 ## 许可与第三方资源
 
