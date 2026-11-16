@@ -31,6 +31,8 @@ prototype/assets/*.ttf
 prototype/assets/*.otf
 # 每轮改动的草稿，正式文档写完后删除，不纳入版本管理
 draft/
+# 开发日志只保留在本地：它记录的是过程与判断，不作为对外文档发布
+docs/devlog.md
 # AI 助手的计划文档与过程记录，不是项目文档；其中含本机绝对路径
 .trae/
 # 实机截图暂不入库
