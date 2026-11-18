@@ -79,6 +79,8 @@ fun ChatListScreen(
     onOpenArchived: () -> Unit = {},
     onOpenTokenUsage: () -> Unit = {},
     onOpenSettings: () -> Unit,
+    /** 打开终端页。 */
+    onOpenTerminal: () -> Unit = {},
     /** 打开收件箱。 */
     onOpenInbox: () -> Unit = {},
     /** 收件箱未读数；0 时不显示角标。 */
@@ -212,6 +214,7 @@ fun ChatListScreen(
                 onQueryChange = { query = it },
                 onBack = onBack,
                 onOpenSettings = onOpenSettings,
+                onOpenTerminal = onOpenTerminal,
                 onOpenArchived = onOpenArchived,
                 onOpenTokenUsage = onOpenTokenUsage,
                 onOpenInbox = onOpenInbox,
@@ -821,6 +824,7 @@ private fun ListHeader(
     onQueryChange: (String) -> Unit,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenTerminal: () -> Unit = {},
     onOpenArchived: () -> Unit,
     onOpenTokenUsage: () -> Unit,
     onOpenInbox: () -> Unit = {},
@@ -942,6 +946,11 @@ private fun ListHeader(
                         onClick = onToggleSelecting,
                     )
                 }
+                IconButtonCell(
+                    icon = QwenIcons.terminal,
+                    description = "终端",
+                    onClick = onOpenTerminal,
+                )
                 IconButtonCell(
                     icon = QwenIcons.settings,
                     description = "设置",

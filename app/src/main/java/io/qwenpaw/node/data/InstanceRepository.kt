@@ -33,7 +33,7 @@ data class VerifyResult(
     /**
      * 同一地址上配套插件（QwenPaw Node Bridge）的探测结论。
      *
-     * 验证阶段还没有登录 token，因此开启了登录鉴权的服务端会返回 401，
+     * 验证阶段还没有登录 token，因此开启了 Web 登录认证的服务端会返回 401，
      * 此时记为 [io.qwenpaw.node.data.plugin.BridgeStatus.Unknown]，
      * 不能据此判断「没有安装」。
      */
@@ -389,7 +389,7 @@ class InstanceRepository(
                 if (username.isNullOrBlank() || password.isNullOrBlank()) {
                     // userHint 必须一起给：只写 message 的话，[ErrorText.of] 会落到
                     // 401 的默认分支，把「还没填账号」说成「登录已失效」。
-                    val msg = "该实例已开启登录鉴权，需要用户名和密码"
+                    val msg = "该实例已开启 Web 登录认证，需要用户名和密码"
                     throw ApiException(401, msg, msg, tokenSent = false)
                 }
                 token = api.login(
@@ -454,7 +454,7 @@ class InstanceRepository(
                 if (username.isNullOrBlank() || password.isNullOrBlank()) {
                     // 与 probeAgents 同一处理：userHint 里放同一句，否则会被映射成
                     // 「登录已失效」——用户此时根本还没登录过。
-                    val msg = "该实例已开启登录鉴权，需要用户名和密码"
+                    val msg = "该实例已开启 Web 登录认证，需要用户名和密码"
                     throw ApiException(401, msg, msg, tokenSent = false)
                 }
                 val auth = api.login(

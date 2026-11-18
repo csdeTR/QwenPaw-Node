@@ -109,6 +109,8 @@ fun InstanceForm(
     submitLabel: String = "连接",
     /** 该主机已在「受信任的连接」里时返回 true，此时不弹安全提示。 */
     isTrustedHost: (String) -> Boolean = { false },
+    /** 编辑已有实例时提供；新增实例为 null。 */
+    onOpenSshProfile: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
 ) {
     // 至少保留一行输入框，否则用户没有地方填地址。
@@ -620,6 +622,16 @@ fun InstanceForm(
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (onOpenSshProfile != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Divider()
+                    NavRow(
+                        icon = QwenIcons.terminal,
+                        title = "SSH 直连",
+                        subtitle = "地址、私钥或密码；仅在本机配置与连接",
+                        onClick = onOpenSshProfile,
+                    )
+                }
             }
         }
 

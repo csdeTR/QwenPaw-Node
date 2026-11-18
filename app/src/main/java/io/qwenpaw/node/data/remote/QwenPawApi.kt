@@ -37,6 +37,11 @@ import io.qwenpaw.node.data.model.FileGuardDto
 import io.qwenpaw.node.data.model.GcRequestDto
 import io.qwenpaw.node.data.model.GcResultDto
 import io.qwenpaw.node.data.model.GcSettingsDto
+import io.qwenpaw.node.data.model.GitBranchDto
+import io.qwenpaw.node.data.model.GitCommitDiffDto
+import io.qwenpaw.node.data.model.GitDiffDto
+import io.qwenpaw.node.data.model.GitLogEntryDto
+import io.qwenpaw.node.data.model.GitStatusDto
 import io.qwenpaw.node.data.model.HarnessesDto
 import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.data.model.InboxPageDto
@@ -78,6 +83,11 @@ import io.qwenpaw.node.data.model.SaveSkillResultDto
 import io.qwenpaw.node.data.model.SearchPageDto
 import io.qwenpaw.node.data.model.SkillConflictDto
 import io.qwenpaw.node.data.model.SkillDetailDto
+import io.qwenpaw.node.data.model.SshConfigDto
+import io.qwenpaw.node.data.model.SshCredentialDto
+import io.qwenpaw.node.data.model.TerminalDto
+import io.qwenpaw.node.data.model.TerminalOutputDto
+import io.qwenpaw.node.data.model.TerminalStatusDto
 import io.qwenpaw.node.data.model.SkillDto
 import io.qwenpaw.node.data.model.SlashCommandDto
 import io.qwenpaw.node.data.model.SnapshotRequestDto
@@ -2514,6 +2524,218 @@ class QwenPawApi(
         ).language
     }
 
+    // ---------- 终端 ----------
+
+    /** `GET /api/terminals/status`。`enabled:false` 时 `reason` 说明缺少的依赖。 */
+    fun terminalStatus(conn: Connection): TerminalStatusDto = decode(
+        request(conn, "GET", "/api/terminals/status"),
+        TerminalStatusDto.serializer(),
+    )
+
+    /** `GET /api/terminals/{group}`。 */
+    fun terminals(conn: Connection, group: String): List<TerminalDto> = decode(
+        request(conn, "GET", "/api/terminals/$group"),
+        ListSerializer(TerminalDto.serializer()),
+    )
+
+    /** `POST /api/terminals/{group}`。服务端不接受 body。 */
+    fun createTerminal(conn: Connection, group: String): TerminalDto = decode(
+        request(conn, "POST", "/api/terminals/$group"),
+        TerminalDto.serializer(),
+    )
+
+    /**
+     * `GET /api/terminals/{group}/{id}/output?after=`。
+     *
+     * 服务端最多阻塞 20 秒，因此走 [terminalClient] 的 30 秒读超时，而不是默认客户端的
+     * 10 分钟。轮询成功不写网络日志：一次终端会话会产生大量长轮询，逐条记录只会淹没日志。
+     */
+    fun terminalOutput(
+        conn: Connection,
+        group: String,
+        terminalId: String,
+        after: Int,
+    ): TerminalOutputDto {
+        val url = connUrl(conn, "/api/terminals/$group/$terminalId/output?after=$after")
+        val request = baseBuilder(conn, url).get().build()
+        return terminalClientShared.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                logFailure(request, response.code, text)
+                throw failureOf(
+                    response.code,
+                    text,
+                    response.header("WWW-Authenticate"),
+                    tokenSentOf(request),
+                )
+            }
+            decode(text, TerminalOutputDto.serializer())
+        }
+    }
+
+    /** `POST /api/terminals/{group}/{id}/input`。单帧上限 16384 字符。 */
+    fun terminalInput(conn: Connection, group: String, terminalId: String, data: String) {
+        request(
+            conn,
+            "POST",
+            "/api/terminals/$group/$terminalId/input",
+            buildJsonObject { put("data", data) },
+        )
+    }
+
+    /** `POST /api/terminals/{group}/{id}/resize`。 */
+    fun terminalResize(
+        conn: Connection,
+        group: String,
+        terminalId: String,
+        rows: Int,
+        cols: Int,
+    ) {
+        request(
+            conn,
+            "POST",
+            "/api/terminals/$group/$terminalId/resize",
+            buildJsonObject {
+                put("rows", rows)
+                put("cols", cols)
+            },
+        )
+    }
+
+    /** `PATCH /api/terminals/{group}/{id}`。 */
+    fun renameTerminal(
+        conn: Connection,
+        group: String,
+        terminalId: String,
+        title: String,
+    ): TerminalDto = decode(
+        request(
+            conn,
+            "PATCH",
+            "/api/terminals/$group/$terminalId",
+            buildJsonObject { put("title", title) },
+        ),
+        TerminalDto.serializer(),
+    )
+
+    /** `DELETE /api/terminals/{group}/{id}`。 */
+    fun closeTerminal(conn: Connection, group: String, terminalId: String) {
+        request(conn, "DELETE", "/api/terminals/$group/$terminalId")
+    }
+
+    // ---------- Git ----------
+
+    /** `GET /api/workspace/git/status`。注意该端点可能在首次调用时初始化仓库。 */
+    fun gitStatus(conn: Connection): GitStatusDto = decode(
+        request(conn, "GET", "/api/workspace/git/status"),
+        GitStatusDto.serializer(),
+    )
+
+    /** `GET /api/workspace/git/diff`。未跟踪文件由服务端用 `--no-index` 现算。 */
+    fun gitDiff(
+        conn: Connection,
+        path: String? = null,
+        staged: Boolean = false,
+        untracked: Boolean = false,
+    ): GitDiffDto = decode(
+        getUrl(
+            conn,
+            workspaceUrl(
+                conn,
+                "/api/workspace/git/diff",
+                mapOf(
+                    "path" to path,
+                    "staged" to if (staged) "true" else null,
+                    "untracked" to if (untracked) "true" else null,
+                ),
+            ),
+        ),
+        GitDiffDto.serializer(),
+    )
+
+    /** `POST /api/workspace/git/stage`。空列表等于全部。 */
+    fun gitStage(conn: Connection, paths: List<String>) {
+        val body = buildJsonObject {
+            putJsonArray("paths") { paths.forEach { add(it) } }
+        }
+        request(conn, "POST", "/api/workspace/git/stage", body)
+    }
+
+    /** `POST /api/workspace/git/unstage`。空列表等于全部。 */
+    fun gitUnstage(conn: Connection, paths: List<String>) {
+        val body = buildJsonObject {
+            putJsonArray("paths") { paths.forEach { add(it) } }
+        }
+        request(conn, "POST", "/api/workspace/git/unstage", body)
+    }
+
+    /** `POST /api/workspace/git/commit`。空白消息服务端回 400。 */
+    fun gitCommit(conn: Connection, message: String) {
+        request(
+            conn,
+            "POST",
+            "/api/workspace/git/commit",
+            buildJsonObject { put("message", message) },
+        )
+    }
+
+    /** `GET /api/workspace/git/log?limit=`。 */
+    fun gitLog(conn: Connection, limit: Int = 20): List<GitLogEntryDto> = decode(
+        getUrl(
+            conn,
+            workspaceUrl(
+                conn,
+                "/api/workspace/git/log",
+                mapOf("limit" to limit.toString()),
+            ),
+        ),
+        ListSerializer(GitLogEntryDto.serializer()),
+    )
+
+    /** `GET /api/workspace/git/branches`。只读展示，不做切换。 */
+    fun gitBranches(conn: Connection): List<GitBranchDto> = decode(
+        request(conn, "GET", "/api/workspace/git/branches"),
+        ListSerializer(GitBranchDto.serializer()),
+    )
+
+    /** `GET /api/workspace/git/commit-diff?commit_hash=`。 */
+    fun gitCommitDiff(conn: Connection, hash: String): GitCommitDiffDto = decode(
+        getUrl(
+            conn,
+            workspaceUrl(
+                conn,
+                "/api/workspace/git/commit-diff",
+                mapOf("commit_hash" to hash),
+            ),
+        ),
+        GitCommitDiffDto.serializer(),
+    )
+
+    // ---------- 插件 SSH ----------
+
+    /** 插件 `/ssh/config` 的脱敏目标；未配置时插件回 404。 */
+    fun bridgeSshConfig(conn: Connection): SshConfigDto = decode(
+        request(conn, "GET", BRIDGE_SSH_CONFIG_PATH),
+        SshConfigDto.serializer(),
+    )
+
+    /**
+     * 插件 `/ssh/credential`。响应含私钥或登录密码，**不写日志**。
+     *
+     * 错误分支只透传插件给的脱敏 detail；插件侧保证 detail 不带密钥内容。
+     */
+    fun bridgeSshCredential(conn: Connection): SshCredentialDto = decode(
+        request(conn, "GET", BRIDGE_SSH_CREDENTIAL_PATH),
+        SshCredentialDto.serializer(),
+    )
+
+    /** SSH WebSocket 的地址；basicAuth 与 token 冲突时 token 走 `?token=`。 */
+    fun bridgeSshUrl(conn: Connection): HttpUrl = connUrl(conn, BRIDGE_SSH_PATH)
+
+    /** SSH WebSocket 的请求：带 X-Agent-Id、Bearer/Basic 或 `?token=`。 */
+    fun bridgeSshRequest(conn: Connection): Request =
+        baseBuilder(conn, bridgeSshUrl(conn)).build()
+
     private fun checkpointRestore(
         conn: Connection,
         req: RestoreCheckpointRequestDto,
@@ -2685,6 +2907,10 @@ class QwenPawApi(
         }
         return execute(builder.build())
     }
+
+    /** 用已经拼好的地址发 GET，供查询参数较多的端点使用。 */
+    private fun getUrl(conn: Connection, url: HttpUrl): String =
+        execute(baseBuilder(conn, url).get().build())
 
     /**
      * 请求地址，必要时把 token 挪到查询参数上。
@@ -2872,6 +3098,26 @@ class QwenPawApi(
 
         /** portability 导入转发端点。 */
         const val BRIDGE_PORTABILITY_PATH = "/api/plugins/qwenpaw-node-bridge/portability"
+
+        /** 插件 SSH 中继与脱敏配置端点。 */
+        const val BRIDGE_SSH_PATH = "/api/plugins/qwenpaw-node-bridge/ssh"
+        const val BRIDGE_SSH_CONFIG_PATH = "/api/plugins/qwenpaw-node-bridge/ssh/config"
+        const val BRIDGE_SSH_CREDENTIAL_PATH = "/api/plugins/qwenpaw-node-bridge/ssh/credential"
+
+        /**
+         * 终端长轮询专用客户端。
+         *
+         * 服务端 `output` 最多阻塞 20 秒，读超时必须大于它；这份客户端也不挂网络日志，
+         * 否则一次终端会话会产生大量没有信息量的轮询记录。
+         */
+        private val terminalClientShared: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(20, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .callTimeout(35, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             // 流式对话可能持续很久，读超时给足；其余请求单次不会超过这个值。

@@ -58,6 +58,10 @@ import io.qwenpaw.node.font.FontState
 import io.qwenpaw.node.ui.VoiceTrigger
 import io.qwenpaw.node.ui.theme.ThemeMode
 import io.qwenpaw.node.ui.theme.QwenIcons
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material3.Surface
 
 /** 设置页：实例、外观、消息显示、通知与行为、语音输入、运行日志、关于。 */
 @Composable
@@ -74,6 +78,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     /** 打开设置页下的「工作区文件」。默认空实现，预览与测试不受影响。 */
     onOpenWorkspace: () -> Unit = {},
+    onOpenTerminal: () -> Unit = {},
     /** 打开设置页下的「备份」。 */
     onOpenBackup: () -> Unit = {},
     /** 打开设置页下的「检查点」。 */
@@ -160,6 +165,12 @@ fun SettingsScreen(
     onRemoveTrustedHost: (String) -> Unit = {},
     /** 该主机是否已在受信任集合里。地址校验完成后据此过滤提示。 */
     isTrustedHost: (String) -> Boolean = { false },
+    /** 已确认允许经配套插件下发 SSH 凭据的主机。 */
+    sshTrustedHosts: Set<String> = emptySet(),
+    /** 新增地址：同时写入提示豁免与 SSH 凭据授权。 */
+    onAddTrustedHostForSsh: (String) -> Boolean = { false },
+    /** 老地址只补 SSH 授权，不改提示豁免。 */
+    onConfirmSshTrust: (String) -> Boolean = { false },
     voiceEnabled: Boolean = false,
     onVoiceEnabled: (Boolean) -> Unit = {},
     voiceTrigger: VoiceTrigger = VoiceTrigger.TAP,
@@ -234,8 +245,6 @@ fun SettingsScreen(
     onLogout: (String) -> Unit = {},
 ) {
     var adding by remember { mutableStateOf(false) }
-    // 「安全提示」开关的关闭确认。
-    var confirmDisableHints by remember { mutableStateOf(false) }
     // 待确认退出登录的实例。
     var logoutFor by remember { mutableStateOf<InstanceConfig?>(null) }
     // 添加实例的两种方式：null 表示在方式选择页，否则是具体形态。
@@ -447,6 +456,11 @@ fun SettingsScreen(
 
     // 编辑实例同样走这套交互，地址预填并自动读取智能体列表。
     SettingsPage.EDIT -> current.editing?.let { instance ->
+        val context = LocalContext.current
+        var showSshProfile by remember(instance.id) { mutableStateOf(false) }
+        val sshProfileStore = remember(context, instance.id) {
+            io.qwenpaw.node.data.terminal.SshProfileStore(context)
+        }
         Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
             Column(
                 modifier = Modifier
@@ -503,8 +517,27 @@ fun SettingsScreen(
                     currentSsid = currentSsid,
                     submitLabel = "保存",
                     isTrustedHost = isTrustedHost,
+                    onOpenSshProfile = { showSshProfile = true },
                     onCancel = { editing = null },
                 )
+            }
+        }
+        if (showSshProfile) {
+            Dialog(
+                onDismissRequest = { showSshProfile = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    SshProfileScreen(
+                        store = sshProfileStore,
+                        instanceId = instance.id,
+                        instanceName = instance.name,
+                        onBack = { showSshProfile = false },
+                    )
+                }
             }
         }
     }
@@ -610,7 +643,7 @@ fun SettingsScreen(
                         NavRow(
                             icon = QwenIcons.bell,
                             title = "通知与行为",
-                            subtitle = "紧凑排版、屏幕常亮、安全提示",
+                            subtitle = "紧凑排版、屏幕常亮",
                             onClick = { section = SettingsPage.BEHAVIOR },
                         )
                         Divider()
@@ -777,6 +810,13 @@ fun SettingsScreen(
                             )
                             Divider()
                             NavRow(
+                                icon = QwenIcons.terminal,
+                                title = "终端",
+                                subtitle = "服务端 PTY 与 SSH 两种来源",
+                                onClick = onOpenTerminal,
+                            )
+                            Divider()
+                            NavRow(
                                 icon = QwenIcons.packageIcon,
                                 title = "备份",
                                 subtitle = "创建、导出与恢复服务端配置与工作区",
@@ -898,8 +938,12 @@ fun SettingsScreen(
                 SettingsPage.TRUSTED -> {
                     TrustedHostsPage(
                         hosts = trustedHosts,
-                        onAdd = onAddTrustedHost,
+                        sshHosts = sshTrustedHosts,
+                        onAddForSsh = onAddTrustedHostForSsh,
+                        onConfirmSshTrust = onConfirmSshTrust,
                         onRemove = onRemoveTrustedHost,
+                        securityHintsEnabled = securityHintsEnabled,
+                        onSecurityHintsEnabled = onSecurityHintsEnabled,
                     )
                 }
 
@@ -1079,38 +1123,6 @@ fun SettingsScreen(
                         subtitle = "仅在生成回复期间生效",
                         checked = keepScreenOn,
                         onCheckedChange = onKeepScreenOn,
-                    )
-                    Divider()
-                    SwitchRow(
-                        title = "安全提示",
-                        subtitle = "服务器地址可从公网访问，且服务端未开启「Web登录认证」或未使用 HTTPS 时提醒",
-                        checked = securityHintsEnabled,
-                        onCheckedChange = { want ->
-                            // 关闭要二次确认：这是唯一会在用户不知情时保护他的提示，
-                            // 一次误触就永久静默，代价比多点一下高得多。
-                            if (want) onSecurityHintsEnabled(true) else confirmDisableHints = true
-                        },
-                    )
-                }
-                if (confirmDisableHints) {
-                    AlertDialog(
-                        onDismissRequest = { confirmDisableHints = false },
-                        title = { Text("关闭安全提示") },
-                        text = {
-                            Text(
-                                "关闭后，服务器地址可从公网访问，且服务端未开启「Web登录认证」或未使用 HTTPS 时，不再提醒。" +
-                                    "这不会改变服务端的实际状态。",
-                            )
-                        },
-                        confirmButton = {
-                            TextButton(onClick = {
-                                confirmDisableHints = false
-                                onSecurityHintsEnabled(false)
-                            }) { Text("仍然关闭") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { confirmDisableHints = false }) { Text("取消") }
-                        },
                     )
                 }
                 }
@@ -1723,7 +1735,7 @@ internal fun Card(content: @Composable () -> Unit) {
  * 这样不必点进子页就能确认状态；这也是把它与普通设置行区分开的地方。
  */
 @Composable
-private fun NavRow(
+internal fun NavRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
@@ -2133,23 +2145,27 @@ internal fun ActionRow(text: String, onClick: () -> Unit) {
 }
 
 /**
- * 受信任的连接：一组不再触发地址安全提示的主机。
+ * 受信任的连接：提示豁免与 SSH 凭据授权两层。
  *
- * 只影响提示，不影响连接与鉴权——加进来之后用户仍会照常被要求登录。
- * 输入接受整条地址，入库前由 ViewModel 归一化成 host；这里先判断「能否识别」，
- * 用按钮可用性与一行错误提示表达，而不是等用户点完才知道输入无效。
+ * [hosts] 只豁免安全提示；只有确认进 [sshHosts] 才允许经配套插件下发 SSH 凭据。
+ * 新增地址走同一张确认框，同时写入两层；老地址在列表里补确认，不改提示豁免。
  */
 @Composable
 private fun TrustedHostsPage(
     hosts: Set<String>,
-    onAdd: (String) -> Boolean,
+    sshHosts: Set<String>,
+    onAddForSsh: (String) -> Boolean,
+    onConfirmSshTrust: (String) -> Boolean,
     onRemove: (String) -> Unit,
+    securityHintsEnabled: Boolean,
+    onSecurityHintsEnabled: (Boolean) -> Unit,
 ) {
     var input by rememberSaveable { mutableStateOf("") }
-    // 与 ViewModel 共用同一个归一化函数：这里认为能识别时，添加一定会成功。
+    var confirmDisableHints by remember { mutableStateOf(false) }
+    var pendingAdd by remember { mutableStateOf<String?>(null) }
+    var pendingSsh by remember { mutableStateOf<String?>(null) }
+    var ownershipConfirmed by remember { mutableStateOf(false) }
     val recognized = io.qwenpaw.node.data.normalizeTrustedHost(input) != null
-    // 只有「填了却认不出来」才提示。空输入不报错：刚进页面就顶一行红字，
-    // 会让人以为自己做错了什么，而按钮已经用禁用色表达了「还不能添加」。
     val errorText = if (input.isNotBlank() && !recognized) {
         "无法识别这个地址，请填写主机名或 IP"
     } else {
@@ -2158,9 +2174,26 @@ private fun TrustedHostsPage(
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
 
+    fun closeConfirm() {
+        pendingAdd = null
+        pendingSsh = null
+        ownershipConfirmed = false
+    }
+
     Column {
+        Card {
+            SwitchRow(
+                title = "安全提示",
+                subtitle = "服务器地址可从公网访问，且服务端未开启「Web 登录认证」或未使用 HTTPS 时提醒",
+                checked = securityHintsEnabled,
+                onCheckedChange = { want ->
+                    if (want) onSecurityHintsEnabled(true) else confirmDisableHints = true
+                },
+            )
+        }
         Text(
-            text = "这些地址不会弹出安全提示。仅在你确认服务器属于自己的时候添加。",
+            text = "这些地址不再弹出安全提示。只有进一步确认该地址仅你可访问后，" +
+                "才允许经配套插件向本机下发 SSH 私钥或口令。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
@@ -2198,12 +2231,8 @@ private fun TrustedHostsPage(
                         },
                     )
                     .clickable(enabled = recognized) {
-                        if (onAdd(input)) {
-                            input = ""
-                            // 收起键盘，让刚添加的条目和下面的列表露出来。
-                            focus.clearFocus()
-                            keyboard?.hide()
-                        }
+                        pendingAdd = input
+                        ownershipConfirmed = false
                     }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             )
@@ -2228,20 +2257,49 @@ private fun TrustedHostsPage(
                 )
             } else {
                 sorted.forEachIndexed { index, host ->
+                    val sshAllowed = io.qwenpaw.node.data.isTrustedHost(host, sshHosts)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = host,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = host,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = if (sshAllowed) {
+                                    "提示豁免 + SSH 凭据授权"
+                                } else {
+                                    "仅提示豁免，未确认用于 SSH"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (sshAllowed) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.secondary
+                                },
+                            )
+                        }
+                        if (!sshAllowed) {
+                            Text(
+                                text = "确认用于 SSH",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        pendingSsh = host
+                                        ownershipConfirmed = false
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             text = "移除",
                             style = MaterialTheme.typography.labelMedium,
@@ -2256,6 +2314,96 @@ private fun TrustedHostsPage(
                 }
             }
         }
+    }
+
+    if (confirmDisableHints) {
+        AlertDialog(
+            onDismissRequest = { confirmDisableHints = false },
+            title = { Text("关闭安全提示") },
+            text = {
+                Column {
+                    Text(
+                        "关闭后，服务器地址可从公网访问、且服务端未开启「Web 登录认证」或未使用 HTTPS 时，不再提醒。",
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "这可能使你无法及时发现服务器、对话内容或 SSH 凭据被他人访问，属于严重安全风险。",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "关闭提示不会解除 SSH 终端的凭据下发限制；要放行某台主机，仍须在下方确认该地址仅你可访问。",
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDisableHints = false
+                    onSecurityHintsEnabled(false)
+                }) { Text("仍然关闭") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDisableHints = false }) { Text("保持开启") }
+            },
+        )
+    }
+
+    val target = pendingAdd ?: pendingSsh
+    if (target != null) {
+        val isNew = pendingAdd != null
+        AlertDialog(
+            onDismissRequest = { closeConfirm() },
+            title = {
+                Text(if (isNew) "确认添加受信任的地址" else "确认用于 SSH 凭据下发")
+            },
+            text = {
+                Column {
+                    Text("请确认 $target 仅你可访问（例如内网地址，或已配置访问控制的公网地址）。")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (isNew) {
+                            "添加后，该地址不再触发安全提示，并允许经配套插件向本机下发 SSH 私钥或登录密码。"
+                        } else {
+                            "该地址已在受信任列表里，本次只补充「允许经配套插件向本机下发 SSH 私钥或登录密码」。"
+                        },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "若该地址实际由他人控制，凭据可能被窃取。",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(
+                            checked = ownershipConfirmed,
+                            onCheckedChange = { ownershipConfirmed = it },
+                        )
+                        Text("我确认该地址/域名仅我可访问")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = ownershipConfirmed,
+                    onClick = {
+                        val accepted = if (isNew) {
+                            onAddForSsh(target)
+                        } else {
+                            onConfirmSshTrust(target)
+                        }
+                        if (accepted && isNew) {
+                            input = ""
+                            focus.clearFocus()
+                            keyboard?.hide()
+                        }
+                        closeConfirm()
+                    },
+                ) { Text(if (isNew) "添加" else "确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { closeConfirm() }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -2601,6 +2749,12 @@ private fun AddModeChooser(onPickFill: () -> Unit, onPickWizard: () -> Unit) {
             title = "引导式添加",
             subtitle = "一步一条，先验证服务器再选智能体",
             onClick = onPickWizard,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "SSH 直连在实例保存后，到该实例的编辑页配置。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

@@ -23,7 +23,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: 安装 Android SDK 35
+      - name: 安装 Android SDK 37.2
         run: |
           SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1)
           if [ -z "$SDKMANAGER" ]; then
@@ -31,7 +31,7 @@ jobs:
             exit 1
           fi
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-37.2" "build-tools;36.0.0"
 
       - name: 启用 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4
@@ -85,7 +85,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: 安装 Android SDK 35
+      - name: 安装 Android SDK 37.2
         run: |
           SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1)
           if [ -z "$SDKMANAGER" ]; then
@@ -93,7 +93,7 @@ jobs:
             exit 1
           fi
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-37.2" "build-tools;36.0.0"
 
       - name: 启用 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4

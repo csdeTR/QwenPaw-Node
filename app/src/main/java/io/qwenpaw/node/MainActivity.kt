@@ -1,6 +1,7 @@
 package io.qwenpaw.node
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -18,9 +19,13 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -66,6 +71,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleTerminalIntent(intent)
         val app = application as QwenPawApp
         setContent {
             val viewModel: AppViewModel = viewModel(
@@ -119,11 +125,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleTerminalIntent(intent)
+    }
+
+    private fun handleTerminalIntent(intent: Intent?) {
+        if (intent?.action != ACTION_OPEN_TERMINAL) return
+        io.qwenpaw.node.notify.TerminalSessionNotifier.requestOpen()
+        intent.action = null
+    }
+
+    companion object {
+        const val ACTION_OPEN_TERMINAL = "io.qwenpaw.node.action.OPEN_TERMINAL"
+    }
 }
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, TERMINAL, GIT }
 
 @Composable
 private fun QwenPawNav(
@@ -136,6 +158,8 @@ private fun QwenPawNav(
     app: QwenPawApp,
 ) {
     var screen by remember { mutableStateOf(Screen.CHAT) }
+    // 终端可从设置、对话列表或通知进入；返回时回到进入前那一页。
+    var terminalOrigin by remember { mutableStateOf(Screen.SETTINGS) }
     // 用量统计有两个入口（对话列表顶栏、设置页）。记住是谁打开的，
     // 返回时才回到进入前那一层——固定回列表会让「设置 → 用量 → 返回」跳过设置页。
     var usageOrigin by remember { mutableStateOf(Screen.LIST) }
@@ -147,6 +171,13 @@ private fun QwenPawNav(
     // 单独存一份而不是塞进 Screen 枚举的参数里，是为了让枚举本身保持无载荷。
     var sourceText by remember { mutableStateOf<String?>(null) }
     val lastChatId by viewModel.lastChatId.collectAsState()
+    LaunchedEffect(Unit) {
+        io.qwenpaw.node.notify.TerminalSessionNotifier.openRequests.collect {
+            if (screen != Screen.TERMINAL) terminalOrigin = screen
+            screen = Screen.TERMINAL
+            io.qwenpaw.node.notify.TerminalSessionNotifier.consumeOpen()
+        }
+    }
 
     // 对话切换后记下来，下次启动恢复到这个对话。
     LaunchedEffect(chatVmState.currentChatId) {
@@ -522,7 +553,11 @@ private fun QwenPawNav(
     // 按层级后退而不是一律回聊天页：从列表进设置再返回时应当回到列表，
     // 否则「设置盖住列表」的层级关系在返回时被跳过，滑向也就无从推导。
     BackHandler(enabled = appState.connected && screen != Screen.CHAT) {
-        parentOf(screen, usageOrigin)?.let { screen = it }
+        if (screen == Screen.TERMINAL) {
+            screen = terminalOrigin
+        } else {
+            parentOf(screen, usageOrigin)?.let { screen = it }
+        }
     }
 
     // 附件同时支持图片与文档。用 ACTION_GET_CONTENT 而不是 OpenDocument：
@@ -566,6 +601,31 @@ private fun QwenPawNav(
             isTrustedHost = viewModel::isTrustedHost,
         )
         return
+    }
+
+    appState.pendingInstanceSwitch?.let { target ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelInstanceSwitch,
+            title = { Text("终端会话正在运行") },
+            text = {
+                Text(
+                    "切换到「${target.name.ifBlank { "其他实例" }}」会中断当前的终端会话。" +
+                        "可以先打开终端页面处理，或停止全部终端后再切换。",
+                )
+            },
+            confirmButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            viewModel.cancelInstanceSwitch()
+                            screen = Screen.TERMINAL
+                        },
+                    ) { Text("打开终端页面") }
+                    TextButton(onClick = viewModel::confirmInstanceSwitch) { Text("停止终端") }
+                    TextButton(onClick = viewModel::cancelInstanceSwitch) { Text("取消") }
+                }
+            },
+        )
     }
 
     // 头像裁剪是一个全屏模态层：放在页面切换之前，盖住任何页面。
@@ -678,6 +738,10 @@ private fun QwenPawNav(
                         viewModel.usage.ensureLoaded()
                         screen = Screen.TOKEN_USAGE
                     },
+                    onOpenTerminal = {
+                        terminalOrigin = Screen.LIST
+                        screen = Screen.TERMINAL
+                    },
                     onOpenInbox = {
                         // 进入前刷新一次：未读数与列表内容都要是当前的。
                         viewModel.inbox.refresh()
@@ -757,6 +821,7 @@ private fun QwenPawNav(
                     onRefresh = viewModel.workspace::refresh,
                     onLoadMore = viewModel.workspace::loadMore,
                     onOpenRoot = viewModel.workspace::openRoot,
+                    onOpenGit = { screen = Screen.GIT },
                     onEnter = viewModel.workspace::enter,
                     onUp = viewModel.workspace::up,
                     onOpenFile = viewModel.workspace::openFile,
@@ -1230,6 +1295,62 @@ private fun QwenPawNav(
                 )
             }
 
+            Screen.TERMINAL -> {
+                val terminalState by viewModel.terminal.state.collectAsState()
+                io.qwenpaw.node.ui.terminal.TerminalScreen(
+                    state = terminalState,
+                    actions = io.qwenpaw.node.ui.terminal.TerminalActions(
+                        open = viewModel.terminal::open,
+                        chooseLocal = viewModel.terminal::chooseLocal,
+                        chooseSsh = viewModel.terminal::chooseSsh,
+                        chooseDirect = viewModel.terminal::chooseDirect,
+                        switchSource = viewModel.terminal::switchSource,
+                        dismissSource = viewModel.terminal::dismissSourceDialog,
+                        newTab = viewModel.terminal::newTab,
+                        selectTab = viewModel.terminal::selectTab,
+                        closeActive = viewModel.terminal::closeActive,
+                        onLeave = viewModel.terminal::onLeave,
+                        respondHostKey = viewModel.terminal::respondHostKey,
+                        clearHostKey = viewModel.terminal::clearHostKey,
+                        dismissNotice = viewModel.terminal::dismissNotice,
+                        dismissError = viewModel.terminal::dismissError,
+                        reconnect = viewModel.terminal::reconnect,
+                        selectShell = viewModel.terminal::selectShell,
+                        setAsDefault = viewModel.terminal::setAsDefaultChecked,
+                        setFontSize = viewModel.terminal::setFontSize,
+                        claimPinchTip = viewModel.terminal::claimPinchTip,
+                        renameTab = viewModel.terminal::renameTab,
+                    ),
+                    onBack = {
+                        viewModel.terminal.onLeave()
+                        screen = terminalOrigin
+                    },
+                )
+            }
+
+            Screen.GIT -> {
+                val gitState by viewModel.git.state.collectAsState()
+                io.qwenpaw.node.ui.git.GitScreen(
+                    state = gitState,
+                    actions = io.qwenpaw.node.ui.git.GitActions(
+                        open = viewModel.git::open,
+                        acknowledge = viewModel.git::acknowledgeNotice,
+                        refresh = viewModel.git::load,
+                        showDiff = viewModel.git::showDiff,
+                        showCommitDiff = viewModel.git::showCommitDiff,
+                        stage = viewModel.git::stage,
+                        unstage = viewModel.git::unstage,
+                        commit = viewModel.git::commit,
+                        updateMessage = viewModel.git::updateMessage,
+                        selectTab = viewModel.git::selectTab,
+                        dismissDiff = viewModel.git::dismissDiff,
+                        dismissError = viewModel.git::dismissError,
+                        dismissNotice = viewModel.git::dismissNotice,
+                    ),
+                    onBack = { screen = Screen.WORKSPACE },
+                )
+            }
+
             Screen.SETTINGS -> settingsStateHolder.SaveableStateProvider("settings") {
                 SettingsScreen(
                     instances = instances,
@@ -1243,6 +1364,10 @@ private fun QwenPawNav(
                     appVersion = BuildConfig.VERSION_NAME,
                     onBack = { screen = Screen.LIST },
                     onOpenWorkspace = { screen = Screen.WORKSPACE },
+                    onOpenTerminal = {
+                        terminalOrigin = Screen.SETTINGS
+                        screen = Screen.TERMINAL
+                    },
                     onOpenBackup = { screen = Screen.BACKUP },
                     onOpenCheckpoint = { screen = Screen.CHECKPOINT },
                     onOpenModels = { screen = Screen.MODELS },
@@ -1317,6 +1442,9 @@ private fun QwenPawNav(
                     onAddTrustedHost = viewModel::addTrustedHost,
                     onRemoveTrustedHost = viewModel::removeTrustedHost,
                     isTrustedHost = viewModel::isTrustedHost,
+                    sshTrustedHosts = appState.sshTrustedHosts,
+                    onAddTrustedHostForSsh = viewModel::addTrustedHostForSsh,
+                    onConfirmSshTrust = viewModel::confirmSshTrust,
                     bridgeStatus = appState.bridgeStatus,
                     onRefreshBridge = viewModel::refreshBridgeStatus,
                     bridgeFeaturesEnabled = appState.bridgeFeaturesEnabled,
@@ -1660,6 +1788,9 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS,
     Screen.SKILLS, Screen.MCP, Screen.MARKET, Screen.RUNNING_CONFIG, Screen.SECURITY,
     Screen.AGENTS, Screen.RUNTIME, Screen.PORTABILITY, Screen.APP_CENTER -> Screen.SETTINGS
+    Screen.TERMINAL -> Screen.SETTINGS
+    // Git 从工作区文件页顶栏进入，返回也回工作区。
+    Screen.GIT -> Screen.WORKSPACE
     // 检查点的只读对话页是检查点的下一层，返回直接回到检查点。
     Screen.CHECKPOINT_CHAT -> Screen.CHECKPOINT
     // 原文页从聊天页的气泡进入，返回也回聊天页。

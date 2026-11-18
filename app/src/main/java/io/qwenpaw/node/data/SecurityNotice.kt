@@ -120,3 +120,49 @@ internal fun isTrustedHost(host: String, trustedHosts: Set<String>): Boolean {
     val target = normalizeTrustedHost(host) ?: return false
     return trustedHosts.any { normalizeTrustedHost(it) == target }
 }
+
+/**
+ * 经配套插件下发 SSH 凭据的放行结论。
+ *
+ * [reason] 只在 [allowed] 为假时非空，界面直接显示。
+ */
+data class SshCredentialGate(
+    val allowed: Boolean,
+    val reason: String? = null,
+)
+
+/**
+ * 判断当前地址是否允许经插件下发 SSH 私钥或登录密码。
+ *
+ * **不接收 `securityHintsEnabled`。** 那个开关只控制是否弹提示，不能成为绕过凭据下发限制的
+ * 后门；要放行某台公网主机，只能把它显式确认进 [sshTrustedHosts]。
+ *
+ * 注意这里的受信任集合与旧的 [trustedHosts] 是两套：旧集合只豁免提示，不代表允许下发凭据。
+ */
+internal fun assessSshCredentialGate(
+    url: String,
+    loginRequired: Boolean,
+    sshTrustedHosts: Set<String>,
+): SshCredentialGate {
+    val notice = assessSecurity(url, loginRequired)
+    if (!notice.any) return SshCredentialGate(allowed = true)
+    // 「公网 + 未开鉴权」时终端本身不可用，受信任也不能绕过；受信任只豁免提示与明文风险。
+    if (notice.exposed) {
+        return SshCredentialGate(
+            allowed = false,
+            reason = "服务端尚未开启 Web 登录认证，终端本身不可用；请先在服务端开启 Web 登录认证并注册用户。" +
+                "关闭安全提示不会解除这条限制。",
+        )
+    }
+    if (isTrustedHost(notice.host, sshTrustedHosts)) {
+        return SshCredentialGate(allowed = true)
+    }
+    val reason = when {
+        notice.noTls ->
+            "当前地址可从公网访问且使用明文 HTTP，经配套插件下发私钥或登录密码会让凭据在链路上可读；" +
+                "请改用 HTTPS，或在「设置 → 服务器 → 受信任的连接」中确认该地址仅你可访问。"
+        else ->
+            "当前地址未通过安全校验，无法使用 SSH 终端。"
+    }
+    return SshCredentialGate(allowed = false, reason = reason)
+}

@@ -115,7 +115,7 @@ class UiRegressionTest {
                     onEdit = {},
                     onPickAgent = {},
                     onAdd = { _, _ -> },
-                    onVerifyHosts = { _, _ ->
+                    onVerifyHosts = { _, _, _, _ ->
                         io.qwenpaw.node.data.VerifyResult(
                             baseUrl = "",
                             version = "",

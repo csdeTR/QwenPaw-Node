@@ -1830,8 +1830,8 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 - 服务端阻塞最多 **20 秒**。客户端读超时必须大于它，否则每次都空转。
 - `reset: true` 表示游标已失效（输出缓冲区上限 256 KB），须按返回的 `cursor` 重来。
 - 单次最多返回 `MAX_CHUNK = 32768` 字符。
-- `{group}` 是 UUID，由客户端为每个会话生成并持久化；换了它就看不到原来的终端。
-- 上限：每会话 8 个、全局 32 个，超出回 409；空闲 1 小时回收（`DETACHED_TTL`）。
+- `{group}` 是 UUID，由客户端按「实例 + 智能体」生成并持久化；换了它就看不到原来的终端。
+- 上限：每组 8 个、全局 32 个，超出回 409；空闲 1 小时回收（`DETACHED_TTL`）。
 
 **输出是带 ANSI 转义序列的原始流**，实测提示符形如`\x1b[?2004h\x1b]0;csdetr@qp-test: ~\x07\x1b[01;32m…\x1b[00m$ `。必须自行解析 VT 子集，不能直接放进文本控件。
 
@@ -1921,47 +1921,44 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 4. **访问控制的通过 / 拒绝 / 忽略 / 备注四态分开**，不共用「关闭」。
 5. **ACP 的 `command`、`args` 属于在服务端执行任意命令**，改动要有明确说明，不按普通开关处理。
 
-### 31.6 插件提供的 SSH 通道（源码层确认，未实测）
+### 31.6 插件提供的 SSH 通道（v0.4.0）
 
-终端除服务端本地 PTY 外，还能走 SSH。SSH 不在核心 API 里，由配套插件`qwenpaw-node-bridge`（≥ v0.4.0，capability `ssh`）提供一条 WebSocket 中继，客户端在这条通道上跑标准 SSH 协议。
+客户端终端页有三个来源：默认（服务端本地 PTY）、Bridge 中继（配套插件）与 SSH 直连。渲染仍在客户端，三种来源共用同一套 VT 模拟。
 
-**三条源码依据**：
-
-1. 插件用 `api.register_http_router(router, prefix=...)` 注册普通 `APIRouter`，宿主在 `plugins/registry.py` 的 `_mount_plugin_http_on_app` 里调`app.include_router(router, prefix=full_path_prefix, tags=tags)`。
-2. FastAPI 的 `include_router` 会保留 `APIWebSocketRoute`（`fastapi/routing.py` 里对 `isinstance(route, APIWebSocketRoute)` 的分支），因此 `@router.websocket("/ssh")` 会挂到 `/api/plugins/qwenpaw-node-bridge/ssh`。
-3. 本服务端已有可用的 WS 端点：`app/routers/voice.py` 的 `@voice_router.websocket("/voice/ws")`，说明 uvicorn 侧无需额外配置。
-
-**鉴权必须由插件自己做。** `AuthMiddleware` 继承 `BaseHTTPMiddleware`（`app/auth.py:724`），Starlette 的 `BaseHTTPMiddleware` 只包裹 HTTP 作用域，**看不到 WebSocket 连接**。因此 HTTP 那层的登录态不会自动作用在 WS 上，插件必须在 handler 里校验令牌再 `accept()`——`voice.py` 正是这么做的（先查一次性 token，失败直接 `close(1008)`）。
-
-**两端形态**：
-
-| 侧 | 做法 |
-| --- | --- |
-| 插件 | 校验令牌 → `accept()` → `socket.create_connection((host, port))` → 双向泵字节，只发二进制帧 |
-| 客户端 | OkHttp WebSocket ↔ `Socket` 适配器（有界队列做背压）↔ `sshj` 等 SSHv2 实现 |
-
-**插件对外三个端点**（v0.4.0 计划）：
+**硬前置：服务端已开启Web 登录认证。** 插件 v0.4.0 的 `/ssh/credential`、`PUT /ssh/settings` 与 `WS /ssh` 都要求 `QWENPAW_AUTH_ENABLED=true`。WS 不走 `AuthMiddleware`，插件必须在 `accept()` 前用 `qwenpaw.app.auth.verify_token` 校验 `Authorization: Bearer` 或 `?token=`。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| WS | `/ssh` | 二进制帧中继到配置好的目标 |
-| GET | `/ssh/config` | 脱敏连接信息，客户端读 |
-| GET / PUT | `/ssh/settings` | 控制台读写完整设置，私钥只写不读 |
+| WS | `/api/plugins/qwenpaw-node-bridge/ssh` | 二进制帧中继到设置里的 host:port；并发上限 4 |
+| GET | `/ssh/config` | 脱敏目标 `{host,port,user,auth,key_configured,key_source}` |
+| GET | `/ssh/credential` | 按需下发凭据，插件**自校验 token**，`Cache-Control: no-store`，不写日志 |
+| GET / PUT | `/ssh/settings` | 控制台读写；PUT 插件自校验 token，空白密钥字段保留原值 |
 
-`GET /ssh/config` 回 `{host, port, user, auth, key_configured, key_source}`。**私钥内容与口令永不回传**，只有 `key_configured` 这一个布尔。客户端据此决定是否引导用户去控制台补配置。
+**只连设置里的目标。** 客户端不能指定主机；默认 `127.0.0.1:22`。主机密钥 TOFU 在客户端做（JSch），首次弹指纹，变化时拒绝并提供清除入口。
 
-**设置面板在 Web 控制台，不在手机上。** 插件 `plugin.json` 增加`entry.frontend: "ui/index.js"`，Console 通过`GET /api/frontend_plugin/{plugin_id}/files/ui/index.js` 动态 import 这个 ESM 模块，宿主提供 `window.QwenPaw.host.React` 与 `antd`。字段为地址、端口、用户名、认证方式、私钥来源、私钥、口令；私钥来源优先「服务端已有路径」，粘贴方式落盘 `0600`。
+**HTTP 敏感端点也自己校验 token。** 实测在服务端热切换鉴权开关后，带空 `Authorization: Bearer` 的请求仍能到达插件路由；因此 `PUT /ssh/settings` 与 `GET /ssh/credential` 在 handler 内再调一次 `verify_token`，失败回 401，不依赖核心中间件。
 
-**终端页的入口先选方式**：服务端终端 / SSH 连接。未装插件或版本低于 v0.4.0 时SSH 项**置灰并给出安装地址，不隐藏**——隐藏会让人以为只有一种终端。
+**客户端安全闸门。** 经插件下发凭据的 SSH 终端受现有地址校验约束：`assessSshCredentialGate(url, loginRequired, sshTrustedHosts)` 只在 `!SecurityNotice.any` 或该主机已确认进 `sshTrustedHosts` 时放行。公网明文未确认的主机不能使用 SSH 终端；`securityHintsEnabled=false` 只关闭提示，不能绕过闸门。受信任列表分两层：
 
-**四条约束（写进实现，不是建议）**：
+- `trustedHosts` 只豁免提示；
+- `sshTrustedHosts` 由「受信任的连接」页的「我确认该地址/域名仅我可访问」写入，才允许下发凭据。
 
-1. **这是代理，必须收窄范围。** 默认只允许 `127.0.0.1:22`，其它目标走显式白名单，并限制并发连接数。不限制等于给公网开了一个跳板。
-2. **反向代理要支持 WS 升级。** nginx 需要 `proxy_http_version 1.1` 与`Upgrade` / `Connection` 头。握手失败时降级为「只有本地终端」，不要报错。
-3. **主机密钥不得自动接受。** 首次连接走 TOFU，用户确认指纹后才记住。
-4. **新增 SSH 库要走依赖门禁**：`proguard-rules.pro` 补 keep 规则，并复核两个变体 × 四个 ABI 的体积。
+老版本已有的受信任地址只保留提示豁免，需要再确认一次用于 SSH；新增地址一次确认同时写入两层。
 
-**为什么还值得做**：本地 PTY 的渲染依赖客户端自己写的 VT 子集，全屏程序不保证；SSH 拿到的是真正的 `xterm-256color` PTY。另外它能连服务端可到达的其它主机。
+**SSH 直连是纯客户端能力。** 手机直接 `Socket` 到用户配置的 host:port，JSch 完成握手与认证，不经过插件；因此不需要 `QWENPAW_AUTH_ENABLED`，也不受 `sshTrustedHosts` 闸门约束。主机密钥 TOFU 与中继共用 `SshHostKeys`。连接后若目标与 QwenPaw 实例同机，客户端用 `GET /api/workspace/project-directory` 的 `path` 进入智能体工作区；不同机时跳过。配置存在 `qwenpaw_ssh_profiles` 的 EncryptedSharedPreferences，私钥/口令不写日志。
+
+**设置目录**：`~/.qwenpaw/plugin_data/qwenpaw-node-bridge/`，目录 `0700`，`ssh_settings.json` 与内联 `ssh_key` 为 `0600`。私钥优先用服务端已有路径；粘贴方式才落盘。
+
+**控制台设置面板**：`ui/index.js` 通过 `window.QwenPaw.registerRoutes("qwenpaw-node-bridge", …)` 挂到 Settings → Plugins → 「SSH 设置」；使用宿主注入的 `React` / `antd` / `getApiUrl` / `getApiToken`。页面使用 HTTP 时显示明文传输警告。
+
+**四条硬约束**：
+
+1. 这是代理，只允许设置里的目标，且限制并发。
+2. 反向代理要支持 WebSocket 升级；握手失败时客户端提示并降级为只有本地终端。
+3. 主机密钥不得自动接受；首次 TOFU，变化时告警。
+4. 新增 SSH 库走依赖门禁：JSch 已补 keep 规则，8 包体积见 release.md。
+
+**边界**：闸门是客户端策略，插件只负责鉴权。持有 token 的自定义客户端仍可直接请求 `/ssh/credential`；这与终端本身的权限边界一致——能拿到 token 的人本来就能在服务端执行命令。
 
 ---
 

@@ -104,7 +104,7 @@ class ErrorTextAuthTest {
     /** 缺凭据抛的 401 带 userHint，不能被映射成「登录已失效」。 */
     @Test
     fun `missing credentials message is not shown as expired login`() {
-        val msg = "该实例已开启登录鉴权，需要用户名和密码"
+        val msg = "该实例已开启 Web 登录认证，需要用户名和密码"
         val text = ErrorText.of(ApiException(401, msg, msg, tokenSent = false))
         assertEquals(msg, text)
         assertFalse(text.contains("登录已失效"))

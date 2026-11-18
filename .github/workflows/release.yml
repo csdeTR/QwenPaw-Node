@@ -39,7 +39,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: 安装 Android SDK 35
+      - name: 安装 Android SDK 37.2
         run: |
           SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1)
           if [ -z "$SDKMANAGER" ]; then
@@ -47,7 +47,7 @@ jobs:
             exit 1
           fi
           yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMANAGER" "platform-tools" "platforms;android-37.2" "build-tools;36.0.0"
 
       - name: 启用 Gradle 缓存
         uses: gradle/actions/setup-gradle@v4
@@ -113,6 +113,20 @@ jobs:
             }
           done
 
+      - name: 校验 16KB 页对齐
+        run: |
+          TOOL=$(ls "$ANDROID_HOME"/build-tools/*/zipalign 2>/dev/null | tail -1)
+          if [ -z "$TOOL" ]; then
+            echo "::error::找不到 zipalign"
+            exit 1
+          fi
+          for f in $(find app/build/outputs/apk -path "*/release/*.apk"); do
+            "$TOOL" -c -P 16 4 "$f" > /dev/null || {
+              echo "::error::$f 未按 16KB 页对齐"
+              exit 1
+            }
+          done
+
       # 产物名要能一眼分出变体与架构：
       #   QwenPaw-Node-v0.4.0-arm64-v8a.apk
       #   QwenPaw-Node-v0.4.0-no-sherpa-arm64-v8a.apk
@@ -165,8 +179,8 @@ jobs:
             echo
             echo '| 变体 | 语音 | 体积 | 说明 |'
             echo '| --- | --- | --- | --- |'
-            echo '| 标准包 | 本地识别或服务端转写（二选一，默认本地） | 约 25MB | 需要离线可用与实时字幕时选择这一种 |'
-            echo '| `-no-sherpa` | 仅服务端转写 | 约 2.4MB | 不需要离线识别时可省下约 22MB |'
+            echo '| 标准包 | 本地识别或服务端转写（二选一，默认本地） | 约 29MB | 需要离线可用与实时字幕时选择这一种 |'
+            echo '| `-no-sherpa` | 仅服务端转写 | 约 6.5MB | 不需要离线识别时可省下约 22MB |'
             echo
             echo '文件名里的架构部分与之对应：'
             echo

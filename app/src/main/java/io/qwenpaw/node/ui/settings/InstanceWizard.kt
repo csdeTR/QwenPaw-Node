@@ -241,7 +241,7 @@ fun InstanceWizard(
         if (needsLogin == false) {
             // 只在首次判定时提示；从第 3 步返回时不再重复弹，避免每次返回都被打断。
             if (fresh) {
-                Toast.makeText(context, "该服务端未开启登录验证，已跳过", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "该服务端未开启 Web 登录认证，已跳过", Toast.LENGTH_SHORT).show()
             }
             step = 3
         }
@@ -478,14 +478,14 @@ internal fun SecurityNoticeDialog(
             text = {
                 Column {
                     Text(
-                        text = "未检测到登录验证。任何能访问到 ${notice.host} 的人" +
+                        text = "未检测到 Web 登录认证。任何能访问到 ${notice.host} 的人" +
                             "都可以操作这台机器上的智能体、读取对话记录。",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = "当前状态无异于将设备向全世界公开，为确保安全，" +
-                            "请尽快开启QwenPaw「Web登录认证」，保护控制台免受未授权访问",
+                            "请尽快开启 QwenPaw「Web 登录认证」，保护控制台免受未授权访问",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -544,7 +544,7 @@ private enum class SecurityStage { AUTH, TLS }
 private fun TrustedHostHint() {
     Spacer(Modifier.height(10.dp))
     Text(
-        text = "如果这台服务器是你自己的，可以在「设置 → 服务器 → 受信任的连接」里" +
+        text = "如果这个地址仅你可访问，请在「设置 → 服务器 → 受信任的连接」里" +
             "添加该地址，之后不再弹出本条提示。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -554,7 +554,7 @@ private fun TrustedHostHint() {
 /**
  * 点「上一步」时应当回到的步骤。
  *
- * 第 2 步在「服务端未开启登录验证」时是**不可停留**的：`LaunchedEffect` 会立刻
+ * 第 2 步在「服务端未开启 Web 登录认证」时是**不可停留**的：`LaunchedEffect` 会立刻
  * 把页面推回第 3 步，而第 2 步又没有输入框可填。此时从第 3 步返回若落在第 2 步，
  * 用户只会看到画面闪一下又被送回原处。因此这种情况下直接回第 1 步。
  *
@@ -669,7 +669,7 @@ private fun StepServer(
                 "该地址由反向代理保护，需要填写账号与密码才能访问服务端"
             } else {
                 "仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。" +
-                    "它与「Web登录认证」无关。"
+                    "它与「Web 登录认证」无关。"
             },
             style = MaterialTheme.typography.labelSmall,
             color = if (proxyRequired) {
@@ -784,14 +784,14 @@ private fun StepLogin(
     }
     if (!needsLogin) {
         Text(
-            text = "该服务器未开启登录验证，正在进入下一步。",
+            text = "该服务器未开启 Web 登录认证，正在进入下一步。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         return
     }
     Text(
-        text = "这台服务器开启了登录验证，需要填写账号与密码。",
+        text = "这台服务器开启了 Web 登录认证，需要填写账号与密码。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

@@ -1,9 +1,9 @@
 import java.io.File
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
@@ -25,14 +25,16 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "io.qwenpaw.node"
-    compileSdk = 35
+    compileSdk = 37
+    compileSdkMinor = 2
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "io.qwenpaw.node"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.6.2"
+        versionCode = 18
+        versionName = "0.7.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 「关于」页里展示的仓库地址，单独抽成 BuildConfig 字段，
@@ -116,9 +118,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 
     buildFeatures {
         compose = true
@@ -134,21 +133,35 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+    }
+}
+
+androidComponents {
+    // AGP 9 默认关闭 release 变体的单测；Compose Preview 的任务生成要求它为 true。
+    beforeVariants(selector().all()) { variant ->
+        (variant as? com.android.build.api.variant.HasUnitTestBuilder)?.enableUnitTest = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
     }
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.activity:activity-compose:1.13.0")
     // 工作区目录下载需要在 SAF 授权目录里逐级建子目录与文件
-    implementation("androidx.documentfile:documentfile:1.0.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.documentfile:documentfile:1.1.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     // 用量统计的趋势折线。选 2.0.0 而不是更新的版本：它的 compose-bom 为 2024.12.01，
     // 与本项目完全一致；2.1 之后会把 Compose 一起抬高，3.x 已转 KMP、要求 Kotlin 2.4。
     implementation("com.patrykandpatrick.vico:compose:2.0.0")
@@ -159,16 +172,22 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.security:security-crypto:1.1.0")
     // 头像裁剪需要按 EXIF 方向旋转，否则竖拍照片会躺倒
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
     // 头像可能是 GIF。coil-gif 提供逐帧播放的解码器，静态位图只能显示首帧。
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-gif:2.7.0")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // SSH 终端：客户端跑标准 SSH，插件只做 WebSocket TCP 中继。
+    // Ed25519 依赖系统 JCE（Android 13+）或 BouncyCastle；本版不带 BC，低版本提示改用口令/RSA。
+    implementation("com.github.mwiede:jsch:2.28.0")
+    // 终端渲染：ConnectBot termlib（Compose + libvterm JNI）。
+    implementation("org.connectbot:termlib:0.3.15")
+    runtimeOnly("org.slf4j:slf4j-nop:2.0.20")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
     // 端上识别引擎只在 full 变体里。AAR 不在 Maven 中央仓库，放在 app/libs。
     // nosherpa 变体不带这个依赖，因此四个 ABI 的包里都不会出现它的 .so。
     "fullImplementation"(files("libs/sherpa-onnx-1.13.3.aar"))
@@ -178,19 +197,19 @@ dependencies {
     // 「core 1.10.1 + android 1.9.0」这种半升级状态带来的运行期 NoSuchMethodError。
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
 
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    ksp("androidx.room:room-compiler:2.8.5")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
-    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.robolectric:robolectric:4.18")
 
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

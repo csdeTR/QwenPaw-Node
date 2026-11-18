@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -96,6 +97,7 @@ fun WorkspaceScreen(
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onOpenRoot: (WorkspaceRoot) -> Unit,
+    onOpenGit: () -> Unit = {},
     onEnter: (WorkspaceEntry) -> Unit,
     onUp: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
@@ -163,6 +165,7 @@ fun WorkspaceScreen(
                 onUp = onUp,
                 onRefresh = onRefresh,
                 onOpenRoot = onOpenRoot,
+                onOpenGit = onOpenGit,
                 onRequestDirectoryDownload = onRequestDirectoryDownload,
                 onUpload = {
                     write.beginUpload()
@@ -297,6 +300,7 @@ private fun WorkspaceTopBar(
     onUp: () -> Unit,
     onRefresh: () -> Unit,
     onOpenRoot: (WorkspaceRoot) -> Unit,
+    onOpenGit: () -> Unit,
     onRequestDirectoryDownload: () -> Unit,
     onUpload: () -> Unit,
 ) {
@@ -333,6 +337,13 @@ private fun WorkspaceTopBar(
                 )
             }
             IconCircle(icon = QwenIcons.refresh, description = "刷新", onClick = onRefresh)
+            if (state.root == WorkspaceRoot.WORKSPACE) {
+                IconCircle(
+                    icon = QwenIcons.workflow,
+                    description = "Git 提交",
+                    onClick = onOpenGit,
+                )
+            }
             if (state.canUpload) {
                 IconCircle(icon = QwenIcons.filePlus, description = "上传文件", onClick = onUpload)
             }
@@ -816,12 +827,22 @@ internal fun IconCircle(
     description: String,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
             .size(38.dp)
             .clip(CircleShape)
-            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
+            .then(
+                when {
+                    !enabled -> Modifier
+                    onLongClick != null -> Modifier.combinedClickable(
+                        onClick = onClick,
+                        onLongClick = onLongClick,
+                    )
+                    else -> Modifier.clickable(onClick = onClick)
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

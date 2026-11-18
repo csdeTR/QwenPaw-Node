@@ -167,9 +167,16 @@ data class AppState(
      *
      * 存归一化后的 host（无协议、无端口、无方括号），与
      * [io.qwenpaw.node.data.normalizeTrustedHost] 的输出同构。
-     * 它只影响提示，不影响连接、鉴权与请求本身。
+     * **它只豁免提示**；允许经插件下发 SSH 凭据的是 [sshTrustedHosts]，两者分开是
+     * 为了不把旧版本「只想关掉提示」的同意静默扩大成「允许把私钥发出去」。
      */
     val trustedHosts: Set<String> = emptySet(),
+    /**
+     * 已确认「该地址仅你可访问」并允许经配套插件下发 SSH 凭据的主机。
+     *
+     * 只由受信任页的显式确认写入；旧版本已有的 [trustedHosts] 不会自动迁移过来。
+     */
+    val sshTrustedHosts: Set<String> = emptySet(),
     /**
      * 配套插件（QwenPaw Node Bridge）的探测结论。
      *
@@ -200,6 +207,12 @@ data class AppState(
      * 用户点了「本次使用」之后 Compose 不会重组，界面会停在「自动选择」。
      */
     val sessionPicks: Map<String, String> = emptyMap(),
+    /**
+     * 有终端会话时用户请求切换服务器实例。
+     *
+     * 非空即弹确认窗；确认或取消后清空。只拦服务器实例，智能体切换不受影响。
+     */
+    val pendingInstanceSwitch: InstanceConfig? = null,
 )
 
 class AppViewModel(
@@ -224,6 +237,11 @@ class AppViewModel(
     private val localAsr: io.qwenpaw.node.voice.LocalAsr = io.qwenpaw.node.voice.LocalAsr.Disabled,
     /** 大文件下载通道。为 null 时（测试、预览）工作区页面不创建。 */
     private val downloadClient: io.qwenpaw.node.data.remote.DownloadClient? = null,
+    /**
+     * 应用上下文。终端组、SSH 主机密钥与 Git 首次说明要落 SharedPreferences。
+     * 测试与预览可以为 null；此时不要访问 [terminal] / [git]。
+     */
+    private val appContext: android.content.Context? = null,
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -292,6 +310,7 @@ class AppViewModel(
             renderAssistantMarkdown = prefs.getBoolean(KEY_RENDER_ASSISTANT_MD, true),
             securityHintsEnabled = prefs.getBoolean(KEY_SECURITY_HINTS, true),
             trustedHosts = readTrustedHosts(),
+            sshTrustedHosts = readSshTrustedHosts(),
             bridgeFeaturesEnabled = prefs.getBoolean(KEY_BRIDGE_FEATURES, false),
         ),
     )
@@ -576,6 +595,7 @@ class AppViewModel(
     }
 
     fun useSaved(instance: InstanceConfig) {
+        if (blockInstanceSwitch(instance)) return
         bind(instance)
         _state.update { it.copy(connected = true, connectError = null) }
         chatViewModel.refreshChats()
@@ -583,8 +603,31 @@ class AppViewModel(
 
     fun switchTo(id: String) {
         val instance = instances.value.firstOrNull { it.id == id } ?: return
+        if (blockInstanceSwitch(instance)) return
         repository.setActive(id)
         useSaved(instance)
+    }
+
+    /** 终端会话存在时切换服务器实例要用户先决定：去终端处理，或停掉全部会话。 */
+    private fun blockInstanceSwitch(instance: InstanceConfig): Boolean {
+        val active = repository.active() ?: return false
+        if (active.id == instance.id) return false
+        val terminal = terminalHolder ?: return false
+        if (!terminal.hasSessions) return false
+        _state.update { it.copy(pendingInstanceSwitch = instance) }
+        return true
+    }
+
+    fun cancelInstanceSwitch() {
+        _state.update { it.copy(pendingInstanceSwitch = null) }
+    }
+
+    fun confirmInstanceSwitch() {
+        val target = _state.value.pendingInstanceSwitch ?: return
+        _state.update { it.copy(pendingInstanceSwitch = null) }
+        terminalHolder?.shutdown()
+        repository.setActive(target.id)
+        useSaved(target)
     }
 
     fun remove(id: String) {
@@ -626,7 +669,7 @@ class AppViewModel(
                 }
                 result.exceptionOrNull()?.let { e ->
                     note = if (e is io.qwenpaw.node.data.remote.ApiException && e.code == 403) {
-                        "该实例未启用登录验证，本地凭据已清除"
+                        "该实例未启用 Web 登录认证，本地凭据已清除"
                     } else {
                         // 网络失败不阻塞登出：本地凭据必须清掉，否则用户「退不出去」。
                         "吊销凭据失败：${io.qwenpaw.node.data.remote.ErrorText.of(e)}；本地凭据已清除"
@@ -869,10 +912,56 @@ class AppViewModel(
     /** 移除一条受信任的连接。输入会先归一化，与添加时的存储形态一致。 */
     fun removeTrustedHost(host: String) {
         val target = io.qwenpaw.node.data.normalizeTrustedHost(host) ?: return
-        val next = _state.value.trustedHosts - target
-        prefs.edit().putStringSet(KEY_TRUSTED_HOSTS, next).apply()
-        _state.update { it.copy(trustedHosts = next) }
+        val noticeNext = _state.value.trustedHosts - target
+        val sshNext = _state.value.sshTrustedHosts - target
+        prefs.edit()
+            .putStringSet(KEY_TRUSTED_HOSTS, noticeNext)
+            .putStringSet(KEY_SSH_TRUSTED_HOSTS, sshNext)
+            .apply()
+        _state.update { it.copy(trustedHosts = noticeNext, sshTrustedHosts = sshNext) }
     }
+
+    /**
+     * 新增一个受信任地址：同时豁免提示并允许下发 SSH 凭据。
+     *
+     * 只由受信任页的「确认该地址仅你可访问」流程调用；确认弹窗必须先把两个后果写清楚。
+     */
+    fun addTrustedHostForSsh(raw: String): Boolean {
+        val host = io.qwenpaw.node.data.normalizeTrustedHost(raw) ?: return false
+        val noticeNext = _state.value.trustedHosts + host
+        val sshNext = _state.value.sshTrustedHosts + host
+        prefs.edit()
+            .putStringSet(KEY_TRUSTED_HOSTS, noticeNext)
+            .putStringSet(KEY_SSH_TRUSTED_HOSTS, sshNext)
+            .apply()
+        _state.update { s ->
+            s.copy(
+                trustedHosts = noticeNext,
+                sshTrustedHosts = sshNext,
+                securityNotice = s.securityNotice?.takeUnless {
+                    io.qwenpaw.node.data.isTrustedHost(it.host, noticeNext)
+                },
+            )
+        }
+        return true
+    }
+
+    /**
+     * 老版本留下的受信任地址只补 SSH 授权，不改提示豁免集合。
+     *
+     * 这样升级本身不会扩大用户当初的同意范围。
+     */
+    fun confirmSshTrust(raw: String): Boolean {
+        val host = io.qwenpaw.node.data.normalizeTrustedHost(raw) ?: return false
+        val next = _state.value.sshTrustedHosts + host
+        prefs.edit().putStringSet(KEY_SSH_TRUSTED_HOSTS, next).apply()
+        _state.update { it.copy(sshTrustedHosts = next) }
+        return true
+    }
+
+    /** 该主机是否已确认允许经插件下发 SSH 凭据。 */
+    fun isSshTrustedHost(host: String): Boolean =
+        io.qwenpaw.node.data.isTrustedHost(host, _state.value.sshTrustedHosts)
 
     /** 该主机是否在受信任集合里。界面用它过滤地址安全提示。 */
     fun isTrustedHost(host: String): Boolean =
@@ -1166,6 +1255,12 @@ class AppViewModel(
             .mapNotNull { io.qwenpaw.node.data.normalizeTrustedHost(it) }
             .toSet()
 
+    private fun readSshTrustedHosts(): Set<String> =
+        prefs.getStringSet(KEY_SSH_TRUSTED_HOSTS, null)
+            .orEmpty()
+            .mapNotNull { io.qwenpaw.node.data.normalizeTrustedHost(it) }
+            .toSet()
+
     /** 从 prefs 读类别集合。缺失或全部无效时回退为全部类别。 */
     private fun readLogKinds(): Set<io.qwenpaw.node.log.LogKind> {
         val raw = prefs.getStringSet(KEY_LOG_KINDS, null) ?: return io.qwenpaw.node.log.LogKind.entries.toSet()
@@ -1293,6 +1388,52 @@ class AppViewModel(
             network = network,
         ).also { workspaceHolder = it }
 
+    /** 终端。分组按实例 + 智能体持久化；页面离开停轮询，不删服务端终端。 */
+    private var terminalHolder: io.qwenpaw.node.ui.terminal.TerminalViewModel? = null
+
+    val terminal: io.qwenpaw.node.ui.terminal.TerminalViewModel
+        get() = terminalHolder ?: io.qwenpaw.node.ui.terminal.TerminalViewModel(
+            api = api,
+            connection = ::activeConnection,
+            appState = { _state.value },
+            instanceId = { repository.active()?.id },
+            store = io.qwenpaw.node.data.terminal.TerminalStore(
+                requireNotNull(appContext) { "终端需要 appContext" },
+            ),
+            hostKeys = io.qwenpaw.node.data.terminal.SshHostKeys(
+                requireNotNull(appContext) { "终端需要 appContext" },
+            ),
+            profileStore = io.qwenpaw.node.data.terminal.SshProfileStore(
+                requireNotNull(appContext) { "终端需要 appContext" },
+            ),
+            vpnActive = {
+                network?.current?.value?.kind ==
+                    io.qwenpaw.node.data.NetworkMonitor.Snapshot.KIND_VPN
+            },
+            scope = scope,
+            onSessionCountChanged = { count ->
+                appContext?.let {
+                    io.qwenpaw.node.notify.TerminalSessionNotifier.update(it, count)
+                }
+            },
+        ).also {
+            terminalHolder = it
+            io.qwenpaw.node.notify.TerminalSessionNotifier.stopAll = { it.shutdown() }
+        }
+
+    /** Git 提交链路。首次说明的确认状态与终端共用 TerminalStore。 */
+    private var gitHolder: io.qwenpaw.node.ui.git.GitViewModel? = null
+
+    val git: io.qwenpaw.node.ui.git.GitViewModel
+        get() = gitHolder ?: io.qwenpaw.node.ui.git.GitViewModel(
+            api = api,
+            connection = ::activeConnection,
+            instanceId = { repository.active()?.id },
+            store = io.qwenpaw.node.data.terminal.TerminalStore(
+                requireNotNull(appContext) { "Git 需要 appContext" },
+            ),
+        ).also { gitHolder = it }
+
     /** 备份归档。按实例区分，与当前智能体无关。 */
     private var backupHolder: io.qwenpaw.node.ui.backup.BackupViewModel? = null
 
@@ -1409,6 +1550,15 @@ class AppViewModel(
             runtimeHolder?.clear()
             portabilityHolder?.clear()
             appCenterHolder?.clear()
+            // 同一实例换智能体是允许的：终端会话保留，收尾仍按各标签自己的分组。
+            val sameInstance = previous.substringBefore('|') == instance.id
+            if (!sameInstance) {
+                terminalHolder?.shutdown()
+                terminalHolder = null
+                io.qwenpaw.node.notify.TerminalSessionNotifier.stopAll = null
+            }
+            gitHolder?.clear()
+            gitHolder = null
         }
         agentsHolder?.setCurrentAgent(instance.agentId)
         // 每次重绑都核对一次服务端头像：绑定本身已经发生过一次网络请求，
@@ -1426,6 +1576,8 @@ class AppViewModel(
 
     override fun onCleared() {
         chatViewModel.detach()
+        terminalHolder?.shutdown()
+        io.qwenpaw.node.notify.TerminalSessionNotifier.stopAll = null
     }
 
     companion object {
@@ -1445,6 +1597,7 @@ class AppViewModel(
         private const val KEY_SECURITY_HINTS = "security_hints_enabled"
         /** 受信任的主机名集合，命中后不再提示地址风险。 */
         private const val KEY_TRUSTED_HOSTS = "trusted_hosts"
+        private const val KEY_SSH_TRUSTED_HOSTS = "ssh_trusted_hosts"
         /** 是否启用依赖配套插件的功能。默认关闭。 */
         private const val KEY_BRIDGE_FEATURES = "bridge_features_enabled"
         private const val KEY_ASSISTANT_COLLAPSE = "assistant_collapse"
@@ -1498,6 +1651,7 @@ class AppViewModel(
                         // 会被静默降级成服务端转写，界面上看不出原因。
                         localAsr = app.localAsr,
                         downloadClient = app.downloadClient,
+                        appContext = appContext,
                     ) as T
                 }
             }
