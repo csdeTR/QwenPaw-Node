@@ -32,11 +32,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AgentDto
 import kotlinx.coroutines.launch
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 智能体选择面板，设置页切换实例的智能体时用。 */
@@ -59,7 +62,7 @@ fun AgentPickerDialog(
             failure = null
             runCatching { load() }
                 .onSuccess { agents = it }
-                .onFailure { failure = it.message ?: "无法读取智能体列表" }
+                .onFailure { failure = it.message ?: Texts.get(R.string.agentpick_load_failed) }
             loading = false
         }
     }
@@ -68,7 +71,7 @@ fun AgentPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择智能体") },
+        title = { Text(stringResource(R.string.agentpick_title)) },
         text = {
             Column(
                 modifier = Modifier
@@ -96,11 +99,13 @@ fun AgentPickerDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
-                        TextButton(onClick = { reload() }) { Text("重试") }
+                        TextButton(onClick = { reload() }) {
+                            Text(stringResource(R.string.action_retry))
+                        }
                     }
 
                     agents.isEmpty() -> Text(
-                        text = "该实例未返回可用的智能体",
+                        text = stringResource(R.string.agentpick_empty),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -120,10 +125,10 @@ fun AgentPickerDialog(
             TextButton(
                 onClick = { onPick(picked) },
                 enabled = !loading && agents.isNotEmpty(),
-            ) { Text("保存") }
+            ) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -181,7 +186,7 @@ private fun PickerRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
             }
             agent.activeModel?.model?.let { model ->
                 Text(
-                    text = "模型 $model",
+                    text = stringResource(R.string.agentpick_model, model),
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                 )
@@ -192,7 +197,7 @@ private fun PickerRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
             Box(modifier = Modifier.size(16.dp)) {
                 Icon(
                     imageVector = QwenIcons.check,
-                    contentDescription = "已选择",
+                    contentDescription = stringResource(R.string.agentpick_selected_desc),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.secondary,
                 )

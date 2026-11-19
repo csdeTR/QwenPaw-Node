@@ -1,5 +1,6 @@
 package io.qwenpaw.node.log
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -21,6 +22,7 @@ class RunLogTest {
      */
     @Before
     fun reset() {
+        TestTexts.install()
         RunLog.clear()
         RunLog.setKinds(LogKind.entries.toSet())
         RunLog.disable()

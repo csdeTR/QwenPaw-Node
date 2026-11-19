@@ -37,10 +37,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.GitChangeDto
 import io.qwenpaw.node.data.model.GitLogEntryDto
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -84,7 +87,11 @@ fun GitScreen(
                     .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconCircle(icon = QwenIcons.arrowLeft, description = "返回", onClick = onBack)
+                IconCircle(
+                    icon = QwenIcons.arrowLeft,
+                    description = stringResource(R.string.action_back),
+                    onClick = onBack,
+                )
                 Spacer(Modifier.width(4.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -93,7 +100,8 @@ fun GitScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = state.status?.branch?.takeIf { it.isNotBlank() } ?: "工作区",
+                        text = state.status?.branch?.takeIf { it.isNotBlank() }
+                            ?: stringResource(R.string.git_workspace),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -111,7 +119,7 @@ fun GitScreen(
                 }
                 IconCircle(
                     icon = QwenIcons.refresh,
-                    description = "刷新",
+                    description = stringResource(R.string.action_refresh),
                     onClick = actions.refresh,
                     enabled = !state.busy,
                 )
@@ -148,17 +156,19 @@ fun GitScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        text = "无法读取 Git 状态",
+                        text = stringResource(R.string.git_error_status),
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = state.error ?: "当前工作区不是 Git 仓库。",
+                        text = state.error ?: stringResource(R.string.git_not_repo),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = actions.refresh) { Text("重试") }
+                    TextButton(onClick = actions.refresh) {
+                        Text(stringResource(R.string.action_retry))
+                    }
                 }
 
                 else -> Column(modifier = Modifier.fillMaxSize()) {
@@ -195,21 +205,20 @@ fun GitScreen(
     if (!state.acknowledged && !noticeDismissed) {
         AlertDialog(
             onDismissRequest = { noticeDismissed = true },
-            title = { Text("首次打开 Git") },
+            title = { Text(stringResource(R.string.git_intro_title)) },
             text = {
-                Text(
-                    "打开后会检查工作区。如果它还不是独立的 Git 仓库，服务端会初始化仓库、" +
-                        "写一份 .gitignore，并把当前全部文件做一次初始提交。这个操作会改动工作区。",
-                )
+                Text(stringResource(R.string.git_intro_message))
             },
             confirmButton = {
                 TextButton(onClick = {
                     noticeDismissed = true
                     actions.acknowledge()
-                }) { Text("我已了解，继续") }
+                }) { Text(stringResource(R.string.git_intro_confirm)) }
             },
             dismissButton = {
-                TextButton(onClick = { noticeDismissed = true }) { Text("暂不检查") }
+                TextButton(onClick = { noticeDismissed = true }) {
+                    Text(stringResource(R.string.git_intro_dismiss))
+                }
             },
         )
     }
@@ -217,19 +226,20 @@ fun GitScreen(
     if (showBranches) {
         AlertDialog(
             onDismissRequest = { showBranches = false },
-            title = { Text("分支（只读）") },
+            title = { Text(stringResource(R.string.git_branches_title)) },
             text = {
                 Column {
                     val branches = state.branches
                     if (branches.isEmpty()) {
-                        Text("没有可显示的分支。")
+                        Text(stringResource(R.string.git_branches_empty))
                     } else {
+                        val remoteSuffix = stringResource(R.string.git_branch_remote)
                         branches.forEach { branch ->
                             Text(
                                 text = buildString {
                                     if (branch.current) append("● ")
                                     append(branch.name)
-                                    if (branch.remote) append("（远程）")
+                                    if (branch.remote) append(remoteSuffix)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.padding(vertical = 3.dp),
@@ -238,14 +248,16 @@ fun GitScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "本版不提供切换分支；需要换分支请使用 Web 控制台。",
+                        stringResource(R.string.git_branches_hint),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showBranches = false }) { Text("关闭") }
+                TextButton(onClick = { showBranches = false }) {
+                    Text(stringResource(R.string.action_close))
+                }
             },
         )
     }
@@ -261,21 +273,23 @@ private fun GitIntro(dismissed: Boolean, onAcknowledge: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "Git 检查尚未开始",
+            text = stringResource(R.string.git_pending_title),
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(Modifier.height(8.dp))
         Text(
             text = if (dismissed) {
-                "你选择了暂不检查。准备好后可以继续；首次检查可能会初始化仓库并做一次初始提交。"
+                stringResource(R.string.git_pending_dismissed)
             } else {
-                "首次检查可能会初始化仓库并做一次初始提交。"
+                stringResource(R.string.git_pending_hint)
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onAcknowledge) { Text("继续检查") }
+        Button(onClick = onAcknowledge) {
+            Text(stringResource(R.string.git_pending_continue))
+        }
     }
 }
 
@@ -287,10 +301,14 @@ private fun GitTabs(tab: GitTab, onSelect: (GitTab) -> Unit) {
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TabChip("改动", tab == GitTab.CHANGES) { onSelect(GitTab.CHANGES) }
-        TabChip("历史", tab == GitTab.HISTORY) { onSelect(GitTab.HISTORY) }
+        TabChip(stringResource(R.string.git_tab_changes), tab == GitTab.CHANGES) {
+            onSelect(GitTab.CHANGES)
+        }
+        TabChip(stringResource(R.string.git_tab_history), tab == GitTab.HISTORY) {
+            onSelect(GitTab.HISTORY)
+        }
         if (tab == GitTab.CHANGES) {
-            val status = "工作区"
+            val status = stringResource(R.string.git_workspace)
             Spacer(Modifier.weight(1f))
             Text(
                 text = status,
@@ -326,6 +344,9 @@ private fun ChangesTab(
     state: GitUiState,
     actions: GitActions,
 ) {
+    val stagedTitle = stringResource(R.string.git_section_staged)
+    val unstagedTitle = stringResource(R.string.git_section_unstaged)
+    val untrackedTitle = stringResource(R.string.git_section_untracked)
     Column(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -340,7 +361,7 @@ private fun ChangesTab(
             if (ahead > 0 || behind > 0) {
                 item {
                     Text(
-                        text = "领先 $ahead / 落后 $behind",
+                        text = stringResource(R.string.git_ahead_behind, ahead, behind),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 4.dp),
@@ -348,21 +369,21 @@ private fun ChangesTab(
                 }
             }
             section(
-                title = "已暂存",
+                title = stagedTitle,
                 changes = state.staged,
                 staged = true,
                 state = state,
                 actions = actions,
             )
             section(
-                title = "未暂存",
+                title = unstagedTitle,
                 changes = state.unstaged,
                 staged = false,
                 state = state,
                 actions = actions,
             )
             section(
-                title = "未跟踪",
+                title = untrackedTitle,
                 changes = state.untracked,
                 staged = false,
                 state = state,
@@ -371,7 +392,7 @@ private fun ChangesTab(
             if (state.staged.isEmpty() && state.unstaged.isEmpty() && state.untracked.isEmpty()) {
                 item {
                     Text(
-                        text = "工作区没有改动。",
+                        text = stringResource(R.string.git_changes_empty),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp),
@@ -389,7 +410,7 @@ private fun ChangesTab(
             OutlinedTextField(
                 value = state.message,
                 onValueChange = actions.updateMessage,
-                placeholder = { Text("提交信息") },
+                placeholder = { Text(stringResource(R.string.git_commit_message_hint)) },
                 maxLines = 3,
                 modifier = Modifier.weight(1f),
             )
@@ -399,7 +420,7 @@ private fun ChangesTab(
                 enabled = state.staged.isNotEmpty() &&
                     state.message.isNotBlank() &&
                     !state.busy,
-            ) { Text("提交") }
+            ) { Text(stringResource(R.string.git_commit)) }
         }
     }
 }
@@ -420,7 +441,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "$title（${changes.size}）",
+                text = pluralStringResource(
+                    R.plurals.git_section_count,
+                    changes.size,
+                    title,
+                    changes.size,
+                ),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -432,7 +458,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(
                 },
                 enabled = !state.busy,
             ) {
-                Text(if (staged) "全部取消暂存" else "全部暂存")
+                Text(
+                    if (staged) {
+                        stringResource(R.string.git_unstage_all)
+                    } else {
+                        stringResource(R.string.git_stage_all)
+                    },
+                )
             }
         }
     }
@@ -486,7 +518,13 @@ private fun ChangeRow(
             modifier = Modifier.weight(1f),
         )
         TextButton(onClick = onToggle, enabled = enabled) {
-            Text(if (staged) "取消暂存" else "暂存")
+            Text(
+                if (staged) {
+                    stringResource(R.string.git_unstage)
+                } else {
+                    stringResource(R.string.git_stage)
+                },
+            )
         }
     }
 }
@@ -502,7 +540,7 @@ private fun HistoryTab(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "还没有提交记录。",
+                text = stringResource(R.string.git_history_empty),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -523,6 +561,7 @@ private fun HistoryTab(
 
 @Composable
 private fun HistoryRow(entry: GitLogEntryDto, onClick: () -> Unit) {
+    val noMessage = stringResource(R.string.git_no_commit_message)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -530,7 +569,7 @@ private fun HistoryRow(entry: GitLogEntryDto, onClick: () -> Unit) {
             .padding(vertical = 8.dp),
     ) {
         Text(
-            text = entry.message.ifBlank { "（无提交信息）" },
+            text = entry.message.ifBlank { noMessage },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
@@ -558,7 +597,11 @@ private fun DiffScreen(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconCircle(icon = QwenIcons.arrowLeft, description = "返回", onClick = onClose)
+            IconCircle(
+                icon = QwenIcons.arrowLeft,
+                description = stringResource(R.string.action_back),
+                onClick = onClose,
+            )
             Spacer(Modifier.width(4.dp))
             Text(
                 text = diff.title,
@@ -570,7 +613,7 @@ private fun DiffScreen(
         }
         if (diff.truncated) {
             Text(
-                text = "差异较大，已截断显示；完整内容请在 Web 控制台查看。",
+                text = stringResource(R.string.git_diff_truncated),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -633,6 +676,6 @@ private fun GitBanner(
             },
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onDismiss) { Text("关闭") }
+        TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
     }
 }

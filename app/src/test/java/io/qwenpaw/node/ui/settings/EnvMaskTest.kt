@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.settings
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import org.junit.Assert.assertEquals
@@ -13,6 +15,11 @@ import org.junit.Test
  * 遮罩长度固定，不跟随原值——圆点个数会泄露长度。
  */
 class EnvMaskTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     @Test
     fun `mask hides the value with a fixed number of dots`() {

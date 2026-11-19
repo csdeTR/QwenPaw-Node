@@ -26,7 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -171,13 +173,13 @@ fun RemoteImage(
         when {
             bitmap != null -> Image(
                 bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = "图片",
+                contentDescription = stringResource(R.string.msg_cd_image),
                 modifier = Modifier.fillMaxWidth(),
                 contentScale = ContentScale.Fit,
             )
 
             failed -> Text(
-                text = "图片加载失败",
+                text = stringResource(R.string.msg_image_failed),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 斜杠命令：列表描述 -->
+    <string name="cmd_approval_desc">审批待执行的工具操作：批准、拒绝、查看列表或取消</string>
+    <string name="cmd_approve_desc">批准待执行的工具操作，等同于 /approval approve</string>
+    <string name="cmd_auto_memory_status_desc">查看自动记忆任务的排队与执行状态</string>
+    <string name="cmd_checkpoint_desc">查看与管理对话检查点（自动 / 时间线 / 快照 / 恢复 / 清理 / 重置）</string>
+    <string name="cmd_clear_desc">清空对话上下文</string>
+    <string name="cmd_compact_desc">压缩对话上下文并生成摘要，支持附带说明</string>
+    <string name="cmd_compact_str_desc">查看最近一次压缩生成的摘要</string>
+    <string name="cmd_cron_create_desc">创建或替换定时任务</string>
+    <string name="cmd_cron_delete_desc">删除定时任务</string>
+    <string name="cmd_cron_list_desc">列出全部定时任务</string>
+    <string name="cmd_daemon_desc">服务端守护控制：重启、查看状态、版本与日志</string>
+    <string name="cmd_deny_desc">拒绝待执行的工具操作，等同于 /approval deny</string>
+    <string name="cmd_dump_history_desc">把当前对话导出为 JSONL 文件</string>
+    <string name="cmd_goal_desc">设定目标，智能体持续执行直至完成</string>
+    <string name="cmd_history_desc">查看当前对话的上下文占用与历史统计</string>
+    <string name="cmd_load_history_desc">从导出的 JSONL 文件载入对话</string>
+    <string name="cmd_logs_desc">查看服务端最近的项目日志</string>
+    <string name="cmd_message_desc">查看指定序号的单条消息</string>
+    <string name="cmd_mission_desc">启动任务模式，分解、执行并验证复杂任务</string>
+    <string name="cmd_model_desc">查看或切换 AI 模型</string>
+    <string name="cmd_new_desc">结束当前对话并开始新的对话</string>
+    <string name="cmd_plan_desc">创建结构化计划，把任务分解为多个子任务</string>
+    <string name="cmd_proactive_desc">开关主动消息功能</string>
+    <string name="cmd_reload_config_desc">重新加载服务端配置，无需重启进程</string>
+    <string name="cmd_reload_config_alias_desc">重新加载服务端配置，等同于 /reload-config</string>
+    <string name="cmd_reme_desc">运行并查看 ReMe 记忆操作</string>
+    <string name="cmd_restart_desc">重启服务端的智能体运行时</string>
+    <string name="cmd_skills_desc">列出当前对话可用的技能，并显示可显式调用的技能命令</string>
+    <string name="cmd_status_desc">查看服务端健康状态、运行配置与记忆管理器</string>
+    <string name="cmd_stop_desc">停止当前正在执行的任务</string>
+    <string name="cmd_system_prompt_desc">查看当前生效的系统提示词</string>
+    <string name="cmd_tool_bg_desc">把正在执行的工具调用转入后台继续运行</string>
+    <string name="cmd_tool_cancel_desc">取消正在执行的工具调用</string>
+    <string name="cmd_tools_desc">列出当前对话中正在执行的工具调用</string>
+    <string name="cmd_version_desc">查看服务端版本与关键路径</string>
+
+    <!-- 斜杠命令：分类名 -->
+    <string name="cmd_category_control">控制</string>
+    <string name="cmd_category_conversation">对话</string>
+    <string name="cmd_category_builtin">模式</string>
+    <string name="cmd_category_daemon">服务</string>
+    <string name="cmd_category_auto">自动</string>
+    <string name="cmd_category_skill">技能</string>
+    <string name="cmd_category_user">自定义</string>
+
+    <!-- 斜杠命令：含中文参数的用法示例 -->
+    <string name="cmd_compact_example">/compact 保留需求与待办，去掉调试日志</string>
+    <string name="cmd_goal_example">/goal 补全输入区单元测试</string>
+    <string name="cmd_mission_example">/mission 修复登录失败</string>
+    <string name="cmd_plan_example">/plan 把构建脚本迁到 Gradle 8</string>
+    <string name="cmd_reme_example">/reme search query=\"项目决策\" limit=5</string>
+
+    <!-- 斜杠命令：长按详情 -->
+    <string name="cmd_approval_detail">列出待审批的工具调用，并按编号批准、拒绝或取消。不写子命令时列出可用用法。</string>
+    <string name="cmd_approve_detail">批准排队中的工具调用。有多条待审时用 /approval approve &lt;编号&gt; 指定其中一条。</string>
+    <string name="cmd_checkpoint_detail">按快照、时间线、恢复、清理、重置等子命令管理检查点；不带子命令时列出可用子命令。</string>
+    <string name="cmd_clear_detail">清空当前对话的历史与摘要，不写入长期记忆。该操作不可撤销。</string>
+    <string name="cmd_compact_detail">立即压缩上下文并重写接续摘要，可附带一句说明要保留的内容。</string>
+    <string name="cmd_deny_detail">拒绝排队中的工具调用，可附一句理由，智能体会据此调整做法。</string>
+    <string name="cmd_goal_detail">把一段描述设为持续目标，智能体循环执行直到声明完成或失败。</string>
+    <string name="cmd_mission_detail">按 master、worker、verifier 三层流水线拆解并验证复杂任务，适合有明确验收方式的工作。</string>
+    <string name="cmd_model_detail">不带参数时显示当前模型与来源；带 &lt;供应商&gt;:&lt;模型&gt; 时切换默认模型，另有 list、info、reset 子命令。</string>
+    <string name="cmd_new_detail">结束当前对话并新建一条，旧内容转为长期记忆。</string>
+    <string name="cmd_plan_detail">把任务拆成结构化计划并逐步执行，适合步骤较多的改动。</string>
+    <string name="cmd_reme_detail">调用聊天中允许的 ReMe 记忆动作，例如用 search 按关键词检索记忆。</string>
+    <string name="cmd_skills_detail">列出当前对话可用的技能。技能名本身也能作为命令直接调用。</string>
+    <string name="cmd_status_detail">查看服务端健康状态、运行配置与记忆管理器状态。</string>
+    <string name="cmd_stop_detail">立即终止当前对话中正在运行的任务。</string>
+    <string name="cmd_tool_bg_detail">把正在执行的工具调用转入后台继续运行，先让对话往下走。</string>
+    <string name="cmd_tool_cancel_detail">取消正在执行的工具调用，已经产生的输出会被丢弃。</string>
+    <string name="cmd_tools_detail">列出当前对话中正在运行的工具调用及其进度。</string>
+
+    <!-- 工具分组 -->
+    <string name="tool_category_files">文件与代码</string>
+    <string name="tool_category_web">网页与浏览器</string>
+    <string name="tool_category_media">图像与视频</string>
+    <string name="tool_category_agents">智能体协作</string>
+    <string name="tool_category_runtime">运行与自动化</string>
+    <string name="tool_category_migration">应用迁移</string>
+    <string name="tool_category_other">未分类</string>
+
+    <!-- 工具名与描述 -->
+    <string name="tool_execute_shell_command_name">执行命令</string>
+    <string name="tool_execute_shell_command_desc">运行终端命令，完成系统操作与脚本任务。</string>
+    <string name="tool_read_file_name">读取文件</string>
+    <string name="tool_read_file_desc">读取文本文件，查看内容或指定行。</string>
+    <string name="tool_write_file_name">写入文件</string>
+    <string name="tool_write_file_desc">创建文件，或写入新的文件内容。</string>
+    <string name="tool_edit_file_name">编辑文件</string>
+    <string name="tool_edit_file_desc">查找并替换文件中的指定内容。</string>
+    <string name="tool_append_file_name">追加内容</string>
+    <string name="tool_append_file_desc">在文件末尾添加文本，保留已有内容。</string>
+    <string name="tool_grep_search_name">搜索文件内容</string>
+    <string name="tool_grep_search_desc">按关键词或模式查找文件中的文本。</string>
+    <string name="tool_glob_search_name">查找文件</string>
+    <string name="tool_glob_search_desc">按文件名或路径模式定位文件。</string>
+    <string name="tool_ast_search_name">搜索代码结构</string>
+    <string name="tool_ast_search_desc">按语法结构查找代码中的匹配片段。</string>
+    <string name="tool_desktop_screenshot_name">桌面截图</string>
+    <string name="tool_desktop_screenshot_desc">截取当前桌面，供智能体查看和分析。</string>
+    <string name="tool_view_image_name">查看图片</string>
+    <string name="tool_view_image_desc">读取图片，让模型理解画面内容。</string>
+    <string name="tool_view_video_name">查看视频</string>
+    <string name="tool_view_video_desc">读取视频，让模型分析视频内容。</string>
+    <string name="tool_view_audio_name">查看音频</string>
+    <string name="tool_view_audio_desc">读取音频，让模型转录或分析音频内容。</string>
+    <string name="tool_enhance_and_generate_image_name">增强并生成图片</string>
+    <string name="tool_enhance_and_generate_image_desc">完善图片描述，再生成所需画面。</string>
+    <string name="tool_web_search_name">搜索网页</string>
+    <string name="tool_web_search_desc">搜索互联网，获取最新信息与来源。</string>
+    <string name="tool_web_fetch_name">读取网页</string>
+    <string name="tool_web_fetch_desc">提取指定网页的内容，供阅读和分析。</string>
+    <string name="tool_browser_name">浏览器操作</string>
+    <string name="tool_browser_desc">浏览网页，并与页面上的内容和控件交互。</string>
+    <string name="tool_list_agents_name">查看智能体</string>
+    <string name="tool_list_agents_desc">列出可用智能体，了解可协作的对象。</string>
+    <string name="tool_chat_with_agent_name">与智能体对话</string>
+    <string name="tool_chat_with_agent_desc">向另一个智能体发送消息并获取回复。</string>
+    <string name="tool_submit_to_agent_name">委派后台任务</string>
+    <string name="tool_submit_to_agent_desc">将任务交给其他智能体在后台执行。</string>
+    <string name="tool_check_agent_task_name">查看任务进度</string>
+    <string name="tool_check_agent_task_desc">查询已委派任务的运行状态与结果。</string>
+    <string name="tool_spawn_subagent_name">创建子任务</string>
+    <string name="tool_spawn_subagent_desc">启动临时子智能体，处理独立的工作。</string>
+    <string name="tool_delegate_external_agent_name">委派外部智能体</string>
+    <string name="tool_delegate_external_agent_desc">将工作交给已配置的外部智能体。</string>
+    <string name="tool_send_file_to_user_name">发送文件</string>
+    <string name="tool_send_file_to_user_desc">将文件发送给当前对话中的用户。</string>
+    <string name="tool_get_current_time_name">获取当前时间</string>
+    <string name="tool_get_current_time_desc">查询当前日期和时间。</string>
+    <string name="tool_set_user_timezone_name">设置时区</string>
+    <string name="tool_set_user_timezone_desc">设置用户时区，用于时间相关任务。</string>
+    <string name="tool_get_token_usage_name">查看 Token 用量</string>
+    <string name="tool_get_token_usage_desc">查询模型调用的 Token 消耗。</string>
+    <string name="tool_materialize_skill_name">部署技能</string>
+    <string name="tool_materialize_skill_desc">将技能定义写入当前工作区。</string>
+    <string name="tool_run_tool_batch_name">批量执行工具</string>
+    <string name="tool_run_tool_batch_desc">按 JSON 文件中的定义执行一组工具调用。</string>
+    <string name="tool_activate_f1_exploration_mode_name">邮件审批探索</string>
+    <string name="tool_activate_f1_exploration_mode_desc">进入逐步处理邮件审批的探索模式。</string>
+    <string name="tool_migration_compat_inspect_name">检查迁移资源</string>
+    <string name="tool_migration_compat_inspect_desc">检查暂存资源与当前 QwenPaw 支持的能力。</string>
+    <string name="tool_migration_compat_read_file_name">读取迁移文件</string>
+    <string name="tool_migration_compat_read_file_desc">分页读取暂存资源中的文件内容。</string>
+    <string name="tool_migration_compat_write_file_name">写入迁移文件</string>
+    <string name="tool_migration_compat_write_file_desc">创建或覆盖待修复资源中的文本文件。</string>
+    <string name="tool_migration_compat_update_name">更新迁移配置</string>
+    <string name="tool_migration_compat_update_desc">修改允许更新的 MCP 或定时任务字段。</string>
+    <string name="tool_migration_compat_finalize_name">验证并完成迁移</string>
+    <string name="tool_migration_compat_finalize_desc">运行最终测试，通过后启用修复完成的资源。</string>
+</resources>

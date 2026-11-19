@@ -2,7 +2,9 @@ package io.qwenpaw.node.data.transcription
 
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 
 /**
  * 服务端语音转写的可用性结论。
@@ -39,11 +41,11 @@ sealed interface TranscriptionStatus {
     /** 展现在设置页与服务端说明行的一句话。 */
     val label: String
         get() = when (this) {
-            Unknown -> "尚未检测转写服务"
-            Ready -> "服务端转写已就绪"
-            Disabled -> "服务端未启用语音转写"
-            Misconfigured -> "服务端转写缺少配置"
-            Unsupported -> "当前服务端版本不支持语音转写"
+            Unknown -> Texts.get(R.string.drest_transcription_unknown)
+            Ready -> Texts.get(R.string.drest_transcription_ready)
+            Disabled -> Texts.get(R.string.drest_transcription_disabled)
+            Misconfigured -> Texts.get(R.string.drest_transcription_misconfigured)
+            Unsupported -> Texts.get(R.string.drest_transcription_unsupported)
         }
 }
 

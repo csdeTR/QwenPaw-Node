@@ -1,5 +1,8 @@
 package io.qwenpaw.node.data.remote
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * 把异常映射成给用户看的中文提示。
  *
@@ -24,31 +27,31 @@ object ErrorText {
                 classify401(e.detail ?: e.message, e.wwwAuthenticate, e.tokenSent),
                 e.detail ?: e.message,
             )
-            404 -> "对话不存在或已被删除"
-            409 -> "该对话已有任务在运行，请先停止或等待完成"
-            503 -> "Console 频道未启用，请在服务端开启"
+            404 -> Texts.get(R.string.error_not_found_404)
+            409 -> Texts.get(R.string.error_busy_409)
+            503 -> Texts.get(R.string.error_console_disabled_503)
             else -> e.message
         }
 
         else -> when {
-            e.hasCause<java.net.UnknownHostException>() -> "找不到服务器，请检查地址与网络"
+            e.hasCause<java.net.UnknownHostException>() -> Texts.get(R.string.error_host_not_found)
             e.hasCause<java.net.ConnectException>() || e.isConnectFailure() ->
-                "无法连接服务器，请确认 QwenPaw 已启动且地址端口正确"
+                Texts.get(R.string.error_connect_failed)
 
-            e.hasCause<java.net.SocketTimeoutException>() -> "连接超时，请检查网络后重试"
-            e is java.io.IOException -> "网络中断：请检查网络后重试（草稿已保存）"
-            else -> e.message ?: "未知错误"
+            e.hasCause<java.net.SocketTimeoutException>() -> Texts.get(R.string.error_timeout)
+            e is java.io.IOException -> Texts.get(R.string.error_network_lost)
+            else -> e.message ?: Texts.get(R.string.error_unknown)
         }
     }
 
     /** 「服务端只接受 https」的排查建议。 */
-    const val HTTPS_REQUIRED = "若服务端只接受 https，请把地址改成 https:// 开头，或核对端口"
+    val HTTPS_REQUIRED: String get() = Texts.get(R.string.error_https_required)
 
     /** 「服务端只提供 http」的排查建议。 */
-    const val HTTP_ONLY = "该地址可能只提供 http，可尝试改成 http:// 开头"
+    val HTTP_ONLY: String get() = Texts.get(R.string.error_http_only)
 
     /** 反向代理要求 HTTP Basic 时的排查建议。 */
-    const val PROXY_AUTH_REQUIRED = "在「设置 → 服务器」里为该实例填写反向代理账号与密码"
+    val PROXY_AUTH_REQUIRED: String get() = Texts.get(R.string.error_proxy_auth_required)
 
     /**
      * 401 的真实成因。
@@ -114,11 +117,12 @@ object ErrorText {
 
     /** [AuthFailure] 对应的界面文案。[OTHER] 用服务端原文。 */
     fun authFailureText(failure: AuthFailure, detail: String? = null): String = when (failure) {
-        AuthFailure.PROXY_BASIC -> "该地址由反向代理保护，需要填写反向代理账号与密码"
-        AuthFailure.LOGIN_REQUIRED -> "服务器要求登录，请到「设置 → 服务器」填写账号与密码"
-        AuthFailure.BAD_CREDENTIALS -> "用户名或密码不正确"
-        AuthFailure.TOKEN_EXPIRED -> "登录已失效，请重新登录"
-        AuthFailure.OTHER -> detail?.takeIf { it.isNotBlank() } ?: "登录已失效，请重新登录"
+        AuthFailure.PROXY_BASIC -> Texts.get(R.string.error_auth_proxy_basic)
+        AuthFailure.LOGIN_REQUIRED -> Texts.get(R.string.error_auth_login_required)
+        AuthFailure.BAD_CREDENTIALS -> Texts.get(R.string.error_auth_bad_credentials)
+        AuthFailure.TOKEN_EXPIRED -> Texts.get(R.string.error_auth_token_expired)
+        AuthFailure.OTHER -> detail?.takeIf { it.isNotBlank() }
+            ?: Texts.get(R.string.error_auth_token_expired)
     }
 
     /**

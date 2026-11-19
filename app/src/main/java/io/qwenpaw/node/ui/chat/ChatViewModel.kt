@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.chat
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.local.AppDatabase
 import io.qwenpaw.node.data.local.CachedMessageEntity
 import io.qwenpaw.node.data.local.DraftEntity
@@ -19,6 +20,7 @@ import io.qwenpaw.node.data.stream.HistoryMapper
 import io.qwenpaw.node.data.stream.Role
 import io.qwenpaw.node.data.stream.StreamAccumulator
 import io.qwenpaw.node.notify.ChatNotifier
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -662,14 +664,18 @@ class ChatViewModel(
                     // 服务端会给带附件的消息注入「用户上传文件，已经下载到 <路径>」，
                     // 这既不是用户原话也不是助手回复，出现在预览里只是一串路径噪声。
                     if (line.startsWith(UPLOAD_NOTICE_PREFIX)) continue
-                    val prefix = if (message.role == Role.USER) "你：" else ""
-                    return (prefix + line).take(60)
+                    val text = if (message.role == Role.USER) {
+                        Texts.get(R.string.chatvm_preview_you, line)
+                    } else {
+                        line
+                    }
+                    return text.take(60)
                 }
 
-                ChatMessage.Kind.IMAGE -> return "[图片]"
+                ChatMessage.Kind.IMAGE -> return Texts.get(R.string.chatvm_preview_image)
                 ChatMessage.Kind.TOOL -> {
                     val name = message.tool?.name
-                    if (!name.isNullOrBlank()) return "[工具] $name"
+                    if (!name.isNullOrBlank()) return Texts.get(R.string.chatvm_preview_tool, name)
                 }
 
                 ChatMessage.Kind.REASONING -> Unit
@@ -697,7 +703,7 @@ class ChatViewModel(
         // 之后再按 id 去 chats 里查就永远查不到，提示会固定退化成「对话」。
         val name = _state.value.chats.firstOrNull { it.id == chatId }?.name
             ?: _state.value.archivedChats.firstOrNull { it.id == chatId }?.name
-            ?: "对话"
+            ?: Texts.get(R.string.chatvm_chat_fallback)
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.archiveChat(conn, chatId) } }
                 .onSuccess {
@@ -720,11 +726,12 @@ class ChatViewModel(
                             messages = if (s.currentChatId == chatId) emptyList() else s.messages,
                         )
                     }
-                    _notifications.tryEmit("已归档「$name」")
+                    val archivedHint = Texts.get(R.string.chatvm_archived_name, name)
+                    _notifications.tryEmit(archivedHint)
                     // 归档是少数几个服务端提供撤销的动作，给出一次撤销机会。
                     // unarchiveChat 幂等，重复点不会出错。
                     _undoOffers.tryEmit(
-                        io.qwenpaw.node.ui.common.UndoOffer("已归档「$name」") {
+                        io.qwenpaw.node.ui.common.UndoOffer(archivedHint) {
                             unarchiveChat(chatId)
                         },
                     )
@@ -732,7 +739,7 @@ class ChatViewModel(
                 .onFailure { e ->
                     // 运行中的对话服务端会拒绝归档（409），这里给一句更直白的提示。
                     val msg = if (e is ApiException && e.code == 409) {
-                        "对话正在运行，无法归档，请先停止"
+                        Texts.get(R.string.chatvm_archive_running)
                     } else {
                         friendly(e)
                     }
@@ -785,15 +792,21 @@ class ChatViewModel(
                         )
                     }
                     val skipped = result.failed.size
-                    val msg = buildString {
-                        append("已归档 ${okIds.size} 个对话")
-                        if (skipped > 0) append("，$skipped 个正在运行已跳过")
+                    val msg = if (skipped > 0) {
+                        Texts.quantity(
+                            R.plurals.chatvm_batch_archived_skipped,
+                            okIds.size,
+                            okIds.size,
+                            skipped,
+                        )
+                    } else {
+                        Texts.quantity(R.plurals.chatvm_batch_archived, okIds.size, okIds.size)
                     }
                     _notifications.tryEmit(msg)
                 }
                 .onFailure { e ->
                     val msg = if (e is ApiException && e.code == 409) {
-                        "部分对话正在运行，无法归档"
+                        Texts.get(R.string.chatvm_batch_archive_running)
                     } else {
                         friendly(e)
                     }
@@ -829,15 +842,21 @@ class ChatViewModel(
                         )
                     }
                     val skipped = result.failed.size
-                    val msg = buildString {
-                        append("已恢复 ${okIds.size} 个对话")
-                        if (skipped > 0) append("，$skipped 个未能恢复")
+                    val msg = if (skipped > 0) {
+                        Texts.quantity(
+                            R.plurals.chatvm_batch_restored_skipped,
+                            okIds.size,
+                            okIds.size,
+                            skipped,
+                        )
+                    } else {
+                        Texts.quantity(R.plurals.chatvm_batch_restored, okIds.size, okIds.size)
                     }
                     _notifications.tryEmit(msg)
                     if (okIds.isNotEmpty()) {
                         _undoOffers.tryEmit(
                             io.qwenpaw.node.ui.common.UndoOffer(
-                                "已恢复 ${okIds.size} 个对话",
+                                Texts.quantity(R.plurals.chatvm_batch_restored, okIds.size, okIds.size),
                             ) { batchArchive(okIds.toList()) },
                         )
                     }
@@ -873,7 +892,9 @@ class ChatViewModel(
                     }
                     // 图标属于本机数据，服务端不知道它的存在，必须在这里清。
                     runCatching { chatIds.forEach { chatIconStore?.clear(it) } }
-                    _notifications.tryEmit("已删除 ${chatIds.size} 个对话")
+                    _notifications.tryEmit(
+                        Texts.quantity(R.plurals.chatvm_batch_deleted, chatIds.size, chatIds.size),
+                    )
                 }
                 .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
         }
@@ -921,7 +942,7 @@ class ChatViewModel(
                         io.qwenpaw.node.log.LogKind.NETWORK,
                         "ChatVM",
                         e,
-                        "读取分组列表失败",
+                        Texts.get(R.string.chattail_group_load_failed),
                     )
                 }
         }
@@ -960,7 +981,10 @@ class ChatViewModel(
                     _state.update { s ->
                         s.copy(
                             groups = s.groups + created,
-                            error = "已创建分组「${created.name.ifBlank { created.id }}」",
+                            error = Texts.get(
+                                R.string.chatvm_group_created,
+                                created.name.ifBlank { created.id },
+                            ),
                         )
                     }
                     refreshGroups()
@@ -983,7 +1007,7 @@ class ChatViewModel(
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         if (!isCustomGroup(groupId)) {
-            _state.update { it.copy(error = "内置分组不可重命名") }
+            _state.update { it.copy(error = Texts.get(R.string.chatvm_group_builtin_rename)) }
             return
         }
         val conn = currentConnection ?: return
@@ -1001,7 +1025,7 @@ class ChatViewModel(
      */
     fun deleteGroup(groupId: String) {
         if (!isCustomGroup(groupId)) {
-            _state.update { it.copy(error = "内置分组不可删除") }
+            _state.update { it.copy(error = Texts.get(R.string.chatvm_group_builtin_delete)) }
             return
         }
         val conn = currentConnection ?: return
@@ -1114,7 +1138,7 @@ class ChatViewModel(
                         providerId to model
                     }
                     if (p.isNullOrBlank() || m.isNullOrBlank()) {
-                        throw IllegalStateException("服务端没有配置默认模型，无法恢复默认")
+                        throw IllegalStateException(Texts.get(R.string.chatvm_no_default_model))
                     }
                     api.setChatModel(conn, chatId, p, m)
                 }
@@ -1199,7 +1223,7 @@ class ChatViewModel(
             }.onFailure { e ->
                 // 服务端对不存在的路径返回 400，原文是英文，这里给出更直白的说明。
                 val msg = if (e is ApiException && e.code == 400) {
-                    "目录不存在或不可用，请确认这是服务端上的绝对路径"
+                    Texts.get(R.string.chatvm_project_dir_invalid)
                 } else {
                     friendly(e)
                 }
@@ -1218,7 +1242,7 @@ class ChatViewModel(
                 _state.update { it.copy(thinking = view, error = null) }
             }.onFailure { e ->
                 val msg = if (e is ApiException && e.code == 422) {
-                    "当前模型不支持这个思考档位"
+                    Texts.get(R.string.chatvm_thinking_unsupported)
                 } else {
                     friendly(e)
                 }
@@ -1235,25 +1259,43 @@ class ChatViewModel(
 
     /** 把给定标题与消息列表拼成 Markdown（列表页复制全部也复用）。 */
     fun markdownOf(title: String, messages: List<ChatMessage>): String = buildString {
-        append("# ").append(title.ifBlank { "对话" }).append("\n\n")
+        append(
+            Texts.get(
+                R.string.chattail_export_title,
+                title.ifBlank { Texts.get(R.string.chattail_export_default_title) },
+            ),
+        )
         messages.forEach { message ->
             when (message.kind) {
                 ChatMessage.Kind.TEXT -> {
-                    append(if (message.role == Role.USER) "**你**" else "**助手**")
+                    append(
+                        if (message.role == Role.USER) {
+                            Texts.get(R.string.chattail_export_user)
+                        } else {
+                            Texts.get(R.string.chattail_export_assistant)
+                        },
+                    )
                     append("\n\n").append(message.text).append("\n\n")
                 }
 
-                ChatMessage.Kind.IMAGE -> append("![图片](")
-                    .append(message.imageUrl.orEmpty()).append(")\n\n")
+                ChatMessage.Kind.IMAGE -> append(
+                    Texts.get(R.string.chattail_export_image, message.imageUrl.orEmpty()),
+                )
 
                 ChatMessage.Kind.TOOL -> {
-                    append("> 工具 `").append(message.tool?.name.orEmpty()).append("`")
-                    append(if (message.tool?.done == true) "（完成）" else "（运行中）")
+                    append(Texts.get(R.string.chattail_export_tool, message.tool?.name.orEmpty()))
+                    append(
+                        if (message.tool?.done == true) {
+                            Texts.get(R.string.chattail_export_done)
+                        } else {
+                            Texts.get(R.string.chattail_export_running)
+                        },
+                    )
                     append("\n\n")
                 }
 
                 ChatMessage.Kind.REASONING -> {
-                    append("<details><summary>思考过程</summary>\n\n")
+                    append(Texts.get(R.string.chattail_export_reasoning))
                     append(message.text).append("\n\n</details>\n\n")
                 }
             }
@@ -1317,7 +1359,7 @@ class ChatViewModel(
     private suspend fun runSearch(keyword: String, cursor: Int, append: Boolean) {
         val conn = currentConnection
         if (conn == null) {
-            _search.update { it.copy(loading = false, error = "未连接到服务器") }
+            _search.update { it.copy(loading = false, error = Texts.get(R.string.chatvm_search_not_connected)) }
             return
         }
         val result = runCatching {
@@ -1337,7 +1379,10 @@ class ChatViewModel(
             _search.update {
                 it.copy(
                     loading = false,
-                    error = "检索失败：${failure.message ?: failure.javaClass.simpleName}",
+                    error = Texts.get(
+                        R.string.chatvm_search_failed,
+                        failure.message ?: failure.javaClass.simpleName,
+                    ),
                 )
             }
         }
@@ -1484,7 +1529,11 @@ class ChatViewModel(
                         io.qwenpaw.node.log.LogKind.NETWORK,
                         "ChatVM",
                         it,
-                        if (decodeFailure) "解析历史失败 chat=$chatId" else "拉取历史失败 chat=$chatId",
+                        if (decodeFailure) {
+                            Texts.get(R.string.chattail_log_history_parse_failed, chatId)
+                        } else {
+                            Texts.get(R.string.chattail_log_history_fetch_failed, chatId)
+                        },
                     )
                 }
                 if (!decodeFailure) updateLink(LinkState.OFFLINE)
@@ -1496,9 +1545,9 @@ class ChatViewModel(
                         messages = cachedMessages,
                         currentChatName = name,
                         error = if (decodeFailure) {
-                            "服务端返回的历史数据无法解析，显示本地缓存"
+                            Texts.get(R.string.chatvm_history_decode_failed)
                         } else {
-                            "无法连接服务器，显示本地缓存"
+                            Texts.get(R.string.chatvm_history_offline)
                         },
                     )
                 }
@@ -1623,7 +1672,7 @@ class ChatViewModel(
         val attachments = _state.value.attachments
         if (trimmed.isEmpty() && attachments.isEmpty()) return
         if (_state.value.running) {
-            _state.update { it.copy(error = "当前对话有回复正在生成，请稍候或先停止") }
+            _state.update { it.copy(error = Texts.get(R.string.chatvm_busy)) }
             return
         }
         val conn = currentConnection ?: return
@@ -1662,14 +1711,14 @@ class ChatViewModel(
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "ChatVM",
-                    "本次没有当前对话，已新建 ${created.id}",
+                    Texts.get(R.string.chattail_log_new_chat, created.id),
                 )
             } else {
                 // 复用路径也记一条：这条日志是判断「发消息为何新建对话」现场的直接依据。
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "ChatVM",
-                    "复用当前对话 $chatId",
+                    Texts.get(R.string.chattail_log_reuse_chat, chatId),
                 )
             }
             startRun(conn, chatId, trimmed, attachments)
@@ -1686,7 +1735,7 @@ class ChatViewModel(
     fun retry(message: ChatMessage) {
         val text = message.retryText ?: return
         if (_state.value.running) {
-            _state.update { it.copy(error = "当前对话有回复正在生成，请稍候或先停止") }
+            _state.update { it.copy(error = Texts.get(R.string.chatvm_busy)) }
             return
         }
         accumulator.removeError(message.id)
@@ -1815,13 +1864,14 @@ class ChatViewModel(
                         }
 
                         is ChatEvent.RateLimited -> {
-                            failure = buildString {
-                                append("模型限流：")
-                                append(event.message)
-                                if (event.alternatives.isNotEmpty()) {
-                                    append("\n可用备选：")
-                                    append(event.alternatives.joinToString("、"))
-                                }
+                            failure = if (event.alternatives.isEmpty()) {
+                                Texts.get(R.string.chatvm_rate_limited, event.message)
+                            } else {
+                                Texts.get(
+                                    R.string.chatvm_rate_limited_alternatives,
+                                    event.message,
+                                    event.alternatives.joinToString("、"),
+                                )
                             }
                         }
 
@@ -1840,7 +1890,7 @@ class ChatViewModel(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "ChatVM",
                     e,
-                    "发送失败 chat=$chatId",
+                    Texts.get(R.string.chattail_log_send_failed, chatId),
                 )
                 failure = friendly(e)
             } catch (e: Exception) {
@@ -1848,7 +1898,7 @@ class ChatViewModel(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "ChatVM",
                     e,
-                    "发送异常 chat=$chatId",
+                    Texts.get(R.string.chattail_log_send_error, chatId),
                 )
                 failure = friendly(e)
             }
@@ -1925,11 +1975,11 @@ class ChatViewModel(
      */
     private fun notifyIfBackground() {
         if (isAppVisible()) return
-        val title = _state.value.currentChatName.ifBlank { "对话" }
+        val title = _state.value.currentChatName.ifBlank { Texts.get(R.string.chatvm_chat_fallback) }
         val reply = _state.value.messages.lastOrNull { it.role == Role.ASSISTANT && it.kind == ChatMessage.Kind.TEXT }
         val preview = reply?.text?.takeIf { it.isNotBlank() }?.let { body ->
             body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty().take(80)
-        } ?: "服务端回复已完成"
+        } ?: Texts.get(R.string.chatvm_notify_reply_done)
         ChatNotifier.notifyDone(
             appContext,
             appContext.getString(io.qwenpaw.node.R.string.notify_done_title, title),
@@ -1976,7 +2026,7 @@ class ChatViewModel(
             io.qwenpaw.node.log.RunLog.d(
                 io.qwenpaw.node.log.LogKind.STREAM,
                 "ChatVM",
-                "重连既有流 chat=$chatId",
+                Texts.get(R.string.chattail_log_reconnect_stream, chatId),
             )
             val collected = runCatching {
                 streamClient.open(conn, body).collect { event ->
@@ -2018,7 +2068,7 @@ class ChatViewModel(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "ChatVM",
                     e,
-                    "重连流失败 chat=$chatId",
+                    Texts.get(R.string.chattail_log_reconnect_failed, chatId),
                 )
                 updateLink(LinkState.OFFLINE)
             }
@@ -2086,7 +2136,7 @@ class ChatViewModel(
                             io.qwenpaw.node.log.RunLog.d(
                                 io.qwenpaw.node.log.LogKind.NETWORK,
                                 "Poll",
-                                "审批轮询恢复，此前连续失败 $failures 次",
+                                Texts.get(R.string.chattail_log_poll_recovered, failures),
                             )
                         }
                         failures = 0
@@ -2097,7 +2147,9 @@ class ChatViewModel(
                         val previousIds = previous.map { it.requestId }.toSet()
                         val fresh = approvals.filterNot { it.requestId in previousIds }
                         if (fresh.isNotEmpty()) {
-                            _notifications.tryEmit("有 ${fresh.size} 个操作等待审批")
+                            _notifications.tryEmit(
+                                Texts.quantity(R.plurals.chatvm_approvals_pending, fresh.size, fresh.size),
+                            )
                         }
                         _state.update { it.copy(pendingApprovals = approvals) }
                     }.onFailure { e ->
@@ -2109,7 +2161,7 @@ class ChatViewModel(
                                 io.qwenpaw.node.log.LogKind.NETWORK,
                                 "Poll",
                                 e,
-                                "审批轮询失败，已连续 $failures 次",
+                                Texts.get(R.string.chattail_log_poll_failed, failures),
                             )
                         }
                     }
@@ -2139,7 +2191,7 @@ class ChatViewModel(
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    api.deny(conn, approval.requestId, approval.sessionId, "用户从手机端拒绝")
+                    api.deny(conn, approval.requestId, approval.sessionId, Texts.get(R.string.chattail_deny_reason))
                 }
             }.onSuccess {
                 _state.update { s ->
@@ -2181,7 +2233,7 @@ class ChatViewModel(
                 _state.update { s -> s.copy(error = null) }
                 refreshToolCall(toolCallId)
             }.onFailure { e ->
-                _state.update { it.copy(error = toolActionError(e, "取消")) }
+                _state.update { it.copy(error = toolActionError(e, Texts.get(R.string.action_cancel))) }
             }
         }
     }
@@ -2198,7 +2250,7 @@ class ChatViewModel(
                 _state.update { s -> s.copy(error = null) }
                 refreshToolCall(toolCallId)
             }.onFailure { e ->
-                _state.update { it.copy(error = toolActionError(e, "转入后台")) }
+                _state.update { it.copy(error = toolActionError(e, Texts.get(R.string.chatvm_tool_action_offload))) }
             }
         }
     }
@@ -2227,7 +2279,7 @@ class ChatViewModel(
                 _state.update { s -> s.copy(error = null) }
                 refreshToolCall(toolCallId)
             }.onFailure { e ->
-                _state.update { it.copy(error = toolActionError(e, "延长时限")) }
+                _state.update { it.copy(error = toolActionError(e, Texts.get(R.string.chatvm_tool_action_extend))) }
             }
         }
     }
@@ -2293,8 +2345,8 @@ class ChatViewModel(
     private fun toolActionError(e: Throwable, action: String): String {
         val failure = e as? ApiException
         return when (failure?.code) {
-            404 -> "该工具调用已结束，无法${action}"
-            409 -> "工具状态已变化，请刷新后再试"
+            404 -> Texts.get(R.string.chatvm_tool_already_ended, action)
+            409 -> Texts.get(R.string.chatvm_tool_state_changed)
             else -> friendly(e)
         }
     }
@@ -2370,7 +2422,7 @@ class ChatViewModel(
          * 服务端在媒体消息时用 `Media Message`，这里统一用中文，
          * 因为它会短暂显示在顶栏与列表里。
          */
-        internal const val NEW_CHAT_NAME = "新对话"
+        internal val NEW_CHAT_NAME: String get() = Texts.get(R.string.chattail_new_chat_name)
 
         /** 标题生成是后台任务，30 秒超时；这里只补一次，避免持续轮询。 */
         private const val TITLE_RETRY_DELAY_MS = 4000L
@@ -2381,6 +2433,8 @@ class ChatViewModel(
         private val IMAGE_EXTENSIONS = listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
 
         /** 服务端为附件消息注入的提示前缀，预览时要跳过。 */
-        private const val UPLOAD_NOTICE_PREFIX = "用户上传文件，已经下载到"
+        // 服务端注入的固定前缀，不随界面语言变化，因此放在 translatable="false" 的资源里。
+        private val UPLOAD_NOTICE_PREFIX: String
+            get() = Texts.get(R.string.chattail_upload_notice_prefix)
     }
 }

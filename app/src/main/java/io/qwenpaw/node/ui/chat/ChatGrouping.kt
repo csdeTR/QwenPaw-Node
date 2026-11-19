@@ -1,7 +1,9 @@
 package io.qwenpaw.node.ui.chat
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatSpecDto
+import io.qwenpaw.node.ui.i18n.Texts
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -28,20 +30,18 @@ enum class GroupMode {
 
     val label: String
         get() = when (this) {
-            TIME -> "按时间"
-            SOURCE -> "按来源"
-            NONE -> "不分组"
+            TIME -> Texts.get(R.string.chatgroup_mode_time)
+            SOURCE -> Texts.get(R.string.chatgroup_mode_source)
+            NONE -> Texts.get(R.string.chatgroup_mode_none)
         }
 }
 
 /** 列表里的一个分区。 */
 data class ChatSection(val key: String, val title: String, val chats: List<ChatSpecDto>)
 
-/** 置顶区的 key 与标题，两种分组模式下都用同一份。 */
+/** 置顶区与未分组区的 key，两种分组模式下都用同一份；标题取自资源。 */
 private const val PINNED_KEY = "pinned"
-private const val PINNED_TITLE = "置顶"
 private const val UNGROUPED_KEY = "ungrouped"
-private const val UNGROUPED_TITLE = "未分组"
 
 /** 自建分组的 `kind` 值。内置分组是 `default` / `cron` / `subagents`。 */
 internal const val CUSTOM_KIND = "custom"
@@ -55,9 +55,9 @@ internal const val CUSTOM_KIND = "custom"
  * 自建分组没有 kind，继续用用户起的名字，为空时退回 id。
  */
 internal fun groupTitle(group: ChatGroupDto): String = when (group.kind) {
-    "default" -> "未分组"
-    "cron" -> "定时任务对话"
-    "subagents" -> "子智能体对话"
+    "default" -> Texts.get(R.string.chatgroup_ungrouped)
+    "cron" -> Texts.get(R.string.chatgroup_cron)
+    "subagents" -> Texts.get(R.string.chatgroup_subagents)
     else -> group.name.ifBlank { group.id }
 }
 
@@ -108,10 +108,18 @@ object ChatGrouping {
             }
         }
         return buildList {
-            if (pinned.isNotEmpty()) add(ChatSection(PINNED_KEY, PINNED_TITLE, pinned))
-            if (today.isNotEmpty()) add(ChatSection("today", "今天", today))
-            if (recent.isNotEmpty()) add(ChatSection("recent", "近 7 天", recent))
-            if (earlier.isNotEmpty()) add(ChatSection("earlier", "更早", earlier))
+            if (pinned.isNotEmpty()) {
+                add(ChatSection(PINNED_KEY, Texts.get(R.string.chatgroup_pinned), pinned))
+            }
+            if (today.isNotEmpty()) {
+                add(ChatSection("today", Texts.get(R.string.chatgroup_today), today))
+            }
+            if (recent.isNotEmpty()) {
+                add(ChatSection("recent", Texts.get(R.string.chatgroup_recent), recent))
+            }
+            if (earlier.isNotEmpty()) {
+                add(ChatSection("earlier", Texts.get(R.string.chatgroup_earlier), earlier))
+            }
         }
     }
 
@@ -215,13 +223,21 @@ object ChatGrouping {
         val ordered = orderedGroups(groups)
 
         return buildList {
-            if (pinned.isNotEmpty()) add(ChatSection(PINNED_KEY, PINNED_TITLE, pinned))
+            if (pinned.isNotEmpty()) {
+                add(ChatSection(PINNED_KEY, Texts.get(R.string.chatgroup_pinned), pinned))
+            }
             var ungroupedPlaced = false
             ordered.forEach { group ->
                 // 未分组紧跟在「其他内置分组」之后、定时任务之前：
                 // 它属于用户自己产生的对话，不该被自动任务的表头压在下面。
                 if (!ungroupedPlaced && unknown.isNotEmpty() && rankOf(group.kind) > 2) {
-                    add(ChatSection(UNGROUPED_KEY, UNGROUPED_TITLE, unknown))
+                    add(
+                        ChatSection(
+                            UNGROUPED_KEY,
+                            Texts.get(R.string.chatgroup_ungrouped),
+                            unknown,
+                        ),
+                    )
                     ungroupedPlaced = true
                 }
                 // 没有对话的组在 buckets 里根本没有键，这里补成空表而不是跳过：
@@ -236,7 +252,7 @@ object ChatGrouping {
                 add(ChatSection("g:${group.id}", title, items))
             }
             if (unknown.isNotEmpty() && !ungroupedPlaced) {
-                add(ChatSection(UNGROUPED_KEY, UNGROUPED_TITLE, unknown))
+                add(ChatSection(UNGROUPED_KEY, Texts.get(R.string.chatgroup_ungrouped), unknown))
             }
         }
     }

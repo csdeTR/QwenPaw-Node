@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.checkpoint
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.CheckpointGraphDto
 import io.qwenpaw.node.data.model.CheckpointNodeDto
 import io.qwenpaw.node.data.model.CheckpointSessionDto
@@ -12,6 +13,7 @@ import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -95,7 +97,12 @@ class CheckpointViewModel(
     fun refresh() {
         val conn = connection() ?: run {
             _state.update {
-                it.copy(loading = false, loaded = true, error = "尚未连接服务器", writesDisabled = true)
+                it.copy(
+                    loading = false,
+                    loaded = true,
+                    error = Texts.get(R.string.checkpoint_error_not_connected),
+                    writesDisabled = true,
+                )
             }
             return
         }
@@ -245,7 +252,7 @@ class CheckpointViewModel(
                         snapshotSession = null,
                         viewingSession = null,
                         snapshotName = "",
-                        notice = "已创建检查点",
+                        notice = Texts.get(R.string.checkpoint_notice_snapshot_created),
                     )
                 }
                 reloadGraph()
@@ -351,8 +358,14 @@ class CheckpointViewModel(
                         restoreApplying = false,
                         restore = null,
                         restorePreview = null,
-                        notice = "已回滚 ${result.restoredPaths.size} 个文件" +
-                            if (result.includeMemory) "，会话记忆已恢复" else "",
+                        notice = if (result.includeMemory) {
+                            Texts.get(
+                                R.string.checkpoint_notice_restore_with_memory,
+                                result.restoredPaths.size,
+                            )
+                        } else {
+                            Texts.get(R.string.checkpoint_notice_restore, result.restoredPaths.size)
+                        },
                     )
                 }
                 reloadGraph()
@@ -388,7 +401,12 @@ class CheckpointViewModel(
                 val saved = withContext(Dispatchers.IO) { api.updateCheckpointGcSettings(conn, settings) }
                 if (gen != generation) return@launch
                 _state.update {
-                    it.copy(gcSaving = false, gcSettings = saved, gcDraft = GcDraft.from(saved), notice = "清理策略已保存")
+                    it.copy(
+                        gcSaving = false,
+                        gcSettings = saved,
+                        gcDraft = GcDraft.from(saved),
+                        notice = Texts.get(R.string.checkpoint_notice_gc_saved),
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -437,7 +455,7 @@ class CheckpointViewModel(
                     it.copy(
                         gcApplying = false,
                         gcPreview = null,
-                        notice = "已清理 ${result.deletedRefs.size} 个检查点",
+                        notice = Texts.get(R.string.checkpoint_notice_gc_applied, result.deletedRefs.size),
                     )
                 }
                 reloadGraph()
@@ -484,7 +502,7 @@ class CheckpointViewModel(
                         resetting = false,
                         resetConfirm = false,
                         autoEnabled = result.autoEnabled,
-                        notice = "已删除全部检查点",
+                        notice = Texts.get(R.string.checkpoint_notice_reset_done),
                     )
                 }
                 reloadGraph()
@@ -546,9 +564,10 @@ class CheckpointViewModel(
 
     private fun checkpointError(e: Throwable): String = when {
         e is ApiException && e.code == 400 ->
-            e.detail?.takeIf { it.isNotBlank() }?.take(200) ?: "请求参数无效"
-        e is ApiException && e.code == 404 -> "检查点不存在，可能已被清理"
-        e is ApiException && e.code == 409 -> "服务端已有恢复或清理在进行，请稍后重试"
+            e.detail?.takeIf { it.isNotBlank() }?.take(200)
+                ?: Texts.get(R.string.checkpoint_error_bad_request)
+        e is ApiException && e.code == 404 -> Texts.get(R.string.checkpoint_error_not_found)
+        e is ApiException && e.code == 409 -> Texts.get(R.string.checkpoint_error_conflict)
         else -> ErrorText.of(e)
     }
 }

@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.chat
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -11,6 +13,11 @@ import org.junit.Test
  * 聊天页顶部直接是「处理中」，本地没有任何用户气泡。
  */
 class AttachmentPlaceholderTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private val imageExts = listOf(".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
     private fun isImage(name: String): Boolean =

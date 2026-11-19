@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.skills
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.BroadcastConflictDto
 import io.qwenpaw.node.data.model.SkillImportConflictDto
@@ -13,6 +14,7 @@ import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.data.remote.SafZipSource
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -101,7 +103,13 @@ class SkillsViewModel(
     /** 拉列表。两个请求并行，池失败不影响主体。 */
     fun refresh() {
         val conn = connection() ?: run {
-            _state.update { it.copy(loaded = true, loading = false, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(
+                    loaded = true,
+                    loading = false,
+                    error = Texts.get(R.string.skills_error_not_connected),
+                )
+            }
             return
         }
         _state.update { it.copy(loading = true, error = null, poolError = null) }
@@ -239,7 +247,11 @@ class SkillsViewModel(
                             detail = current.detail?.takeIf { it.name == edit.name }?.copy(
                                 content = next.draft,
                             ) ?: current.detail,
-                            notice = if (result.mode == "noop") "内容与服务端一致，未写入" else "已保存",
+                            notice = if (result.mode == "noop") {
+                                Texts.get(R.string.skills_notice_noop)
+                            } else {
+                                Texts.get(R.string.skills_notice_saved)
+                            },
                         )
                     }
                 }
@@ -267,14 +279,16 @@ class SkillsViewModel(
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.createSkill(conn, name, content) } }
                 .onSuccess { created ->
-                    _state.update { it.copy(notice = "已创建「$created」") }
+                    _state.update {
+                        it.copy(notice = Texts.get(R.string.skills_notice_created, created))
+                    }
                     refresh()
                     onResult(true)
                 }
                 .onFailure { e ->
                     val suggested = (e as? ApiException)?.let { api.skillConflictOf(it) }
                     val text = if (suggested != null) {
-                        "已有同名技能，可改用「${suggested.suggestedName}」"
+                        Texts.get(R.string.skills_notice_conflict, suggested.suggestedName)
                     } else {
                         creationFailureText(e)
                     }
@@ -295,7 +309,7 @@ class SkillsViewModel(
                             skills = current.skills.filter { it.name != name },
                             detail = current.detail?.takeIf { it.name != name },
                             edit = current.edit?.takeIf { it.name != name },
-                            notice = "已删除「$name」",
+                            notice = Texts.get(R.string.skills_notice_deleted, name),
                         )
                     }
                     onResult(true)
@@ -338,16 +352,24 @@ class SkillsViewModel(
                         it.copy(
                             importing = false,
                             notice = if (result.imported.isEmpty()) {
-                                "没有导入任何技能"
+                                Texts.get(R.string.skills_notice_import_none)
                             } else {
-                                "已导入：${result.imported.joinToString()}"
+                                Texts.get(
+                                    R.string.skills_notice_imported,
+                                    result.imported.joinToString(),
+                                )
                             },
                         )
                     }
                     refresh()
                 }
             }.onFailure { e ->
-                _state.update { it.copy(importing = false, notice = "导入失败：${ErrorText.of(e)}") }
+                _state.update {
+                    it.copy(
+                        importing = false,
+                        notice = Texts.get(R.string.skills_notice_import_failed, ErrorText.of(e)),
+                    )
+                }
             }
         }
     }
@@ -378,13 +400,21 @@ class SkillsViewModel(
                     _state.update {
                         it.copy(
                             importing = false,
-                            notice = "已导入：${result.imported.joinToString()}",
+                            notice = Texts.get(
+                                R.string.skills_notice_imported,
+                                result.imported.joinToString(),
+                            ),
                         )
                     }
                     refresh()
                 }
             }.onFailure { e ->
-                _state.update { it.copy(importing = false, notice = "导入失败：${ErrorText.of(e)}") }
+                _state.update {
+                    it.copy(
+                        importing = false,
+                        notice = Texts.get(R.string.skills_notice_import_failed, ErrorText.of(e)),
+                    )
+                }
             }
         }
     }
@@ -428,7 +458,9 @@ class SkillsViewModel(
         val conn = connection() ?: return
         val current = _state.value.broadcast ?: return
         if (current.targets.isEmpty()) {
-            _state.update { it.copy(broadcast = current.copy(error = "请至少选择一个智能体")) }
+            _state.update {
+                it.copy(broadcast = current.copy(error = Texts.get(R.string.skills_error_no_target)))
+            }
             return
         }
         _state.update { it.copy(broadcast = current.copy(running = true, error = null)) }
@@ -456,7 +488,11 @@ class SkillsViewModel(
                     _state.update {
                         it.copy(
                             broadcast = null,
-                            notice = "已广播到 ${result.downloaded.size} 个智能体",
+                            notice = Texts.quantity(
+                                R.plurals.skills_notice_broadcast,
+                                result.downloaded.size,
+                                result.downloaded.size,
+                            ),
                         )
                     }
                     refresh()
@@ -510,7 +546,7 @@ class SkillsViewModel(
         val ex = e as? ApiException ?: return ErrorText.of(e)
         return when (ex.code) {
             422 -> SkillCopy.scanBlockedText(ex.detail ?: ex.message, severityOf(ex.detail))
-            400 -> ex.detail ?: "正文格式不符合要求，需要写明 frontmatter 的 name 与 description"
+            400 -> ex.detail ?: Texts.get(R.string.skills_error_body_invalid)
             else -> ErrorText.of(e)
         }
     }
@@ -519,7 +555,7 @@ class SkillsViewModel(
         val ex = e as? ApiException ?: return ErrorText.of(e)
         return when (ex.code) {
             422 -> SkillCopy.scanBlockedText(ex.detail ?: ex.message, severityOf(ex.detail))
-            400 -> ex.detail ?: "正文格式不符合要求，需要写明 frontmatter 的 name 与 description"
+            400 -> ex.detail ?: Texts.get(R.string.skills_error_body_invalid)
             else -> ErrorText.of(e)
         }
     }
@@ -527,7 +563,7 @@ class SkillsViewModel(
     private fun deleteFailureText(e: Throwable): String {
         val ex = e as? ApiException ?: return ErrorText.of(e)
         return when (ex.code) {
-            409 -> "服务端未能删除该技能。可能仍有工作区在启用它，请先停用。"
+            409 -> Texts.get(R.string.skills_error_delete_conflict)
             else -> ErrorText.of(e)
         }
     }

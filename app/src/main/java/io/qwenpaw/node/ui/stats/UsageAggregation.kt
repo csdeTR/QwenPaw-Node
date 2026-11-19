@@ -1,15 +1,17 @@
 package io.qwenpaw.node.ui.stats
 
+import androidx.annotation.StringRes
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.LlmToolDailyDto
 import io.qwenpaw.node.data.model.TokenUsageRecordDto
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 
 /** 用量页的时间范围。三档都含首尾两天，与服务端的 `start_date` / `end_date` 语义一致。 */
-enum class UsageRange(val days: Long, val label: String) {
-    D7(7, "近 7 天"),
-    D30(30, "近 30 天"),
-    D90(90, "近 90 天"),
+enum class UsageRange(val days: Long, @StringRes val labelRes: Int) {
+    D7(7, R.string.stats_range_d7),
+    D30(30, R.string.stats_range_d30),
+    D90(90, R.string.stats_range_d90),
 }
 
 /** 按模型聚合后的一行。`key` 为 `providerId:model`，与 `by_model` 的键同一形态。 */

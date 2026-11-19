@@ -27,9 +27,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.chat.formatTokens
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -72,14 +75,14 @@ fun UsageScreen(
                     ) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "用量统计",
+                        text = stringResource(R.string.stats_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -113,13 +116,13 @@ fun UsageScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = state.summaryError ?: "加载用量失败",
+                        text = state.summaryError ?: stringResource(R.string.stats_load_failed),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        text = "点击重试",
+                        text = stringResource(R.string.stats_tap_to_retry),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable(onClick = onRetry),
@@ -135,65 +138,108 @@ fun UsageScreen(
                 ) {
                     RangeRow(current = state.range, onRange = onRange)
 
-                    SectionCard(title = "区间概览", subtitle = "全服务端") {
+                    SectionCard(
+                        title = stringResource(R.string.stats_range_summary_title),
+                        subtitle = stringResource(R.string.stats_scope_server),
+                    ) {
                         val summary = state.summary
                         if (summary == null) {
                             BlockError(state.summaryError, onRetry)
                         } else {
-                            MetricRow("总调用次数", summary.totalCalls.toString())
-                            MetricRow("输入 tokens", formatTokens(summary.totalPromptTokens))
-                            MetricRow("输出 tokens", formatTokens(summary.totalCompletionTokens))
+                            MetricRow(
+                                stringResource(R.string.stats_metric_total_calls),
+                                summary.totalCalls.toString(),
+                            )
+                            MetricRow(
+                                stringResource(R.string.stats_metric_prompt_tokens),
+                                formatTokens(summary.totalPromptTokens),
+                            )
+                            MetricRow(
+                                stringResource(R.string.stats_metric_completion_tokens),
+                                formatTokens(summary.totalCompletionTokens),
+                            )
                             // 没有调用时服务端给的是 null，不是 0。写成「0.0%」会把「还没测过」
                             // 说成「命中率为零」，两者对用户的含义完全不同。
                             MetricRow(
-                                "缓存命中率",
-                                summary.cacheHitRate?.let { "%.1f%%".format(it) } ?: "暂无数据",
+                                stringResource(R.string.stats_metric_cache_hit_rate),
+                                summary.cacheHitRate?.let { "%.1f%%".format(it) }
+                                    ?: stringResource(R.string.stats_no_data),
                             )
                         }
                     }
 
-                    SectionCard(title = "当前智能体", subtitle = "只统计当前智能体") {
+                    SectionCard(
+                        title = stringResource(R.string.stats_agent_title),
+                        subtitle = stringResource(R.string.stats_scope_agent),
+                    ) {
                         val agent = state.agent
                         when {
                             agent == null -> BlockError(state.agentError, onRetry)
                             agent.totalActiveSessions == 0 && agent.totalMessages == 0 &&
                                 agent.totalLlmCalls == 0 && agent.totalToolCalls == 0 ->
-                                EmptyHint("所选时间范围内没有活动")
+                                EmptyHint(stringResource(R.string.stats_agent_empty))
                             else -> {
-                                MetricRow("活跃会话", agent.totalActiveSessions.toString())
-                                MetricRow("消息数", agent.totalMessages.toString())
-                                MetricRow("LLM 调用", agent.totalLlmCalls.toString())
-                                MetricRow("工具调用", agent.totalToolCalls.toString())
                                 MetricRow(
-                                    "缓存命中率",
-                                    agent.agentCacheHitRate?.let { "%.1f%%".format(it) } ?: "暂无数据",
+                                    stringResource(R.string.stats_metric_active_sessions),
+                                    agent.totalActiveSessions.toString(),
+                                )
+                                MetricRow(
+                                    stringResource(R.string.stats_metric_messages),
+                                    agent.totalMessages.toString(),
+                                )
+                                MetricRow(
+                                    stringResource(R.string.stats_metric_llm_calls),
+                                    agent.totalLlmCalls.toString(),
+                                )
+                                MetricRow(
+                                    stringResource(R.string.stats_metric_tool_calls),
+                                    agent.totalToolCalls.toString(),
+                                )
+                                MetricRow(
+                                    stringResource(R.string.stats_metric_cache_hit_rate),
+                                    agent.agentCacheHitRate?.let { "%.1f%%".format(it) }
+                                        ?: stringResource(R.string.stats_no_data),
                                 )
                             }
                         }
                     }
 
-                    SectionCard(title = "调用趋势", subtitle = "全服务端") {
+                    SectionCard(
+                        title = stringResource(R.string.stats_trend_title),
+                        subtitle = stringResource(R.string.stats_scope_server),
+                    ) {
                         if (state.trendError != null && state.trend.isEmpty()) {
                             BlockError(state.trendError, onRetry)
                         } else if (state.trend.isEmpty()) {
-                            EmptyHint("所选时间范围内没有调用")
+                            EmptyHint(stringResource(R.string.stats_trend_empty))
                         } else {
                             UsageChart(state.trend)
                             Spacer(Modifier.height(8.dp))
-                            Legend(llmLabel = "LLM 调用", toolLabel = "工具调用")
+                            Legend(
+                                llmLabel = stringResource(R.string.stats_metric_llm_calls),
+                                toolLabel = stringResource(R.string.stats_metric_tool_calls),
+                            )
                         }
                     }
 
-                    SectionCard(title = "按模型", subtitle = "全服务端") {
+                    SectionCard(
+                        title = stringResource(R.string.stats_models_title),
+                        subtitle = stringResource(R.string.stats_scope_server),
+                    ) {
                         if (state.modelsError != null && state.models.isEmpty()) {
                             BlockError(state.modelsError, onRetry)
                         } else if (state.models.isEmpty()) {
-                            EmptyHint("所选时间范围内没有调用")
+                            EmptyHint(stringResource(R.string.stats_trend_empty))
                         } else {
                             state.models.forEach { row ->
                                 UsageLine(
                                     label = row.model.ifBlank { row.providerId },
-                                    sub = "${row.providerId} · ${row.callCount} 次调用",
+                                    sub = pluralStringResource(
+                                        R.plurals.stats_model_call_count,
+                                        row.callCount,
+                                        row.providerId,
+                                        row.callCount,
+                                    ),
                                     value = row.totalTokens,
                                 )
                             }
@@ -212,7 +258,7 @@ private fun RangeRow(current: UsageRange, onRange: (UsageRange) -> Unit) {
         UsageRange.entries.forEach { range ->
             val selected = range == current
             Text(
-                text = range.label,
+                text = stringResource(range.labelRes),
                 style = MaterialTheme.typography.labelLarge,
                 color = if (selected) {
                     MaterialTheme.colorScheme.onPrimary
@@ -269,13 +315,13 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color) {
 private fun BlockError(message: String?, onRetry: () -> Unit) {
     Column {
         Text(
-            text = message ?: "暂无数据",
+            text = message ?: stringResource(R.string.stats_no_data),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "点击重试",
+            text = stringResource(R.string.stats_tap_to_retry),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable(onClick = onRetry),

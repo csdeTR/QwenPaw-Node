@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设置页（SettingsScreen.kt）、智能体选择框（AgentPickerDialog.kt）、
+  聊天字号预览（ChatFontPreview.kt）与服务端界面语言选择框（LanguagePickerDialog.kt）的文案。
+-->
+<resources>
+    <!-- 通用动作与标题 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_version">版本 %1$s</string>
+    <string name="settings_version_subtitle">QwenPaw Node 版本 %1$s</string>
+    <string name="settings_action_download">下载</string>
+    <string name="settings_action_verify">验证</string>
+    <string name="settings_action_preview">预览</string>
+    <string name="settings_action_reset">重置</string>
+    <string name="settings_action_share">分享</string>
+    <string name="settings_action_view">查看</string>
+    <string name="settings_action_visit">前往</string>
+    <string name="settings_action_switch">切换</string>
+    <!-- 「确认」：与通用键 action_confirm（确定）不同字，两者不能合并。 -->
+    <string name="settings_action_confirm">确认</string>
+
+    <!-- 一级列表 -->
+    <string name="settings_nav_server">服务器</string>
+    <string name="settings_section_profile_appearance">个人资料与外观</string>
+    <string name="settings_nav_profile">我的资料</string>
+    <string name="settings_nav_profile_subtitle">昵称、我的头像与智能体头像</string>
+    <string name="settings_nav_appearance">外观</string>
+    <string name="settings_nav_appearance_subtitle">深浅色、字号、MiSans 字体</string>
+    <string name="settings_nav_messages">消息显示</string>
+    <string name="settings_nav_messages_subtitle">折叠方式、用量显示、操作行样式</string>
+    <string name="settings_section_this_phone">此手机</string>
+    <string name="settings_nav_voice">语音</string>
+    <string name="settings_nav_voice_subtitle">语音按钮、转写来源与触发方式</string>
+    <string name="settings_nav_behavior">通知与行为</string>
+    <string name="settings_nav_behavior_subtitle">紧凑排版、屏幕常亮</string>
+    <string name="settings_nav_logs">运行日志</string>
+    <string name="settings_nav_logs_subtitle">记录开关、记录类型、查看与分享</string>
+    <string name="settings_section_server_config">服务端配置</string>
+    <string name="settings_bridge_title">配套插件</string>
+    <string name="settings_bridge_feature_on">功能已开启</string>
+    <string name="settings_bridge_feature_off">功能已关闭</string>
+    <string name="settings_bridge_unavailable">未安装时不可开启</string>
+    <string name="settings_nav_tools">工具</string>
+    <string name="settings_nav_tools_subtitle">开关与异步执行</string>
+    <plurals name="settings_tools_enabled_summary">
+        <item quantity="other">%1$d / %2$d 个已启用</item>
+    </plurals>
+    <string name="settings_nav_envs">环境变量</string>
+    <string name="settings_nav_envs_subtitle">读写服务端环境变量</string>
+    <plurals name="settings_envs_configured_summary">
+        <item quantity="other">%1$d 项已配置</item>
+    </plurals>
+    <string name="settings_nav_cron">定时任务</string>
+    <string name="settings_nav_cron_subtitle">按计划自动执行</string>
+    <plurals name="settings_cron_jobs_summary">
+        <item quantity="other">%1$d 个任务</item>
+    </plurals>
+    <string name="settings_nav_models">模型与提供商</string>
+    <string name="settings_nav_models_subtitle">默认模型与连通性测试</string>
+    <string name="settings_nav_agents">智能体管理</string>
+    <string name="settings_nav_agents_subtitle">新建、复制、启停、排序与导出</string>
+    <string name="settings_nav_runtime">运行时</string>
+    <string name="settings_nav_runtime_subtitle">ACP 命令、Node 运行时与外部智能体登录</string>
+    <string name="settings_nav_app_center">App 中心</string>
+    <string name="settings_nav_app_center_subtitle">查看已安装的 PawApp 并在浏览器打开</string>
+    <string name="settings_nav_skills">技能</string>
+    <string name="settings_nav_skills_subtitle">浏览、启停与编辑 SKILL.md</string>
+    <string name="settings_nav_mcp">MCP</string>
+    <string name="settings_nav_mcp_subtitle">客户端开关、工具白名单与策略</string>
+    <string name="settings_nav_market">扩展市场</string>
+    <string name="settings_nav_market_subtitle">技能市场与插件目录，只读</string>
+    <string name="settings_nav_workspace">工作区文件</string>
+    <string name="settings_nav_workspace_subtitle">浏览、预览与下载服务端文件</string>
+    <string name="settings_nav_terminal">终端</string>
+    <string name="settings_nav_terminal_subtitle">服务端 PTY 与 SSH 两种来源</string>
+    <string name="settings_nav_backup">备份</string>
+    <string name="settings_nav_backup_subtitle">创建、导出与恢复服务端配置与工作区</string>
+    <string name="settings_nav_checkpoint">检查点</string>
+    <string name="settings_nav_checkpoint_subtitle">查看时间线并回滚到之前的状态</string>
+    <string name="settings_nav_offload">后台策略</string>
+    <string name="settings_nav_offload_subtitle_offload">工具超时后转入后台</string>
+    <string name="settings_nav_offload_subtitle_abort">工具超时后直接中止</string>
+    <string name="settings_nav_running_config">运行配置</string>
+    <string name="settings_nav_running_config_subtitle">最大迭代、输入长度与上下文压缩</string>
+    <string name="settings_nav_security">安全</string>
+    <string name="settings_nav_security_subtitle">工具与文件防护、沙箱、技能扫描</string>
+    <string name="settings_nav_server_language">服务端界面语言</string>
+    <string name="settings_upload_limit_title">上传上限</string>
+    <string name="settings_upload_limit_unread">尚未读取</string>
+    <string name="settings_upload_limit_none">不限制</string>
+    <string name="settings_nav_usage">用量统计</string>
+    <string name="settings_nav_usage_subtitle">Token、调用与工具趋势</string>
+    <string name="settings_nav_about">关于</string>
+
+    <!-- 子页标题（sectionTitle） -->
+    <string name="settings_section_font_preview">字号预览</string>
+    <string name="settings_section_cron_edit">新建任务 / 编辑任务</string>
+
+    <!-- 服务器实例页 -->
+    <string name="settings_section_server_instances">服务器实例</string>
+    <plurals name="settings_item_count_summary">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <string name="settings_nav_trusted">受信任的连接</string>
+    <plurals name="settings_trusted_hosts_summary">
+        <item quantity="other">%1$d 个地址不会触发安全提示</item>
+    </plurals>
+    <string name="settings_add_instance">添加实例</string>
+    <string name="settings_add_instance_form">添加实例（填表）</string>
+    <string name="settings_add_instance_wizard">添加实例（引导式）</string>
+    <string name="settings_edit_instance">编辑实例</string>
+    <string name="settings_server_summary_empty">尚未添加服务器</string>
+    <string name="settings_server_summary_no_address">未设置地址</string>
+    <string name="settings_server_summary_named">%1$s（%2$s）</string>
+
+    <!-- 移除实例与退出登录 -->
+    <string name="settings_instance_unnamed">未命名</string>
+    <string name="settings_instance_remove_title">移除实例</string>
+    <string name="settings_instance_remove_message">将移除「%1$s」及其地址配置。</string>
+    <string name="settings_instance_remove_impact_addresses">该实例的地址列表、地址偏好与智能体选择</string>
+    <string name="settings_instance_remove_impact_cache">本机缓存的离线消息仍会保留，重新添加同一实例后可继续查看</string>
+    <string name="settings_logout_title">退出登录</string>
+    <string name="settings_logout_message">将吊销服务端签发给你这台手机的凭据，并清除本机保存的 token。实例与地址会保留，再次连接时需要重新输入账号密码。</string>
+
+    <!-- 外观页 -->
+    <string name="settings_ui_scale_title">界面字号</string>
+    <string name="settings_ui_scale_subtitle">当前 %1$s</string>
+    <string name="settings_chat_scale_title">聊天字号</string>
+    <string name="settings_chat_scale_subtitle">只影响对话正文；当前 %1$s</string>
+    <string name="settings_use_misans_title">使用 MiSans 字体</string>
+    <string name="settings_use_misans_ready">替换系统默认字体</string>
+    <string name="settings_use_misans_not_ready">需先在下方下载字体</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+
+    <!-- 我的资料页 -->
+    <string name="settings_avatar_user_title">我的头像</string>
+    <string name="settings_avatar_user_subtitle">显示在消息右侧</string>
+    <string name="settings_avatar_agent_title">智能体头像</string>
+    <string name="settings_avatar_agent_subtitle">显示在消息左侧</string>
+    <string name="settings_use_server_avatar_title">使用 QwenPaw 服务端头像</string>
+    <string name="settings_use_server_avatar_subtitle">读取网页端设置的头像；本机头像优先</string>
+    <string name="settings_image_processing_title">图片处理</string>
+    <string name="settings_image_processing_subtitle">静态图片裁剪为正方形并压缩到 500×500；GIF 动图原样保存并循环播放。头像在对话里显示为 32dp 的圆形，超过这个尺寸的部分会被裁掉</string>
+    <string name="settings_nickname_title">我的昵称</string>
+    <string name="settings_nickname_subtitle">显示在自己发出的消息头部</string>
+    <string name="settings_avatar_me">我</string>
+    <string name="settings_avatar_agent">智能体</string>
+    <string name="settings_avatar_change">更换</string>
+    <string name="settings_avatar_choose">选择</string>
+    <string name="settings_server_avatar_title">服务端头像</string>
+    <string name="settings_server_avatar_none">服务端未设置头像</string>
+    <string name="settings_server_avatar_loaded">已读取网页端的头像</string>
+
+    <!-- 消息显示页 -->
+    <string name="settings_assistant_collapse_title">智能体消息折叠</string>
+    <string name="settings_assistant_collapse_subtitle">默认值与官方网页一致</string>
+    <string name="settings_collapse_expanded">全部展开</string>
+    <string name="settings_collapse_process">折叠过程</string>
+    <string name="settings_collapse_result">折叠结果</string>
+    <string name="settings_show_stats_title">在回复末尾显示用量</string>
+    <string name="settings_show_stats_subtitle">显示本轮回复的输入输出 token、所用模型与完成时间</string>
+    <string name="settings_render_user_markdown_title">用户消息渲染 Markdown</string>
+    <string name="settings_render_agent_markdown_title">智能体消息渲染 Markdown</string>
+    <string name="settings_render_markdown_subtitle">关闭后按原文显示，数学公式不参与排版</string>
+    <string name="settings_action_row_title">消息操作行</string>
+    <string name="settings_action_row_subtitle">只影响消息下方的「复制」「复制为 Markdown」「选择文本」三项；选择图标显示时，三项的图形比较接近；长按菜单里始终显示文字</string>
+    <string name="settings_action_style_text">文字</string>
+    <string name="settings_action_style_icon">图标</string>
+
+    <!-- 通知与行为页 -->
+    <string name="settings_compact_list_title">对话列表紧凑排版</string>
+    <string name="settings_compact_list_subtitle">仅显示名称与时间，单屏可容纳更多对话</string>
+    <string name="settings_keep_screen_on_title">生成中保持屏幕常亮</string>
+    <string name="settings_keep_screen_on_subtitle">仅在生成回复期间生效</string>
+
+    <!-- 语音页 -->
+    <string name="settings_voice_enabled_title">显示语音按钮</string>
+    <string name="settings_voice_enabled_subtitle">录音后转写为文字</string>
+    <string name="settings_voice_source_title">转写来源</string>
+    <string name="settings_voice_source_local">本地识别</string>
+    <string name="settings_voice_source_server">服务端转写</string>
+    <string name="settings_voice_source_local_hint">识别在本机完成，音频不出手机；需先下载识别模型。</string>
+    <string name="settings_voice_source_server_hint">录音上传至所连接的服务端转写；需联网且服务端已配置转写服务。</string>
+    <string name="settings_voice_trigger_title">触发方式</string>
+    <string name="settings_voice_trigger_tap">点击开始</string>
+    <string name="settings_voice_trigger_hold">按住说话</string>
+    <string name="settings_voice_autostop_title">说完自动停止</string>
+    <string name="settings_voice_autostop_subtitle">关闭时需再次点击麦克风结束</string>
+    <string name="settings_asr_model_title">语音识别模型</string>
+    <string name="settings_asr_model_not_installed">未下载，本地识别暂不可用</string>
+    <string name="settings_asr_model_ready">已安装，本地识别可用</string>
+    <string name="settings_asr_model_downloading">正在下载 %1$d%%</string>
+    <string name="settings_asr_model_installing">正在解压</string>
+    <string name="settings_asr_model_source">来自 sherpa-onnx；约 150MB，识别全程在本机完成</string>
+    <string name="settings_asr_transcribe_refresh">重新检测</string>
+    <string name="settings_transcribe_hint">语音转写由服务端完成，需先在服务端配置转写服务；录音会发送到所连接的服务器，识别结果填入输入框。</string>
+
+    <!-- 运行日志页 -->
+    <string name="settings_log_enabled_title">记录运行日志</string>
+    <string name="settings_log_enabled_subtitle">只记录本次运行期间的事件</string>
+    <string name="settings_log_kinds_title">记录类型</string>
+    <string name="settings_log_kinds_subtitle">排查某一类问题时，可关闭其余类别以减少干扰</string>
+    <string name="settings_log_view_title">查看运行日志</string>
+    <string name="settings_log_view_subtitle">按时间查看本次运行记录的事件</string>
+    <string name="settings_log_share_title">分享运行日志</string>
+    <string name="settings_log_share_subtitle">通过系统分享发送给其它应用，便于反馈问题时一并提供</string>
+
+    <!-- 关于页 -->
+    <string name="settings_about_description">基于 QwenPaw 接口构建的第三方 Android 客户端。离线时只保留草稿和缓存历史，不会自动重新发送。</string>
+    <string name="settings_about_repo_title">项目仓库</string>
+    <string name="settings_about_bridge_repo_title">配套插件仓库</string>
+    <string name="settings_about_credits_title">第三方资源</string>
+    <string name="settings_about_credit_qwenpaw">本项目连接的服务端。QwenPaw Node 是它的第三方 Android 客户端，全部功能通过它的 HTTP 接口实现</string>
+    <string name="settings_about_credit_openclaw">部分交互与节点能力的设计参考了它的 Android 客户端</string>
+    <string name="settings_about_credit_sherpa">端上流式识别引擎（Apache-2.0），仅标准包内置；识别模型按需从该仓库下载</string>
+    <string name="settings_about_credit_misans">可选字体，版权归小米科技有限责任公司；遵循 MiSans 字体许可协议，按需从该仓库下载</string>
+    <string name="settings_about_credit_coil">头像图片加载与 GIF 逐帧解码（Apache-2.0）</string>
+    <string name="settings_about_credits_footer">QwenPaw Node 的诞生离不开这些开源项目</string>
+
+    <!-- 实例行 -->
+    <string name="settings_instance_current">当前</string>
+    <string name="settings_instance_address">地址：%1$s</string>
+    <string name="settings_instance_address_with_alias">地址：%1$s，%2$s</string>
+    <plurals name="settings_instance_backup_suffix">
+        <item quantity="other">（+%1$d 个备用）</item>
+    </plurals>
+    <string name="settings_instance_address_marker_session">（本次指定）</string>
+    <string name="settings_instance_address_marker_saved">（已指定）</string>
+    <string name="settings_instance_agent_line">智能体：%1$s</string>
+    <string name="settings_instance_agent_chip">智能体 %1$s</string>
+    <string name="settings_instance_address_collapse">收起地址</string>
+    <string name="settings_instance_address_choose">选择地址</string>
+    <string name="settings_instance_credentials_saved">本机已保存登录凭据</string>
+    <string name="settings_session_address_label">本次使用：%1$s</string>
+    <string name="settings_session_address_auto">自动选择</string>
+    <string name="settings_instance_address_auto_ordered">自动选择（按列表顺序）</string>
+    <string name="settings_session_address_hint">「本次使用」只影响这次打开；长期偏好请在编辑实例里设置。</string>
+    <string name="settings_address_selected_desc">已选择</string>
+
+    <!-- 受信任的连接 -->
+    <string name="settings_trusted_invalid_host">无法识别这个地址，请填写主机名或 IP</string>
+    <string name="settings_security_hints_title">安全提示</string>
+    <string name="settings_security_hints_subtitle">服务器地址可从公网访问，且服务端未开启「Web 登录认证」或未使用 HTTPS 时提醒</string>
+    <string name="settings_trusted_page_hint">这些地址不再弹出安全提示。只有进一步确认该地址仅你可访问后，才允许经配套插件向本机下发 SSH 私钥或口令。</string>
+    <string name="settings_trusted_input_placeholder">例如 192.168.1.5 或 example.com</string>
+    <string name="settings_section_trusted_added">已添加</string>
+    <string name="settings_trusted_empty">还没有添加任何地址</string>
+    <string name="settings_trusted_ssh_allowed">提示豁免 + SSH 凭据授权</string>
+    <string name="settings_trusted_ssh_pending">仅提示豁免，未确认用于 SSH</string>
+    <string name="settings_trusted_confirm_ssh">确认用于 SSH</string>
+    <string name="settings_security_hints_off_title">关闭安全提示</string>
+    <string name="settings_security_hints_off_message">关闭后，服务器地址可从公网访问、且服务端未开启「Web 登录认证」或未使用 HTTPS 时，不再提醒。</string>
+    <string name="settings_security_hints_off_warning">这可能使你无法及时发现服务器、对话内容或 SSH 凭据被他人访问，属于严重安全风险。</string>
+    <string name="settings_security_hints_off_ssh_note">关闭提示不会解除 SSH 终端的凭据下发限制；要放行某台主机，仍须在下方确认该地址仅你可访问。</string>
+    <string name="settings_security_hints_off_confirm">仍然关闭</string>
+    <string name="settings_security_hints_keep">保持开启</string>
+    <string name="settings_trusted_add_title">确认添加受信任的地址</string>
+    <string name="settings_trusted_ssh_title">确认用于 SSH 凭据下发</string>
+    <string name="settings_trusted_confirm_message">请确认 %1$s 仅你可访问（例如内网地址，或已配置访问控制的公网地址）。</string>
+    <string name="settings_trusted_add_body">添加后，该地址不再触发安全提示，并允许经配套插件向本机下发 SSH 私钥或登录密码。</string>
+    <string name="settings_trusted_ssh_body">该地址已在受信任列表里，本次只补充「允许经配套插件向本机下发 SSH 私钥或登录密码」。</string>
+    <string name="settings_trusted_risk">若该地址实际由他人控制，凭据可能被窃取。</string>
+    <string name="settings_trusted_ownership">我确认该地址/域名仅我可访问</string>
+
+    <!-- 添加实例的方式选择 -->
+    <string name="settings_add_mode_form_title">填表添加</string>
+    <string name="settings_add_mode_form_subtitle">逐项填写地址、账号与智能体，可配置多个地址</string>
+    <string name="settings_add_mode_wizard_title">引导式添加</string>
+    <string name="settings_add_mode_wizard_subtitle">一步一条，先验证服务器再选智能体</string>
+    <string name="settings_add_mode_ssh_note">SSH 直连在实例保存后，到该实例的编辑页配置。</string>
+
+    <!-- MiSans 字体包 -->
+    <string name="settings_font_package_title">MiSans 字体包</string>
+    <string name="settings_font_not_installed">下载后可用，两个字重约 16MB</string>
+    <string name="settings_font_ready">已下载，占用约 16MB</string>
+    <string name="settings_font_downloading">正在下载 %1$d%%</string>
+    <string name="settings_font_note">字体版权归小米科技有限责任公司所有，遵循 MiSans 字体许可协议；应用内按需从 GitHub 项目 %1$s 下载，不随安装包分发。</string>
+
+    <!-- 智能体选择框（AgentPickerDialog.kt） -->
+    <string name="agentpick_load_failed">无法读取智能体列表</string>
+    <string name="agentpick_title">选择智能体</string>
+    <string name="agentpick_empty">该实例未返回可用的智能体</string>
+    <string name="agentpick_model">模型 %1$s</string>
+    <string name="agentpick_selected_desc">已选择</string>
+
+    <!-- 聊天字号预览（ChatFontPreview.kt） -->
+    <string name="appearance_chat_scale_title">聊天字号</string>
+    <string name="appearance_chat_scale_hint">只影响对话正文。顶栏与输入框不随字号变化。</string>
+    <string name="appearance_sample_user_question">字号调到多少比较合适？</string>
+    <string name="appearance_sample_answer" formatted="false">默认 **100%** 适合多数情况。若平时读长回答多，可以调到 110%–125%；调大后每屏能显示的行数会减少，翻页次数随之增加。</string>
+    <string name="appearance_sample_formula">公式与代码也按同一比例缩放：$E = mc^2$，以及 `./gradlew :app:testDebugUnitTest`。</string>
+    <string name="appearance_sample_long_paragraph">这是一段较长的正文，用来观察行高与段间距。字号放大后行高会同步放大，否则行与行会挤在一起；行距按字号的比例计算，因此不同字号下的观感保持一致。</string>
+
+    <!-- 服务端界面语言选择框（LanguagePickerDialog.kt） -->
+    <string name="serverlang_hint">只影响 QwenPaw Web 控制台的语言，不改变本应用的界面。</string>
+    <string name="serverlang_current_desc">当前语言</string>
+</resources>

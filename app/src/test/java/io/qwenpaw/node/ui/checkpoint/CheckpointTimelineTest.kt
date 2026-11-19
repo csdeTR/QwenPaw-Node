@@ -1,11 +1,13 @@
 package io.qwenpaw.node.ui.checkpoint
 
+import io.qwenpaw.node.TestTexts
 import io.qwenpaw.node.data.model.CheckpointNodeDto
 import io.qwenpaw.node.data.model.CheckpointSessionDto
 import io.qwenpaw.node.data.model.RestoreResultDto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -15,6 +17,11 @@ import org.junit.Test
  * 逐条平铺会让页面失去可读性。
  */
 class CheckpointTimelineTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private fun node(
         commit: String,

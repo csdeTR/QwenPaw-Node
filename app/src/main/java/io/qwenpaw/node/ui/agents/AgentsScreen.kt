@@ -31,8 +31,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.ui.backup.AgentExportUiState
 import io.qwenpaw.node.ui.common.AdminTopBar
@@ -94,9 +97,9 @@ fun AgentsScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             AdminTopBar(
-                title = "智能体管理",
+                title = stringResource(R.string.agents_title_manage),
                 onBack = onBack,
-                action = "新建",
+                action = stringResource(R.string.agents_action_new),
                 busy = state.busy,
                 onAction = { creating = true },
             )
@@ -140,21 +143,24 @@ fun AgentsScreen(
                 TextButton(
                     onClick = onDismissNotice,
                     modifier = Modifier.padding(horizontal = 10.dp),
-                ) { Text("清除提示") }
+                ) { Text(stringResource(R.string.agents_action_dismiss_notice)) }
             }
 
             exportState?.let { export ->
-                SectionHeader("导出")
+                SectionHeader(stringResource(R.string.agents_section_export))
                 Card {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
                             text = when (export.stage) {
-                                "creating" -> "正在创建临时备份…"
-                                "building" -> "正在打包智能体「${export.agentName}」…"
-                                "exporting" -> "正在写入所选位置…"
-                                "done" -> "导出完成"
-                                "cancelled" -> "导出已取消"
-                                else -> "导出失败"
+                                "creating" -> stringResource(R.string.agents_export_stage_creating)
+                                "building" -> stringResource(
+                                    R.string.agents_export_stage_building,
+                                    export.agentName,
+                                )
+                                "exporting" -> stringResource(R.string.agents_export_stage_exporting)
+                                "done" -> stringResource(R.string.agents_export_stage_done)
+                                "cancelled" -> stringResource(R.string.agents_export_stage_cancelled)
+                                else -> stringResource(R.string.agents_export_stage_failed)
                             },
                             style = MaterialTheme.typography.bodyLarge,
                         )
@@ -171,13 +177,15 @@ fun AgentsScreen(
                             )
                         }
                         if (!export.busy) {
-                            TextButton(onClick = onDismissExport) { Text("知道了") }
+                            TextButton(onClick = onDismissExport) {
+                                Text(stringResource(R.string.agents_action_got_it))
+                            }
                         }
                     }
                 }
             }
 
-            SectionHeader("从其他客户端导入")
+            SectionHeader(stringResource(R.string.agents_section_import))
             Card {
                 Row(
                     modifier = Modifier
@@ -187,7 +195,7 @@ fun AgentsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "导入到当前智能体",
+                            text = stringResource(R.string.agents_import_target_title),
                             style = MaterialTheme.typography.bodyLarge,
                             color = if (portabilityReady) {
                                 MaterialTheme.colorScheme.onSurface
@@ -197,9 +205,9 @@ fun AgentsScreen(
                         )
                         Text(
                             text = if (portabilityReady) {
-                                "从 Codex / Qoder 等客户端导入会话、记忆与技能"
+                                stringResource(R.string.agents_import_subtitle)
                             } else {
-                                "需要配套插件 v0.2.0 或更高（portability 能力）"
+                                stringResource(R.string.agents_import_requires_plugin)
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -208,11 +216,18 @@ fun AgentsScreen(
                     TextButton(
                         onClick = onOpenPortability,
                         enabled = portabilityReady,
-                    ) { Text("开始") }
+                    ) { Text(stringResource(R.string.agents_action_start)) }
                 }
             }
 
-            SectionHeader("智能体", "${state.rows.size} 个")
+            SectionHeader(
+                title = stringResource(R.string.agents_section_agents),
+                trailing = pluralStringResource(
+                    R.plurals.agents_count,
+                    state.rows.size,
+                    state.rows.size,
+                ),
+            )
             state.rows.forEach { row ->
                 AgentCard(
                     row = row,
@@ -237,7 +252,7 @@ fun AgentsScreen(
 
     if (creating) {
         AgentFormDialog(
-            title = "新建智能体",
+            title = stringResource(R.string.agents_dialog_create),
             showId = true,
             busy = state.busy,
             onDismiss = { creating = false },
@@ -252,7 +267,7 @@ fun AgentsScreen(
 
     editing?.let { agent ->
         AgentFormDialog(
-            title = "编辑智能体",
+            title = stringResource(R.string.agents_dialog_edit),
             initialName = agent.name,
             initialDescription = agent.description,
             showId = false,
@@ -282,15 +297,22 @@ fun AgentsScreen(
     }
 
     deleting?.let { agent ->
+        val workspaceDefault = stringResource(R.string.agents_workspace_default)
         DestructiveActionDialog(
-            title = "删除智能体",
-            message = "将删除「${agent.name.ifBlank { agent.id }}」及其工作区。",
-            impacts = listOf(
-                "工作区目录：${agent.workspaceDir.ifBlank { "服务端默认位置" }}",
-                "该智能体的会话、定时任务与技能",
-                "服务端没有回收站，删除后无法恢复",
+            title = stringResource(R.string.agents_dialog_delete),
+            message = stringResource(
+                R.string.agents_delete_message,
+                agent.name.ifBlank { agent.id },
             ),
-            confirmLabel = "删除",
+            impacts = listOf(
+                stringResource(
+                    R.string.agents_delete_impact_workspace,
+                    agent.workspaceDir.ifBlank { workspaceDefault },
+                ),
+                stringResource(R.string.agents_delete_impact_data),
+                stringResource(R.string.agents_delete_impact_no_trash),
+            ),
+            confirmLabel = stringResource(R.string.action_delete),
             onConfirm = {
                 onDelete(agent.id)
                 deleting = null
@@ -326,15 +348,16 @@ private fun AgentCard(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
                 )
-                if (isDefault) Badge("默认")
+                if (isDefault) Badge(stringResource(R.string.agents_badge_default))
                 if (current) {
                     Spacer(Modifier.width(6.dp))
-                    Badge("当前实例")
+                    Badge(stringResource(R.string.agents_badge_current))
                 }
             }
             Spacer(Modifier.height(4.dp))
+            val statusLabel = statusText(row)
             Text(
-                text = "${agent.id} · ${statusText(row)}",
+                text = "${agent.id} · $statusLabel",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (!agent.enabled) {
                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -345,7 +368,7 @@ private fun AgentCard(
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "启用",
+                    text = stringResource(R.string.agents_label_enabled),
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.weight(1f),
                     color = if (isDefault) {
@@ -361,20 +384,32 @@ private fun AgentCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SmallAction("上移", onClick = { if (!isDefault) onMoveUp() }, enabled = !isDefault)
-                SmallAction("下移", onClick = { if (!isDefault) onMoveDown() }, enabled = !isDefault)
                 SmallAction(
-                    if (agent.pinned) "取消置顶" else "置顶",
+                    stringResource(R.string.agents_action_move_up),
+                    onClick = { if (!isDefault) onMoveUp() },
+                    enabled = !isDefault,
+                )
+                SmallAction(
+                    stringResource(R.string.agents_action_move_down),
+                    onClick = { if (!isDefault) onMoveDown() },
+                    enabled = !isDefault,
+                )
+                SmallAction(
+                    if (agent.pinned) {
+                        stringResource(R.string.agents_action_unpin)
+                    } else {
+                        stringResource(R.string.agents_action_pin)
+                    },
                     onClick = { if (!isDefault) onSetPinned(!agent.pinned) },
                     enabled = !isDefault,
                 )
-                SmallAction("设为当前", onClick = onUse)
+                SmallAction(stringResource(R.string.agents_action_use_current), onClick = onUse)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SmallAction("编辑", onEdit)
-                SmallAction("复制", onCopy)
-                SmallAction("导出", onExport)
-                SmallAction("删除", onDelete, enabled = !isDefault)
+                SmallAction(stringResource(R.string.action_edit), onEdit)
+                SmallAction(stringResource(R.string.action_copy), onCopy)
+                SmallAction(stringResource(R.string.agents_section_export), onExport)
+                SmallAction(stringResource(R.string.action_delete), onDelete, enabled = !isDefault)
             }
         }
     }
@@ -404,14 +439,20 @@ private fun SmallAction(
     }
 }
 
+@Composable
 private fun statusText(row: AgentRow): String {
     val agent = row.agent
     val status = row.status
     return when {
-        !agent.enabled || status?.status == "disabled" -> "已禁用"
-        status?.status == "running" -> "运行中 · ${status.runningTaskCount} 个任务"
-        status == null -> "状态未知"
-        else -> "空闲"
+        !agent.enabled || status?.status == "disabled" ->
+            stringResource(R.string.agents_state_disabled)
+        status?.status == "running" -> pluralStringResource(
+            R.plurals.agents_status_running,
+            status.runningTaskCount,
+            status.runningTaskCount,
+        )
+        status == null -> stringResource(R.string.agents_status_unknown)
+        else -> stringResource(R.string.agents_status_idle)
     }
 }
 
@@ -430,6 +471,9 @@ private fun AgentFormDialog(
     var id by remember { mutableStateOf(initialId) }
     var description by remember { mutableStateOf(initialDescription) }
     var error by remember { mutableStateOf<String?>(null) }
+    // 提交回调不在组合上下文里，文案先在组合期取好。
+    val idInvalidText = stringResource(R.string.agents_error_id_invalid)
+    val operationFailedText = stringResource(R.string.agents_error_operation_failed)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -439,7 +483,7 @@ private fun AgentFormDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; error = null },
-                    label = { Text("名称") },
+                    label = { Text(stringResource(R.string.agents_field_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -448,8 +492,10 @@ private fun AgentFormDialog(
                     OutlinedTextField(
                         value = id,
                         onValueChange = { id = it; error = null },
-                        label = { Text("标识（可留空）") },
-                        supportingText = { Text("2–64 位字母、数字、下划线或连字符；不可为 default") },
+                        label = { Text(stringResource(R.string.agents_field_id_optional)) },
+                        supportingText = {
+                            Text(stringResource(R.string.agents_field_id_hint))
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -458,7 +504,7 @@ private fun AgentFormDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("描述（可留空）") },
+                    label = { Text(stringResource(R.string.agents_field_description_optional)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 error?.let {
@@ -479,17 +525,19 @@ private fun AgentFormDialog(
                         val valid = id.matches(Regex("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}[a-zA-Z0-9]$")) &&
                             id != "default"
                         if (!valid) {
-                            error = "标识格式不正确"
+                            error = idInvalidText
                             return@TextButton
                         }
                     }
                     onConfirm(name, id, description) { ok ->
-                        if (!ok) error = "操作失败，请查看上方提示"
+                        if (!ok) error = operationFailedText
                     }
                 },
-            ) { Text("保存") }
+            ) { Text(stringResource(R.string.action_save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
     )
 }
 
@@ -500,33 +548,36 @@ private fun CopyDialog(
     onDismiss: () -> Unit,
     onConfirm: (name: String, skills: Boolean, jobs: Boolean, onResult: (Boolean) -> Unit) -> Unit,
 ) {
-    var name by remember { mutableStateOf("${agent.name.ifBlank { agent.id }} 副本") }
+    val defaultName = stringResource(R.string.agents_copy_name_suffix, agent.name.ifBlank { agent.id })
+    var name by remember { mutableStateOf(defaultName) }
     var skills by remember { mutableStateOf(false) }
     var jobs by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // 提交回调不在组合上下文里，文案先在组合期取好。
+    val copyFailedText = stringResource(R.string.agents_error_copy_failed)
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("复制智能体") },
+        title = { Text(stringResource(R.string.agents_dialog_copy)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("新名称") },
+                    label = { Text(stringResource(R.string.agents_field_new_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
                 SwitchRow(
-                    title = "复制技能",
-                    subtitle = "把该智能体的技能一并复制到新智能体",
+                    title = stringResource(R.string.agents_copy_skills_title),
+                    subtitle = stringResource(R.string.agents_copy_skills_subtitle),
                     checked = skills,
                     onCheckedChange = { skills = it },
                 )
                 SwitchRow(
-                    title = "复制定时任务",
-                    subtitle = "把该智能体的定时任务一并复制",
+                    title = stringResource(R.string.agents_copy_jobs_title),
+                    subtitle = stringResource(R.string.agents_copy_jobs_subtitle),
                     checked = jobs,
                     onCheckedChange = { jobs = it },
                 )
@@ -544,11 +595,13 @@ private fun CopyDialog(
                 enabled = !busy,
                 onClick = {
                     onConfirm(name, skills, jobs) { ok ->
-                        if (!ok) error = "复制失败，请查看上方提示"
+                        if (!ok) error = copyFailedText
                     }
                 },
-            ) { Text("复制") }
+            ) { Text(stringResource(R.string.action_copy)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
     )
 }

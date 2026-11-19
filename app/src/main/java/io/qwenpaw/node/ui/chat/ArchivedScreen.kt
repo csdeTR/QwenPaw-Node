@@ -34,9 +34,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -91,28 +94,44 @@ fun ArchivedScreen(
                     ) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "已归档",
+                        text = stringResource(R.string.chatarchive_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = if (selecting) "已选 ${selected.size} 个" else "${chats.size} 个",
+                        text = if (selecting) {
+                            pluralStringResource(
+                                R.plurals.chatarchive_selected_count,
+                                selected.size,
+                                selected.size,
+                            )
+                        } else {
+                            pluralStringResource(
+                                R.plurals.chatarchive_total_count,
+                                chats.size,
+                                chats.size,
+                            )
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.weight(1f))
                     if (chats.isNotEmpty()) {
                         Text(
-                            text = if (selecting) "取消" else "选择",
+                            text = if (selecting) {
+                                stringResource(R.string.action_cancel)
+                            } else {
+                                stringResource(R.string.chatarchive_select)
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier
@@ -146,13 +165,13 @@ fun ArchivedScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = "还没有归档的对话",
+                        text = stringResource(R.string.chatarchive_empty_title),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "在对话列表中长按对话即可归档",
+                        text = stringResource(R.string.chatarchive_empty_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -203,14 +222,14 @@ fun ArchivedScreen(
 
     deleting?.let { chat ->
         io.qwenpaw.node.ui.common.DestructiveActionDialog(
-            title = "删除对话",
-            message = "删除后无法恢复，确定要删除「${chat.name}」吗？",
+            title = stringResource(R.string.chatarchive_delete_title),
+            message = stringResource(R.string.chatarchive_delete_message, chat.name),
             impacts = listOf(
-                "该对话的全部消息记录",
-                "与这些消息一同保存的图片与文件引用",
-                "本机为该对话缓存的离线历史",
+                stringResource(R.string.chatarchive_delete_impact_messages),
+                stringResource(R.string.chatarchive_delete_impact_files),
+                stringResource(R.string.chatarchive_delete_impact_cache),
             ),
-            confirmLabel = "删除",
+            confirmLabel = stringResource(R.string.action_delete),
             undoable = false,
             onConfirm = {
                 onDelete(chat.id)
@@ -222,14 +241,22 @@ fun ArchivedScreen(
 
     if (batchDeleteConfirm) {
         io.qwenpaw.node.ui.common.DestructiveActionDialog(
-            title = "删除 ${selected.size} 个对话",
-            message = "删除后无法恢复。",
-            impacts = listOf(
-                "这 ${selected.size} 个对话的全部消息记录",
-                "与这些消息一同保存的图片与文件引用",
-                "本机为它们缓存的离线历史",
+            title = pluralStringResource(
+                R.plurals.chatarchive_batch_delete_title,
+                selected.size,
+                selected.size,
             ),
-            confirmLabel = "删除",
+            message = stringResource(R.string.chatarchive_batch_delete_message),
+            impacts = listOf(
+                pluralStringResource(
+                    R.plurals.chatarchive_batch_delete_impact_messages,
+                    selected.size,
+                    selected.size,
+                ),
+                stringResource(R.string.chatarchive_delete_impact_files),
+                stringResource(R.string.chatarchive_batch_delete_impact_cache),
+            ),
+            confirmLabel = stringResource(R.string.action_delete),
             undoable = false,
             onConfirm = {
                 onBatchDelete(selected.toList())
@@ -259,17 +286,31 @@ private fun BatchActionBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (count == 0) "选择对话" else "已选 $count 个",
+            text = if (count == 0) {
+                stringResource(R.string.chatarchive_select_chats)
+            } else {
+                pluralStringResource(R.plurals.chatarchive_selected_count, count, count)
+            },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.weight(1f))
-        TextButton(onClick = onToggleAll) { Text(if (allSelected) "取消全选" else "全选") }
-        TextButton(enabled = count > 0, onClick = onRestore) { Text("恢复") }
+        TextButton(onClick = onToggleAll) {
+            Text(
+                if (allSelected) {
+                    stringResource(R.string.chatarchive_deselect_all)
+                } else {
+                    stringResource(R.string.chatarchive_select_all)
+                },
+            )
+        }
+        TextButton(enabled = count > 0, onClick = onRestore) {
+            Text(stringResource(R.string.chatarchive_restore))
+        }
         TextButton(
             enabled = count > 0,
             onClick = onDelete,
-        ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+        ) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
     }
 }
 
@@ -299,7 +340,7 @@ private fun ArchivedRow(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = chat.name.ifBlank { "未命名对话" },
+                    text = chat.name.ifBlank { stringResource(R.string.chatarchive_untitled) },
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -316,8 +357,10 @@ private fun ArchivedRow(
             // 多选模式下隐藏单行按钮：批量操作条已经覆盖同样的动作，
             // 两套入口并存时用户很容易点错对象。
             if (!selecting) {
-                TextButton(onClick = onUnarchive) { Text("恢复") }
-                TextButton(onClick = onDelete) { Text("删除") }
+                TextButton(onClick = onUnarchive) {
+                    Text(stringResource(R.string.chatarchive_restore))
+                }
+                TextButton(onClick = onDelete) { Text(stringResource(R.string.action_delete)) }
             }
         }
         Box(

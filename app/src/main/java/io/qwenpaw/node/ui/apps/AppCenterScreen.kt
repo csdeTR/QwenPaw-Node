@@ -20,7 +20,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.PawAppDto
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.settings.Card
@@ -45,7 +48,7 @@ fun AppCenterScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { AdminTopBar(title = "App 中心", onBack = onBack) },
+        topBar = { AdminTopBar(title = stringResource(R.string.appcenter_title), onBack = onBack) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -73,11 +76,11 @@ fun AppCenterScreen(
             }
 
             if (state.loaded && state.apps.isEmpty()) {
-                SectionHeader("尚未安装 App")
+                SectionHeader(stringResource(R.string.appcenter_section_empty))
                 Card {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = "服务端还没有安装任何 PawApp。可在 Web 控制台的扩展市场安装后再回来。",
+                            text = stringResource(R.string.appcenter_empty_hint),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -85,13 +88,20 @@ fun AppCenterScreen(
                         TextButton(
                             enabled = baseUrl != null,
                             onClick = onOpenConsole,
-                        ) { Text("打开 Web 控制台") }
+                        ) { Text(stringResource(R.string.appcenter_action_open_console)) }
                     }
                 }
                 return@Column
             }
 
-            SectionHeader("已安装", "${state.apps.size} 个")
+            SectionHeader(
+                title = stringResource(R.string.appcenter_section_installed),
+                trailing = pluralStringResource(
+                    R.plurals.appcenter_count,
+                    state.apps.size,
+                    state.apps.size,
+                ),
+            )
             state.apps.forEach { app ->
                 AppRow(
                     app = app,
@@ -139,7 +149,9 @@ private fun AppRow(app: PawAppDto, enabled: Boolean, onOpen: () -> Unit) {
                     )
                 }
             }
-            TextButton(enabled = enabled, onClick = onOpen) { Text("打开") }
+            TextButton(enabled = enabled, onClick = onOpen) {
+                Text(stringResource(R.string.appcenter_action_open))
+            }
         }
     }
 }

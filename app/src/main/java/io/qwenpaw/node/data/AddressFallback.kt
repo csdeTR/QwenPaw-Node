@@ -1,6 +1,8 @@
 package io.qwenpaw.node.data
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.ApiException
+import io.qwenpaw.node.ui.i18n.Texts
 
 /**
  * 多地址回退的判定逻辑。
@@ -63,7 +65,7 @@ internal object AddressFallback {
         block: suspend (String) -> T,
     ): Pair<String, T> {
         val list = candidates(urls)
-        if (list.isEmpty()) throw IllegalArgumentException("请填写服务器地址")
+        if (list.isEmpty()) throw IllegalArgumentException(Texts.get(R.string.drest_need_server_address))
         var lastError: Throwable? = null
         for ((index, url) in list.withIndex()) {
             onAttempt(index + 1, list.size, url)
@@ -75,11 +77,11 @@ internal object AddressFallback {
                     io.qwenpaw.node.log.LogKind.NETWORK,
                     "Fallback",
                     e,
-                    "地址 ${index + 1}/${list.size} 不可达：$url",
+                    Texts.get(R.string.drest_address_unreachable, index + 1, list.size, url),
                 )
                 lastError = e
             }
         }
-        throw lastError ?: IllegalStateException("所有地址都无法连接")
+        throw lastError ?: IllegalStateException(Texts.get(R.string.drest_all_addresses_failed))
     }
 }

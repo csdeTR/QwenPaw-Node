@@ -1,7 +1,9 @@
 package io.qwenpaw.node.ui.mcp
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.McpPolicyDto
 import io.qwenpaw.node.data.model.McpToolDefaultDto
+import io.qwenpaw.node.ui.i18n.Texts
 
 /**
  * MCP 访问策略的编辑逻辑。
@@ -19,15 +21,15 @@ internal object McpPolicyEdit {
     val effects: List<String> = listOf("allow", "ask", "deny")
 
     fun effectLabel(effect: String): String = when (effect) {
-        "allow" -> "允许"
-        "ask" -> "询问"
-        "deny" -> "拒绝"
+        "allow" -> Texts.get(R.string.mcp_effect_allow)
+        "ask" -> Texts.get(R.string.mcp_effect_ask)
+        "deny" -> Texts.get(R.string.mcp_effect_deny)
         else -> effect
     }
 
     /** 传输方式。`stdio` 是本机进程，另外两种是远端。 */
     fun transportLabel(transport: String): String = when (transport) {
-        "stdio" -> "本机进程"
+        "stdio" -> Texts.get(R.string.mcp_transport_stdio)
         "streamable_http" -> "HTTP"
         "sse" -> "SSE"
         else -> transport
@@ -44,7 +46,7 @@ internal object McpPolicyEdit {
             transport == "stdio" && command.isNotBlank() -> command
             url.isNotBlank() -> url
             command.isNotBlank() -> command
-            else -> "未配置"
+            else -> Texts.get(R.string.mcp_endpoint_unconfigured)
         }
 
     /** 只改默认效果，其余四个字段原样带回。 */

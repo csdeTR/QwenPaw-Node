@@ -1,9 +1,11 @@
 package io.qwenpaw.node.ui.apps
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.PawAppDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,7 +35,13 @@ class AppCenterViewModel(
     fun refresh(force: Boolean = false) {
         if (!force && (_state.value.loaded || _state.value.loading)) return
         val conn = connection() ?: run {
-            _state.update { it.copy(loading = false, loaded = true, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(
+                    loading = false,
+                    loaded = true,
+                    error = Texts.get(R.string.appcenter_error_not_connected),
+                )
+            }
             return
         }
         _state.update { it.copy(loading = true, error = null) }

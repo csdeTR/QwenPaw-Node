@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.settings
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
 import io.qwenpaw.node.data.model.FileGuardDto
@@ -10,6 +11,7 @@ import io.qwenpaw.node.data.model.ToolGuardRuleDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -321,7 +323,7 @@ class SettingsConfigViewModel(
                     raw = saved,
                     form = RunningConfigEdit.fromJson(saved),
                     loaded = true,
-                    notice = "已保存",
+                    notice = Texts.get(R.string.cfgvm_saved),
                 )
             }.onFailure { e ->
                 _runningConfig.update {
@@ -391,7 +393,11 @@ class SettingsConfigViewModel(
                         toolGuard = saved,
                         toolGuardEnabled = saved["enabled"]?.jsonPrimitive?.booleanOrNull ?: enabled,
                         saving = false,
-                        notice = if (enabled) "工具防护已开启" else "工具防护已关闭",
+                        notice = if (enabled) {
+                            Texts.get(R.string.cfgvm_tool_guard_on)
+                        } else {
+                            Texts.get(R.string.cfgvm_tool_guard_off)
+                        },
                     )
                 }
             }.onFailure { e ->
@@ -410,7 +416,11 @@ class SettingsConfigViewModel(
                         it.copy(
                             fileGuard = guard,
                             saving = false,
-                            notice = if (enabled) "文件防护已开启" else "文件防护已关闭",
+                            notice = if (enabled) {
+                                Texts.get(R.string.cfgvm_file_guard_on)
+                            } else {
+                                Texts.get(R.string.cfgvm_file_guard_off)
+                            },
                         )
                     }
                 }
@@ -430,7 +440,11 @@ class SettingsConfigViewModel(
                         it.copy(
                             sandbox = status,
                             saving = false,
-                            notice = if (enabled) "沙箱已开启" else "沙箱已关闭",
+                            notice = if (enabled) {
+                                Texts.get(R.string.cfgvm_sandbox_on)
+                            } else {
+                                Texts.get(R.string.cfgvm_sandbox_off)
+                            },
                         )
                     }
                 }
@@ -455,7 +469,7 @@ class SettingsConfigViewModel(
                         skillScanner = saved,
                         skillScannerMode = saved["mode"]?.jsonPrimitive?.contentOrNull ?: mode,
                         saving = false,
-                        notice = "技能扫描模式已更新",
+                        notice = Texts.get(R.string.cfgvm_skill_scanner_updated),
                     )
                 }
             }.onFailure { e ->

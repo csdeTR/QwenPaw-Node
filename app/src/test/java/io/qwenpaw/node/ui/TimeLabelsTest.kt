@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui
 
+import io.qwenpaw.node.TestTexts
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -27,6 +28,7 @@ class TimeLabelsTest {
         @BeforeClass
         @JvmStatic
         fun pinZone() {
+            TestTexts.install()
             original = TimeZone.getDefault()
             TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
         }

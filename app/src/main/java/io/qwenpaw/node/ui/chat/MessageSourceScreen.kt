@@ -25,11 +25,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.theme.LocalChatFontScale
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -76,7 +78,7 @@ fun MessageSourceScreen(
                     ) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
@@ -84,19 +86,19 @@ fun MessageSourceScreen(
                     Spacer(Modifier.width(4.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Markdown 原文",
+                            text = stringResource(R.string.msgsrc_title),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            text = "可拖动选中，或用右侧「复制全文」",
+                            text = stringResource(R.string.msgsrc_subtitle),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Text(
-                        text = "复制全文",
+                        text = stringResource(R.string.msgsrc_copy_all),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier

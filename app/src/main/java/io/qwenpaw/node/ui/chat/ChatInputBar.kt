@@ -48,6 +48,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.CommandCopy
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -193,7 +195,7 @@ fun ChatInputBar(
                     ) {
                         if (draft.isEmpty()) {
                             Text(
-                                text = "输入消息",
+                                text = stringResource(R.string.chatinput_placeholder),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -232,12 +234,16 @@ fun ChatInputBar(
                             Spacer(Modifier.width(2.dp))
                             ModelNameButton(name = modelName, onClick = onModelClick)
                         }
+                        val thinkingDescription = thinkingLabel
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let {
+                                stringResource(R.string.chatinput_thinking_strength_value, it)
+                            }
+                            ?: stringResource(R.string.chatinput_thinking_strength)
                         thinkingRatio?.let { ratio ->
                             Spacer(Modifier.width(2.dp))
                             ComposerButton(
-                                description = thinkingLabel?.takeIf { it.isNotBlank() }
-                                    ?.let { "思考强度：$it" }
-                                    ?: "思考强度",
+                                description = thinkingDescription,
                                 onClick = onThinkingClick,
                             ) {
                                 ThinkingBrainIcon(ratio = ratio)
@@ -247,7 +253,11 @@ fun ChatInputBar(
                         // 开关关闭时整个按钮不渲染（不是置灰、不占位）。
                         if (voiceVisible) {
                             ComposerButton(
-                                description = if (voiceHoldMode) "按住说话" else "点击开始录音",
+                                description = if (voiceHoldMode) {
+                                    stringResource(R.string.chatinput_voice_hold)
+                                } else {
+                                    stringResource(R.string.chatinput_voice_tap)
+                                },
                                 enabled = true,
                                 highlighted = voiceListening,
                                 // 按住说话：按下开始、松手结束。
@@ -303,7 +313,7 @@ private fun AttachmentMenuButton(
     var expanded by remember { mutableStateOf(false) }
     Box {
         ComposerButton(
-            description = "更多输入方式",
+            description = stringResource(R.string.chatinput_more),
             onClick = { expanded = true },
         ) {
             Icon(
@@ -320,7 +330,10 @@ private fun AttachmentMenuButton(
         ) {
             DropdownMenuItem(
                 text = {
-                    Text("添加附件", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        stringResource(R.string.chatinput_attach),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 },
                 leadingIcon = {
                     Icon(
@@ -336,7 +349,12 @@ private fun AttachmentMenuButton(
                 },
             )
             DropdownMenuItem(
-                text = { Text("魔法命令", style = MaterialTheme.typography.bodyMedium) },
+                text = {
+                    Text(
+                        stringResource(R.string.chatinput_magic_commands),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
                 leadingIcon = {
                     Icon(
                         imageVector = QwenIcons.sparkles,
@@ -357,7 +375,10 @@ private fun AttachmentMenuButton(
                         // 档位名放第二行，与「智能体工作区」的目录名同一处理：
                         // 挤在右侧时稍长的名称会被截断，还会让标题看起来像被推开的标签。
                         Column {
-                            Text("审批模式", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                stringResource(R.string.chatinput_approval_mode),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                             Text(
                                 text = approvalLabel,
                                 style = MaterialTheme.typography.labelSmall,
@@ -382,7 +403,12 @@ private fun AttachmentMenuButton(
                 )
             }
             DropdownMenuItem(
-                text = { Text("全屏输入", style = MaterialTheme.typography.bodyMedium) },
+                text = {
+                    Text(
+                        stringResource(R.string.chatinput_fullscreen),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
                 leadingIcon = {
                     Icon(
                         imageVector = QwenIcons.maximize,
@@ -400,7 +426,10 @@ private fun AttachmentMenuButton(
                 text = {
                     // 目录名常常很长，放在第二行整行截断，比挤在右侧多出几个字符可读。
                     Column {
-                        Text("智能体工作区", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(R.string.chatinput_workspace),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                         if (workspaceLabel != null) {
                             Text(
                                 text = workspaceLabel,
@@ -546,6 +575,12 @@ private fun SendButton(
     onStop: () -> Unit,
 ) {
     val active = running || enabled
+    // 无障碍描述要在 semantics lambda 之外取：lambda 不是 Composable 上下文。
+    val sendDescription = if (running) {
+        stringResource(R.string.action_stop)
+    } else {
+        stringResource(R.string.chatinput_send)
+    }
     Box(
         modifier = Modifier
             .size(34.dp)
@@ -554,7 +589,7 @@ private fun SendButton(
                 if (active) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.outlineVariant,
             )
-            .semantics { contentDescription = if (running) "停止" else "发送" }
+            .semantics { contentDescription = sendDescription }
             .clickable(enabled = active, onClick = if (running) onStop else onSend),
         contentAlignment = Alignment.Center,
     ) {
@@ -661,7 +696,7 @@ private fun AttachmentChip(name: String, onRemove: () -> Unit) {
         ) {
             Icon(
                 imageVector = QwenIcons.close,
-                contentDescription = "移除附件",
+                contentDescription = stringResource(R.string.chatinput_remove_attachment),
                 modifier = Modifier.size(13.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )

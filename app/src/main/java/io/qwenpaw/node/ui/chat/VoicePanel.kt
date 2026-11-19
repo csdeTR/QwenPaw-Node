@@ -37,9 +37,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.voice.VoiceState
 import io.qwenpaw.node.ui.theme.QwenIcons
 import kotlinx.coroutines.delay
@@ -58,42 +61,42 @@ fun VoiceIntroDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(if (modelReady) "语音输入" else "语音输入需要识别模型")
+            Text(
+                stringResource(
+                    if (modelReady) R.string.voicepanel_intro_title else R.string.voicepanel_intro_title_model,
+                ),
+            )
         },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    text = if (modelReady) {
-                        "可在「本地识别」与「服务端转写」之间选择：前者识别在本机完成，" +
-                            "音频不出手机；后者把录音上传到所连接的服务端。"
-                    } else {
-                        "本地识别需要先下载识别模型，约 150MB，只需下载一次。" +
-                            "下载后音频只在本机处理，不再需要联网。"
-                    },
+                    text = stringResource(
+                        if (modelReady) R.string.voicepanel_intro_body else R.string.voicepanel_intro_body_model,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.size(10.dp))
                 if (holdMode) {
-                    Bullet("按住输入框旁的麦克风开始说话，松开后结束。")
+                    Bullet(stringResource(R.string.voicepanel_bullet_hold))
                 } else {
-                    Bullet("点击麦克风开始录音，再次点击结束。")
+                    Bullet(stringResource(R.string.voicepanel_bullet_tap))
                 }
-                Bullet("结果填入输入框，不会自动发送。")
-                Bullet("转写来源与触发方式可在设置中修改。")
+                Bullet(stringResource(R.string.voicepanel_bullet_result))
+                Bullet(stringResource(R.string.voicepanel_bullet_settings))
             }
         },
         confirmButton = {
             if (modelReady) {
-                TextButton(onClick = onDismiss) { Text("知道了") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.voicepanel_got_it)) }
             } else {
-                TextButton(onClick = onDownload) { Text("去下载模型") }
+                TextButton(onClick = onDownload) { Text(stringResource(R.string.voicepanel_download_model)) }
             }
         },
         dismissButton = if (modelReady) {
             null
         } else {
-            { TextButton(onClick = onDismiss) { Text("暂不设置") } }
+            { TextButton(onClick = onDismiss) { Text(stringResource(R.string.voicepanel_not_now)) } }
         },
     )
 }
@@ -184,13 +187,16 @@ fun VoiceSheet(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = when (state) {
-                        VoiceState.Recording -> when {
-                            holdMode -> "正在录音，松开麦克风结束"
-                            else -> "正在录音，再次点击麦克风结束"
-                        }
-                        VoiceState.Transcribing -> "正在转写"
+                        VoiceState.Recording -> stringResource(
+                            if (holdMode) {
+                                R.string.voicepanel_recording_hold
+                            } else {
+                                R.string.voicepanel_recording_tap
+                            },
+                        )
+                        VoiceState.Transcribing -> stringResource(R.string.voicepanel_transcribing)
                         is VoiceState.Error -> state.message
-                        VoiceState.Idle -> "准备中"
+                        VoiceState.Idle -> stringResource(R.string.voicepanel_preparing)
                     },
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Medium,
@@ -213,8 +219,13 @@ fun VoiceSheet(
                     }
                     Text(
                         text = when (state) {
-                            VoiceState.Recording -> "已录制 ${seconds} 秒"
-                            VoiceState.Transcribing -> "录音已上传，等待服务端返回文字"
+                            VoiceState.Recording ->
+                                pluralStringResource(
+                                    R.plurals.voicepanel_recorded_seconds,
+                                    seconds.toInt(),
+                                    seconds.toInt(),
+                                )
+                            VoiceState.Transcribing -> stringResource(R.string.voicepanel_uploaded)
                             // 本地识别边录边出字；服务端转写没有增量结果，这一行留空。
                             else -> ""
                         },
@@ -237,7 +248,11 @@ fun VoiceSheet(
             // 转写中不给「取消」：请求已经发出去，取消不了，点了只会让用户以为停了。
             if (state != VoiceState.Transcribing) {
                 Text(
-                    text = if (state == VoiceState.Recording) "取消" else "关闭",
+                    text = if (state == VoiceState.Recording) {
+                        stringResource(R.string.action_cancel)
+                    } else {
+                        stringResource(R.string.action_close)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier

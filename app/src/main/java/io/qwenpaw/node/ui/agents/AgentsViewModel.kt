@@ -1,10 +1,12 @@
 package io.qwenpaw.node.ui.agents
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.AgentStatusDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -55,7 +57,13 @@ class AgentsViewModel(
 
     fun refresh() {
         val conn = connection() ?: run {
-            _state.update { it.copy(loading = false, loaded = true, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(
+                    loading = false,
+                    loaded = true,
+                    error = Texts.get(R.string.agents_error_not_connected),
+                )
+            }
             return
         }
         _state.update { it.copy(loading = true, error = null) }
@@ -88,7 +96,12 @@ class AgentsViewModel(
                     api.createAgent(conn, name.trim(), description.trim(), id.trim().ifBlank { null })
                 }
             }.onSuccess {
-                _state.update { it.copy(busy = false, notice = "已创建智能体「${name.trim()}」") }
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        notice = Texts.get(R.string.agents_notice_created, name.trim()),
+                    )
+                }
                 refresh()
                 onResult(true)
             }.onFailure { e ->
@@ -119,7 +132,9 @@ class AgentsViewModel(
                     )
                 }
             }.onSuccess {
-                _state.update { it.copy(busy = false, notice = "已复制智能体") }
+                _state.update {
+                    it.copy(busy = false, notice = Texts.get(R.string.agents_notice_copied))
+                }
                 refresh()
                 onResult(true)
             }.onFailure { e ->
@@ -138,7 +153,7 @@ class AgentsViewModel(
                     api.updateAgentProfile(conn, agentId, name.trim(), description.trim())
                 }
             }.onSuccess {
-                _state.update { it.copy(busy = false, notice = "已保存") }
+                _state.update { it.copy(busy = false, notice = Texts.get(R.string.agents_notice_saved)) }
                 refresh()
                 onResult(true)
             }.onFailure { e ->
@@ -156,7 +171,14 @@ class AgentsViewModel(
                 withContext(Dispatchers.IO) { api.setAgentEnabled(conn, agentId, enabled) }
             }.onSuccess {
                 _state.update {
-                    it.copy(busy = false, notice = if (enabled) "已启用" else "已禁用")
+                    it.copy(
+                        busy = false,
+                        notice = if (enabled) {
+                            Texts.get(R.string.agents_notice_enabled)
+                        } else {
+                            Texts.get(R.string.agents_state_disabled)
+                        },
+                    )
                 }
                 refresh()
             }.onFailure { e ->
@@ -173,7 +195,14 @@ class AgentsViewModel(
                 withContext(Dispatchers.IO) { api.setAgentPinned(conn, agentId, pinned) }
             }.onSuccess {
                 _state.update {
-                    it.copy(busy = false, notice = if (pinned) "已置顶" else "已取消置顶")
+                    it.copy(
+                        busy = false,
+                        notice = if (pinned) {
+                            Texts.get(R.string.agents_notice_pinned)
+                        } else {
+                            Texts.get(R.string.agents_notice_unpinned)
+                        },
+                    )
                 }
                 refresh()
             }.onFailure { e ->
@@ -206,7 +235,9 @@ class AgentsViewModel(
             runCatching {
                 withContext(Dispatchers.IO) { api.deleteAgent(conn, agentId) }
             }.onSuccess {
-                _state.update { it.copy(busy = false, notice = "已删除智能体") }
+                _state.update {
+                    it.copy(busy = false, notice = Texts.get(R.string.agents_notice_deleted))
+                }
                 onAgentDeleted(agentId)
                 refresh()
             }.onFailure { e ->
@@ -217,7 +248,12 @@ class AgentsViewModel(
 
     fun useAsCurrent(agentId: String) {
         onUseAgent(agentId)
-        _state.update { it.copy(currentAgentId = agentId, notice = "已切换当前实例的智能体") }
+        _state.update {
+            it.copy(
+                currentAgentId = agentId,
+                notice = Texts.get(R.string.agents_notice_current_switched),
+            )
+        }
     }
 
     fun dismissNotice() {

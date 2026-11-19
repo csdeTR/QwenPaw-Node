@@ -1,9 +1,11 @@
 package io.qwenpaw.node.data.plugin
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.BridgeInfoDto
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 
 /**
  * 配套插件的探测结果。
@@ -25,9 +27,9 @@ sealed interface BridgeStatus {
     /** 展示用的一行文字，设置页直接读它。 */
     val label: String
         get() = when (this) {
-            Unknown -> "尚未检测"
-            is Ready -> "已检测到 QwenPaw Node Bridge v${info.pluginVersion}"
-            Absent -> "未检测到配套插件"
+            Unknown -> Texts.get(R.string.drest_bridge_unknown)
+            is Ready -> Texts.get(R.string.drest_bridge_ready, info.pluginVersion)
+            Absent -> Texts.get(R.string.drest_bridge_absent)
         }
 }
 

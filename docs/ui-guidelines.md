@@ -803,3 +803,17 @@ minSdk 是 26，两条分支都必须留。静态 PNG 与 GIF 走同一个 `Asyn
 **双指缩放是临时放大，不改变字号。** 松手后回到原字号；持久字号用 A-/A+，范围 9–24sp，按实例保存，修改后重建 Terminal 并发送真实 resize。每次启动后的第一次双指缩放用轻提示说明「临时放大，调整字号请用 A+ / A-」，之后不再打扰。
 
 **IME 回车由 termlib 的 ImeInputView 处理。** 不再有隐藏 BasicTextField；PowerShell/cmd 的「换行」发送 Enter，Ctrl+软键盘字母与硬件键盘一致。
+
+---
+
+## 10、界面文案资源
+
+**Kotlin 源码中不写中文字符串字面量。** 0.7.0-i 起全部文案在 `res/values/strings_*.xml`，注释不受此限。`NoHardcodedChineseTest` 会扫描 `app/src/main/java` 并让违反者失败。
+
+**Compose 用 `stringResource` / `pluralStringResource`，非 Composable 用 `Texts.get` / `Texts.quantity`。** `stringResource` 只能在 @Composable 中调用；放进 `onClick` 等 lambda 时先在外部取值，或改用 `context.getString`。ViewModel 与 `data/` 层统一走 `io.qwenpaw.node.ui.i18n.Texts`。
+
+**占位符带位置，计数用 plurals。** 例：`已归档 %1$d 个对话`，不写 `%d`；中文的 `<plurals>` 只写 `other`。`StringPlaceholderTest` 检查无位置占位符；字面 `%` 写成 `%%`，或给该条加 `formatted="false"`。
+
+**语言自称不翻译。** 「简体中文」「日本語」等用 `translatable="false"`；服务端注入的固定前缀（如上传提示）同样不可翻译，否则客户端与服务端会对不上。
+
+**第二语言新建 `values-<lang>/`。** `values/` 是默认资源目录，保持简体中文；不建 `values-zh`。英文加入时不要搬动现有中文资源。

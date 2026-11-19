@@ -1,7 +1,9 @@
 package io.qwenpaw.node.data.market
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.MarketResultDto
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -55,7 +57,7 @@ class MarketLinkResolver(
             val url = result.sourceUrl.trim()
             // 空地址不落到 QwenPaw 的列表页：那是另一个来源的条目，跳过去只会更困惑。
             return if (url.isEmpty()) {
-                Outcome.Fallback("", "该条目没有详情地址")
+                Outcome.Fallback("", Texts.get(R.string.marketlink_no_detail_url))
             } else {
                 Outcome.Direct(url)
             }
@@ -77,14 +79,20 @@ class MarketLinkResolver(
     private suspend fun resolveQwenPaw(code: String): Outcome {
         val name = code.substringAfterLast('/').trim()
         if (name.isEmpty()) {
-            return Outcome.Fallback(QWENPAW_SKILLS_LIST, "该条目缺少技能标识")
+            return Outcome.Fallback(
+                QWENPAW_SKILLS_LIST,
+                Texts.get(R.string.marketlink_missing_skill_id),
+            )
         }
         val url = SEARCH_ENDPOINT.toHttpUrlOrNull()?.newBuilder()
             ?.addQueryParameter("search", name)
             ?.addQueryParameter("page_size", PAGE_SIZE.toString())
             ?.addQueryParameter("page_number", "1")
             ?.build()
-            ?: return Outcome.Fallback(QWENPAW_SKILLS_LIST, "搜索地址无法构造")
+            ?: return Outcome.Fallback(
+                QWENPAW_SKILLS_LIST,
+                Texts.get(R.string.marketlink_search_url_failed),
+            )
 
         val body = withContext(Dispatchers.IO) {
             runCatching {
@@ -99,9 +107,14 @@ class MarketLinkResolver(
             .fold(
                 onSuccess = { direct ->
                     direct?.let { Outcome.Direct(it) }
-                        ?: Outcome.Fallback(QWENPAW_SKILLS_LIST, "平台没有返回该技能的详情地址")
+                        ?: Outcome.Fallback(
+                            QWENPAW_SKILLS_LIST,
+                            Texts.get(R.string.marketlink_no_detail_from_platform),
+                        )
                 },
-                onFailure = { Outcome.Fallback(QWENPAW_SKILLS_LIST, "无法访问平台技能市场") },
+                onFailure = {
+                    Outcome.Fallback(QWENPAW_SKILLS_LIST, Texts.get(R.string.marketlink_unreachable))
+                },
             )
     }
 

@@ -1,6 +1,8 @@
 package io.qwenpaw.node.ui.skills
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.TimeLabels
+import io.qwenpaw.node.ui.i18n.Texts
 
 /**
  * 技能页会重复用到的几条文案与判定。
@@ -11,18 +13,26 @@ import io.qwenpaw.node.ui.TimeLabels
 internal object SkillCopy {
 
     /** 技能来源。实测只有 `customized` 与 `builtin` 两种，其余原样显示。 */
-    fun sourceLabel(source: String): String = when (source) {
-        "customized" -> "自定义"
-        "builtin" -> "内置"
-        else -> source.ifBlank { "未知来源" }
+    private val SOURCE_LABELS = mapOf(
+        "customized" to R.string.skillcopy_source_customized,
+        "builtin" to R.string.skillcopy_source_builtin,
+    )
+
+    fun sourceLabel(source: String): String {
+        SOURCE_LABELS[source]?.let { return Texts.get(it) }
+        return source.ifBlank { Texts.get(R.string.skillcopy_source_unknown) }
     }
 
     /** 技能池的同步结论。空串表示服务端没给，不显示。 */
-    fun syncStatusLabel(status: String): String = when (status) {
-        "synced" -> "已同步"
-        "outdated" -> "待更新"
-        "" -> ""
-        else -> status
+    private val SYNC_LABELS = mapOf(
+        "synced" to R.string.skillcopy_sync_synced,
+        "outdated" to R.string.skillcopy_sync_outdated,
+    )
+
+    fun syncStatusLabel(status: String): String {
+        if (status.isEmpty()) return ""
+        SYNC_LABELS[status]?.let { return Texts.get(it) }
+        return status
     }
 
     /**
@@ -39,12 +49,12 @@ internal object SkillCopy {
     fun frontmatterHint(content: String): String? {
         val text = content.trimStart()
         if (!text.startsWith("---")) {
-            return "正文开头需要一段 frontmatter，写明 name 与 description 两项"
+            return Texts.get(R.string.skillcopy_hint_missing_block)
         }
         val body = text.removePrefix("---")
         val end = body.indexOf("\n---")
         if (end < 0) {
-            return "frontmatter 没有闭合，需要在末尾补一行 ---"
+            return Texts.get(R.string.skillcopy_hint_unclosed)
         }
         val header = body.substring(0, end)
         val hasName = header.lineSequence().any { line ->
@@ -54,8 +64,8 @@ internal object SkillCopy {
             line.trimStart().startsWith("description:") && line.substringAfter(':').isNotBlank()
         }
         return when {
-            !hasName -> "frontmatter 缺少 name，服务端会拒绝保存"
-            !hasDescription -> "frontmatter 缺少 description，服务端会拒绝保存"
+            !hasName -> Texts.get(R.string.skillcopy_hint_missing_name)
+            !hasDescription -> Texts.get(R.string.skillcopy_hint_missing_description)
             else -> null
         }
     }
@@ -69,15 +79,21 @@ internal object SkillCopy {
      */
     fun scanBlockedText(detail: String?, maxSeverity: String?): String {
         val level = when (maxSeverity?.lowercase()) {
-            "critical" -> "严重"
-            "high" -> "高"
-            "medium" -> "中"
-            "low" -> "低"
+            "critical" -> Texts.get(R.string.skillcopy_severity_critical)
+            "high" -> Texts.get(R.string.skillcopy_severity_high)
+            "medium" -> Texts.get(R.string.skillcopy_severity_medium)
+            "low" -> Texts.get(R.string.skillcopy_severity_low)
             else -> null
         }
-        val head = if (level != null) "技能扫描发现${level}风险，操作已被拦截" else "技能扫描未通过，操作已被拦截"
-        val tail = detail?.takeIf { it.isNotBlank() }?.let { "：$it" }.orEmpty()
-        return "$head$tail。请修改技能内容，或先在 Web 控制台确认扫描规则。"
+        val head = if (level != null) {
+            Texts.get(R.string.skillcopy_scan_blocked_level, level)
+        } else {
+            Texts.get(R.string.skillcopy_scan_blocked)
+        }
+        val tail = detail?.takeIf { it.isNotBlank() }?.let {
+            Texts.get(R.string.skillcopy_scan_detail_suffix, it)
+        }.orEmpty()
+        return Texts.get(R.string.skillcopy_scan_footer, head, tail)
     }
 
     /**
@@ -102,7 +118,11 @@ internal object SkillCopy {
 
     /** 通道列表的展示。服务端默认 `["all"]`，表示全部通道。 */
     fun channelsLabel(channels: List<String>): String =
-        if (channels.isEmpty()) "未限定" else channels.joinToString("、")
+        if (channels.isEmpty()) {
+            Texts.get(R.string.skillcopy_channels_unlimited)
+        } else {
+            channels.joinToString(Texts.get(R.string.skillcopy_channel_separator))
+        }
 
     /** 结尾处带 `+08:00` / `-05:30` 这类偏移。 */
     private val OFFSET_SUFFIX = Regex("([+-]\\d{2}:?\\d{2})$")

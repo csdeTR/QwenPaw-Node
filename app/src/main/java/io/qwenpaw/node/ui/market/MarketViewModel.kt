@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.market
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.market.MarketLinkResolver
 import io.qwenpaw.node.data.model.MarketCategoryDto
 import io.qwenpaw.node.data.model.MarketProviderDto
@@ -14,6 +15,7 @@ import io.qwenpaw.node.data.model.SkillImportResultDto
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.data.remote.SafZipSource
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -122,7 +124,11 @@ class MarketViewModel(
         }
         val conn = connection() ?: run {
             _state.update {
-                it.copy(metaLoaded = true, catalogLoaded = true, metaError = "尚未连接服务器")
+                it.copy(
+                    metaLoaded = true,
+                    catalogLoaded = true,
+                    metaError = Texts.get(R.string.market_error_not_connected),
+                )
             }
             return
         }
@@ -195,7 +201,7 @@ class MarketViewModel(
         val conn = connection() ?: return
         val pages = current.searchableProviders.associate { it.key to 1 }
         if (pages.isEmpty()) {
-            _state.update { it.copy(searchError = "当前没有可用的市场来源") }
+            _state.update { it.copy(searchError = Texts.get(R.string.market_error_no_provider)) }
             return
         }
         _state.update { it.copy(searching = true, searchError = null, resultErrors = emptyList()) }
@@ -220,7 +226,11 @@ class MarketViewModel(
                             // 来源名换成中文标签：服务端给的是 key，界面上出现英文 key 没有意义。
                             resultErrors = response.errors.map { error ->
                                 val label = labelOf[error.provider] ?: error.provider
-                                "$label 暂时不可用：${error.message}"
+                                Texts.get(
+                                    R.string.market_error_provider_unavailable,
+                                    label,
+                                    error.message,
+                                )
                             },
                             truncated = response.byProvider.values.any { page -> page.hasMore },
                             searching = false,
@@ -260,7 +270,10 @@ class MarketViewModel(
                         it.copy(
                             pluginSearching = false,
                             pluginSearched = true,
-                            pluginError = "无法读取在线插件市场：${ErrorText.of(e)}",
+                            pluginError = Texts.get(
+                                R.string.market_error_online_plugins,
+                                ErrorText.of(e),
+                            ),
                         )
                     }
                 }
@@ -309,7 +322,9 @@ class MarketViewModel(
     fun installPluginFromUrl(source: String) {
         val url = source.trim()
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            _state.update { it.copy(notice = "安装地址必须是 http(s) 的 zip 链接") }
+            _state.update {
+                it.copy(notice = Texts.get(R.string.market_error_install_url))
+            }
             return
         }
         pendingPluginSource = null
@@ -354,13 +369,16 @@ class MarketViewModel(
                 _state.update {
                     it.copy(
                         pluginInstall = it.pluginInstall?.copy(stage = "done"),
-                        notice = buildString {
-                            append("已安装插件「")
-                            append(result.name.ifBlank { result.id })
-                            append("」")
-                            if (!result.loaded) {
-                                append("，需重启服务端后生效")
-                            }
+                        notice = if (result.loaded) {
+                            Texts.get(
+                                R.string.market_notice_plugin_installed,
+                                result.name.ifBlank { result.id },
+                            )
+                        } else {
+                            Texts.get(
+                                R.string.market_notice_plugin_installed_restart,
+                                result.name.ifBlank { result.id },
+                            )
                         },
                         catalogLoaded = false,
                     )
@@ -398,7 +416,7 @@ class MarketViewModel(
         val conn = connection() ?: return
         val url = result.sourceUrl.trim()
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            _state.update { it.copy(notice = "该条目没有可用的导入地址") }
+            _state.update { it.copy(notice = Texts.get(R.string.market_error_no_import_url)) }
             return
         }
         scope.launch {
@@ -425,7 +443,9 @@ class MarketViewModel(
                 }
                 pollHubInstall(task.taskId)
             } catch (e: Exception) {
-                _state.update { it.copy(notice = "导入失败：${ErrorText.of(e)}") }
+                _state.update {
+                    it.copy(notice = Texts.get(R.string.market_error_import, ErrorText.of(e)))
+                }
             }
         }
     }

@@ -30,11 +30,13 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 
 /**
  * 块级公式渲染。
@@ -90,7 +92,7 @@ private fun LatexFallback(source: String, color: Color, modifier: Modifier) {
             color = color,
         )
         Text(
-            text = "该公式用到了暂不支持的写法，以上为原始内容",
+            text = stringResource(R.string.latex_fallback_note),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),

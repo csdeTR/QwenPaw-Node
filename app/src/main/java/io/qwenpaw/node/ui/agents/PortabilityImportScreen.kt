@@ -23,7 +23,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.PortabilityAssetDto
 import io.qwenpaw.node.data.model.PortabilityJobDto
 import io.qwenpaw.node.data.model.PortabilityProviderDto
@@ -60,7 +63,7 @@ fun PortabilityImportScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { AdminTopBar(title = "从其他客户端导入", onBack = onBack) },
+        topBar = { AdminTopBar(title = stringResource(R.string.portability_title), onBack = onBack) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -86,7 +89,9 @@ fun PortabilityImportScreen(
                 )
             }
             if (state.error != null || state.notice != null) {
-                TextButton(onClick = onDismissNotice) { Text("清除提示") }
+                TextButton(onClick = onDismissNotice) {
+                    Text(stringResource(R.string.portability_action_dismiss_notice))
+                }
             }
 
             when (state.step) {
@@ -121,12 +126,12 @@ private fun SourcesStep(
     onToggle: (String) -> Unit,
     onStart: () -> Unit,
 ) {
-    SectionHeader("选择来源")
+    SectionHeader(stringResource(R.string.portability_section_sources))
     Card {
         Column(modifier = Modifier.padding(8.dp)) {
             if (state.sources.isEmpty()) {
                 Text(
-                    text = "没有可用的导入来源。请在服务端安装 Codex 或 Qoder，并先完成一次登录。",
+                    text = stringResource(R.string.portability_empty_sources),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(8.dp),
@@ -148,7 +153,11 @@ private fun SourcesStep(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(source.name.ifBlank { source.source }, style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = if (source.detected) "已检测到本地数据" else "未检测到数据",
+                            text = if (source.detected) {
+                                stringResource(R.string.portability_source_detected)
+                            } else {
+                                stringResource(R.string.portability_source_not_detected)
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -161,7 +170,7 @@ private fun SourcesStep(
         TextButton(
             enabled = state.selectedSources.isNotEmpty() && !state.loading,
             onClick = onStart,
-        ) { Text("开始扫描") }
+        ) { Text(stringResource(R.string.portability_action_start_scan)) }
     }
 }
 
@@ -176,9 +185,14 @@ private fun ScanningStep(onCancel: () -> Unit) {
     ) {
         CircularProgressIndicator()
         Spacer(Modifier.padding(start = 12.dp))
-        Text("正在扫描来源，可能需要一点时间…", style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = stringResource(R.string.portability_hint_scanning),
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
-    TextButton(onClick = onCancel, modifier = Modifier.padding(horizontal = 16.dp)) { Text("取消") }
+    TextButton(onClick = onCancel, modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text(stringResource(R.string.action_cancel))
+    }
 }
 
 @Composable
@@ -192,7 +206,10 @@ private fun InventoryStep(
 ) {
     val job = state.job
     if (job == null) {
-        Text("没有可导入的任务", modifier = Modifier.padding(20.dp))
+        Text(
+            text = stringResource(R.string.portability_empty_job),
+            modifier = Modifier.padding(20.dp),
+        )
         return
     }
     val hasPlugins = job.providers.any { provider ->
@@ -210,19 +227,21 @@ private fun InventoryStep(
         )
     }
     if (hasPlugins) {
-        SectionHeader("插件代码执行")
+        SectionHeader(stringResource(R.string.portability_section_plugin_execution))
         Card {
             SwitchRow(
-                title = "允许导入的插件执行",
-                subtitle = "插件代码会在服务端运行；仅在确认来源可信时开启",
+                title = stringResource(R.string.portability_allow_plugin_title),
+                subtitle = stringResource(R.string.portability_allow_plugin_subtitle),
                 checked = state.allowPluginExecution,
                 onCheckedChange = onAllowPluginExecution,
             )
         }
     }
     Row(modifier = Modifier.padding(16.dp)) {
-        TextButton(enabled = !state.loading, onClick = onStart) { Text("开始导入") }
-        TextButton(onClick = onCancel) { Text("取消") }
+        TextButton(enabled = !state.loading, onClick = onStart) {
+            Text(stringResource(R.string.portability_action_start_import))
+        }
+        TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
     }
 }
 
@@ -246,8 +265,12 @@ private fun ProviderInventory(
                 )
             }
             SwitchRow(
-                title = "导入会话",
-                subtitle = "共 ${provider.sessionsTotal} 条",
+                title = stringResource(R.string.portability_sessions_title),
+                subtitle = pluralStringResource(
+                    R.plurals.portability_sessions_total,
+                    provider.sessionsTotal,
+                    provider.sessionsTotal,
+                ),
                 checked = sessions,
                 onCheckedChange = onSessions,
             )
@@ -277,7 +300,7 @@ private fun ProviderInventory(
                             Text(asset.name.ifBlank { asset.sourceId }, style = MaterialTheme.typography.bodyMedium)
                             val hint = when {
                                 asset.blockedReason.isNotBlank() -> asset.blockedReason
-                                asset.state == "existing" -> "已存在，跳过"
+                                asset.state == "existing" -> stringResource(R.string.portability_asset_exists)
                                 else -> asset.message
                             }
                             if (hint.isNotBlank()) {
@@ -299,7 +322,10 @@ private fun ProviderInventory(
 private fun RunningStep(state: PortabilityUiState, onCancel: () -> Unit) {
     val job = state.job
     if (job == null) {
-        Text("没有正在进行的导入", modifier = Modifier.padding(20.dp))
+        Text(
+            text = stringResource(R.string.portability_empty_running),
+            modifier = Modifier.padding(20.dp),
+        )
         return
     }
     Row(
@@ -310,7 +336,11 @@ private fun RunningStep(state: PortabilityUiState, onCancel: () -> Unit) {
     ) {
         CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
         Text(
-            text = if (job.state == "cancelling") "正在取消…" else "正在导入…",
+            text = if (job.state == "cancelling") {
+                stringResource(R.string.portability_running_cancelling)
+            } else {
+                stringResource(R.string.portability_running_importing)
+            },
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -319,8 +349,12 @@ private fun RunningStep(state: PortabilityUiState, onCancel: () -> Unit) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(provider.source, style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    text = "会话 ${provider.sessionsImported}/${provider.sessionsTotal} · 状态 ${provider.state}" +
-                        if (provider.error.isNotBlank()) " · ${provider.error}" else "",
+                    text = stringResource(
+                        R.string.portability_provider_progress,
+                        provider.sessionsImported,
+                        provider.sessionsTotal,
+                        provider.state,
+                    ) + if (provider.error.isNotBlank()) " · ${provider.error}" else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -329,7 +363,7 @@ private fun RunningStep(state: PortabilityUiState, onCancel: () -> Unit) {
         Spacer(Modifier.height(8.dp))
     }
     if (job.logs.isNotEmpty()) {
-        SectionHeader("最近日志")
+        SectionHeader(stringResource(R.string.portability_section_recent_logs))
         Card {
             Column(modifier = Modifier.padding(14.dp)) {
                 job.logs.takeLast(6).forEach { line ->
@@ -338,7 +372,9 @@ private fun RunningStep(state: PortabilityUiState, onCancel: () -> Unit) {
             }
         }
     }
-    TextButton(onClick = onCancel, modifier = Modifier.padding(16.dp)) { Text("取消导入") }
+    TextButton(onClick = onCancel, modifier = Modifier.padding(16.dp)) {
+        Text(stringResource(R.string.portability_action_cancel_import))
+    }
 }
 
 @Composable
@@ -348,13 +384,18 @@ private fun ResultStep(
     onDone: () -> Unit,
 ) {
     val job = state.job ?: return
-    SectionHeader("结果")
+    SectionHeader(stringResource(R.string.portability_section_result))
     Card {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(resultNotice(job), style = MaterialTheme.typography.bodyLarge)
             job.providers.forEach { provider ->
                 Text(
-                    text = "${provider.source}：会话 ${provider.sessionsImported}/${provider.sessionsTotal}",
+                    text = stringResource(
+                        R.string.portability_result_provider,
+                        provider.source,
+                        provider.sessionsImported,
+                        provider.sessionsTotal,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -365,13 +406,26 @@ private fun ResultStep(
         provider.assets.filter { it.state == "failed" }.map { provider.source to it }
     }
     if (failures.isNotEmpty()) {
-        SectionHeader("失败项", "${failures.size} 个")
+        SectionHeader(
+            title = stringResource(R.string.portability_section_failures),
+            trailing = pluralStringResource(
+                R.plurals.portability_failures_count,
+                failures.size,
+                failures.size,
+            ),
+        )
         Card {
             Column(modifier = Modifier.padding(14.dp)) {
                 failures.take(20).forEach { (source, asset) ->
+                    val typeLabel = assetTypeLabel(asset.assetType)
                     Text(
-                        text = "${assetTypeLabel(asset.assetType)} · ${asset.name.ifBlank { asset.sourceId }}" +
-                            "（$source）${asset.message}",
+                        text = stringResource(
+                            R.string.portability_result_failure_item,
+                            typeLabel,
+                            asset.name.ifBlank { asset.sourceId },
+                            source,
+                            asset.message,
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(vertical = 2.dp),
@@ -380,19 +434,24 @@ private fun ResultStep(
             }
         }
         Row(modifier = Modifier.padding(16.dp)) {
-            TextButton(enabled = !state.loading, onClick = onRetry) { Text("重试失败项") }
-            TextButton(onClick = onDone) { Text("完成") }
+            TextButton(enabled = !state.loading, onClick = onRetry) {
+                Text(stringResource(R.string.portability_action_retry_failed))
+            }
+            TextButton(onClick = onDone) { Text(stringResource(R.string.action_done)) }
         }
     } else {
-        TextButton(onClick = onDone, modifier = Modifier.padding(16.dp)) { Text("完成") }
+        TextButton(onClick = onDone, modifier = Modifier.padding(16.dp)) {
+            Text(stringResource(R.string.action_done))
+        }
     }
 }
 
+@Composable
 private fun assetTypeLabel(type: String): String = when (type) {
-    "memory" -> "记忆"
-    "cron", "scheduled_task" -> "定时任务"
-    "skill", "skills" -> "技能"
+    "memory" -> stringResource(R.string.portability_asset_memory)
+    "cron", "scheduled_task" -> stringResource(R.string.portability_asset_cron)
+    "skill", "skills" -> stringResource(R.string.portability_asset_skill)
     "mcp" -> "MCP"
-    "plugin", "plugins" -> "插件"
+    "plugin", "plugins" -> stringResource(R.string.portability_asset_plugin)
     else -> type
 }

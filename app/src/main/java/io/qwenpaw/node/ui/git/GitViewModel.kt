@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.git
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.GitBranchDto
 import io.qwenpaw.node.data.model.GitChangeDto
 import io.qwenpaw.node.data.model.GitLogEntryDto
@@ -8,6 +9,7 @@ import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.data.terminal.TerminalStore
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -190,11 +192,15 @@ class GitViewModel(
         val conn = connection() ?: return
         val message = _state.value.message.trim()
         if (message.isEmpty()) {
-            _state.update { it.copy(notice = "提交信息不能为空") }
+            _state.update {
+                it.copy(notice = Texts.get(R.string.git_notice_message_required))
+            }
             return
         }
         if (_state.value.staged.isEmpty()) {
-            _state.update { it.copy(notice = "没有已暂存的改动") }
+            _state.update {
+                it.copy(notice = Texts.get(R.string.git_notice_nothing_staged))
+            }
             return
         }
         scope.launch {
@@ -202,7 +208,11 @@ class GitViewModel(
             try {
                 withContext(Dispatchers.IO) { api.gitCommit(conn, message) }
                 _state.update {
-                    it.copy(busy = false, message = "", notice = "已提交")
+                    it.copy(
+                        busy = false,
+                        message = "",
+                        notice = Texts.get(R.string.git_notice_committed),
+                    )
                 }
                 load()
             } catch (e: Exception) {

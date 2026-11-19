@@ -45,8 +45,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.BackupMetaDto
 import io.qwenpaw.node.data.model.BackupScopeDto
 import io.qwenpaw.node.data.remote.SafZipSource
@@ -140,7 +143,10 @@ fun BackupScreen(
                 .getOrElse {
                     android.widget.Toast.makeText(
                         context,
-                        "无法读取所选文件：${it.message.orEmpty()}",
+                        context.getString(
+                            R.string.backup_error_read_file,
+                            it.message.orEmpty(),
+                        ),
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                     return@launch
@@ -170,15 +176,23 @@ fun BackupScreen(
                         .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconCircle(icon = QwenIcons.arrowLeft, description = "返回", onClick = onBack)
+                    IconCircle(
+                        icon = QwenIcons.arrowLeft,
+                        description = stringResource(R.string.action_back),
+                        onClick = onBack,
+                    )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "备份",
+                        text = stringResource(R.string.backup_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
-                    IconCircle(icon = QwenIcons.refresh, description = "刷新", onClick = actions.refresh)
+                    IconCircle(
+                        icon = QwenIcons.refresh,
+                        description = stringResource(R.string.action_refresh),
+                        onClick = actions.refresh,
+                    )
                 }
             }
         },
@@ -200,8 +214,7 @@ fun BackupScreen(
         ) {
             item {
                 Text(
-                    text = "备份包含服务端配置与智能体工作区，可在换机或误操作前留档。" +
-                        "创建与导入都会上传工作区文件，请留意当前网络流量。",
+                    text = stringResource(R.string.backup_intro),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -221,13 +234,13 @@ fun BackupScreen(
                 item { JobCard(state, actions) }
             }
             item {
-                SectionHeader("新建备份")
+                SectionHeader(stringResource(R.string.backup_create_section))
                 Card {
                     Column(Modifier.padding(14.dp)) {
                         OutlinedTextField(
                             value = state.createName,
                             onValueChange = actions.setCreateName,
-                            label = { Text("名称") },
+                            label = { Text(stringResource(R.string.backup_create_name_label)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -235,38 +248,38 @@ fun BackupScreen(
                         OutlinedTextField(
                             value = state.createDescription,
                             onValueChange = actions.setCreateDescription,
-                            label = { Text("说明（可选）") },
+                            label = { Text(stringResource(R.string.backup_create_description_label)) },
                             minLines = 2,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Spacer(Modifier.height(10.dp))
                         ScopeSwitch(
-                            title = "智能体工作区",
-                            subtitle = "包含会话文件与项目目录",
+                            title = stringResource(R.string.backup_create_agents_title),
+                            subtitle = stringResource(R.string.backup_create_agents_subtitle),
                             checked = state.createScope.includeAgents,
                             onCheckedChange = {
                                 actions.setCreateScope(state.createScope.copy(includeAgents = it))
                             },
                         )
                         ScopeSwitch(
-                            title = "全局配置",
-                            subtitle = "模型、渠道与界面相关的服务端配置",
+                            title = stringResource(R.string.backup_scope_global_config),
+                            subtitle = stringResource(R.string.backup_create_global_subtitle),
                             checked = state.createScope.includeGlobalConfig,
                             onCheckedChange = {
                                 actions.setCreateScope(state.createScope.copy(includeGlobalConfig = it))
                             },
                         )
                         ScopeSwitch(
-                            title = "密钥",
-                            subtitle = "默认不包含；包含后备份包会持有明文密钥",
+                            title = stringResource(R.string.backup_scope_secrets),
+                            subtitle = stringResource(R.string.backup_create_secrets_subtitle),
                             checked = state.createScope.includeSecrets,
                             onCheckedChange = {
                                 actions.setCreateScope(state.createScope.copy(includeSecrets = it))
                             },
                         )
                         ScopeSwitch(
-                            title = "技能池",
-                            subtitle = "已安装的技能与依赖",
+                            title = stringResource(R.string.backup_scope_skill_pool),
+                            subtitle = stringResource(R.string.backup_create_skill_pool_subtitle),
                             checked = state.createScope.includeSkillPool,
                             onCheckedChange = {
                                 actions.setCreateScope(state.createScope.copy(includeSkillPool = it))
@@ -275,7 +288,7 @@ fun BackupScreen(
                         if (state.createScope.includeAgents) {
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "选择智能体",
+                                text = stringResource(R.string.backup_create_select_agents),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -301,7 +314,7 @@ fun BackupScreen(
                             }
                             if (state.agents.isEmpty()) {
                                 Text(
-                                    text = "服务端没有可选的智能体。",
+                                    text = stringResource(R.string.backup_create_no_agents),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -324,7 +337,7 @@ fun BackupScreen(
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
                             }
-                            Text("开始备份")
+                            Text(stringResource(R.string.backup_create_start))
                         }
                     }
                 }
@@ -335,8 +348,18 @@ fun BackupScreen(
                     val total = transfer.total
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                         Text(
-                            text = "正在导出：${DownloadPolicy.formatBytes(transfer.read)}" +
-                                if (total != null && total > 0) " / ${DownloadPolicy.formatBytes(total)}" else "",
+                            text = if (total != null && total > 0) {
+                                stringResource(
+                                    R.string.backup_export_progress_total,
+                                    DownloadPolicy.formatBytes(transfer.read),
+                                    DownloadPolicy.formatBytes(total),
+                                )
+                            } else {
+                                stringResource(
+                                    R.string.backup_export_progress,
+                                    DownloadPolicy.formatBytes(transfer.read),
+                                )
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -354,30 +377,39 @@ fun BackupScreen(
             }
 
             item {
-                SectionHeader("导入备份", "选择 .zip")
+                SectionHeader(
+                    stringResource(R.string.backup_import_section),
+                    stringResource(R.string.backup_import_section_trailing),
+                )
                 Card {
                     Column(Modifier.padding(14.dp)) {
                         Text(
-                            text = "从本地选择一个备份包导入服务端。同 id 的备份已存在时，" +
-                                "会先询问是否覆盖。",
+                            text = stringResource(R.string.backup_import_section_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }) {
-                            Text("选择备份包")
+                            Text(stringResource(R.string.backup_import_pick))
                         }
                     }
                 }
             }
 
             item {
-                SectionHeader("已有备份", "${state.backups.size} 个")
+                SectionHeader(
+                    stringResource(R.string.backup_list_section),
+                    pluralStringResource(
+                        R.plurals.backup_list_count,
+                        state.backups.size,
+                        state.backups.size,
+                    ),
+                )
             }
             if (state.backups.isEmpty()) {
                 item {
                     Text(
-                        text = "服务端还没有备份。",
+                        text = stringResource(R.string.backup_list_empty),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -402,15 +434,26 @@ fun BackupScreen(
     }
 
     state.deleteTarget?.let { target ->
+        val unknown = stringResource(R.string.backup_unknown_value)
         DestructiveActionDialog(
-            title = "删除备份",
-            message = "将删除备份「${target.name.ifBlank { target.id }}」，服务端不保留回收站。",
-            impacts = listOf(
-                "备份创建时间：${TimeLabels.fullStamp(target.createdAt).orEmpty().ifBlank { "未知" }}",
-                "智能体数量：${target.agentCount}",
-                "删除后无法从该备份恢复。",
+            title = stringResource(R.string.backup_delete_title),
+            message = stringResource(
+                R.string.backup_delete_message,
+                target.name.ifBlank { target.id },
             ),
-            confirmLabel = if (state.deleting) "正在删除…" else "删除",
+            impacts = listOf(
+                stringResource(
+                    R.string.backup_delete_impact_created,
+                    TimeLabels.fullStamp(target.createdAt).orEmpty().ifBlank { unknown },
+                ),
+                stringResource(R.string.backup_delete_impact_agents, target.agentCount),
+                stringResource(R.string.backup_delete_impact_irreversible),
+            ),
+            confirmLabel = if (state.deleting) {
+                stringResource(R.string.backup_deleting)
+            } else {
+                stringResource(R.string.action_delete)
+            },
             onConfirm = { if (!state.deleting) actions.confirmDelete() },
             onDismiss = actions.dismissDelete,
         )
@@ -426,19 +469,21 @@ fun BackupScreen(
 @Composable
 private fun JobCard(state: BackupUiState, actions: BackupActions) {
     val job = state.job ?: return
-    SectionHeader("备份任务")
+    SectionHeader(stringResource(R.string.backup_job_section))
     Card {
         Column(Modifier.padding(14.dp)) {
+            val statusText = when (job.status) {
+                "pending" -> stringResource(R.string.backup_job_pending)
+                "running" -> stringResource(R.string.backup_job_running)
+                "cancel_requested" -> stringResource(R.string.backup_job_cancelling)
+                "completed" -> stringResource(R.string.backup_job_completed)
+                "failed" -> stringResource(R.string.backup_job_failed)
+                "cancelled" -> stringResource(R.string.action_cancelled)
+                else -> job.status
+            }
+            val phaseText = if (job.phase.isNotBlank()) phaseLabel(job.phase) else ""
             Text(
-                text = when (job.status) {
-                    "pending" -> "等待开始"
-                    "running" -> "正在备份"
-                    "cancel_requested" -> "正在取消"
-                    "completed" -> "已完成"
-                    "failed" -> "备份失败"
-                    "cancelled" -> "已取消"
-                    else -> job.status
-                } + if (job.phase.isNotBlank()) " · ${phaseLabel(job.phase)}" else "",
+                text = if (phaseText.isNotEmpty()) "$statusText · $phaseText" else statusText,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
             )
@@ -473,14 +518,18 @@ private fun JobCard(state: BackupUiState, actions: BackupActions) {
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!job.isTerminal) {
-                    TextButton(onClick = actions.cancelJob) { Text("取消任务") }
+                    TextButton(onClick = actions.cancelJob) {
+                        Text(stringResource(R.string.backup_job_cancel))
+                    }
                 }
                 if (!state.jobStreaming && !job.isTerminal) {
-                    TextButton(onClick = actions.retryJob) { Text("重新获取进度") }
+                    TextButton(onClick = actions.retryJob) {
+                        Text(stringResource(R.string.backup_job_retry))
+                    }
                 }
                 if (state.jobStreaming) {
                     Text(
-                        text = "进度实时更新",
+                        text = stringResource(R.string.backup_job_streaming),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 8.dp),
@@ -512,10 +561,20 @@ private fun BackupRow(
             Text(
                 text = listOfNotNull(
                     TimeLabels.fullStamp(backup.createdAt)?.takeIf { it.isNotBlank() },
-                    "${backup.agentCount} 个智能体",
+                    pluralStringResource(
+                        R.plurals.backup_meta_agent_count,
+                        backup.agentCount,
+                        backup.agentCount,
+                    ),
                     scopeSummary(backup.scope),
-                    backup.qwenpawVersion.takeIf { it.isNotBlank() }?.let { "服务端 $it" },
-                    if (backup.acceptedViaTrust == true) "曾信任导入" else null,
+                    backup.qwenpawVersion.takeIf { it.isNotBlank() }?.let {
+                        stringResource(R.string.backup_meta_server_version, it)
+                    },
+                    if (backup.acceptedViaTrust == true) {
+                        stringResource(R.string.backup_meta_trusted)
+                    } else {
+                        null
+                    },
                 ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -530,28 +589,46 @@ private fun BackupRow(
             }
             Row {
                 TextButton(onClick = onDetail, enabled = state.detailLoadingId != backup.id) {
-                    Text(if (state.detailLoadingId == backup.id) "读取中…" else "详情")
+                    Text(
+                        if (state.detailLoadingId == backup.id) {
+                            stringResource(R.string.backup_detail_loading)
+                        } else {
+                            stringResource(R.string.backup_detail)
+                        },
+                    )
                 }
-                TextButton(onClick = onExport, enabled = state.exportId == null) { Text("导出") }
-                TextButton(onClick = onRestore) { Text("恢复") }
+                TextButton(onClick = onExport, enabled = state.exportId == null) {
+                    Text(stringResource(R.string.backup_export))
+                }
+                TextButton(onClick = onRestore) { Text(stringResource(R.string.backup_restore)) }
                 TextButton(onClick = onDelete) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
+                    Text(
+                        stringResource(R.string.action_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
             if (detail != null) {
                 HorizontalDivider()
                 if (detail.workspaceStats.isEmpty()) {
                     Text(
-                        text = "该备份不包含智能体工作区。",
+                        text = stringResource(R.string.backup_detail_no_workspace),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 6.dp),
                     )
                 } else {
                     detail.workspaceStats.forEach { (agentId, stats) ->
+                        val agentName = state.agents.firstOrNull { it.id == agentId }
+                            ?.name?.takeIf { it.isNotBlank() } ?: agentId
                         Text(
-                            text = "${state.agents.firstOrNull { it.id == agentId }?.name?.takeIf { it.isNotBlank() } ?: agentId}" +
-                                "：${stats.files} 个文件，${DownloadPolicy.formatBytes(stats.size)}",
+                            text = pluralStringResource(
+                                R.plurals.backup_detail_workspace_stats,
+                                stats.files,
+                                agentName,
+                                stats.files,
+                                DownloadPolicy.formatBytes(stats.size),
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 2.dp),
@@ -565,7 +642,9 @@ private fun BackupRow(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                TextButton(onClick = onDismissDetail) { Text("收起") }
+                TextButton(onClick = onDismissDetail) {
+                    Text(stringResource(R.string.backup_detail_collapse))
+                }
             }
         }
     }
@@ -576,7 +655,7 @@ private fun RestoreDialog(state: BackupUiState, draft: RestoreDraft, actions: Ba
     val trustAllowed = draft.trustCode == null || draft.trustMode() != null
     AlertDialog(
         onDismissRequest = actions.dismissRestore,
-        title = { Text("恢复备份", fontWeight = FontWeight.SemiBold) },
+        title = { Text(stringResource(R.string.backup_restore_title), fontWeight = FontWeight.SemiBold) },
         text = {
             Column(
                 modifier = Modifier
@@ -587,7 +666,7 @@ private fun RestoreDialog(state: BackupUiState, draft: RestoreDraft, actions: Ba
                     RestoreMode.entries.forEach { mode ->
                         val selected = draft.mode == mode
                         Text(
-                            text = mode.label,
+                            text = stringResource(mode.labelRes),
                             style = MaterialTheme.typography.labelLarge,
                             color = if (selected) {
                                 MaterialTheme.colorScheme.onSecondaryContainer
@@ -611,7 +690,7 @@ private fun RestoreDialog(state: BackupUiState, draft: RestoreDraft, actions: Ba
                 if (draft.mode == RestoreMode.CUSTOM) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "智能体工作区",
+                        text = stringResource(R.string.backup_create_agents_title),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -637,25 +716,29 @@ private fun RestoreDialog(state: BackupUiState, draft: RestoreDraft, actions: Ba
                 }
                 Spacer(Modifier.height(6.dp))
                 ScopeSwitch(
-                    title = "全局配置",
+                    title = stringResource(R.string.backup_scope_global_config),
                     checked = draft.includeGlobalConfig,
                     onCheckedChange = { actions.updateRestore(draft.copy(includeGlobalConfig = it)) },
                 )
                 ScopeSwitch(
-                    title = "密钥",
-                    subtitle = if (draft.secretsAvailable) null else "该备份不包含密钥",
+                    title = stringResource(R.string.backup_scope_secrets),
+                    subtitle = if (draft.secretsAvailable) {
+                        null
+                    } else {
+                        stringResource(R.string.backup_restore_secrets_unavailable)
+                    },
                     checked = draft.includeSecrets && draft.secretsAvailable,
                     enabled = draft.secretsAvailable,
                     onCheckedChange = { actions.updateRestore(draft.copy(includeSecrets = it)) },
                 )
                 ScopeSwitch(
-                    title = "技能池",
+                    title = stringResource(R.string.backup_scope_skill_pool),
                     checked = draft.includeSkillPool,
                     onCheckedChange = { actions.updateRestore(draft.copy(includeSkillPool = it)) },
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "影响范围",
+                    text = stringResource(R.string.backup_restore_impacts_title),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (draft.mode == RestoreMode.FULL) {
                         MaterialTheme.colorScheme.error
@@ -688,9 +771,9 @@ private fun RestoreDialog(state: BackupUiState, draft: RestoreDraft, actions: Ba
             ) {
                 Text(
                     text = when {
-                        state.restoreApplying -> "正在恢复…"
-                        draft.trustMode() != null -> "信任并恢复"
-                        else -> "恢复"
+                        state.restoreApplying -> stringResource(R.string.backup_restore_applying)
+                        draft.trustMode() != null -> stringResource(R.string.backup_restore_trust)
+                        else -> stringResource(R.string.backup_restore)
                     },
                     color = if (trustAllowed) {
                         MaterialTheme.colorScheme.error
@@ -701,7 +784,9 @@ private fun RestoreDialog(state: BackupUiState, draft: RestoreDraft, actions: Ba
             }
         },
         dismissButton = {
-            TextButton(onClick = actions.dismissRestore) { Text("取消") }
+            TextButton(onClick = actions.dismissRestore) {
+                Text(stringResource(R.string.action_cancel))
+            }
         },
     )
 }
@@ -712,11 +797,13 @@ private fun ImportDialogs(state: BackupUiState, actions: BackupActions) {
         ImportState.Idle -> Unit
         is ImportState.Uploading -> AlertDialog(
             onDismissRequest = { },
-            title = { Text("正在导入") },
+            title = { Text(stringResource(R.string.backup_import_uploading_title)) },
             text = {
                 Column {
                     Text(
-                        text = importing.fileName.ifBlank { "备份包" },
+                        text = importing.fileName.ifBlank {
+                            stringResource(R.string.backup_import_file_fallback)
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(8.dp))
@@ -736,7 +823,10 @@ private fun ImportDialogs(state: BackupUiState, actions: BackupActions) {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "已上传 ${DownloadPolicy.formatBytes(importing.read)}",
+                            text = stringResource(
+                                R.string.backup_import_uploaded,
+                                DownloadPolicy.formatBytes(importing.read),
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -744,44 +834,66 @@ private fun ImportDialogs(state: BackupUiState, actions: BackupActions) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = actions.dismissImport) { Text("取消导入") }
+                TextButton(onClick = actions.dismissImport) {
+                    Text(stringResource(R.string.backup_import_cancel))
+                }
             },
         )
 
         is ImportState.Saving -> AlertDialog(
             onDismissRequest = { },
-            title = { Text("正在写入") },
-            text = { Text("服务端正在解包并校验备份，请稍候。") },
+            title = { Text(stringResource(R.string.backup_import_saving_title)) },
+            text = { Text(stringResource(R.string.backup_import_saving_message)) },
             confirmButton = { },
         )
 
         is ImportState.Conflict -> DestructiveActionDialog(
-            title = "备份已存在",
-            message = "服务端已有 id 为「${importing.existing.id}」的备份。继续将覆盖该备份。",
-            impacts = listOf(
-                "已有备份：${importing.existing.name.ifBlank { importing.existing.id }}",
-                "创建时间：${TimeLabels.fullStamp(importing.existing.createdAt).orEmpty().ifBlank { "未知" }}",
-                "覆盖后无法恢复原有备份。",
+            title = stringResource(R.string.backup_import_conflict_title),
+            message = stringResource(
+                R.string.backup_import_conflict_message,
+                importing.existing.id,
             ),
-            confirmLabel = "覆盖导入",
+            impacts = listOf(
+                stringResource(
+                    R.string.backup_import_conflict_existing,
+                    importing.existing.name.ifBlank { importing.existing.id },
+                ),
+                stringResource(
+                    R.string.backup_import_conflict_created,
+                    TimeLabels.fullStamp(importing.existing.createdAt).orEmpty()
+                        .ifBlank { stringResource(R.string.backup_unknown_value) },
+                ),
+                stringResource(R.string.backup_import_conflict_irreversible),
+            ),
+            confirmLabel = stringResource(R.string.backup_import_overwrite),
             onConfirm = actions.confirmImportOverwrite,
             onDismiss = actions.dismissImport,
         )
 
         is ImportState.TrustRequired -> AlertDialog(
             onDismissRequest = actions.dismissImport,
-            title = { Text(if (importing.canTrust) "需要确认信任" else "无法导入") },
+            title = {
+                Text(
+                    if (importing.canTrust) {
+                        stringResource(R.string.backup_import_trust_title)
+                    } else {
+                        stringResource(R.string.backup_import_blocked_title)
+                    },
+                )
+            },
             text = {
                 Column {
                     Text(
-                        text = importing.message.ifBlank { "该备份的签名无法验证。" },
+                        text = importing.message.ifBlank {
+                            stringResource(R.string.backup_import_signature_unknown)
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (importing.canTrust) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "继续将信任该备份的内容，并以本机密钥重新签名。",
+                            text = stringResource(R.string.backup_import_trust_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -790,27 +902,40 @@ private fun ImportDialogs(state: BackupUiState, actions: BackupActions) {
             },
             confirmButton = {
                 if (importing.canTrust) {
-                    TextButton(onClick = actions.trustImport) { Text("信任并导入") }
+                    TextButton(onClick = actions.trustImport) {
+                        Text(stringResource(R.string.backup_import_trust))
+                    }
                 }
             },
             dismissButton = {
                 TextButton(onClick = actions.dismissImport) {
-                    Text(if (importing.canTrust) "取消" else "关闭")
+                    Text(
+                        if (importing.canTrust) {
+                            stringResource(R.string.action_cancel)
+                        } else {
+                            stringResource(R.string.action_close)
+                        },
+                    )
                 }
             },
         )
 
         is ImportState.Done -> AlertDialog(
             onDismissRequest = actions.dismissImport,
-            title = { Text("导入完成") },
+            title = { Text(stringResource(R.string.backup_import_done_title)) },
             text = {
                 Text(
-                    text = "已导入备份「${importing.backup.name.ifBlank { importing.backup.id }}」。",
+                    text = stringResource(
+                        R.string.backup_import_done_message,
+                        importing.backup.name.ifBlank { importing.backup.id },
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
             confirmButton = {
-                TextButton(onClick = actions.dismissImport) { Text("好") }
+                TextButton(onClick = actions.dismissImport) {
+                    Text(stringResource(R.string.backup_import_done_confirm))
+                }
             },
         )
     }
@@ -861,23 +986,29 @@ private fun NoticeCard(message: String, danger: Boolean, onDismiss: () -> Unit) 
                 },
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
         }
     }
 }
 
+@Composable
 private fun phaseLabel(phase: String): String = when (phase) {
-    "preparing" -> "准备中"
-    "agents" -> "写入智能体"
-    "finalizing" -> "收尾"
+    "preparing" -> stringResource(R.string.backup_phase_preparing)
+    "agents" -> stringResource(R.string.backup_phase_agents)
+    "finalizing" -> stringResource(R.string.backup_phase_finalizing)
     else -> phase
 }
 
+@Composable
 private fun scopeSummary(scope: BackupScopeDto): String {
     val parts = mutableListOf<String>()
-    if (scope.includeAgents) parts += "智能体"
-    if (scope.includeGlobalConfig) parts += "全局配置"
-    if (scope.includeSecrets) parts += "密钥"
-    if (scope.includeSkillPool) parts += "技能池"
-    return if (parts.isEmpty()) "空范围" else parts.joinToString("、")
+    if (scope.includeAgents) parts += stringResource(R.string.backup_scope_agents)
+    if (scope.includeGlobalConfig) parts += stringResource(R.string.backup_scope_global_config)
+    if (scope.includeSecrets) parts += stringResource(R.string.backup_scope_secrets)
+    if (scope.includeSkillPool) parts += stringResource(R.string.backup_scope_skill_pool)
+    return if (parts.isEmpty()) {
+        stringResource(R.string.backup_scope_empty)
+    } else {
+        parts.joinToString(stringResource(R.string.backup_list_separator))
+    }
 }

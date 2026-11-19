@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 用户默认昵称 -->
+    <string name="user_default_name">我</string>
+
+    <!-- 时间标签 -->
+    <string name="time_today">今天</string>
+    <string name="time_yesterday">昨天</string>
+    <string name="time_pattern_month_day">M月d日</string>
+
+    <!-- 主界面与导航 -->
+    <string name="main_agent_default_name">智能体</string>
+    <string name="main_import_cancelled">已取消导入</string>
+    <string name="main_read_file_failed">无法读取该文件</string>
+    <string name="main_log_loaded">已载入日志</string>
+    <string name="main_read_image_failed">无法读取该图片</string>
+    <string name="main_image_unreadable">该图片无法解析</string>
+    <string name="main_gif_saved">动图已保存，头像中仅显示首帧</string>
+    <string name="main_server_not_connected">还没有连接服务器</string>
+    <string name="main_transcribe_failed">转写失败</string>
+    <string name="main_model_incomplete">模型文件不完整，重新下载一次</string>
+    <string name="main_recording_limit">录音已达 %1$d 秒上限</string>
+    <string name="main_no_mic_permission">没有麦克风权限，无法录音</string>
+    <plurals name="main_attach_upload_failed">
+        <item quantity="other">%1$d 个附件上传失败，请重试</item>
+    </plurals>
+    <string name="main_terminal_running_title">终端会话正在运行</string>
+    <string name="main_terminal_switch_other">其他实例</string>
+    <string name="main_terminal_switch_message">切换到「%1$s」会中断当前的终端会话。可以先打开终端页面处理，或停止全部终端后再切换。</string>
+    <string name="main_open_terminal_page">打开终端页面</string>
+    <string name="main_stop_terminal">停止终端</string>
+    <string name="main_icon_saved">图标已保存</string>
+    <string name="main_avatar_saved">头像已保存</string>
+    <string name="main_create_group_failed">新建分组失败，请重试</string>
+    <string name="main_default_chat_name">对话</string>
+    <string name="main_connect_failed_address">无法连接该地址</string>
+    <string name="main_connect_ok">连接正常</string>
+    <string name="main_connect_ok_with_version">连接正常，服务端 %1$s</string>
+    <string name="main_export_log_file">QwenPaw 运行日志.txt</string>
+    <string name="main_avatar_removed">已移除头像</string>
+    <string name="main_share_chooser">分享到</string>
+
+    <!-- AppViewModel 的运行与登出提示 -->
+    <string name="app_log_address_switch">地址从 %1$s 切换到 %2$s</string>
+    <string name="app_connect_error_logout_hint">%1$s\n在「设置 → 服务器」里找到该实例，点「退出登录」，再重新输入账号密码</string>
+    <string name="app_auth_disabled_local_cleared">该实例未启用 Web 登录认证，本地凭据已清除</string>
+    <string name="app_revoke_failed">吊销凭据失败：%1$s；本地凭据已清除</string>
+    <string name="app_logged_out">已退出登录，重新连接需再次输入账号密码</string>
+    <string name="app_log_events_fallback">事件流结束，回落到按需刷新</string>
+
+    <!-- 错误文案 -->
+    <string name="error_not_found_404">对话不存在或已被删除</string>
+    <string name="error_busy_409">该对话已有任务在运行，请先停止或等待完成</string>
+    <string name="error_console_disabled_503">Console 频道未启用，请在服务端开启</string>
+    <string name="error_host_not_found">找不到服务器，请检查地址与网络</string>
+    <string name="error_connect_failed">无法连接服务器，请确认 QwenPaw 已启动且地址端口正确</string>
+    <string name="error_timeout">连接超时，请检查网络后重试</string>
+    <string name="error_network_lost">网络中断：请检查网络后重试（草稿已保存）</string>
+    <string name="error_unknown">未知错误</string>
+    <string name="error_https_required">若服务端只接受 https，请把地址改成 https:// 开头，或核对端口</string>
+    <string name="error_http_only">该地址可能只提供 http，可尝试改成 http:// 开头</string>
+    <string name="error_proxy_auth_required">在「设置 → 服务器」里为该实例填写反向代理账号与密码</string>
+    <string name="error_auth_proxy_basic">该地址由反向代理保护，需要填写反向代理账号与密码</string>
+    <string name="error_auth_login_required">服务器要求登录，请到「设置 → 服务器」填写账号与密码</string>
+    <string name="error_auth_bad_credentials">用户名或密码不正确</string>
+    <string name="error_auth_token_expired">登录已失效，请重新登录</string>
+
+    <!-- 语言自称：固定用该语言本身书写，不随界面语言变化 -->
+    <string name="lang_name_zh" translatable="false">中文</string>
+    <string name="lang_name_en" translatable="false">English</string>
+    <string name="lang_name_ja" translatable="false">日本語</string>
+    <string name="lang_name_ru" translatable="false">Русский</string>
+    <string name="lang_name_pt_br" translatable="false">Português (Brasil)</string>
+    <string name="lang_name_id" translatable="false">Bahasa Indonesia</string>
+    <string name="lang_name_vi" translatable="false">Tiếng Việt</string>
+</resources>

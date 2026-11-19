@@ -45,10 +45,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.terminal.TerminalConnection
 import io.qwenpaw.node.data.terminal.TerminalShell
 import io.qwenpaw.node.data.terminal.TerminalSource
@@ -147,7 +149,7 @@ fun TerminalScreen(
                     text = message,
                     isError = true,
                     onDismiss = actions.dismissError,
-                    actionLabel = "重试",
+                    actionLabel = stringResource(R.string.action_retry),
                     onAction = actions.reconnect,
                 )
             }
@@ -163,12 +165,19 @@ fun TerminalScreen(
 
             when (val current = connection) {
                 is TerminalConnection.Failed -> {
-                    val hostKeyChanged = current.message.contains("主机密钥")
+                    // 用资源里的完整句子匹配而不是写死中文：换语言后这条分支仍成立，
+                    // 多地址汇总失败时消息里也包含同一句。
+                    val hostKeyChanged =
+                        current.message.contains(stringResource(R.string.ssh_error_host_key_changed))
                     NoticeStrip(
                         text = current.message,
                         isError = true,
                         onDismiss = null,
-                        actionLabel = if (hostKeyChanged) "清除主机密钥" else "重连",
+                        actionLabel = if (hostKeyChanged) {
+                            stringResource(R.string.terminal_action_clear_host_key)
+                        } else {
+                            stringResource(R.string.terminal_action_reconnect)
+                        },
                         onAction = {
                             if (hostKeyChanged) {
                                 actions.clearHostKey()
@@ -179,15 +188,22 @@ fun TerminalScreen(
                         },
                     )
                 }
-                is TerminalConnection.Exited -> NoticeStrip(
-                    text = "终端已退出${current.code?.let { "（退出码 $it）" } ?: ""}",
-                    isError = false,
-                    onDismiss = null,
-                    actionLabel = "重新打开",
-                    onAction = actions.reconnect,
-                )
+                is TerminalConnection.Exited -> {
+                    val code = current.code
+                    NoticeStrip(
+                        text = if (code != null) {
+                            stringResource(R.string.terminal_exited_with_code, code)
+                        } else {
+                            stringResource(R.string.terminal_exited)
+                        },
+                        isError = false,
+                        onDismiss = null,
+                        actionLabel = stringResource(R.string.terminal_action_reopen),
+                        onAction = actions.reconnect,
+                    )
+                }
                 TerminalConnection.Connecting -> Text(
-                    text = "正在连接…",
+                    text = stringResource(R.string.terminal_connecting),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
@@ -219,7 +235,7 @@ fun TerminalScreen(
                                             if (event.changes.size > 1 && actions.claimPinchTip()) {
                                                 Toast.makeText(
                                                     context,
-                                                    "双指缩放是临时放大；调整字号请用 A+ / A-",
+                                                    context.getString(R.string.terminal_pinch_tip),
                                                     Toast.LENGTH_SHORT,
                                                 ).show()
                                             }
@@ -272,13 +288,13 @@ fun TerminalScreen(
         var draft by remember(tab.id) { mutableStateOf(tab.title) }
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text("重命名标签") },
+            title = { Text(stringResource(R.string.terminal_rename_title)) },
             text = {
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { draft = it },
                     singleLine = true,
-                    label = { Text("标签名称") },
+                    label = { Text(stringResource(R.string.terminal_rename_label)) },
                 )
             },
             confirmButton = {
@@ -288,10 +304,12 @@ fun TerminalScreen(
                         actions.renameTab(tab.id, draft)
                         renameTarget = null
                     },
-                ) { Text("保存") }
+                ) { Text(stringResource(R.string.action_save)) }
             },
             dismissButton = {
-                TextButton(onClick = { renameTarget = null }) { Text("取消") }
+                TextButton(onClick = { renameTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -299,10 +317,10 @@ fun TerminalScreen(
     state.hostKeyPrompt?.let { prompt ->
         AlertDialog(
             onDismissRequest = { actions.respondHostKey(false) },
-            title = { Text("确认主机密钥") },
+            title = { Text(stringResource(R.string.terminal_host_key_title)) },
             text = {
                 Column {
-                    Text("首次连接需要确认服务器身份。请与服务器管理员核对下面的指纹。")
+                    Text(stringResource(R.string.terminal_host_key_message))
                     Spacer(Modifier.height(10.dp))
                     Text(
                         "${prompt.keyType}  ${prompt.host}:${prompt.port}",
@@ -316,7 +334,7 @@ fun TerminalScreen(
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "指纹变化或与管理员给出的不一致时，请取消连接。",
+                        stringResource(R.string.terminal_host_key_warning),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -324,12 +342,12 @@ fun TerminalScreen(
             },
             confirmButton = {
                 TextButton(onClick = { actions.respondHostKey(true) }) {
-                    Text("信任并连接")
+                    Text(stringResource(R.string.terminal_host_key_trust))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { actions.respondHostKey(false) }) {
-                    Text("取消")
+                    Text(stringResource(R.string.action_cancel))
                 }
             },
         )
@@ -338,13 +356,13 @@ fun TerminalScreen(
     if (confirmClose) {
         AlertDialog(
             onDismissRequest = { confirmClose = false },
-            title = { Text("关闭终端") },
+            title = { Text(stringResource(R.string.terminal_close_title)) },
             text = {
                 Text(
                     if (activeTab?.source == TerminalSource.LOCAL) {
-                        "关闭后会终止服务端终端及其子进程，正在运行的命令会中断。"
+                        stringResource(R.string.terminal_close_local_message)
                     } else {
-                        "关闭后会断开当前 SSH 会话。"
+                        stringResource(R.string.terminal_close_ssh_message)
                     },
                 )
             },
@@ -352,10 +370,12 @@ fun TerminalScreen(
                 TextButton(onClick = {
                     confirmClose = false
                     actions.closeActive()
-                }) { Text("关闭") }
+                }) { Text(stringResource(R.string.action_close)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClose = false }) { Text("取消") }
+                TextButton(onClick = { confirmClose = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -372,12 +392,14 @@ private fun EmptyTerminal(onChoose: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            "还没有打开终端",
+            stringResource(R.string.terminal_empty_title),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(10.dp))
-        TextButton(onClick = onChoose) { Text("选择终端方式") }
+        TextButton(onClick = onChoose) {
+            Text(stringResource(R.string.terminal_choose_source))
+        }
     }
 }
 
@@ -397,11 +419,16 @@ private fun TerminalTopBar(
             .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconCircle(icon = QwenIcons.arrowLeft, description = "返回", onClick = onBack)
+        IconCircle(
+            icon = QwenIcons.arrowLeft,
+            description = stringResource(R.string.action_back),
+            onClick = onBack,
+        )
         Spacer(Modifier.width(4.dp))
         Column(modifier = Modifier.weight(1f)) {
+            val defaultTitle = stringResource(R.string.terminal_default_title)
             Text(
-                text = state.title.ifBlank { "终端" },
+                text = state.title.ifBlank { defaultTitle },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -409,10 +436,10 @@ private fun TerminalTopBar(
             )
             Text(
                 text = when (state.source) {
-                    TerminalSource.LOCAL -> "默认"
-                    TerminalSource.SSH_RELAY -> "Bridge 中继"
-                    TerminalSource.SSH_DIRECT -> "SSH 直连"
-                    null -> "未选择方式"
+                    TerminalSource.LOCAL -> stringResource(R.string.terminal_source_local)
+                    TerminalSource.SSH_RELAY -> stringResource(R.string.terminal_source_relay)
+                    TerminalSource.SSH_DIRECT -> stringResource(R.string.terminal_source_direct)
+                    null -> stringResource(R.string.terminal_source_none)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -420,13 +447,17 @@ private fun TerminalTopBar(
         }
         IconCircle(
             icon = QwenIcons.plus,
-            description = "新建终端",
+            description = stringResource(R.string.terminal_new_tab),
             onClick = onNew,
             onLongClick = onSwitch,
             enabled = !state.busy && state.canAdd,
         )
         if (state.activeTab != null) {
-            IconCircle(icon = QwenIcons.close, description = "关闭终端", onClick = onClose)
+            IconCircle(
+                icon = QwenIcons.close,
+                description = stringResource(R.string.terminal_close_title),
+                onClick = onClose,
+            )
         }
     }
 }
@@ -446,10 +477,11 @@ private fun TerminalTabs(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val defaultTitle = stringResource(R.string.terminal_default_title)
         tabs.forEach { tab ->
             val selected = tab.id == activeTabId
             Text(
-                text = tab.title.ifBlank { "终端" },
+                text = tab.title.ifBlank { defaultTitle },
                 style = MaterialTheme.typography.labelMedium,
                 color = if (selected) {
                     MaterialTheme.colorScheme.onPrimary
@@ -535,7 +567,7 @@ private fun KeyBar(
             KeyButton("Ctrl-C") { sendControl('c'.code) }
             KeyButton("Ctrl-D") { sendControl('d'.code) }
             KeyButton("Ctrl-Z") { sendControl('z'.code) }
-            KeyButton("粘贴", onClick = onPaste)
+            KeyButton(stringResource(R.string.terminal_key_paste), onClick = onPaste)
         }
     }
 }
@@ -574,12 +606,12 @@ private fun TerminalSourceDialog(
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = actions.dismissSource,
-        title = { Text("选择终端方式") },
+        title = { Text(stringResource(R.string.terminal_choose_source)) },
         text = {
             Column {
                 if (state.shellOptions.size > 1) {
                     Text(
-                        "默认 / Bridge 中继的登录 shell",
+                        stringResource(R.string.terminal_shell_section_title),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -595,7 +627,7 @@ private fun TerminalSourceDialog(
                                     if (shell == TerminalShell.GIT_BASH) {
                                         Toast.makeText(
                                             context,
-                                            "请先确认目标 Windows 已安装 Bash（Git Bash 或 WSL）；未安装时命令会失败。",
+                                            context.getString(R.string.terminal_git_bash_hint),
                                             Toast.LENGTH_SHORT,
                                         ).show()
                                     }
@@ -607,24 +639,24 @@ private fun TerminalSourceDialog(
                     Spacer(Modifier.height(8.dp))
                 }
                 SourceRow(
-                    title = "默认",
-                    description = "使用 /api/terminals 端点，方式与 Web 控制台一致，需要开启「Web 登录认证」。",
+                    title = stringResource(R.string.terminal_source_local),
+                    description = stringResource(R.string.terminal_source_local_desc),
                     reason = state.localReason,
                     enabled = state.localAvailable,
                     onClick = actions.chooseLocal,
                 )
                 Spacer(Modifier.height(10.dp))
                 SourceRow(
-                    title = "Bridge 中继",
-                    description = "经配套插件 QwenPaw Node Bridge 转发；适合手机只能访问 QwenPaw Web 端口的场景。",
+                    title = stringResource(R.string.terminal_source_relay),
+                    description = stringResource(R.string.terminal_source_relay_desc),
                     reason = state.sshReason,
                     enabled = state.sshAvailable,
                     onClick = actions.chooseSsh,
                 )
                 Spacer(Modifier.height(10.dp))
                 SourceRow(
-                    title = "SSH 直连",
-                    description = "从本机直接连接目标 SSH；平台与 shell 在 设置 → 服务器 → 编辑实例 → 高级选项 → SSH 直连 中配置。",
+                    title = stringResource(R.string.terminal_source_direct),
+                    description = stringResource(R.string.terminal_source_direct_desc),
                     reason = state.directReason,
                     enabled = state.directAvailable,
                     onClick = actions.chooseDirect,
@@ -635,12 +667,11 @@ private fun TerminalSourceDialog(
                         checked = state.setAsDefault,
                         onCheckedChange = { actions.setAsDefault(it) },
                     )
-                    Text("设为默认")
+                    Text(stringResource(R.string.terminal_set_as_default))
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "SSH 凭据只在本机内存中使用。Bridge 中继的公网明文地址需先在" +
-                        "「受信任的连接」确认该地址仅你可访问；关闭安全提示不会解除这条限制。",
+                    text = stringResource(R.string.terminal_credentials_note),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -649,18 +680,25 @@ private fun TerminalSourceDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = actions.dismissSource) {
-                Text(if (state.tabs.isNotEmpty()) "取消" else "返回")
+                Text(
+                    if (state.tabs.isNotEmpty()) {
+                        stringResource(R.string.action_cancel)
+                    } else {
+                        stringResource(R.string.action_back)
+                    },
+                )
             }
         },
     )
 }
 
+@Composable
 private fun shellLabel(shell: TerminalShell): String = when (shell) {
-    TerminalShell.DEFAULT -> "默认"
+    TerminalShell.DEFAULT -> stringResource(R.string.terminal_source_local)
     TerminalShell.BASH -> "bash"
     TerminalShell.DASH -> "dash"
     TerminalShell.POWERSHELL -> "PowerShell"
-    TerminalShell.CMD -> "命令提示符"
+    TerminalShell.CMD -> stringResource(R.string.terminal_shell_cmd)
     TerminalShell.GIT_BASH -> "Bash"
 }
 
@@ -749,7 +787,7 @@ private fun NoticeStrip(
             TextButton(onClick = onAction) { Text(it) }
         }
         onDismiss?.let {
-            TextButton(onClick = it) { Text("关闭") }
+            TextButton(onClick = it) { Text(stringResource(R.string.action_close)) }
         }
     }
 }

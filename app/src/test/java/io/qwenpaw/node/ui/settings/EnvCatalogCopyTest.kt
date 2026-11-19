@@ -1,5 +1,8 @@
 package io.qwenpaw.node.ui.settings
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
+import io.qwenpaw.node.ui.i18n.Texts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -14,6 +17,11 @@ import org.junit.Test
  * 因此这里逐条校验。
  */
 class EnvCatalogCopyTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private val builtinKeys = listOf(
         "QWENPAW_LLM_STREAM_FIRST_CONTENT_TIMEOUT",
@@ -45,8 +53,8 @@ class EnvCatalogCopyTest {
         builtinKeys.forEach { key ->
             val copy = envSpecCopy(key)
             assertNotNull("缺少说明：$key", copy)
-            assertTrue("描述为空：$key", copy!!.description.isNotBlank())
-            assertTrue("修改方式为空：$key", copy.howToModify.isNotBlank())
+            assertTrue("描述为空：$key", Texts.get(copy!!.description).isNotBlank())
+            assertTrue("修改方式为空：$key", Texts.get(copy.howToModify).isNotBlank())
         }
     }
 
@@ -76,6 +84,6 @@ class EnvCatalogCopyTest {
 
     @Test
     fun `readonly hint matches the official wording`() {
-        assertEquals("仅供查看，QwenPaw 运行期间不能修改。", READONLY_HINT)
+        assertEquals("仅供查看，QwenPaw 运行期间不能修改。", Texts.get(READONLY_HINT))
     }
 }

@@ -1,12 +1,15 @@
 package io.qwenpaw.node.ui.backup
 
+import androidx.annotation.StringRes
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.BackupDetailDto
 import io.qwenpaw.node.data.model.RestoreBackupRequestDto
+import io.qwenpaw.node.ui.i18n.Texts
 
 /** 恢复方式。`full` 覆盖整包，`custom` 按勾选项恢复。 */
-enum class RestoreMode(val apiValue: String, val label: String) {
-    FULL("full", "整包恢复"),
-    CUSTOM("custom", "选择性恢复"),
+enum class RestoreMode(val apiValue: String, @StringRes val labelRes: Int) {
+    FULL("full", R.string.backup_restore_mode_full),
+    CUSTOM("custom", R.string.backup_restore_mode_custom),
 }
 
 /**
@@ -73,40 +76,46 @@ data class RestoreDraft(
     fun impacts(): List<String> {
         val lines = mutableListOf<String>()
         lines += when (mode) {
-            RestoreMode.FULL -> "恢复方式：整包替换服务端现有数据"
-            RestoreMode.CUSTOM -> "恢复方式：仅恢复勾选的内容"
+            RestoreMode.FULL -> Texts.get(R.string.backup_restore_impact_mode_full)
+            RestoreMode.CUSTOM -> Texts.get(R.string.backup_restore_impact_mode_custom)
         }
         val total = backup.workspaceStats.size
         lines += when {
-            mode == RestoreMode.FULL -> "智能体工作区：全部 $total 个"
-            agentIds.isEmpty() -> "智能体工作区：不恢复"
-            else -> "智能体工作区：已选 ${agentIds.size} 个，共 $total 个"
+            mode == RestoreMode.FULL ->
+                Texts.quantity(R.plurals.backup_restore_impact_agents_all, total, total)
+            agentIds.isEmpty() -> Texts.get(R.string.backup_restore_impact_agents_none)
+            else -> Texts.quantity(
+                R.plurals.backup_restore_impact_agents_selected,
+                agentIds.size,
+                agentIds.size,
+                total,
+            )
         }
         lines += if (includeGlobalConfig) {
-            "全局配置：覆盖服务端当前配置"
+            Texts.get(R.string.backup_restore_impact_global_overwrite)
         } else {
-            "全局配置：保留服务端当前配置"
+            Texts.get(R.string.backup_restore_impact_global_keep)
         }
         lines += when {
-            !backup.scope.includeSecrets -> "密钥：该备份未包含密钥，服务端现有密钥保持不变"
-            secretsEffective -> "密钥：覆盖服务端当前密钥"
-            else -> "密钥：保留服务端当前密钥"
+            !backup.scope.includeSecrets -> Texts.get(R.string.backup_restore_impact_secrets_absent)
+            secretsEffective -> Texts.get(R.string.backup_restore_impact_secrets_overwrite)
+            else -> Texts.get(R.string.backup_restore_impact_secrets_keep)
         }
         lines += if (includeSkillPool) {
-            "技能池：覆盖服务端当前技能池"
+            Texts.get(R.string.backup_restore_impact_skills_overwrite)
         } else {
-            "技能池：保留服务端当前技能池"
+            Texts.get(R.string.backup_restore_impact_skills_keep)
         }
         if (mode == RestoreMode.FULL) {
-            lines += "备份之后新建的智能体会从注册表中移除。"
+            lines += Texts.get(R.string.backup_restore_impact_new_agents)
         }
         if (trustCode != null) {
             lines += when (trustMode()) {
-                null -> "该备份的签名方式无法验证，不能继续恢复。"
-                else -> "该备份不是本机签名，继续将信任其内容并以本机密钥重新签名。"
+                null -> Texts.get(R.string.backup_restore_impact_signature_unknown)
+                else -> Texts.get(R.string.backup_restore_impact_signature_foreign)
             }
         }
-        lines += "服务端会在恢复前自动创建安全快照，可用于回滚本次恢复。"
+        lines += Texts.get(R.string.backup_restore_impact_snapshot)
         return lines
     }
 }

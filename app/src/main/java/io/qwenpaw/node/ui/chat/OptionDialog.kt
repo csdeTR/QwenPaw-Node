@@ -22,10 +22,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 对话框里的一项。[key] 由调用方解释，选中态与点击回调都按它派发。 */
@@ -86,7 +88,7 @@ fun OptionDialog(
                 ) {
                     Icon(
                         imageVector = QwenIcons.close,
-                        contentDescription = "关闭",
+                        contentDescription = stringResource(R.string.action_close),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -95,7 +97,7 @@ fun OptionDialog(
             Spacer(Modifier.height(6.dp))
             if (items.isEmpty() && leading == null) {
                 Text(
-                    text = emptyHint ?: "没有可选项",
+                    text = emptyHint ?: stringResource(R.string.option_empty),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),

@@ -108,7 +108,7 @@ object LatexParser {
             stopAtBracket: Boolean = false,
             stopAtEnvBoundary: Boolean = false,
         ): MathNode {
-            require(depth <= MAX_DEPTH) { "公式嵌套过深" }
+            require(depth <= MAX_DEPTH) { "formula nesting too deep" }
             val children = mutableListOf<MathNode>()
             var pendingSpace = false
             while (pos < s.length) {
@@ -175,19 +175,19 @@ object LatexParser {
         }
 
         private fun parseAtom(depth: Int): MathNode {
-            require(depth <= MAX_DEPTH) { "公式嵌套过深" }
-            require(pos < s.length) { "公式意外结束" }
+            require(depth <= MAX_DEPTH) { "formula nesting too deep" }
+            require(pos < s.length) { "formula ended unexpectedly" }
             return when (val c = s[pos]) {
                 '{' -> {
                     pos++
                     val body = parseSequence(depth + 1)
-                    require(pos < s.length && s[pos] == '}') { "花括号不配平" }
+                    require(pos < s.length && s[pos] == '}') { "unbalanced braces" }
                     pos++
                     body
                 }
 
                 '\\' -> parseCommand(depth)
-                '^', '_' -> throw IllegalStateException("缺少上下标的主体")
+                '^', '_' -> throw IllegalStateException("missing base for superscript/subscript")
                 else -> {
                     pos++
                     MathNode.Sym(c.toString())
@@ -200,7 +200,7 @@ object LatexParser {
             val name = readCommandName()
             if (name.isEmpty()) {
                 // `\{` `\}` `\|` `\,` 这类单字符命令
-                require(pos < s.length) { "反斜杠后缺少字符" }
+                require(pos < s.length) { "missing character after backslash" }
                 val ch = s[pos]
                 pos++
                 return when (ch) {
@@ -227,7 +227,7 @@ object LatexParser {
                     if (s.getOrNull(pos) == '[') {
                         pos++
                         index = parseSequence(depth + 1, stopAtBracket = true)
-                        require(s.getOrNull(pos) == ']') { "根指数缺少右方括号" }
+                        require(s.getOrNull(pos) == ']') { "missing closing bracket for root index" }
                         pos++
                     }
                     MathNode.Radical(index, parseArgument(depth))
@@ -241,7 +241,7 @@ object LatexParser {
                 "left" -> {
                     val left = readDelimiter()
                     val body = parseSequence(depth + 1, stopAtRight = true)
-                    require(peekCommandName() == "right") { "\\left 缺少配对的 \\right" }
+                    require(peekCommandName() == "right") { "\\left without matching \\right" }
                     // peek 只看到 `\right`，不能直接调 readCommandName：
                     // 它从当前字符读字母，而当前字符是反斜杠，会读到空串。
                     pos++
@@ -250,7 +250,7 @@ object LatexParser {
                     MathNode.Delim(left, body, right)
                 }
 
-                "right" -> throw IllegalStateException("多余的 \\right")
+                "right" -> throw IllegalStateException("unexpected \\right")
 
                 "sum", "prod", "coprod", "int", "iint", "oint", "bigcup", "bigcap" ->
                     MathNode.BigOp(bigOpSymbol(name), null, null)
@@ -317,7 +317,7 @@ object LatexParser {
                 current += parseSequence(depth + 1, stopAtEnvBoundary = true)
                 when {
                     pos >= s.length ->
-                        throw IllegalStateException("\\begin{$name} 缺少 \\end{$name}")
+                        throw IllegalStateException("\\begin{$name} without \\end{$name}")
 
                     s[pos] == '&' -> pos++
 
@@ -331,7 +331,7 @@ object LatexParser {
                         pos++ // 跳过反斜杠
                         readCommandName()
                         val endName = readRawGroup()
-                        require(endName == name) { "\\begin{$name} 与 \\end{$endName} 不匹配" }
+                        require(endName == name) { "\\begin{$name} does not match \\end{$endName}" }
                         // 行末的 `\\` 之后会留下一个空行，它不构成一行内容。
                         if (current.any { it !is MathNode.Row || it.children.isNotEmpty() }) {
                             rows += current
@@ -339,7 +339,7 @@ object LatexParser {
                         break
                     }
 
-                    else -> throw IllegalStateException("环境缺少 \\end")
+                    else -> throw IllegalStateException("environment missing \\end")
                 }
             }
             return MathNode.Env(kind, rows)
@@ -369,11 +369,11 @@ object LatexParser {
         /** 参数可以带花括号也可以不带（`\frac12`），后者只取一个原子。 */
         private fun parseArgument(depth: Int): MathNode {
             while (pos < s.length && s[pos].isWhitespace()) pos++
-            require(pos < s.length) { "缺少参数" }
+            require(pos < s.length) { "missing argument" }
             if (s[pos] == '{') {
                 pos++
                 val body = parseSequence(depth + 1)
-                require(pos < s.length && s[pos] == '}') { "花括号不配平" }
+                require(pos < s.length && s[pos] == '}') { "unbalanced braces" }
                 pos++
                 return body
             }
@@ -383,7 +383,7 @@ object LatexParser {
         /** 原样读取 `{…}` 里的文本，保留空格与中文。 */
         private fun readRawGroup(): String {
             while (pos < s.length && s[pos].isWhitespace()) pos++
-            require(pos < s.length && s[pos] == '{') { "\\text 缺少花括号" }
+            require(pos < s.length && s[pos] == '{') { "\\text missing braces" }
             var depth = 0
             val start = pos + 1
             while (pos < s.length) {
@@ -400,13 +400,13 @@ object LatexParser {
                 }
                 pos++
             }
-            throw IllegalStateException("\\text 花括号不配平")
+            throw IllegalStateException("\\text has unbalanced braces")
         }
 
         /** 读一个不带排版语义的文本参数，用于 `\mathbb{R}` 这类逐字符映射的命令。 */
         private fun readSimpleText(): String {
             while (pos < s.length && s[pos].isWhitespace()) pos++
-            require(pos < s.length) { "缺少参数" }
+            require(pos < s.length) { "missing argument" }
             if (s[pos] == '{') return readRawGroup()
             val c = s[pos]
             pos++
@@ -415,7 +415,7 @@ object LatexParser {
 
         private fun readDelimiter(): String {
             while (pos < s.length && s[pos].isWhitespace()) pos++
-            require(pos < s.length) { "\\left 缺少定界符" }
+            require(pos < s.length) { "\\left missing delimiter" }
             if (s[pos] == '\\') {
                 pos++
                 val name = readCommandName()
@@ -432,7 +432,7 @@ object LatexParser {
                     "rfloor" -> "⌋"
                     "lceil" -> "⌈"
                     "rceil" -> "⌉"
-                    else -> throw IllegalStateException("不支持的定界符 \\$name")
+                    else -> throw IllegalStateException("unsupported delimiter \\$name")
                 }
             }
             val c = s[pos]

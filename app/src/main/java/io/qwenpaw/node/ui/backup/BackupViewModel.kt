@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.backup
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.BackupDetailDto
 import io.qwenpaw.node.data.model.BackupJobSnapshotDto
@@ -14,6 +15,7 @@ import io.qwenpaw.node.data.remote.DownloadClient
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.data.stream.BackupJobStreamClient
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.workspace.DownloadSink
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -102,7 +104,7 @@ data class BackupUiState(
     val jobStreaming: Boolean = false,
     val jobError: String? = null,
     val creating: Boolean = false,
-    val createName: String = "手动备份",
+    val createName: String = Texts.get(R.string.backup_default_name),
     val createDescription: String = "",
     val createScope: BackupScopeDto = BackupScopeDto(),
     val createAgentIds: Set<String> = emptySet(),
@@ -161,7 +163,13 @@ class BackupViewModel(
     /** 重新读取列表、智能体与活动任务。 */
     fun refresh() {
         val conn = connection() ?: run {
-            _state.update { it.copy(loading = false, loaded = true, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(
+                    loading = false,
+                    loaded = true,
+                    error = Texts.get(R.string.backup_not_connected),
+                )
+            }
             return
         }
         val gen = generation
@@ -236,11 +244,11 @@ class BackupViewModel(
         if (current.creating) return
         val name = current.createName.trim()
         if (name.isEmpty()) {
-            _state.update { it.copy(createError = "请填写备份名称") }
+            _state.update { it.copy(createError = Texts.get(R.string.backup_error_name_required)) }
             return
         }
         if (current.createScope.includeAgents && current.createAgentIds.isEmpty()) {
-            _state.update { it.copy(createError = "请至少选择一个智能体") }
+            _state.update { it.copy(createError = Texts.get(R.string.backup_error_agent_required)) }
             return
         }
         val request = CreateBackupRequestDto(
@@ -265,7 +273,7 @@ class BackupViewModel(
                     it.copy(
                         creating = false,
                         createError = if (e is ApiException && e.code == 409) {
-                            "已有备份任务或恢复正在进行，请等待结束后重试"
+                            Texts.get(R.string.backup_error_busy)
                         } else {
                             backupError(e)
                         },
@@ -295,7 +303,11 @@ class BackupViewModel(
                 if (e is ApiException && e.code == 404) {
                     streamJob?.cancel()
                     _state.update {
-                        it.copy(job = null, jobStreaming = false, jobError = "备份任务已结束，进度不可再查询")
+                        it.copy(
+                            job = null,
+                            jobStreaming = false,
+                            jobError = Texts.get(R.string.backup_error_job_expired),
+                        )
                     }
                     refresh()
                 } else {
@@ -332,8 +344,8 @@ class BackupViewModel(
                     if (gen != generation) return@collect
                     val notice = if (snapshot.isTerminal) {
                         when (snapshot.status) {
-                            "completed" -> "备份已完成"
-                            "cancelled" -> "备份已取消"
+                            "completed" -> Texts.get(R.string.backup_notice_job_done)
+                            "cancelled" -> Texts.get(R.string.backup_notice_job_cancelled)
                             "failed" -> null
                             else -> null
                         }
@@ -406,9 +418,17 @@ class BackupViewModel(
                     it.copy(
                         deleting = false,
                         deleteTarget = if (failed == null) null else it.deleteTarget,
-                        notice = if (failed == null) "已删除备份「${target.name}」" else null,
+                        notice = if (failed == null) {
+                            Texts.get(R.string.backup_notice_deleted, target.name)
+                        } else {
+                            null
+                        },
                         error = failed?.let { item ->
-                            "无法删除备份：${item.error.orEmpty().ifBlank { "服务端未返回原因" }}"
+                            Texts.get(
+                                R.string.backup_error_delete_failed,
+                                item.error.orEmpty()
+                                    .ifBlank { Texts.get(R.string.backup_error_no_server_reason) },
+                            )
                         },
                     )
                 }
@@ -437,7 +457,12 @@ class BackupViewModel(
                 return@launch
             }
             if (out == null) {
-                _state.update { it.copy(exportId = null, exportError = "无法写入所选位置，请换一个目录") }
+                _state.update {
+                    it.copy(
+                        exportId = null,
+                        exportError = Texts.get(R.string.backup_error_write_target),
+                    )
+                }
                 return@launch
             }
             try {
@@ -449,7 +474,11 @@ class BackupViewModel(
                 }
                 if (gen != generation) return@launch
                 _state.update {
-                    it.copy(exportId = null, export = null, notice = "备份已导出到所选位置")
+                    it.copy(
+                        exportId = null,
+                        export = null,
+                        notice = Texts.get(R.string.backup_notice_exported),
+                    )
                 }
             } catch (e: CancellationException) {
                 withContext(NonCancellable) { runCatching { sink.discard() } }
@@ -459,7 +488,11 @@ class BackupViewModel(
                 withContext(NonCancellable) { runCatching { sink.discard() } }
                 if (gen != generation) return@launch
                 _state.update {
-                    it.copy(exportId = null, export = null, exportError = "导出失败：${backupError(e)}")
+                    it.copy(
+                        exportId = null,
+                        export = null,
+                        exportError = Texts.get(R.string.backup_error_export_failed, backupError(e)),
+                    )
                 }
             }
         }
@@ -491,8 +524,12 @@ class BackupViewModel(
             val label = agentName.ifBlank { agentId }
             try {
                 val request = CreateBackupRequestDto(
-                    name = "导出-$label-${System.currentTimeMillis()}",
-                    description = "临时导出，成功后自动删除",
+                    name = Texts.get(
+                        R.string.drest_backup_export_name,
+                        label,
+                        System.currentTimeMillis(),
+                    ),
+                    description = Texts.get(R.string.drest_backup_export_description),
                     scope = BackupScopeDto(
                         includeAgents = true,
                         includeGlobalConfig = false,
@@ -506,13 +543,16 @@ class BackupViewModel(
                 _state.update { it.copy(agentExport = it.agentExport?.copy(stage = "building")) }
                 val terminal = jobStream.open(conn, job.jobId)
                     .firstOrNull { it.isTerminal }
-                    ?: error("备份任务没有返回终态")
+                    ?: error(Texts.get(R.string.backup_error_job_no_terminal))
                 if (terminal.status != "completed") {
-                    error(terminal.error ?: "备份任务未完成：${terminal.status}")
+                    error(
+                        terminal.error
+                            ?: Texts.get(R.string.backup_error_job_incomplete, terminal.status),
+                    )
                 }
 
                 _state.update { it.copy(agentExport = it.agentExport?.copy(stage = "exporting")) }
-                val out = sink.open() ?: error("无法写入所选位置")
+                val out = sink.open() ?: error(Texts.get(R.string.backup_error_write_target_denied))
                 out.use { stream ->
                     downloadClient.download(api.exportBackupRequest(conn, backupId), stream)
                 }
@@ -526,10 +566,19 @@ class BackupViewModel(
                         agentExport = it.agentExport?.copy(
                             stage = "done",
                             error = failed?.let { item ->
-                                "导出成功，但临时备份删除失败：${item.error.orEmpty().ifBlank { "服务端未返回原因" }}"
+                                Texts.get(
+                                    R.string.backup_error_temp_backup_delete,
+                                    item.error.orEmpty().ifBlank {
+                                        Texts.get(R.string.backup_error_no_server_reason)
+                                    },
+                                )
                             },
                         ),
-                        notice = if (failed == null) "已导出，临时备份已清理" else null,
+                        notice = if (failed == null) {
+                            Texts.get(R.string.backup_notice_exported_cleaned)
+                        } else {
+                            null
+                        },
                     )
                 }
             } catch (e: CancellationException) {
@@ -539,7 +588,11 @@ class BackupViewModel(
                         it.copy(
                             agentExport = it.agentExport?.copy(
                                 stage = "cancelled",
-                                error = if (backupId != null) "导出已取消，临时备份已保留" else null,
+                                error = if (backupId != null) {
+                                    Texts.get(R.string.backup_error_export_cancelled)
+                                } else {
+                                    null
+                                },
                             ),
                         )
                     }
@@ -549,7 +602,7 @@ class BackupViewModel(
                 withContext(NonCancellable) { runCatching { sink.discard() } }
                 if (gen != generation) return@launch
                 val keepHint = if (backupId != null) {
-                    "。临时备份已保留，可在备份页重试或删除"
+                    Texts.get(R.string.backup_error_temp_backup_kept_hint)
                 } else {
                     ""
                 }
@@ -557,7 +610,10 @@ class BackupViewModel(
                     it.copy(
                         agentExport = it.agentExport?.copy(
                             stage = "failed",
-                            error = "导出失败：${backupError(e)}$keepHint",
+                            error = Texts.get(
+                                R.string.backup_error_export_failed,
+                                backupError(e) + keepHint,
+                            ),
                         ),
                     )
                 }
@@ -651,7 +707,10 @@ class BackupViewModel(
             } catch (e: Exception) {
                 if (gen != generation) return@launch
                 _state.update {
-                    it.copy(import = ImportState.Idle, error = "导入失败：${backupError(e)}")
+                    it.copy(
+                        import = ImportState.Idle,
+                        error = Texts.get(R.string.backup_error_import_failed, backupError(e)),
+                    )
                 }
             }
         }
@@ -715,9 +774,9 @@ class BackupViewModel(
                         restoreApplying = false,
                         restore = null,
                         notice = if (result.preservedLocalKeys.isEmpty()) {
-                            "备份已恢复"
+                            Texts.get(R.string.backup_notice_restored)
                         } else {
-                            "备份已恢复，本机受保护的密钥保持不变"
+                            Texts.get(R.string.backup_notice_restored_keys_kept)
                         },
                     )
                 }
@@ -767,10 +826,11 @@ class BackupViewModel(
 
     private fun backupError(e: Throwable): String = when {
         e is ApiException && e.code == 401 -> ErrorText.of(e)
-        e is ApiException && e.code == 404 -> "备份不存在，可能已被删除"
-        e is ApiException && e.code == 409 -> "服务端正忙，请稍后重试"
+        e is ApiException && e.code == 404 -> Texts.get(R.string.backup_error_not_found)
+        e is ApiException && e.code == 409 -> Texts.get(R.string.backup_error_server_busy)
         e is ApiException && e.code == 400 ->
-            e.detail?.takeIf { it.isNotBlank() }?.take(200) ?: "请求参数无效"
+            e.detail?.takeIf { it.isNotBlank() }?.take(200)
+                ?: Texts.get(R.string.backup_error_bad_request)
         else -> ErrorText.of(e)
     }
 }

@@ -45,7 +45,7 @@ internal suspend fun stageWorkspaceUploads(
         val ok = runCatching {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(target).use { output -> input.copyTo(output) }
-            } ?: throw IOException("无法读取所选文件")
+            } ?: throw IOException("cannot read selected file")
             // 拿不到声明体积时以复制后的实际大小为准。
             if (exceedsLimit(target.length(), limitMb)) {
                 target.delete()

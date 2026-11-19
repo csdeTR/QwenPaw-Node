@@ -31,9 +31,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.chat.OptionDialog
 import io.qwenpaw.node.ui.chat.OptionItem
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -80,14 +83,14 @@ fun ModelsScreen(
                     ) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "模型与提供商",
+                        text = stringResource(R.string.models_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -126,7 +129,7 @@ fun ModelsScreen(
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        text = "点击重试",
+                        text = stringResource(R.string.models_action_retry_click),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable(onClick = onRetry),
@@ -142,7 +145,7 @@ fun ModelsScreen(
                 ) {
                     ModelsCard {
                         Text(
-                            text = "默认模型",
+                            text = stringResource(R.string.models_section_default),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
@@ -151,14 +154,15 @@ fun ModelsScreen(
                         ModelScope.entries.forEach { scope ->
                             DefaultModelRow(
                                 scope = scope,
-                                value = state.labelOf(scope) ?: "跟随全局",
+                                value = state.labelOf(scope)
+                                    ?: stringResource(R.string.models_follow_global),
                                 enabled = !state.saving && state.choices.isNotEmpty(),
                                 onClick = { picking = scope },
                             )
                         }
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "全局默认影响服务端所有智能体的默认模型；单个对话的模型仍可在聊天页切换。",
+                            text = stringResource(R.string.models_default_hint),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -187,7 +191,7 @@ fun ModelsScreen(
 
                     ModelsCard {
                         Text(
-                            text = "供应商",
+                            text = stringResource(R.string.models_section_providers),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
@@ -195,24 +199,45 @@ fun ModelsScreen(
                         Spacer(Modifier.height(10.dp))
                         if (state.providers.isEmpty()) {
                             Text(
-                                text = "服务端未配置供应商，请在 Web 控制台添加。",
+                                text = stringResource(R.string.models_no_providers),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         } else {
                             state.providers.forEach { provider ->
+                                val count = provider.allModels.size
+                                val modelsText = if (count == 0) {
+                                    stringResource(R.string.models_no_models)
+                                } else {
+                                    pluralStringResource(
+                                        R.plurals.models_model_count,
+                                        count,
+                                        count,
+                                    )
+                                }
                                 ProviderRow(
                                     name = provider.name.ifBlank { provider.id },
-                                    detail = buildString {
-                                        val count = provider.allModels.size
-                                        append(if (count == 0) "未发现可用模型" else "$count 个模型")
-                                        if (!provider.enabled) append(" · 已停用")
+                                    detail = if (provider.enabled) {
+                                        modelsText
+                                    } else {
+                                        stringResource(
+                                            R.string.models_detail_disabled,
+                                            modelsText,
+                                        )
                                     },
                                     dimmed = !provider.enabled,
                                     testing = provider.id in state.testing,
                                     // 测试失败也是 200，因此按 success 分支；失败时给服务端原文。
-                                    result = state.testResults[provider.id]?.let {
-                                        if (it.success) "可用" else it.message.ifBlank { "不可用" }
+                                    result = state.testResults[provider.id]?.let { result ->
+                                        when {
+                                            result.success -> stringResource(
+                                                R.string.models_result_available,
+                                            )
+                                            result.message.isBlank() -> stringResource(
+                                                R.string.models_result_unavailable,
+                                            )
+                                            else -> result.message
+                                        }
                                     },
                                     onTest = { onTest(provider.id) },
                                 )
@@ -227,7 +252,7 @@ fun ModelsScreen(
     val pickingScope = picking
     if (pickingScope != null) {
         OptionDialog(
-            title = pickingScope.title,
+            title = stringResource(pickingScope.titleRes),
             items = state.choices.map { choice ->
                 OptionItem(
                     key = choice.key,
@@ -236,7 +261,7 @@ fun ModelsScreen(
                     selected = state.labelOf(pickingScope) == choice.modelName,
                 )
             },
-            emptyHint = "服务端未配置可用模型",
+            emptyHint = stringResource(R.string.models_no_available_models),
             onPick = { key ->
                 picking = null
                 state.choices.firstOrNull { it.key == key }?.let { choice ->
@@ -282,7 +307,7 @@ private fun DefaultModelRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = scope.title,
+                text = stringResource(scope.titleRes),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -333,8 +358,8 @@ private fun ProviderRow(
             }
             Text(
                 text = when {
-                    testing -> "测试中"
-                    else -> "测试连接"
+                    testing -> stringResource(R.string.models_testing)
+                    else -> stringResource(R.string.models_action_test)
                 },
                 style = MaterialTheme.typography.labelLarge,
                 color = if (testing) {

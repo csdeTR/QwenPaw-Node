@@ -41,9 +41,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.InboxEventDto
 import io.qwenpaw.node.ui.TimeLabels
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
@@ -111,14 +114,14 @@ fun InboxScreen(
                     ) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "收件箱",
+                        text = stringResource(R.string.inbox_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -126,7 +129,11 @@ fun InboxScreen(
                     if (state.unreadCount > 0) {
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "${state.unreadCount} 条未读",
+                            text = pluralStringResource(
+                                R.plurals.inbox_unread_count,
+                                state.unreadCount,
+                                state.unreadCount,
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.secondary,
                         )
@@ -134,7 +141,7 @@ fun InboxScreen(
                     Spacer(Modifier.weight(1f))
                     if (state.unreadCount > 0 && !state.filtered) {
                         Text(
-                            text = "全部已读",
+                            text = stringResource(R.string.inbox_mark_all_read),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier
@@ -186,9 +193,9 @@ fun InboxScreen(
                 ) {
                     Text(
                         text = when {
-                            !state.loaded -> "正在加载"
-                            state.filtered -> "没有符合条件的记录"
-                            else -> "收件箱是空的"
+                            !state.loaded -> stringResource(R.string.inbox_loading)
+                            state.filtered -> stringResource(R.string.inbox_empty_filtered)
+                            else -> stringResource(R.string.inbox_empty)
                         },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -196,7 +203,7 @@ fun InboxScreen(
                     if (state.loaded && !state.filtered) {
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "定时任务与记忆写入的结果会出现在这里",
+                            text = stringResource(R.string.inbox_empty_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -237,10 +244,13 @@ fun InboxScreen(
 
     deleting?.let { event ->
         DestructiveActionDialog(
-            title = "删除事件",
-            message = "删除后无法恢复，确定要删除这条事件吗？",
-            impacts = listOf("「${event.title}」这条记录", "该事件关联的运行轨迹（若无其它引用）"),
-            confirmLabel = "删除",
+            title = stringResource(R.string.inbox_delete_title),
+            message = stringResource(R.string.inbox_delete_message),
+            impacts = listOf(
+                stringResource(R.string.inbox_delete_impact_event, event.title),
+                stringResource(R.string.inbox_delete_impact_runs),
+            ),
+            confirmLabel = stringResource(R.string.action_delete),
             undoable = false,
             onConfirm = {
                 onDelete(event.id)
@@ -252,8 +262,8 @@ fun InboxScreen(
 
     when (picking) {
         InboxFilterKind.Source -> InboxFilterDialog(
-            title = "筛选来源",
-            options = listOf(InboxFilterOption(null, "全部")) +
+            title = stringResource(R.string.inbox_filter_source_title),
+            options = listOf(InboxFilterOption(null, stringResource(R.string.inbox_filter_all))) +
                 INBOX_SOURCE_FILTERS.map { InboxFilterOption(it, inboxSourceLabel(it)) },
             selected = state.sourceFilter,
             onSelect = {
@@ -264,8 +274,8 @@ fun InboxScreen(
         )
 
         InboxFilterKind.Agent -> InboxFilterDialog(
-            title = "筛选智能体",
-            options = listOf(InboxFilterOption(null, "全部")) +
+            title = stringResource(R.string.inbox_filter_agent_title),
+            options = listOf(InboxFilterOption(null, stringResource(R.string.inbox_filter_all))) +
                 state.agentOptions.map { InboxFilterOption(it.id, it.name.ifBlank { it.id }) },
             selected = state.agentFilter,
             onSelect = {
@@ -273,7 +283,11 @@ fun InboxScreen(
                 onAgentFilter(it)
             },
             onDismiss = { picking = null },
-            emptyHint = if (state.agentOptions.isEmpty()) "未能读取智能体列表" else null,
+            emptyHint = if (state.agentOptions.isEmpty()) {
+                stringResource(R.string.inbox_agents_unavailable)
+            } else {
+                null
+            },
         )
 
         null -> Unit
@@ -336,10 +350,12 @@ private fun InboxEventRow(
                 )
             }
             Spacer(Modifier.height(4.dp))
+            val sourceLabel = inboxSourceLabel(event.sourceType)
             Text(
-                text = buildString {
-                    append(inboxSourceLabel(event.sourceType))
-                    if (event.status.isNotBlank()) append("，").append(event.status)
+                text = if (event.status.isNotBlank()) {
+                    stringResource(R.string.inbox_source_with_status, sourceLabel, event.status)
+                } else {
+                    sourceLabel
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -386,19 +402,25 @@ private fun InboxFilterRow(
         // 左侧一组占满剩余宽度，智能体名过长时被压缩到省略号，不把「清除」挤出屏幕。
         Row(modifier = Modifier.weight(1f)) {
             FilterButton(
-                text = "来源 · " + sourceFilterLabel(sourceFilter),
+                text = stringResource(
+                    R.string.inbox_filter_source,
+                    sourceFilterLabel(sourceFilter),
+                ),
                 onClick = onPickSource,
             )
             Spacer(Modifier.width(12.dp))
             FilterButton(
-                text = "智能体 · " + (agentLabel ?: "全部"),
+                text = stringResource(
+                    R.string.inbox_filter_agent,
+                    agentLabel ?: stringResource(R.string.inbox_filter_all),
+                ),
                 onClick = onPickAgent,
                 modifier = Modifier.weight(1f, fill = false),
             )
         }
         if (sourceFilter != null || agentFilter != null) {
             Text(
-                text = "清除",
+                text = stringResource(R.string.inbox_filter_clear),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -490,7 +512,7 @@ private fun InboxFilterDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
         },
         containerColor = MaterialTheme.colorScheme.surface,
     )
@@ -524,7 +546,7 @@ private fun InboxFilterOptionRow(label: String, selected: Boolean, onClick: () -
             Spacer(Modifier.width(8.dp))
             Icon(
                 imageVector = QwenIcons.check,
-                contentDescription = "已选中",
+                contentDescription = stringResource(R.string.inbox_selected),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(16.dp),
             )

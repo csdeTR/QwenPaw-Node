@@ -1,6 +1,7 @@
 package io.qwenpaw.node
 
 import android.app.Application
+import android.content.Context
 import io.qwenpaw.node.data.InstanceRepository
 import io.qwenpaw.node.data.NetworkMonitor
 import io.qwenpaw.node.data.local.AppDatabase
@@ -11,6 +12,10 @@ import io.qwenpaw.node.font.FontManager
 
 /** 简单的手工依赖装配（项目规模不需要 DI 框架）。 */
 class QwenPawApp : Application() {
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(io.qwenpaw.node.ui.i18n.AppLocale.wrap(base))
+    }
 
     lateinit var api: QwenPawApi
         private set
@@ -45,6 +50,8 @@ class QwenPawApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 后台任务与通知取文案走 Texts，必须在任何业务代码之前安装。
+        io.qwenpaw.node.ui.i18n.Texts.install(this)
         api = QwenPawApi()
         // 由变体源码决定：full 是 sherpa，_no-sherpa 是不可用桩。
         localAsr = io.qwenpaw.node.voice.LocalAsrProvider.create(this)

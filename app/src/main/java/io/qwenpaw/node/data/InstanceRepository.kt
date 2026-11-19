@@ -1,5 +1,6 @@
 package io.qwenpaw.node.data
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceStore
@@ -9,6 +10,7 @@ import io.qwenpaw.node.data.remote.BasicAuth
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,15 +53,15 @@ internal enum class HostedPlatform(
     /** 匹配用的主机名；子域名一并拦截。 */
     val host: String,
     /** 给用户看的原因与建议。 */
-    val message: String,
+    @androidx.annotation.StringRes val messageRes: Int,
 ) {
     AGENTSCOPE(
         host = "qwenpaw.platform.agentscope.io",
-        message = "QwenPaw Node无法添加源于AgentScope Platform的实例，请使用私有化部署方案",
+        messageRes = R.string.drest_hosted_agentscope,
     ),
     MODELSCOPE(
         host = "modelscope.cn",
-        message = "QwenPaw Node无法添加通过魔搭创空间创建的实例，请使用私有化部署方案",
+        messageRes = R.string.drest_hosted_modelscope,
     ),
 }
 
@@ -178,7 +180,7 @@ class InstanceRepository(
         basicAuth: BasicAuth? = null,
     ): String? {
         val normalized = runCatching { normalizeBaseUrl(baseUrl) }.getOrNull()
-            ?: return "地址格式不正确"
+            ?: return Texts.get(R.string.instance_error_address_invalid)
         return runCatching {
             val status = api.authStatus(normalized, basicAuth)
             if (!loginRequired(status)) return@runCatching
@@ -321,7 +323,7 @@ class InstanceRepository(
                     throw ApiException(
                         code = 401,
                         message = e.message,
-                        userHint = "反向代理拒绝了这组账号密码，请核对后重试",
+                        userHint = Texts.get(R.string.instance_error_proxy_auth_rejected),
                         detail = e.detail,
                         wwwAuthenticate = e.wwwAuthenticate,
                         tokenSent = false,
@@ -389,7 +391,7 @@ class InstanceRepository(
                 if (username.isNullOrBlank() || password.isNullOrBlank()) {
                     // userHint 必须一起给：只写 message 的话，[ErrorText.of] 会落到
                     // 401 的默认分支，把「还没填账号」说成「登录已失效」。
-                    val msg = "该实例已开启 Web 登录认证，需要用户名和密码"
+                    val msg = Texts.get(R.string.instance_error_login_required)
                     throw ApiException(401, msg, msg, tokenSent = false)
                 }
                 token = api.login(
@@ -454,7 +456,7 @@ class InstanceRepository(
                 if (username.isNullOrBlank() || password.isNullOrBlank()) {
                     // 与 probeAgents 同一处理：userHint 里放同一句，否则会被映射成
                     // 「登录已失效」——用户此时根本还没登录过。
-                    val msg = "该实例已开启 Web 登录认证，需要用户名和密码"
+                    val msg = Texts.get(R.string.instance_error_login_required)
                     throw ApiException(401, msg, msg, tokenSent = false)
                 }
                 val auth = api.login(
@@ -526,7 +528,7 @@ class InstanceRepository(
      */
     internal fun normalize(baseUrls: List<String>): List<String> {
         val cleaned = baseUrls.map { it.trim() }.filter { it.isNotBlank() }
-        if (cleaned.isEmpty()) throw IllegalArgumentException("请填写服务器地址")
+        if (cleaned.isEmpty()) throw IllegalArgumentException(Texts.get(R.string.drest_need_server_address))
         return cleaned.map { normalizeBaseUrl(it) }.distinct()
     }
 
@@ -652,10 +654,10 @@ class InstanceRepository(
                 .replace('／', '/')
                 .replace('　', ' ')
             val trimmed = ascii.trim().trimEnd('/')
-            if (trimmed.isEmpty()) throw IllegalArgumentException("请填写服务器地址")
+            if (trimmed.isEmpty()) throw IllegalArgumentException(Texts.get(R.string.drest_need_server_address))
             val host = hostOf(trimmed)
             // 托管平台的实例不能按自建实例直连：验证与连接都要先过这一关。
-            hostedPlatformOf(host)?.let { throw IllegalArgumentException(it.message) }
+            hostedPlatformOf(host)?.let { throw IllegalArgumentException(Texts.get(it.messageRes)) }
             val withScheme = if (trimmed.contains("://")) {
                 trimmed
             } else {
@@ -748,7 +750,7 @@ class InstanceRepository(
             normalize: (String) -> String,
         ): List<AddressEntry> {
             val cleaned = entries.filter { it.url.isNotBlank() }
-            if (cleaned.isEmpty()) throw IllegalArgumentException("请填写服务器地址")
+            if (cleaned.isEmpty()) throw IllegalArgumentException(Texts.get(R.string.drest_need_server_address))
             val seen = mutableSetOf<String>()
             return cleaned.mapNotNull { entry ->
                 val url = normalize(entry.url.trim())

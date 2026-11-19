@@ -30,11 +30,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.CRON_TIMEZONE
 import io.qwenpaw.node.data.model.CronExecutionRecordDto
 import io.qwenpaw.node.data.model.CronJobSpecDto
 import io.qwenpaw.node.data.model.CronJobStateDto
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.theme.qwenSwitchColors
 import java.time.ZoneId
@@ -83,14 +87,17 @@ internal fun CronSection(
             )
         }
 
-        SectionHeader("任务", "${state.jobs.size} 个")
+        SectionHeader(
+            stringResource(R.string.cron_header_jobs),
+            pluralStringResource(R.plurals.cron_count, state.jobs.size, state.jobs.size),
+        )
         Card {
             if (state.jobs.isEmpty()) {
                 Text(
                     text = when {
-                        state.loading -> "正在加载"
-                        state.error != null -> "加载失败，请重试"
-                        else -> "还没有定时任务"
+                        state.loading -> stringResource(R.string.action_loading)
+                        state.error != null -> stringResource(R.string.cron_load_failed)
+                        else -> stringResource(R.string.cron_empty_jobs)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -120,7 +127,7 @@ internal fun CronSection(
                 }
             }
             Divider()
-            ActionRow(text = "新建任务", onClick = onNew)
+            ActionRow(text = stringResource(R.string.cron_action_new), onClick = onNew)
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -128,16 +135,21 @@ internal fun CronSection(
     pendingRun?.let { job ->
         AlertDialog(
             onDismissRequest = { pendingRun = null },
-            title = { Text("立即执行", style = MaterialTheme.typography.titleMedium) },
+            title = {
+                Text(stringResource(R.string.cron_action_run), style = MaterialTheme.typography.titleMedium)
+            },
             text = {
                 Text(
-                    text = "确定要立即执行任务「${job.name.ifBlank { "未命名" }}」吗？",
+                    text = stringResource(
+                        R.string.cron_run_confirm,
+                        job.name.ifBlank { stringResource(R.string.cron_unnamed) },
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
             confirmButton = {
                 Text(
-                    text = "执行",
+                    text = stringResource(R.string.cron_action_execute),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -150,7 +162,7 @@ internal fun CronSection(
             },
             dismissButton = {
                 Text(
-                    text = "取消",
+                    text = stringResource(R.string.action_cancel),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
@@ -163,13 +175,16 @@ internal fun CronSection(
 
     pendingDelete?.let { job ->
         io.qwenpaw.node.ui.common.DestructiveActionDialog(
-            title = "删除任务",
-            message = "将删除定时任务「${job.name.ifBlank { "未命名" }}」。",
-            impacts = listOf(
-                "该任务的调度规则与运行状态",
-                "执行记录一并删除，删除后不能恢复",
+            title = stringResource(R.string.cron_delete_title),
+            message = stringResource(
+                R.string.cron_delete_message,
+                job.name.ifBlank { stringResource(R.string.cron_unnamed) },
             ),
-            confirmLabel = "删除",
+            impacts = listOf(
+                stringResource(R.string.cron_delete_impact_schedule),
+                stringResource(R.string.cron_delete_impact_history),
+            ),
+            confirmLabel = stringResource(R.string.action_delete),
             undoable = false,
             onConfirm = {
                 onDelete(job.id.orEmpty())
@@ -181,7 +196,7 @@ internal fun CronSection(
 
     historyJob?.let { job ->
         CronHistoryDialog(
-            jobName = job.name.ifBlank { "未命名" },
+            jobName = job.name.ifBlank { stringResource(R.string.cron_unnamed) },
             records = state.history[job.id],
             loading = state.historyLoading,
             onDismiss = { historyJob = null },
@@ -191,7 +206,7 @@ internal fun CronSection(
 
 @Composable
 private fun CronError(text: String, onDismiss: () -> Unit) {
-    SectionHeader("操作失败")
+    SectionHeader(stringResource(R.string.action_failed))
     Card {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -204,7 +219,7 @@ private fun CronError(text: String, onDismiss: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = "关闭",
+                text = stringResource(R.string.action_close),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -234,22 +249,22 @@ private fun CronTimezoneHint(
             .minOrNull()
     }
 
-    SectionHeader("时间对照")
+    SectionHeader(stringResource(R.string.cron_header_timezone_compare))
     Card {
         Column(modifier = Modifier.padding(14.dp)) {
             if (next != null) {
                 Text(
-                    text = "北京时间  ${formatInZone(next, beijing)}",
+                    text = stringResource(R.string.cron_beijing_time, formatInZone(next, beijing)),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    text = "服务端时区  ${formatInZone(next, serverZone)}",
+                    text = stringResource(R.string.cron_server_time, formatInZone(next, serverZone)),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(Modifier.height(8.dp))
             }
             Text(
-                text = "服务端时区与北京时间不同，任务仍按北京时间执行。",
+                text = stringResource(R.string.cron_timezone_note),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -286,7 +301,7 @@ private fun CronRow(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = job.name.ifBlank { "未命名任务" },
+                        text = job.name.ifBlank { stringResource(R.string.cron_unnamed_task) },
                         style = MaterialTheme.typography.bodyLarge,
                         maxLines = 1,
                     )
@@ -299,7 +314,7 @@ private fun CronRow(
                                 .padding(horizontal = 6.dp, vertical = 1.dp),
                         ) {
                             Text(
-                                text = "待迁移审核",
+                                text = stringResource(R.string.cron_tag_review),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                             )
@@ -331,7 +346,7 @@ private fun CronRow(
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            text = "关闭",
+                            text = stringResource(R.string.action_close),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier
@@ -358,7 +373,7 @@ private fun CronRow(
                 ) {
                     Icon(
                         imageVector = QwenIcons.moreVertical,
-                        contentDescription = "更多操作",
+                        contentDescription = stringResource(R.string.cron_more_actions),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -367,28 +382,43 @@ private fun CronRow(
                     expanded = menuOpen,
                     onDismissRequest = { onMenuOpenChange(false) },
                 ) {
-                    DropdownMenuItem(text = { Text("立即执行") }, onClick = {
-                        onMenuOpenChange(false)
-                        onRun()
-                    })
-                    DropdownMenuItem(text = { Text("编辑") }, onClick = {
-                        onMenuOpenChange(false)
-                        onEdit()
-                    })
-                    DropdownMenuItem(text = { Text("执行记录") }, onClick = {
-                        onMenuOpenChange(false)
-                        onHistory()
-                    })
-                    if (review) {
-                        DropdownMenuItem(text = { Text("审核通过") }, onClick = {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.cron_action_run)) },
+                        onClick = {
                             onMenuOpenChange(false)
-                            onPromote()
-                        })
+                            onRun()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_edit)) },
+                        onClick = {
+                            onMenuOpenChange(false)
+                            onEdit()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.cron_action_history)) },
+                        onClick = {
+                            onMenuOpenChange(false)
+                            onHistory()
+                        },
+                    )
+                    if (review) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.cron_action_promote)) },
+                            onClick = {
+                                onMenuOpenChange(false)
+                                onPromote()
+                            },
+                        )
                     }
-                    DropdownMenuItem(text = { Text("删除") }, onClick = {
-                        onMenuOpenChange(false)
-                        onDelete()
-                    })
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_delete)) },
+                        onClick = {
+                            onMenuOpenChange(false)
+                            onDelete()
+                        },
+                    )
                 }
             }
         }
@@ -414,12 +444,16 @@ private fun requiresReview(job: CronJobSpecDto): Boolean {
  * 待审核与已暂停状态下，下次时间不会到来，先说时间会误导。
  */
 private fun statusText(job: CronJobSpecDto, state: CronJobStateDto?, serverTimezone: String?): String {
-    if (requiresReview(job)) return "需审核通过后才能启用或立即执行"
+    if (requiresReview(job)) return Texts.get(R.string.cron_status_needs_review)
     if (!job.enabled) {
         val next = state?.nextRunAt?.let { formatIsoInZone(it, ZoneId.of(CRON_TIMEZONE)) }
-        return if (next == null) "已暂停" else "已暂停，启用后下次 $next"
+        return if (next == null) {
+            Texts.get(R.string.cron_status_paused)
+        } else {
+            Texts.get(R.string.cron_status_paused_with_next, next)
+        }
     }
-    if (state == null) return "状态未知"
+    if (state == null) return Texts.get(R.string.cron_status_unknown)
     val next = state.nextRunAt?.let { formatIsoInZone(it, ZoneId.of(CRON_TIMEZONE)) }
     val serverNext = serverTimezone?.let { name ->
         runCatching { ZoneId.of(name) }.getOrNull()?.let { zone -> state.nextRunAt?.let { formatIsoInZone(it, zone) } }
@@ -428,15 +462,17 @@ private fun statusText(job: CronJobSpecDto, state: CronJobStateDto?, serverTimez
         next == null -> null
         // 只有时区不同且换算结果确实不同时才并排写出服务端时间。
         serverNext != null && serverNext != next &&
-            isUtcPlus8(serverTimezone) == false -> "下次 $next（服务端 $serverNext）"
-        else -> "下次 $next"
+            isUtcPlus8(serverTimezone) == false ->
+            Texts.get(R.string.cron_status_next_server, next, serverNext)
+        else -> Texts.get(R.string.cron_status_next, next)
     }
     return when {
-        state.lastStatus == "error" && state.lastError != null -> "上次失败：${state.lastError.take(40)}"
-        state.lastStatus == "error" -> "上次执行失败"
+        state.lastStatus == "error" && state.lastError != null ->
+            Texts.get(R.string.cron_status_last_error, state.lastError.take(40))
+        state.lastStatus == "error" -> Texts.get(R.string.cron_status_last_failed)
         nextText != null -> nextText
-        state.lastStatus == "running" -> "正在执行"
-        else -> "尚未运行"
+        state.lastStatus == "running" -> Texts.get(R.string.cron_status_running)
+        else -> Texts.get(R.string.cron_status_never_run)
     }
 }
 
@@ -449,12 +485,20 @@ private fun CronHistoryDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("执行记录：$jobName", style = MaterialTheme.typography.titleMedium) },
+        title = {
+            Text(stringResource(R.string.cron_history_title, jobName), style = MaterialTheme.typography.titleMedium)
+        },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 when {
-                    loading && records == null -> Text("正在加载", style = MaterialTheme.typography.bodySmall)
-                    records.isNullOrEmpty() -> Text("还没有执行记录", style = MaterialTheme.typography.bodySmall)
+                    loading && records == null -> Text(
+                        stringResource(R.string.action_loading),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    records.isNullOrEmpty() -> Text(
+                        stringResource(R.string.cron_history_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     else -> records.forEach { record ->
                         Row(
                             modifier = Modifier
@@ -469,7 +513,11 @@ private fun CronHistoryDialog(
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                text = if (record.status == "success") "成功" else record.status,
+                                text = if (record.status == "success") {
+                                    stringResource(R.string.cron_history_success)
+                                } else {
+                                    record.status
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (record.status == "success") {
                                     MaterialTheme.colorScheme.onSurfaceVariant
@@ -479,7 +527,11 @@ private fun CronHistoryDialog(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = if (record.trigger == "manual") "手动" else "计划",
+                                text = if (record.trigger == "manual") {
+                                    stringResource(R.string.cron_history_manual)
+                                } else {
+                                    stringResource(R.string.cron_history_scheduled)
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -490,7 +542,7 @@ private fun CronHistoryDialog(
         },
         confirmButton = {
             Text(
-                text = "关闭",
+                text = stringResource(R.string.action_close),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier

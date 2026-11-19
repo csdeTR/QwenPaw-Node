@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.chat
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatSpecDto
@@ -14,6 +16,11 @@ import java.time.LocalDate
  * 不必开模拟器去点。日期比较统一按本地时区，这也是旧 `timeLabel` 的偏差所在。
  */
 class ChatGroupingTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private fun chat(
         id: String,

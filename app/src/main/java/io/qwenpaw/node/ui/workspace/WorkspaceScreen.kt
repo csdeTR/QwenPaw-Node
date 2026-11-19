@@ -49,11 +49,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.UploadConflictPolicy
 import io.qwenpaw.node.ui.common.GetMultipleContent
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -128,7 +131,11 @@ fun WorkspaceScreen(
             if (result.skipped.isNotEmpty()) {
                 android.widget.Toast.makeText(
                     context,
-                    "已跳过 ${result.skipped.size} 个文件（超过上传上限或无法读取）",
+                    context.resources.getQuantityString(
+                        R.plurals.workspace_upload_skipped_toast,
+                        result.skipped.size,
+                        result.skipped.size,
+                    ),
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
             }
@@ -226,8 +233,8 @@ fun WorkspaceScreen(
     if (staging) {
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("正在准备文件") },
-            text = { Text("选中文件会先复制到本地缓存，上传结束后自动删除。") },
+            title = { Text(stringResource(R.string.workspace_preparing_title)) },
+            text = { Text(stringResource(R.string.workspace_preparing_message)) },
             confirmButton = {},
         )
     }
@@ -245,8 +252,8 @@ fun WorkspaceScreen(
     if (state.preparing) {
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("正在统计目录内容") },
-            text = { Text("只读取文件列表与体积，不会开始传输。") },
+            title = { Text(stringResource(R.string.workspace_scanning_title)) },
+            text = { Text(stringResource(R.string.workspace_scanning_message)) },
             confirmButton = {},
         )
     }
@@ -254,7 +261,7 @@ fun WorkspaceScreen(
     state.plan?.let { plan ->
         AlertDialog(
             onDismissRequest = onPlanCancel,
-            title = { Text("确认下载") },
+            title = { Text(stringResource(R.string.workspace_download_confirm_title)) },
             text = {
                 Column {
                     Text(plan.subtitle, style = MaterialTheme.typography.bodyMedium)
@@ -276,10 +283,10 @@ fun WorkspaceScreen(
                             is DownloadPlan.Directory -> treeLauncher.launch(null)
                         }
                     },
-                ) { Text("选择保存位置") }
+                ) { Text(stringResource(R.string.workspace_download_pick_location)) }
             },
             dismissButton = {
-                TextButton(onClick = onPlanCancel) { Text("取消") }
+                TextButton(onClick = onPlanCancel) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -316,10 +323,14 @@ private fun WorkspaceTopBar(
                 .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconCircle(icon = QwenIcons.arrowLeft, description = "返回", onClick = onBack)
+            IconCircle(
+                icon = QwenIcons.arrowLeft,
+                description = stringResource(R.string.action_back),
+                onClick = onBack,
+            )
             Spacer(Modifier.width(4.dp))
             Text(
-                text = "工作区文件",
+                text = stringResource(R.string.workspace_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -327,7 +338,7 @@ private fun WorkspaceTopBar(
             )
             if (state.path.isNotEmpty() && state.preview == null) {
                 Text(
-                    text = "上一级",
+                    text = stringResource(R.string.workspace_parent),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -336,21 +347,29 @@ private fun WorkspaceTopBar(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
             }
-            IconCircle(icon = QwenIcons.refresh, description = "刷新", onClick = onRefresh)
+            IconCircle(
+                icon = QwenIcons.refresh,
+                description = stringResource(R.string.action_refresh),
+                onClick = onRefresh,
+            )
             if (state.root == WorkspaceRoot.WORKSPACE) {
                 IconCircle(
                     icon = QwenIcons.workflow,
-                    description = "Git 提交",
+                    description = stringResource(R.string.workspace_git_commit),
                     onClick = onOpenGit,
                 )
             }
             if (state.canUpload) {
-                IconCircle(icon = QwenIcons.filePlus, description = "上传文件", onClick = onUpload)
+                IconCircle(
+                    icon = QwenIcons.filePlus,
+                    description = stringResource(R.string.workspace_upload),
+                    onClick = onUpload,
+                )
             }
             if (state.canDownloadDirectory) {
                 IconCircle(
                     icon = QwenIcons.download,
-                    description = "下载此目录",
+                    description = stringResource(R.string.workspace_download_directory),
                     onClick = onRequestDirectoryDownload,
                 )
             }
@@ -364,7 +383,7 @@ private fun WorkspaceTopBar(
         ) {
             WorkspaceRoot.entries.forEach { root ->
                 WorkspaceChip(
-                    label = root.title,
+                    label = stringResource(root.titleRes),
                     selected = state.root == root,
                     onClick = { onOpenRoot(root) },
                 )
@@ -372,7 +391,7 @@ private fun WorkspaceTopBar(
         }
         if (state.root == WorkspaceRoot.PROJECT) {
             Text(
-                text = "项目目录未绑定时，这里显示服务端默认工作区。",
+                text = stringResource(R.string.workspace_project_hint),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
@@ -515,7 +534,7 @@ private fun EntryRow(
         if (onDownload != null) {
             IconCircle(
                 icon = QwenIcons.download,
-                description = "下载 ${entry.name}",
+                description = stringResource(R.string.workspace_entry_download, entry.name),
                 onClick = onDownload,
             )
         }
@@ -540,7 +559,11 @@ private fun PreviewContent(
                 .padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconCircle(icon = QwenIcons.arrowLeft, description = "返回目录", onClick = onBack)
+            IconCircle(
+                icon = QwenIcons.arrowLeft,
+                description = stringResource(R.string.workspace_back_to_directory),
+                onClick = onBack,
+            )
             Spacer(Modifier.width(4.dp))
             Text(
                 text = preview.title,
@@ -553,7 +576,7 @@ private fun PreviewContent(
             if (preview is WorkspacePreview.Text) {
                 IconCircle(
                     icon = QwenIcons.pencil,
-                    description = "编辑",
+                    description = stringResource(R.string.action_edit),
                     onClick = onEdit,
                     enabled = canEdit,
                 )
@@ -561,7 +584,7 @@ private fun PreviewContent(
             if (entry != null) {
                 IconCircle(
                     icon = QwenIcons.download,
-                    description = "下载",
+                    description = stringResource(R.string.workspace_download),
                     onClick = { onDownload(entry) },
                 )
             }
@@ -607,7 +630,7 @@ private fun TextPreview(
         ) {
             SelectionContainer {
                 Text(
-                    text = preview.content.ifEmpty { "（空文件）" },
+                    text = preview.content.ifEmpty { stringResource(R.string.workspace_empty_file) },
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -633,17 +656,19 @@ private fun TextPreview(
                     CircularProgressIndicator(modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "正在加载",
+                        text = stringResource(R.string.workspace_loading),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    TextButton(onClick = onLoadMore) { Text("继续加载") }
+                    TextButton(onClick = onLoadMore) {
+                        Text(stringResource(R.string.workspace_load_more))
+                    }
                 }
             }
         } else if (preview.eof) {
             Text(
-                text = "已到文件末尾",
+                text = stringResource(R.string.workspace_end_of_file),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -677,12 +702,12 @@ private fun ImagePreview(preview: WorkspacePreview.Image, onDownload: () -> Unit
 
             else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = preview.error ?: "无法显示这张图片",
+                    text = preview.error ?: stringResource(R.string.workspace_image_unavailable),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
-                TextButton(onClick = onDownload) { Text("下载") }
+                TextButton(onClick = onDownload) { Text(stringResource(R.string.workspace_download)) }
             }
         }
     }
@@ -700,7 +725,7 @@ private fun UnsupportedPreview(preview: WorkspacePreview.Unsupported, onDownload
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "这种文件不能直接预览",
+                text = stringResource(R.string.workspace_preview_unsupported),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -713,7 +738,7 @@ private fun UnsupportedPreview(preview: WorkspacePreview.Unsupported, onDownload
                 )
             }
             Spacer(Modifier.height(10.dp))
-            TextButton(onClick = onDownload) { Text("下载") }
+            TextButton(onClick = onDownload) { Text(stringResource(R.string.workspace_download)) }
         }
     }
 }
@@ -723,14 +748,18 @@ private fun EmptyContent(state: WorkspaceUiState) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = if (state.loaded) "这个目录是空的" else "正在加载",
+                text = if (state.loaded) {
+                    stringResource(R.string.workspace_directory_empty)
+                } else {
+                    stringResource(R.string.workspace_loading)
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (state.loaded && state.root == WorkspaceRoot.MEMORY) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "记忆条目会在对话过程中自动写入",
+                    text = stringResource(R.string.workspace_memory_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -755,7 +784,7 @@ private fun ErrorStrip(message: String, onRetry: () -> Unit) {
             modifier = Modifier.weight(1f),
         )
         Text(
-            text = "重试",
+            text = stringResource(R.string.action_retry),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onErrorContainer,
             modifier = Modifier
@@ -780,7 +809,12 @@ private fun DownloadDialog(
             Column {
                 if (download.fileCount > 1) {
                     Text(
-                        text = "第 ${download.fileIndex}/${download.fileCount} 个文件",
+                        text = pluralStringResource(
+                            R.plurals.workspace_download_file_index,
+                            download.fileCount,
+                            download.fileIndex,
+                            download.fileCount,
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -813,9 +847,9 @@ private fun DownloadDialog(
         },
         confirmButton = {
             if (running) {
-                TextButton(onClick = onCancel) { Text("取消") }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
             } else {
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
             }
         },
     )
@@ -871,13 +905,18 @@ private fun prettyTime(raw: String): String {
     return if (normalized.length >= 16) normalized.take(16) else normalized
 }
 
+@Composable
 private fun progressText(download: DownloadState): String {
     val read = DownloadPolicy.formatBytes(download.read)
     val total = download.total?.let { DownloadPolicy.formatBytes(it) }
     return when (download.phase) {
-        DownloadPhase.RUNNING -> if (total != null) "$read / $total" else "已下载 $read"
-        DownloadPhase.DONE -> "下载完成"
-        DownloadPhase.CANCELLED -> "下载已取消"
-        DownloadPhase.FAILED -> "下载失败"
+        DownloadPhase.RUNNING -> if (total != null) {
+            "$read / $total"
+        } else {
+            stringResource(R.string.workspace_download_progress_read, read)
+        }
+        DownloadPhase.DONE -> stringResource(R.string.workspace_download_complete)
+        DownloadPhase.CANCELLED -> stringResource(R.string.workspace_download_cancelled)
+        DownloadPhase.FAILED -> stringResource(R.string.workspace_download_failed)
     }
 }

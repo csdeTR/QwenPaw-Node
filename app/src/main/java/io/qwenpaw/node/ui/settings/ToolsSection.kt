@@ -28,8 +28,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ToolConfigFieldDto
 import io.qwenpaw.node.data.model.ToolDto
 import io.qwenpaw.node.ui.ToolCopy
@@ -72,15 +75,15 @@ internal fun ToolsSection(
             .fillMaxWidth(),
     ) {
         if (tools.isEmpty()) {
-            SectionHeader("工具")
+            SectionHeader(stringResource(R.string.tools_header))
             Card {
                 Text(
                     text = when {
-                        loading -> "正在加载"
+                        loading -> stringResource(R.string.action_loading)
                         // 空列表 + 错误时要说「加载失败」而不是「没有工具」：
                         // 后者会让用户以为服务端确实一个工具都没装。
-                        error != null -> "加载失败：$error"
-                        else -> "没有可用的工具"
+                        error != null -> stringResource(R.string.tools_load_failed, error)
+                        else -> stringResource(R.string.tools_empty)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (error != null) MaterialTheme.colorScheme.error
@@ -90,7 +93,10 @@ internal fun ToolsSection(
             }
         }
         grouped.forEach { (category, list) ->
-            SectionHeader(ToolCopy.category(category), trailing = "${list.size} 个")
+            SectionHeader(
+                ToolCopy.category(category),
+                trailing = pluralStringResource(R.plurals.tools_count, list.size, list.size),
+            )
             Card {
                 list.forEachIndexed { index, tool ->
                     ToolRow(
@@ -100,6 +106,7 @@ internal fun ToolsSection(
                     )
                     if (configurable.containsKey(tool.name)) {
                         Divider()
+                        val fieldCount = configurable[tool.name]!!.configFields!!.size
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -109,18 +116,22 @@ internal fun ToolsSection(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "配置",
+                                    text = stringResource(R.string.tools_config),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
-                                    text = "填写${configurable[tool.name]!!.configFields!!.size} 项参数后才能使用",
+                                    text = pluralStringResource(
+                                        R.plurals.tools_config_hint,
+                                        fieldCount,
+                                        fieldCount,
+                                    ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Text(
-                                text = "填写",
+                                text = stringResource(R.string.tools_fill),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.secondary,
                             )
@@ -229,8 +240,16 @@ private fun SyncAsyncChip(async: Boolean, onChange: (Boolean) -> Unit) {
             .clip(RoundedCornerShape(999.dp))
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(999.dp)),
     ) {
-        SyncAsyncSegment("同步", selected = !async, onClick = { onChange(false) })
-        SyncAsyncSegment("异步", selected = async, onClick = { onChange(true) })
+        SyncAsyncSegment(
+            stringResource(R.string.tools_sync),
+            selected = !async,
+            onClick = { onChange(false) },
+        )
+        SyncAsyncSegment(
+            stringResource(R.string.tools_async),
+            selected = async,
+            onClick = { onChange(true) },
+        )
     }
 }
 
@@ -310,7 +329,7 @@ private fun ToolConfigDialog(
                 }
                 if (fields.isEmpty()) {
                     Text(
-                        text = "该工具没有可填的配置项",
+                        text = stringResource(R.string.tools_config_empty),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -319,7 +338,7 @@ private fun ToolConfigDialog(
         },
         confirmButton = {
             Text(
-                text = "保存",
+                text = stringResource(R.string.action_save),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -329,7 +348,7 @@ private fun ToolConfigDialog(
         },
         dismissButton = {
             Text(
-                text = "取消",
+                text = stringResource(R.string.action_cancel),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier

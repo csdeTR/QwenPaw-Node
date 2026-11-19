@@ -37,10 +37,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.CheckpointNodeDto
 import io.qwenpaw.node.data.model.CheckpointSessionDto
 import io.qwenpaw.node.data.model.ChatSpecDto
@@ -136,15 +139,23 @@ fun CheckpointScreen(
                         .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconCircle(icon = QwenIcons.arrowLeft, description = "返回", onClick = onBack)
+                    IconCircle(
+                        icon = QwenIcons.arrowLeft,
+                        description = stringResource(R.string.action_back),
+                        onClick = onBack,
+                    )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "检查点",
+                        text = stringResource(R.string.checkpoint_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
-                    IconCircle(icon = QwenIcons.refresh, description = "刷新", onClick = actions.refresh)
+                    IconCircle(
+                        icon = QwenIcons.refresh,
+                        description = stringResource(R.string.action_refresh),
+                        onClick = actions.refresh,
+                    )
                 }
             }
         },
@@ -169,7 +180,7 @@ fun CheckpointScreen(
                     Card {
                         Column(Modifier.padding(14.dp)) {
                             Text(
-                                text = "无法读取检查点",
+                                text = stringResource(R.string.checkpoint_load_failed),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.error,
@@ -180,7 +191,9 @@ fun CheckpointScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            TextButton(onClick = actions.dismissError) { Text("关闭") }
+                            TextButton(onClick = actions.dismissError) {
+                                Text(stringResource(R.string.action_close))
+                            }
                         }
                     }
                 }
@@ -188,17 +201,17 @@ fun CheckpointScreen(
 
             if (!state.writesDisabled) {
                 item {
-                    SectionHeader("自动检查点")
+                    SectionHeader(stringResource(R.string.checkpoint_auto_header))
                     Card {
                         Column(Modifier.padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        text = "自动创建检查点",
+                                        text = stringResource(R.string.checkpoint_auto_title),
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     Text(
-                                        text = "在对话产生变更前自动留档，可随时回滚。",
+                                        text = stringResource(R.string.checkpoint_auto_hint),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -212,7 +225,7 @@ fun CheckpointScreen(
                             state.status?.workspaceDir?.takeIf { it.isNotBlank() }?.let { dir ->
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = "工作区：$dir",
+                                    text = stringResource(R.string.checkpoint_workspace_dir, dir),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -220,8 +233,14 @@ fun CheckpointScreen(
                             state.graph?.summary?.let { summary ->
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = "共 ${summary.total} 个检查点：自动 ${summary.auto}、" +
-                                        "手动 ${summary.snapshots}、恢复前 ${summary.safety}",
+                                    text = pluralStringResource(
+                                        R.plurals.checkpoint_summary,
+                                        summary.total,
+                                        summary.total,
+                                        summary.auto,
+                                        summary.snapshots,
+                                        summary.safety,
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -233,11 +252,11 @@ fun CheckpointScreen(
 
             if (!state.writesDisabled) {
                 item {
-                    SectionHeader("手动快照")
+                    SectionHeader(stringResource(R.string.checkpoint_manual_header))
                     Card {
                         Column(Modifier.padding(14.dp)) {
                             Text(
-                                text = "选择一条会话，查看后为它创建命名检查点。",
+                                text = stringResource(R.string.checkpoint_manual_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -245,7 +264,7 @@ fun CheckpointScreen(
                             if (sessions.isEmpty()) {
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = "服务端还没有会话。",
+                                    text = stringResource(R.string.checkpoint_manual_empty),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -289,7 +308,11 @@ fun CheckpointScreen(
                             if (sessions.size > SNAPSHOT_SESSION_LIMIT) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    text = "仅列出最近的 $SNAPSHOT_SESSION_LIMIT 条会话。",
+                                    text = pluralStringResource(
+                                        R.plurals.checkpoint_manual_limit,
+                                        SNAPSHOT_SESSION_LIMIT,
+                                        SNAPSHOT_SESSION_LIMIT,
+                                    ),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -313,7 +336,7 @@ fun CheckpointScreen(
             if (state.groups.isEmpty() && state.graph != null) {
                 item {
                     Text(
-                        text = "当前工作区还没有检查点。",
+                        text = stringResource(R.string.checkpoint_timeline_empty),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -325,7 +348,7 @@ fun CheckpointScreen(
                 item(key = "header-${group.sessionKey}") {
                     SectionHeader(
                         title = group.title,
-                        trailing = if (group.archived) "已归档" else null,
+                        trailing = if (group.archived) stringResource(R.string.checkpoint_archived) else null,
                     )
                 }
                 items(group.nodes, key = { "node-${it.commit}" }) { node ->
@@ -339,33 +362,33 @@ fun CheckpointScreen(
 
             if (!state.writesDisabled) {
                 item {
-                    SectionHeader("清理")
+                    SectionHeader(stringResource(R.string.checkpoint_gc_header))
                     Card {
                         Column(Modifier.padding(14.dp)) {
                             Text(
-                                text = "按数量与时间保留最近的检查点，超出部分会被删除。",
+                                text = stringResource(R.string.checkpoint_gc_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(8.dp))
                             GcField(
-                                label = "保留数量",
+                                label = stringResource(R.string.checkpoint_gc_keep_count),
                                 value = state.gcDraft.keepCount,
                                 onValueChange = { actions.updateGcDraft(state.gcDraft.copy(keepCount = it)) },
                             )
                             GcField(
-                                label = "保留天数",
+                                label = stringResource(R.string.checkpoint_gc_keep_days),
                                 value = state.gcDraft.keepDays,
                                 onValueChange = { actions.updateGcDraft(state.gcDraft.copy(keepDays = it)) },
                             )
                             GcField(
-                                label = "恢复前快照保留天数",
+                                label = stringResource(R.string.checkpoint_gc_pre_restore_days),
                                 value = state.gcDraft.preRestoreDays,
                                 onValueChange = { actions.updateGcDraft(state.gcDraft.copy(preRestoreDays = it)) },
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "压缩仓库对象",
+                                    text = stringResource(R.string.checkpoint_gc_compact),
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.weight(1f),
                                 )
@@ -383,16 +406,34 @@ fun CheckpointScreen(
                             }
                             Row {
                                 TextButton(onClick = actions.saveGcSettings, enabled = !state.gcSaving) {
-                                    Text(if (state.gcSaving) "保存中…" else "保存策略")
+                                    Text(
+                                        if (state.gcSaving) {
+                                            stringResource(R.string.checkpoint_gc_saving)
+                                        } else {
+                                            stringResource(R.string.checkpoint_gc_save)
+                                        },
+                                    )
                                 }
                                 TextButton(onClick = actions.previewGc, enabled = !state.gcPreviewing) {
-                                    Text(if (state.gcPreviewing) "预览中…" else "预览清理")
+                                    Text(
+                                        if (state.gcPreviewing) {
+                                            stringResource(R.string.checkpoint_gc_previewing)
+                                        } else {
+                                            stringResource(R.string.checkpoint_gc_preview)
+                                        },
+                                    )
                                 }
                                 TextButton(
                                     onClick = actions.applyGc,
                                     enabled = state.gcPreview != null && !state.gcApplying,
                                 ) {
-                                    Text(if (state.gcApplying) "清理中…" else "执行清理")
+                                    Text(
+                                        if (state.gcApplying) {
+                                            stringResource(R.string.checkpoint_gc_applying)
+                                        } else {
+                                            stringResource(R.string.checkpoint_gc_apply)
+                                        },
+                                    )
                                 }
                             }
                             state.gcPreview?.let { preview ->
@@ -400,10 +441,14 @@ fun CheckpointScreen(
                                 Spacer(Modifier.height(6.dp))
                                 Text(
                                     text = if (preview.deletedRefs.isEmpty()) {
-                                        "预览结果：没有需要清理的检查点。"
+                                        stringResource(R.string.checkpoint_gc_preview_empty)
                                     } else {
-                                        "预览结果：将删除 ${preview.deletedRefs.size} 个，" +
-                                            "保留 ${preview.keptRefs.size} 个。"
+                                        pluralStringResource(
+                                            R.plurals.checkpoint_gc_preview_result,
+                                            preview.deletedRefs.size,
+                                            preview.deletedRefs.size,
+                                            preview.keptRefs.size,
+                                        )
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -413,21 +458,24 @@ fun CheckpointScreen(
                     }
                 }
                 item {
-                    SectionHeader("危险操作")
+                    SectionHeader(stringResource(R.string.checkpoint_danger_header))
                     Card {
                         Column(Modifier.padding(14.dp)) {
                             Text(
-                                text = "删除全部检查点",
+                                text = stringResource(R.string.checkpoint_reset_heading),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
-                                text = "删除当前工作区的全部检查点，此操作不可撤销。",
+                                text = stringResource(R.string.checkpoint_reset_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             TextButton(onClick = actions.requestReset) {
-                                Text("重置全部检查点", color = MaterialTheme.colorScheme.error)
+                                Text(
+                                    stringResource(R.string.checkpoint_reset_action),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
                             }
                         }
                     }
@@ -440,15 +488,24 @@ fun CheckpointScreen(
         RestoreCheckpointDialog(state = state, draft = draft, actions = actions)
     }
     if (state.resetConfirm) {
+        val agentFallback = stringResource(R.string.checkpoint_impact_current_agent)
+        val workspaceLabel = state.status?.workspaceDir.orEmpty().ifBlank { agentFallback }
         DestructiveActionDialog(
-            title = "重置全部检查点",
-            message = "将删除当前工作区的全部检查点，包括自动、手动与恢复前快照。",
+            title = stringResource(R.string.checkpoint_reset_action),
+            message = stringResource(R.string.checkpoint_reset_confirm_message),
             impacts = listOf(
-                "工作区：${state.status?.workspaceDir.orEmpty().ifBlank { "当前智能体" }}",
-                "检查点数量：${state.graph?.summary?.total ?: 0}",
-                "删除后无法回滚到这些检查点。",
+                stringResource(R.string.checkpoint_workspace_dir, workspaceLabel),
+                stringResource(
+                    R.string.checkpoint_impact_count,
+                    state.graph?.summary?.total ?: 0,
+                ),
+                stringResource(R.string.checkpoint_impact_no_undo),
             ),
-            confirmLabel = if (state.resetting) "正在删除…" else "确认删除",
+            confirmLabel = if (state.resetting) {
+                stringResource(R.string.checkpoint_reset_deleting)
+            } else {
+                stringResource(R.string.checkpoint_reset_confirm)
+            },
             onConfirm = { if (!state.resetting) actions.confirmReset() },
             onDismiss = actions.dismissReset,
         )
@@ -482,7 +539,7 @@ private fun CheckpointNodeRow(node: CheckpointNodeDto, onRestore: () -> Unit, en
                     if (node.isHead) {
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "最新",
+                            text = stringResource(R.string.checkpoint_node_latest),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary,
                         )
@@ -502,7 +559,9 @@ private fun CheckpointNodeRow(node: CheckpointNodeDto, onRestore: () -> Unit, en
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            TextButton(onClick = onRestore, enabled = enabled) { Text("回滚") }
+            TextButton(onClick = onRestore, enabled = enabled) {
+                Text(stringResource(R.string.checkpoint_node_restore))
+            }
         }
     }
 }
@@ -525,7 +584,7 @@ fun CheckpointSnapshotDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("创建检查点") },
+        title = { Text(stringResource(R.string.checkpoint_snapshot_create)) },
         text = {
             Column {
                 Text(
@@ -536,7 +595,7 @@ fun CheckpointSnapshotDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = onNameChange,
-                    label = { Text("名称（可选）") },
+                    label = { Text(stringResource(R.string.checkpoint_snapshot_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -552,11 +611,17 @@ fun CheckpointSnapshotDialog(
         },
         confirmButton = {
             TextButton(onClick = onConfirm, enabled = !pending) {
-                Text(if (pending) "创建中…" else "创建")
+                Text(
+                    if (pending) {
+                        stringResource(R.string.checkpoint_snapshot_creating)
+                    } else {
+                        stringResource(R.string.checkpoint_snapshot_confirm)
+                    },
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -569,7 +634,7 @@ private fun RestoreCheckpointDialog(
 ) {
     AlertDialog(
         onDismissRequest = actions.dismissRestore,
-        title = { Text("回滚到检查点") },
+        title = { Text(stringResource(R.string.checkpoint_restore_title)) },
         text = {
             Column(
                 modifier = Modifier
@@ -589,7 +654,7 @@ private fun RestoreCheckpointDialog(
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "会话记忆",
+                        text = stringResource(R.string.checkpoint_restore_memory),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -597,7 +662,7 @@ private fun RestoreCheckpointDialog(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "工作区文件",
+                        text = stringResource(R.string.checkpoint_restore_files),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -618,12 +683,20 @@ private fun RestoreCheckpointDialog(
                     val files = state.restorePreview?.filePaths.orEmpty()
                     Spacer(Modifier.height(6.dp))
                     Row {
-                        TextButton(onClick = actions.selectAllFiles) { Text("全选") }
-                        TextButton(onClick = actions.clearFiles) { Text("清空") }
+                        TextButton(onClick = actions.selectAllFiles) {
+                            Text(stringResource(R.string.checkpoint_restore_select_all))
+                        }
+                        TextButton(onClick = actions.clearFiles) {
+                            Text(stringResource(R.string.action_clear))
+                        }
                     }
                     if (files.isEmpty()) {
                         Text(
-                            text = if (state.previewLoading) "正在读取文件列表…" else "该检查点没有可恢复的文件。",
+                            text = if (state.previewLoading) {
+                                stringResource(R.string.checkpoint_restore_loading_files)
+                            } else {
+                                stringResource(R.string.checkpoint_restore_no_files)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -651,13 +724,13 @@ private fun RestoreCheckpointDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "影响范围",
+                    text = stringResource(R.string.checkpoint_restore_impacts),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 draft.impacts(state.restorePreview).forEach { line ->
                     Text(
-                        text = "· $line",
+                        text = stringResource(R.string.checkpoint_restore_impact_line, line),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 1.dp),
@@ -679,14 +752,22 @@ private fun RestoreCheckpointDialog(
                 enabled = draft.canApply && !state.restoreApplying,
             ) {
                 Text(
-                    text = if (state.restoreApplying) "回滚中…" else "确认回滚",
+                    text = if (state.restoreApplying) {
+                        stringResource(R.string.checkpoint_restore_applying)
+                    } else {
+                        stringResource(R.string.checkpoint_restore_confirm)
+                    },
                     color = MaterialTheme.colorScheme.error,
                 )
             }
         },
         dismissButton = {
-            TextButton(onClick = actions.dismissRestore) { Text("取消") }
-            TextButton(onClick = actions.loadPreview) { Text("刷新预览") }
+            TextButton(onClick = actions.dismissRestore) {
+                Text(stringResource(R.string.action_cancel))
+            }
+            TextButton(onClick = actions.loadPreview) {
+                Text(stringResource(R.string.checkpoint_restore_refresh_preview))
+            }
         },
     )
 }

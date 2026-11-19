@@ -1,9 +1,11 @@
 package io.qwenpaw.node.data.remote
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import java.io.IOException
 import java.net.ConnectException
@@ -17,6 +19,11 @@ import java.net.UnknownHostException
  * 用户在界面上看到的是 `Failed to connect to /10.0.2.2:8099` 这样的英文异常。
  */
 class ErrorTextTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     @Test
     fun `business errors win over network heuristics`() {

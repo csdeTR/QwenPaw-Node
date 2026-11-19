@@ -1,5 +1,8 @@
 package io.qwenpaw.node.ui.inbox
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * 收件箱的来源类型与中文标签。
  *
@@ -23,14 +26,18 @@ internal val INBOX_SOURCE_FILTERS: List<String> = listOf(
  * `null` 与空白都表示不做来源筛选，统一显示「全部」，与首项选项一致。
  */
 internal fun sourceFilterLabel(source: String?): String =
-    if (source.isNullOrBlank()) "全部" else inboxSourceLabel(source)
+    if (source.isNullOrBlank()) {
+        Texts.get(R.string.inbox_filter_all)
+    } else {
+        inboxSourceLabel(source)
+    }
 
 /** 来源的中文标签。 */
 internal fun inboxSourceLabel(sourceType: String): String = when (sourceType) {
-    "cron" -> "定时任务"
-    "heartbeat" -> "心跳"
-    "memory" -> "记忆"
-    "skill_autoupdate" -> "技能更新"
-    "mail" -> "邮件"
+    "cron" -> Texts.get(R.string.inbox_source_cron)
+    "heartbeat" -> Texts.get(R.string.inbox_source_heartbeat)
+    "memory" -> Texts.get(R.string.inbox_source_memory)
+    "skill_autoupdate" -> Texts.get(R.string.inbox_source_skill_autoupdate)
+    "mail" -> Texts.get(R.string.inbox_source_mail)
     else -> sourceType
 }

@@ -6,7 +6,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import io.qwenpaw.node.R
 
 /**
  * 多选一的中性对话框：标题 + 说明 + N 个并列选项 + 一个取消。
@@ -28,7 +30,7 @@ fun ChoiceDialog(
     onPick: (Int) -> Unit,
     onDismiss: () -> Unit,
     message: String? = null,
-    dismissLabel: String = "取消",
+    dismissLabel: String = stringResource(R.string.action_cancel),
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,

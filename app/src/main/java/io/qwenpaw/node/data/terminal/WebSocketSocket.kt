@@ -7,6 +7,8 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -115,13 +117,22 @@ class WebSocketSocket(
         }
 
         override fun write(b: ByteArray, off: Int, len: Int) {
-            if (closed.get()) throw IOException(failure?.message ?: "SSH 中继已关闭")
+            if (closed.get()) {
+                throw IOException(failure?.message ?: Texts.get(R.string.ssh_error_relay_closed))
+            }
             val data = b.copyOfRange(off, off + len).toByteString()
             var attempts = 0
             while (!webSocket.send(data)) {
-                failure?.let { throw IOException(it.message ?: "SSH 中继连接失败", it) }
-                if (closed.get()) throw IOException("SSH 中继已关闭")
-                if (++attempts > 500) throw IOException("SSH 中继发送超时")
+                failure?.let {
+                    throw IOException(
+                        it.message ?: Texts.get(R.string.ssh_error_relay_connection_failed),
+                        it,
+                    )
+                }
+                if (closed.get()) throw IOException(Texts.get(R.string.ssh_error_relay_closed))
+                if (++attempts > 500) {
+                    throw IOException(Texts.get(R.string.ssh_error_relay_send_timeout))
+                }
                 Thread.sleep(10)
             }
         }

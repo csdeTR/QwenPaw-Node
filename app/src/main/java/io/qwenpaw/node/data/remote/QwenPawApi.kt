@@ -1,7 +1,9 @@
 package io.qwenpaw.node.data.remote
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AcpNodeRuntimeDto
 import io.qwenpaw.node.data.model.AgentDto
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.data.model.AgentListDto
 import io.qwenpaw.node.data.model.AgentProfileDto
 import io.qwenpaw.node.data.model.AgentRefDto
@@ -2903,7 +2905,7 @@ class QwenPawApi(
             "PUT" -> builder.put(requestBody ?: EMPTY_BODY)
             "PATCH" -> builder.patch(requestBody ?: EMPTY_BODY)
             "DELETE" -> builder.delete()
-            else -> error("不支持的方法 $method")
+            else -> error(Texts.get(R.string.api_unsupported_method, method))
         }
         return execute(builder.build())
     }
@@ -2990,7 +2992,7 @@ class QwenPawApi(
         val builder = baseBuilder(conn, connUrl(conn, path))
         when (method) {
             "GET" -> builder.get()
-            else -> error("不支持的方法 $method")
+            else -> error(Texts.get(R.string.api_unsupported_method, method))
         }
         return client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) {
@@ -3033,7 +3035,7 @@ class QwenPawApi(
     )
 
     private fun <T> decode(text: String, serializer: kotlinx.serialization.DeserializationStrategy<T>): T {
-        if (text.isBlank()) throw ApiException(204, "服务端返回了空响应")
+        if (text.isBlank()) throw ApiException(204, Texts.get(R.string.api_empty_response))
         return json.decodeFromString(serializer, text)
     }
 
@@ -3069,16 +3071,16 @@ class QwenPawApi(
          * 这一条要回答的是「我该改什么」，而不是「哪里错了」——前者用户能动手，
          * 后者只会把人引向会话数据。
          */
-        internal const val LOGIN_NOT_REACHED =
-            "登录接口返回 404。若服务端只接受 https，http 上的登录请求会被跳转改写成 GET 并丢失请求体；" +
-                "请把服务器地址改为 https:// 开头"
+        internal val LOGIN_NOT_REACHED: String
+            get() = Texts.get(R.string.drest_login_not_reached)
 
         /**
          * 登录接口 401 的说明。
          *
          * 用户此时还没拿到过 token，说「登录已失效」会把人引向一个不存在的失效状态。
          */
-        internal const val BAD_CREDENTIALS = "用户名或密码不正确"
+        internal val BAD_CREDENTIALS: String
+            get() = Texts.get(R.string.drest_bad_credentials)
 
         /**
          * 配套插件的自述端点。
@@ -3180,7 +3182,7 @@ class QwenPawApi(
             val normalized = baseUrl.trim().trimEnd('/')
                 .let { if (it.contains("://")) it else "http://$it" }
             val url = normalized.toHttpUrlOrNull()
-                ?: throw IllegalArgumentException("地址不合法：$baseUrl")
+                ?: throw IllegalArgumentException(Texts.get(R.string.api_invalid_address, baseUrl))
             return url.newBuilder()
                 .addPathSegments(path.removePrefix("/").substringBefore('?'))
                 .query(path.substringAfter('?', "").ifBlank { null })

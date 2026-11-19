@@ -35,14 +35,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.os.SystemClock
 import android.widget.Toast
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.Role
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.CodeTextStyle
 import io.qwenpaw.node.ui.theme.MessageMaxWidth
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -168,10 +172,11 @@ private fun StepsHeader(
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
+    val reasoningLabel = stringResource(R.string.msg_reasoning)
     val latest = steps.lastOrNull()?.let { step ->
         step.tool?.name?.takeIf { it.isNotBlank() }
             ?: when (step.kind) {
-                ChatMessage.Kind.REASONING -> "思考"
+                ChatMessage.Kind.REASONING -> reasoningLabel
                 ChatMessage.Kind.TEXT -> step.text.lineSequence()
                     .firstOrNull { it.isNotBlank() }?.trim()?.take(24)
                 else -> null
@@ -195,17 +200,17 @@ private fun StepsHeader(
                 ),
         )
         Spacer(Modifier.width(7.dp))
+        // 措辞对齐官方：进行中 / 已完成 / N 步。
+        val statusText = when {
+            running -> stringResource(R.string.msg_steps_running)
+            stepCount > 0 -> pluralStringResource(R.plurals.msg_steps_done_count, stepCount, stepCount)
+            else -> stringResource(R.string.msg_steps_done)
+        }
         Text(
-            text = buildString {
-                // 措辞对齐官方：进行中 / 已完成 / N 步。
-                append(
-                    when {
-                        running -> "处理中"
-                        stepCount > 0 -> "处理完成，$stepCount 步"
-                        else -> "处理完成"
-                    },
-                )
-                if (!expanded && latest != null) append("，").append(latest)
+            text = if (!expanded && latest != null) {
+                stringResource(R.string.msg_steps_with_latest, statusText, latest)
+            } else {
+                statusText
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -216,7 +221,11 @@ private fun StepsHeader(
         Spacer(Modifier.width(4.dp))
         Icon(
             imageVector = if (expanded) QwenIcons.chevronUp else QwenIcons.chevronDown,
-            contentDescription = if (expanded) "收起步骤" else "展开步骤",
+            contentDescription = if (expanded) {
+                stringResource(R.string.msg_steps_collapse)
+            } else {
+                stringResource(R.string.msg_steps_expand)
+            },
             modifier = Modifier.size(15.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -264,7 +273,11 @@ private fun ProcessReasoningRow(step: ChatMessage, defaultOpen: Boolean = false)
             .padding(start = 9.dp, top = 1.dp, bottom = 1.dp, end = 4.dp),
     ) {
         Text(
-            text = if (open) "思考过程" else "思考：$preview",
+            text = if (open) {
+                stringResource(R.string.msg_reasoning_title)
+            } else {
+                stringResource(R.string.msg_reasoning_preview, preview)
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -304,6 +317,8 @@ private fun ProcessToolRow(
     onToolDeadline: () -> Unit = {},
 ) {
     val tool = step.tool ?: return
+    val fallbackToolLabel = stringResource(R.string.msg_tool_fallback)
+    val toolLabel = tool.name.ifBlank { fallbackToolLabel }
     var open by remember(step.id) { mutableStateOf(defaultOpen) }
     // 用户手动收/展开过就按他的选择来，不再自动动。
     var userToggled by remember(step.id) { mutableStateOf(false) }
@@ -394,7 +409,7 @@ private fun ProcessToolRow(
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = tool.name.ifBlank { "工具调用" },
+                text = toolLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -424,7 +439,11 @@ private fun ProcessToolRow(
             Spacer(Modifier.width(4.dp))
             Icon(
                 imageVector = if (open) QwenIcons.chevronUp else QwenIcons.chevronDown,
-                contentDescription = if (open) "收起" else "展开",
+                contentDescription = if (open) {
+                    stringResource(R.string.msg_tool_collapse)
+                } else {
+                    stringResource(R.string.msg_tool_expand)
+                },
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -432,13 +451,17 @@ private fun ProcessToolRow(
         if (open) {
             if (tool.arguments.isNotBlank()) {
                 Spacer(Modifier.height(5.dp))
-                Text("参数", style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.msg_tool_params), style = MaterialTheme.typography.labelSmall)
                 SelectionContainer { Text(tool.arguments, style = CodeTextStyle) }
             }
             if (!output.isNullOrBlank()) {
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    text = if (live != null) "输出（实时）" else "输出",
+                    text = if (live != null) {
+                        stringResource(R.string.msg_tool_output_live)
+                    } else {
+                        stringResource(R.string.msg_tool_output)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                 )
                 SelectionContainer {
@@ -446,7 +469,7 @@ private fun ProcessToolRow(
                 }
                 if (output.length > MAX_TOOL_OUTPUT_CHARS) {
                     Text(
-                        text = "（输出过长，已截断）",
+                        text = stringResource(R.string.msg_tool_output_truncated),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -475,10 +498,10 @@ private fun ProcessToolRow(
 
     if (pendingCancel) {
         io.qwenpaw.node.ui.common.DestructiveActionDialog(
-            title = "取消执行",
-            message = "确定要取消工具「${tool.name.ifBlank { "工具调用" }}」的执行吗？",
-            impacts = listOf("该工具已产生的执行会被中断，结果不再返回"),
-            confirmLabel = "取消执行",
+            title = stringResource(R.string.msg_cancel_tool_title),
+            message = stringResource(R.string.msg_cancel_tool_message, toolLabel),
+            impacts = listOf(stringResource(R.string.msg_cancel_tool_impact)),
+            confirmLabel = stringResource(R.string.msg_cancel_tool_title),
             undoable = false,
             onConfirm = {
                 onCancelTool(tool.callId)
@@ -494,10 +517,10 @@ private fun toolStateBadge(
     tool: io.qwenpaw.node.data.stream.ToolCard,
     info: io.qwenpaw.node.data.model.ToolCallInfoDto?,
 ): String? = when {
-    info?.endState == "interrupted" || info?.forceCancelled == true -> "已取消"
-    info?.status == "offloaded" -> "已转后台"
-    tool.done -> "已完成"
-    else -> "运行中"
+    info?.endState == "interrupted" || info?.forceCancelled == true -> Texts.get(R.string.msg_tool_state_cancelled)
+    info?.status == "offloaded" -> Texts.get(R.string.msg_tool_state_offloaded)
+    tool.done -> Texts.get(R.string.msg_tool_state_done)
+    else -> Texts.get(R.string.msg_tool_state_running)
 }
 
 /** 展开后的操作行：取消执行 / 转入后台 / 推迟转后台 / 延长执行超时。 */
@@ -515,13 +538,15 @@ private fun ToolControlRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 两个延长按钮只在与字段对应时限存在时才有意义：没有时限就无从延长。
-        ToolAction("取消执行", onCancel)
+        ToolAction(stringResource(R.string.msg_cancel_tool_title), onCancel)
         if (info.status == "running") {
-            ToolAction("转入后台", onOffload)
-            if (info.offloadRemaining != null) ToolAction("推迟转后台", onExtendOffload)
+            ToolAction(stringResource(R.string.msg_tool_action_offload), onOffload)
+            if (info.offloadRemaining != null) {
+                ToolAction(stringResource(R.string.msg_tool_action_postpone), onExtendOffload)
+            }
         }
         if (info.killRemaining != null || info.status == "offloaded") {
-            ToolAction("延长执行超时", onExtendKill)
+            ToolAction(stringResource(R.string.msg_tool_action_extend), onExtendKill)
         }
     }
 }
@@ -606,9 +631,9 @@ data class MessageAppearance(
     /** 头像文件版本，变化时重新读取图片。 */
     val avatarVersion: Long = 0L,
     /** 用户侧显示名。默认「我」。 */
-    val userName: String = "我",
+    val userName: String = Texts.get(R.string.user_default_name),
     /** 智能体显示名。来自实例选择的智能体，消息自带 `original_name` 时优先用后者。 */
-    val agentName: String = "智能体",
+    val agentName: String = Texts.get(R.string.main_agent_default_name),
     /** 是否在回复末尾显示用量。 */
     val showStats: Boolean = false,
     /**
@@ -708,11 +733,13 @@ private fun TextBubble(
 
     if (askSource) {
         io.qwenpaw.node.ui.common.ChoiceDialog(
-            title = "是否显示 Markdown/LaTeX 原文？",
-            message = "页面上看到的是排版后的结果，公式与表格已重排。" +
-                "看原文可以完整选中并复制其中的标记。",
-            choices = listOf("显示", "不显示"),
-            dismissLabel = "取消",
+            title = stringResource(R.string.msg_source_dialog_title),
+            message = stringResource(R.string.msg_source_dialog_body),
+            choices = listOf(
+                stringResource(R.string.msg_source_show),
+                stringResource(R.string.msg_source_hide),
+            ),
+            dismissLabel = stringResource(R.string.action_cancel),
             onPick = { index ->
                 askSource = false
                 if (index == 0) {
@@ -721,7 +748,7 @@ private fun TextBubble(
                     selectionMode = true
                     Toast.makeText(
                         context,
-                        "已进入选择模式，「完成选择」按钮在这条消息下方",
+                        context.getString(R.string.msg_selection_entered),
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
@@ -830,7 +857,11 @@ private fun TextBubble(
                 if (collapsible && message.error == null) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = if (expanded) "收起" else "展开全文",
+                        text = if (expanded) {
+                            stringResource(R.string.msg_tool_collapse)
+                        } else {
+                            stringResource(R.string.msg_expand_full)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = contentColor.copy(alpha = 0.75f),
                         modifier = Modifier
@@ -846,7 +877,7 @@ private fun TextBubble(
                         onClick = { onRetry?.invoke(message) },
                         contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                     ) {
-                        Text("重试", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.action_retry), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -856,25 +887,33 @@ private fun TextBubble(
                 onDismissRequest = { menuOpen = false },
             ) {
                 androidx.compose.material3.DropdownMenuItem(
-                    text = { Text("复制") },
+                    text = { Text(stringResource(R.string.action_copy)) },
                     leadingIcon = { MenuIcons.Leading(MenuAction.COPY) },
                     onClick = {
                         menuOpen = false
                         copy(MarkdownPlainText.strip(message.text))
-                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.msg_copied),
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     },
                 )
                 androidx.compose.material3.DropdownMenuItem(
-                    text = { Text("复制为 Markdown") },
+                    text = { Text(stringResource(R.string.msg_action_copy_markdown)) },
                     leadingIcon = { MenuIcons.Leading(MenuAction.COPY_MARKDOWN) },
                     onClick = {
                         menuOpen = false
                         copy(message.text)
-                        Toast.makeText(context, "已复制 Markdown", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.msg_copied_markdown),
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     },
                 )
                 androidx.compose.material3.DropdownMenuItem(
-                    text = { Text("选择文本") },
+                    text = { Text(stringResource(R.string.msg_action_select_text)) },
                     leadingIcon = { MenuIcons.Leading(MenuAction.SELECT_TEXT) },
                     onClick = {
                         menuOpen = false
@@ -1006,7 +1045,12 @@ private fun MessageFrame(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
                 ) {
-                    MessageAction("完成选择", MenuAction.DONE_SELECTING, appearance.actionStyle, onToggleSelection)
+                    MessageAction(
+                        stringResource(R.string.msg_action_done_selecting),
+                        MenuAction.DONE_SELECTING,
+                        appearance.actionStyle,
+                        onToggleSelection,
+                    )
                 }
             } else if (copyable) {
                 Spacer(Modifier.height(2.dp))
@@ -1014,18 +1058,38 @@ private fun MessageFrame(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
                 ) {
-                    MessageAction("复制", MenuAction.COPY, appearance.actionStyle) {
+                    MessageAction(
+                        stringResource(R.string.action_copy),
+                        MenuAction.COPY,
+                        appearance.actionStyle,
+                    ) {
                         onCopy()
-                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.msg_copied),
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     }
-                    MessageAction("复制为 Markdown", MenuAction.COPY_MARKDOWN, appearance.actionStyle) {
+                    MessageAction(
+                        stringResource(R.string.msg_action_copy_markdown),
+                        MenuAction.COPY_MARKDOWN,
+                        appearance.actionStyle,
+                    ) {
                         onCopyMarkdown()
-                        Toast.makeText(context, "已复制 Markdown", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.msg_copied_markdown),
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     }
                     // 与长按菜单里的「选择文本」是同一个入口，两处都要先询问一次。
                     // 进入选择态后这条消息下方的按钮会换成「完成选择」，
                     // 用户未必知道往哪找，所以进态的就近提示由调用方在确认之后给出。
-                    MessageAction("选择文本", MenuAction.SELECT_TEXT, appearance.actionStyle) {
+                    MessageAction(
+                        stringResource(R.string.msg_action_select_text),
+                        MenuAction.SELECT_TEXT,
+                        appearance.actionStyle,
+                    ) {
                         onRequestSelect()
                     }
                 }
@@ -1084,13 +1148,19 @@ private fun MessageAction(
  */
 @Composable
 private fun MessageStatsLine(stats: io.qwenpaw.node.data.stream.TurnStats) {
-    val parts = buildList {
-        add("输入 ${stats.promptTokens}")
-        add("输出 ${stats.completionTokens}")
-        stats.model?.takeIf { it.isNotBlank() }?.let { add(it) }
+    val model = stats.model?.takeIf { it.isNotBlank() }
+    val usage = if (model == null) {
+        stringResource(R.string.msg_stats_usage, stats.promptTokens, stats.completionTokens)
+    } else {
+        stringResource(
+            R.string.msg_stats_usage_model,
+            stats.promptTokens,
+            stats.completionTokens,
+            model,
+        )
     }
     Text(
-        text = parts.joinToString("，") + " tokens",
+        text = usage + " tokens",
         style = MaterialTheme.typography.labelSmall,
         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
     )

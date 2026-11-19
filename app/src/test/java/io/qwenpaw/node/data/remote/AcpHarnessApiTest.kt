@@ -1,4 +1,5 @@
 package io.qwenpaw.node.data.remote
+import io.qwenpaw.node.TestTexts
 
 import io.qwenpaw.node.ui.settings.harnessLines
 import io.qwenpaw.node.ui.settings.toLoginUi
@@ -23,6 +24,7 @@ class AcpHarnessApiTest {
 
     @Before
     fun setUp() {
+        TestTexts.install()
         server = MockWebServer()
         server.start()
         conn = Connection(server.url("/").toString().trimEnd('/'), null, "default")

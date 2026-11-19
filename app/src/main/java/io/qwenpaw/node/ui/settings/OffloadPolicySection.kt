@@ -9,7 +9,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 
 /**
  * 后台策略：工具超时后默认怎么处理。
@@ -30,11 +32,11 @@ internal fun OffloadPolicySection(
         modifier = modifier
             .fillMaxWidth(),
     ) {
-        SectionHeader("工具超时后")
+        SectionHeader(stringResource(R.string.offload_header_timeout))
         Card {
             SwitchRow(
-                title = "转入后台继续执行",
-                subtitle = "关闭后，超时的工具会被中止；开启后，工具转到后台继续执行，结果稍后送达",
+                title = stringResource(R.string.offload_switch_title),
+                subtitle = stringResource(R.string.offload_switch_subtitle),
                 checked = action == OFFLOAD,
                 enabled = !loading,
                 onCheckedChange = { enabled ->
@@ -42,9 +44,9 @@ internal fun OffloadPolicySection(
                 },
             )
         }
-        SectionHeader("说明")
+        SectionHeader(stringResource(R.string.offload_header_notes))
         Text(
-            text = "这里设置的是默认动作，单个工具仍可在工具页单独指定异步执行。",
+            text = stringResource(R.string.offload_notes),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp),

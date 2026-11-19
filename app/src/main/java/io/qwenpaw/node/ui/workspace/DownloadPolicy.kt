@@ -1,5 +1,7 @@
 package io.qwenpaw.node.ui.workspace
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import java.util.Locale
 
 /**
@@ -36,22 +38,34 @@ internal object DownloadPolicy {
         if (!needsWarning(sizeBytes, metered, vpn)) return null
         val lines = mutableListOf<String>()
         val subject = if (fileCount != null) {
-            "待下载目录共 $fileCount 个文件"
+            Texts.quantity(
+                R.plurals.workspace_download_subject_directory,
+                fileCount,
+                fileCount,
+            )
         } else {
-            "待下载文件"
+            Texts.get(R.string.workspace_download_subject_file)
         }
         if (sizeBytes != null && sizeBytes >= LARGE_FILE_BYTES) {
-            lines += "$subject，合计 ${formatBytes(sizeBytes)}，会占用较多流量与时间。"
+            lines += Texts.get(
+                R.string.workspace_download_warning_large,
+                subject,
+                formatBytes(sizeBytes),
+            )
         } else if (fileCount != null && sizeBytes != null) {
-            lines += "$subject，合计 ${formatBytes(sizeBytes)}。"
+            lines += Texts.get(
+                R.string.workspace_download_warning_total,
+                subject,
+                formatBytes(sizeBytes),
+            )
         } else if (fileCount != null) {
-            lines += "$subject，大小暂时无法统计。"
+            lines += Texts.get(R.string.workspace_download_warning_unknown, subject)
         }
         if (metered) {
-            lines += "当前使用移动数据网络，下载会消耗流量套餐。"
+            lines += Texts.get(R.string.workspace_download_warning_metered)
         }
         if (vpn) {
-            lines += "当前通过 VPN 连接（如 EasyTier 中继），下载流量会计入中继套餐。"
+            lines += Texts.get(R.string.workspace_download_warning_vpn)
         }
         return lines.joinToString("\n")
     }

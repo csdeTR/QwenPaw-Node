@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  工作区文件（WorkspaceScreen.kt / WorkspaceViewModel.kt / WorkspaceEditor.kt /
+  DownloadPolicy.kt）与备份（BackupScreen.kt / BackupViewModel.kt / BackupRestore.kt）的文案。
+-->
+<resources>
+    <!-- 工作区：列表与顶栏 -->
+    <string name="workspace_title">工作区文件</string>
+    <string name="workspace_parent">上一级</string>
+    <string name="workspace_git_commit">Git 提交</string>
+    <string name="workspace_upload">上传文件</string>
+    <string name="workspace_download_directory">下载此目录</string>
+    <string name="workspace_project_hint">项目目录未绑定时，这里显示服务端默认工作区。</string>
+    <string name="workspace_entry_download">下载 %1$s</string>
+    <string name="workspace_list_separator">、</string>
+
+    <!-- 工作区：三个根 -->
+    <string name="workspace_root_workspace">工作区</string>
+    <string name="workspace_root_project">项目目录</string>
+    <string name="workspace_root_memory">记忆</string>
+
+    <!-- 工作区：预览 -->
+    <string name="workspace_back_to_directory">返回目录</string>
+    <string name="workspace_download">下载</string>
+    <string name="workspace_empty_file">（空文件）</string>
+    <string name="workspace_loading">正在加载</string>
+    <string name="workspace_load_more">继续加载</string>
+    <string name="workspace_end_of_file">已到文件末尾</string>
+    <string name="workspace_image_unavailable">无法显示这张图片</string>
+    <string name="workspace_preview_unsupported">这种文件不能直接预览</string>
+    <string name="workspace_error_image_decode">无法解码这张图片，可下载后查看</string>
+    <string name="workspace_error_image_too_large">图片超过 20 MB，可下载后查看</string>
+
+    <!-- 工作区：空目录 -->
+    <string name="workspace_directory_empty">这个目录是空的</string>
+    <string name="workspace_memory_hint">记忆条目会在对话过程中自动写入</string>
+
+    <!-- 工作区：等待态 -->
+    <string name="workspace_preparing_title">正在准备文件</string>
+    <string name="workspace_preparing_message">选中文件会先复制到本地缓存，上传结束后自动删除。</string>
+    <string name="workspace_scanning_title">正在统计目录内容</string>
+    <string name="workspace_scanning_message">只读取文件列表与体积，不会开始传输。</string>
+    <plurals name="workspace_upload_skipped_toast">
+        <item quantity="other">已跳过 %1$d 个文件（超过上传上限或无法读取）</item>
+    </plurals>
+
+    <!-- 工作区：下载 -->
+    <string name="workspace_download_confirm_title">确认下载</string>
+    <string name="workspace_download_pick_location">选择保存位置</string>
+    <string name="workspace_download_single_size">单文件，%1$s</string>
+    <string name="workspace_download_single_unknown">单文件，大小未知</string>
+    <string name="workspace_download_directory_title">下载目录</string>
+    <plurals name="workspace_download_directory_count">
+        <item quantity="other">共 %1$d 个文件</item>
+    </plurals>
+    <plurals name="workspace_download_directory_count_total">
+        <item quantity="other">共 %1$d 个文件，合计 %2$s</item>
+    </plurals>
+    <plurals name="workspace_download_file_index">
+        <item quantity="other">第 %1$d/%2$d 个文件</item>
+    </plurals>
+    <string name="workspace_download_progress_read">已下载 %1$s</string>
+    <string name="workspace_download_complete">下载完成</string>
+    <string name="workspace_download_cancelled">下载已取消</string>
+    <string name="workspace_download_cancelled_partial">下载已取消，已完成的文件会保留</string>
+    <string name="workspace_download_failed">下载失败</string>
+    <string name="workspace_download_saved">已保存到所选位置</string>
+    <plurals name="workspace_download_saved_count">
+        <item quantity="other">已保存 %1$d 个文件</item>
+    </plurals>
+    <plurals name="workspace_download_partial_count">
+        <item quantity="other">已完成 %1$d 个，失败 %2$d 个</item>
+    </plurals>
+
+    <!-- 工作区：下载前的流量提示 -->
+    <string name="workspace_download_subject_file">待下载文件</string>
+    <plurals name="workspace_download_subject_directory">
+        <item quantity="other">待下载目录共 %1$d 个文件</item>
+    </plurals>
+    <string name="workspace_download_warning_large">%1$s，合计 %2$s，会占用较多流量与时间。</string>
+    <string name="workspace_download_warning_total">%1$s，合计 %2$s。</string>
+    <string name="workspace_download_warning_unknown">%1$s，大小暂时无法统计。</string>
+    <string name="workspace_download_warning_metered">当前使用移动数据网络，下载会消耗流量套餐。</string>
+    <string name="workspace_download_warning_vpn">当前通过 VPN 连接（如 EasyTier 中继），下载流量会计入中继套餐。</string>
+
+    <!-- 工作区：编辑与上传 -->
+    <string name="workspace_edit_back">返回预览</string>
+    <string name="workspace_edit_conflict_title">文件已在别处修改</string>
+    <string name="workspace_edit_conflict_message">磁盘上的内容已不是打开时的版本。重新加载会丢弃当前草稿；强制覆盖会保存草稿并覆盖外部改动。</string>
+    <string name="workspace_edit_reload">重新加载</string>
+    <string name="workspace_edit_force_overwrite">强制覆盖</string>
+    <string name="workspace_upload_conflict_title">目标目录已有同名文件</string>
+    <string name="workspace_upload_conflict_message">以下文件已存在：%1$s。覆盖会替换服务端内容，跳过则保留原文件。</string>
+    <string name="workspace_upload_overwrite">覆盖</string>
+    <string name="workspace_upload_skip">跳过</string>
+    <string name="workspace_upload_progress">正在上传 %1$d/%2$d：%3$s</string>
+    <string name="workspace_upload_cancelled">上传已取消</string>
+    <plurals name="workspace_upload_done">
+        <item quantity="other">已上传 %1$d 个文件</item>
+    </plurals>
+    <plurals name="workspace_upload_failed_part">
+        <item quantity="other">，失败 %1$d 个</item>
+    </plurals>
+    <plurals name="workspace_upload_skipped_part">
+        <item quantity="other">，跳过 %1$d 个</item>
+    </plurals>
+    <string name="workspace_upload_error_part">：%1$s</string>
+    <plurals name="workspace_upload_conflicts_pending">
+        <item quantity="other">有 %1$d 个文件已存在</item>
+    </plurals>
+
+    <!-- 工作区：编辑判据与错误 -->
+    <string name="workspace_edit_blocked_memory">记忆文件不支持编辑</string>
+    <string name="workspace_edit_blocked_incomplete">文件尚未完整加载，先点「继续加载」</string>
+    <string name="workspace_edit_blocked_no_version">未取得版本信息，暂时无法编辑</string>
+    <string name="workspace_edit_blocked_too_large">文件超过 2 MB，请在服务端编辑</string>
+    <string name="workspace_error_version_missing">未取得版本信息，无法继续编辑</string>
+    <string name="workspace_error_download_busy">请等待当前下载结束</string>
+    <string name="workspace_error_upload_target_missing">目标目录不存在，可能已被删除</string>
+    <string name="workspace_error_directory_empty">这个目录里没有可下载的文件</string>
+    <string name="workspace_error_write_target">无法写入所选位置：%1$s</string>
+    <string name="workspace_error_write_target_hint">无法写入所选位置，请换一个目录</string>
+    <string name="workspace_error_too_many_files">目录内文件过多，请分批下载</string>
+    <string name="workspace_error_not_found">文件或目录不存在，可能已被删除</string>
+    <string name="workspace_error_forbidden">没有权限访问这个位置</string>
+    <string name="workspace_error_bad_request">请求参数无效</string>
+    <string name="workspace_not_connected">尚未连接服务器</string>
+
+    <!-- 备份：页面与新建 -->
+    <string name="backup_title">备份</string>
+    <string name="backup_intro">备份包含服务端配置与智能体工作区，可在换机或误操作前留档。创建与导入都会上传工作区文件，请留意当前网络流量。</string>
+    <string name="backup_create_section">新建备份</string>
+    <string name="backup_create_name_label">名称</string>
+    <string name="backup_create_description_label">说明（可选）</string>
+    <string name="backup_create_agents_title">智能体工作区</string>
+    <string name="backup_create_agents_subtitle">包含会话文件与项目目录</string>
+    <string name="backup_create_global_subtitle">模型、渠道与界面相关的服务端配置</string>
+    <string name="backup_create_secrets_subtitle">默认不包含；包含后备份包会持有明文密钥</string>
+    <string name="backup_create_skill_pool_subtitle">已安装的技能与依赖</string>
+    <string name="backup_create_select_agents">选择智能体</string>
+    <string name="backup_create_no_agents">服务端没有可选的智能体。</string>
+    <string name="backup_create_start">开始备份</string>
+    <string name="backup_default_name">手动备份</string>
+
+    <!-- 备份：范围 -->
+    <string name="backup_scope_agents">智能体</string>
+    <string name="backup_scope_global_config">全局配置</string>
+    <string name="backup_scope_secrets">密钥</string>
+    <string name="backup_scope_skill_pool">技能池</string>
+    <string name="backup_scope_empty">空范围</string>
+    <string name="backup_list_separator">、</string>
+
+    <!-- 备份：导出与导入 -->
+    <string name="backup_export_progress">正在导出：%1$s</string>
+    <string name="backup_export_progress_total">正在导出：%1$s / %2$s</string>
+    <string name="backup_import_section">导入备份</string>
+    <string name="backup_import_section_trailing">选择 .zip</string>
+    <string name="backup_import_section_desc">从本地选择一个备份包导入服务端。同 id 的备份已存在时，会先询问是否覆盖。</string>
+    <string name="backup_import_pick">选择备份包</string>
+    <string name="backup_import_file_fallback">备份包</string>
+    <string name="backup_import_uploading_title">正在导入</string>
+    <string name="backup_import_uploaded">已上传 %1$s</string>
+    <string name="backup_import_cancel">取消导入</string>
+    <string name="backup_import_saving_title">正在写入</string>
+    <string name="backup_import_saving_message">服务端正在解包并校验备份，请稍候。</string>
+    <string name="backup_import_conflict_title">备份已存在</string>
+    <string name="backup_import_conflict_message">服务端已有 id 为「%1$s」的备份。继续将覆盖该备份。</string>
+    <string name="backup_import_conflict_existing">已有备份：%1$s</string>
+    <string name="backup_import_conflict_created">创建时间：%1$s</string>
+    <string name="backup_import_conflict_irreversible">覆盖后无法恢复原有备份。</string>
+    <string name="backup_import_overwrite">覆盖导入</string>
+    <string name="backup_import_trust_title">需要确认信任</string>
+    <string name="backup_import_blocked_title">无法导入</string>
+    <string name="backup_import_signature_unknown">该备份的签名无法验证。</string>
+    <string name="backup_import_trust_hint">继续将信任该备份的内容，并以本机密钥重新签名。</string>
+    <string name="backup_import_trust">信任并导入</string>
+    <string name="backup_import_done_title">导入完成</string>
+    <string name="backup_import_done_message">已导入备份「%1$s」。</string>
+    <string name="backup_import_done_confirm">好</string>
+    <string name="backup_error_read_file">无法读取所选文件：%1$s</string>
+
+    <!-- 备份：列表与详情 -->
+    <string name="backup_list_section">已有备份</string>
+    <plurals name="backup_list_count">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <string name="backup_list_empty">服务端还没有备份。</string>
+    <plurals name="backup_meta_agent_count">
+        <item quantity="other">%1$d 个智能体</item>
+    </plurals>
+    <string name="backup_meta_server_version">服务端 %1$s</string>
+    <string name="backup_meta_trusted">曾信任导入</string>
+    <string name="backup_detail_loading">读取中…</string>
+    <string name="backup_detail">详情</string>
+    <string name="backup_export">导出</string>
+    <string name="backup_restore">恢复</string>
+    <string name="backup_detail_collapse">收起</string>
+    <string name="backup_detail_no_workspace">该备份不包含智能体工作区。</string>
+    <plurals name="backup_detail_workspace_stats">
+        <item quantity="other">%1$s：%2$d 个文件，%3$s</item>
+    </plurals>
+
+    <!-- 备份：删除 -->
+    <string name="backup_delete_title">删除备份</string>
+    <string name="backup_delete_message">将删除备份「%1$s」，服务端不保留回收站。</string>
+    <string name="backup_delete_impact_created">备份创建时间：%1$s</string>
+    <string name="backup_delete_impact_agents">智能体数量：%1$d</string>
+    <string name="backup_delete_impact_irreversible">删除后无法从该备份恢复。</string>
+    <string name="backup_deleting">正在删除…</string>
+    <string name="backup_unknown_value">未知</string>
+
+    <!-- 备份：任务卡 -->
+    <string name="backup_job_section">备份任务</string>
+    <string name="backup_job_pending">等待开始</string>
+    <string name="backup_job_running">正在备份</string>
+    <string name="backup_job_cancelling">正在取消</string>
+    <string name="backup_job_completed">已完成</string>
+    <string name="backup_job_failed">备份失败</string>
+    <string name="backup_job_cancel">取消任务</string>
+    <string name="backup_job_retry">重新获取进度</string>
+    <string name="backup_job_streaming">进度实时更新</string>
+    <string name="backup_phase_preparing">准备中</string>
+    <string name="backup_phase_agents">写入智能体</string>
+    <string name="backup_phase_finalizing">收尾</string>
+
+    <!-- 备份：恢复 -->
+    <string name="backup_restore_title">恢复备份</string>
+    <string name="backup_restore_mode_full">整包恢复</string>
+    <string name="backup_restore_mode_custom">选择性恢复</string>
+    <string name="backup_restore_secrets_unavailable">该备份不包含密钥</string>
+    <string name="backup_restore_impacts_title">影响范围</string>
+    <string name="backup_restore_applying">正在恢复…</string>
+    <string name="backup_restore_trust">信任并恢复</string>
+    <string name="backup_restore_impact_mode_full">恢复方式：整包替换服务端现有数据</string>
+    <string name="backup_restore_impact_mode_custom">恢复方式：仅恢复勾选的内容</string>
+    <plurals name="backup_restore_impact_agents_all">
+        <item quantity="other">智能体工作区：全部 %1$d 个</item>
+    </plurals>
+    <string name="backup_restore_impact_agents_none">智能体工作区：不恢复</string>
+    <plurals name="backup_restore_impact_agents_selected">
+        <item quantity="other">智能体工作区：已选 %1$d 个，共 %2$d 个</item>
+    </plurals>
+    <string name="backup_restore_impact_global_overwrite">全局配置：覆盖服务端当前配置</string>
+    <string name="backup_restore_impact_global_keep">全局配置：保留服务端当前配置</string>
+    <string name="backup_restore_impact_secrets_absent">密钥：该备份未包含密钥，服务端现有密钥保持不变</string>
+    <string name="backup_restore_impact_secrets_overwrite">密钥：覆盖服务端当前密钥</string>
+    <string name="backup_restore_impact_secrets_keep">密钥：保留服务端当前密钥</string>
+    <string name="backup_restore_impact_skills_overwrite">技能池：覆盖服务端当前技能池</string>
+    <string name="backup_restore_impact_skills_keep">技能池：保留服务端当前技能池</string>
+    <string name="backup_restore_impact_new_agents">备份之后新建的智能体会从注册表中移除。</string>
+    <string name="backup_restore_impact_signature_unknown">该备份的签名方式无法验证，不能继续恢复。</string>
+    <string name="backup_restore_impact_signature_foreign">该备份不是本机签名，继续将信任其内容并以本机密钥重新签名。</string>
+    <string name="backup_restore_impact_snapshot">服务端会在恢复前自动创建安全快照，可用于回滚本次恢复。</string>
+
+    <!-- 备份：提示与错误 -->
+    <string name="backup_not_connected">尚未连接服务器</string>
+    <string name="backup_error_name_required">请填写备份名称</string>
+    <string name="backup_error_agent_required">请至少选择一个智能体</string>
+    <string name="backup_error_busy">已有备份任务或恢复正在进行，请等待结束后重试</string>
+    <string name="backup_error_job_expired">备份任务已结束，进度不可再查询</string>
+    <string name="backup_notice_job_done">备份已完成</string>
+    <string name="backup_notice_job_cancelled">备份已取消</string>
+    <string name="backup_notice_deleted">已删除备份「%1$s」</string>
+    <string name="backup_error_delete_failed">无法删除备份：%1$s</string>
+    <string name="backup_error_no_server_reason">服务端未返回原因</string>
+    <string name="backup_error_write_target">无法写入所选位置，请换一个目录</string>
+    <string name="backup_error_write_target_denied">无法写入所选位置</string>
+    <string name="backup_notice_exported">备份已导出到所选位置</string>
+    <string name="backup_error_export_failed">导出失败：%1$s</string>
+    <string name="backup_notice_exported_cleaned">已导出，临时备份已清理</string>
+    <string name="backup_error_export_cancelled">导出已取消，临时备份已保留</string>
+    <string name="backup_error_temp_backup_delete">导出成功，但临时备份删除失败：%1$s</string>
+    <string name="backup_error_temp_backup_kept_hint">。临时备份已保留，可在备份页重试或删除</string>
+    <string name="backup_error_job_no_terminal">备份任务没有返回终态</string>
+    <string name="backup_error_job_incomplete">备份任务未完成：%1$s</string>
+    <string name="backup_error_import_failed">导入失败：%1$s</string>
+    <string name="backup_notice_restored">备份已恢复</string>
+    <string name="backup_notice_restored_keys_kept">备份已恢复，本机受保护的密钥保持不变</string>
+    <string name="backup_error_not_found">备份不存在，可能已被删除</string>
+    <string name="backup_error_server_busy">服务端正忙，请稍后重试</string>
+    <string name="backup_error_bad_request">请求参数无效</string>
+</resources>

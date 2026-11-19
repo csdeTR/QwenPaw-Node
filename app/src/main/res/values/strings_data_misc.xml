@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 实例与连接校验（InstanceRepository） -->
+    <string name="instance_error_address_invalid">地址格式不正确</string>
+    <string name="instance_error_login_required">该实例已开启 Web 登录认证，需要用户名和密码</string>
+    <string name="instance_error_proxy_auth_rejected">反向代理拒绝了这组账号密码，请核对后重试</string>
+
+    <!-- REST 客户端（QwenPawApi） -->
+    <string name="api_empty_response">服务端返回了空响应</string>
+    <string name="api_invalid_address">地址不合法：%1$s</string>
+    <string name="api_unsupported_method">不支持的方法 %1$s</string>
+
+    <!-- 流式客户端（ChatStreamClient / ToolStreamClient / BackupJobStreamClient） -->
+    <string name="stream_empty_body">响应体为空</string>
+    <string name="stream_log_broken">读流中断，已收到 %1$d 帧</string>
+    <string name="stream_log_finished">流正常结束，共 %1$d 帧</string>
+    <string name="stream_log_new">建立新流</string>
+    <string name="stream_log_open_failed">建流失败</string>
+    <string name="stream_log_reconnect">挂回既有流</string>
+    <string name="stream_log_rejected">建流被拒：%1$d %2$s</string>
+
+    <!-- 流式下载（DownloadClient） -->
+    <string name="download_empty_body">响应体为空</string>
+
+    <!-- 备份导入上传源（BackupImportBody） -->
+    <string name="backupbody_read_failed">无法读取所选文件</string>
+
+    <!-- 市场详情页地址解析（MarketLinkResolver） -->
+    <string name="marketlink_missing_skill_id">该条目缺少技能标识</string>
+    <string name="marketlink_no_detail_from_platform">平台没有返回该技能的详情地址</string>
+    <string name="marketlink_no_detail_url">该条目没有详情地址</string>
+    <string name="marketlink_search_url_failed">搜索地址无法构造</string>
+    <string name="marketlink_unreachable">无法访问平台技能市场</string>
+
+    <!-- 录音（VoiceInput） -->
+    <string name="voice_error_duration_limit">录音已达 %1$d 秒上限</string>
+    <string name="voice_error_interrupted">录音中断</string>
+    <string name="voice_error_mic_unavailable">麦克风不可用</string>
+    <string name="voice_error_no_permission">没有麦克风权限</string>
+    <string name="voice_error_open_failed">无法打开麦克风</string>
+
+    <!-- 头像裁剪与会话图标（AvatarCropScreen / ChatIconStore） -->
+    <string name="avatar_crop_title">调整头像</string>
+    <string name="avatar_icon_book">阅读</string>
+    <string name="avatar_icon_chat">对话</string>
+    <string name="avatar_icon_code">代码</string>
+    <string name="avatar_icon_lightbulb">想法</string>
+    <string name="avatar_icon_science">研究</string>
+    <string name="avatar_icon_star">收藏</string>
+    <string name="avatar_icon_translate">翻译</string>
+    <string name="avatar_icon_work">工作</string>
+
+    <!-- 字体下载（FontManager） -->
+    <string name="font_error_download_empty">下载内容为空</string>
+    <string name="font_error_download_incomplete">下载没有完成</string>
+    <string name="font_error_download_status">下载失败，返回 %1$d</string>
+    <string name="font_error_incomplete">字体文件不完整，重新下载一次</string>
+
+    <!-- 运行日志（LoggingInterceptor） -->
+    <string name="runlog_http_failed">%1$s 失败，耗时 %2$dms</string>
+    <string name="runlog_http_redirect_note">（重定向，未跟随）</string>
+    <string name="runlog_http_result">%1$s → %2$d%3$s（%4$dms）</string>
+</resources>

@@ -1,5 +1,8 @@
 package io.qwenpaw.node.ui.chat
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * 发送时要在本地补的用户侧占位文字。
  *
@@ -21,9 +24,11 @@ internal fun filePlaceholders(
     isImage: (String) -> Boolean,
 ): List<String> {
     if (text.isNotBlank()) return emptyList()
-    if (attachments.isEmpty()) return listOf("[附件]")
+    if (attachments.isEmpty()) return listOf(Texts.get(R.string.chattail_attachment_none))
 
     val files = attachments.filterNot { isImage(it.substringAfterLast('/')) }
     // 只有图片时，图片自身已经是可见气泡，不再补文字。
-    return files.map { "[文件] ${it.substringAfterLast('/')}" }
+    return files.map {
+        Texts.get(R.string.chattail_attachment_file, it.substringAfterLast('/'))
+    }
 }

@@ -43,7 +43,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -55,6 +57,7 @@ import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceDraft
 import io.qwenpaw.node.data.model.AgentDto
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.launch
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -106,7 +109,7 @@ fun InstanceForm(
     /** 当前网络，用于地址编辑区提示「这条现在会被优先使用」。 */
     currentNetKind: String = NetworkMonitor.Snapshot.KIND_OTHER,
     currentSsid: String? = null,
-    submitLabel: String = "连接",
+    submitLabel: String = stringResource(R.string.connect_connect),
     /** 该主机已在「受信任的连接」里时返回 true，此时不弹安全提示。 */
     isTrustedHost: (String) -> Boolean = { false },
     /** 编辑已有实例时提供；新增实例为 null。 */
@@ -137,6 +140,7 @@ fun InstanceForm(
     var loadingAgents by remember { mutableStateOf(false) }
     var agentError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     // 地址是否已验证通过。步骤 1 的勾只在验证成功后出现——
     // 只看「地址非空」会让用户以为这一步已经完成。
@@ -195,7 +199,7 @@ fun InstanceForm(
                     if (result.proxyAuthRequired) {
                         // 被反代拦住不是「连不上」：地址是通的。展开高级选项让它就地填。
                         advanced = true
-                        verifyMessage = "该地址由反向代理保护，请在高级选项里填写反向代理账号与密码"
+                        verifyMessage = context.getString(R.string.connect_proxy_protected)
                         verifying = false
                         verifyingAt = null
                         return@launch
@@ -208,12 +212,28 @@ fun InstanceForm(
                         )
                     }.getOrNull()
                     verifyMessage = buildString {
-                        append("连接正常")
-                        if (version.isNotBlank()) append("，服务端 ").append(version)
-                        append("，").append(bridgeLabel(result.bridge))
+                        append(
+                            if (version.isNotBlank()) {
+                                context.getString(
+                                    R.string.connect_verify_ok_version,
+                                    version,
+                                    bridgeLabel(result.bridge),
+                                )
+                            } else {
+                                context.getString(
+                                    R.string.connect_verify_ok_bridge,
+                                    bridgeLabel(result.bridge),
+                                )
+                            },
+                        )
                         // 命中的不是第一个地址时明确说出来，让用户知道回退生效了。
                         if (primaryNormalized != null && result.baseUrl != primaryNormalized) {
-                            append("，已回退到 ").append(result.baseUrl)
+                            append(
+                                context.getString(
+                                    R.string.connect_verify_fallback,
+                                    result.baseUrl,
+                                ),
+                            )
                         }
                     }
                     // 地址通了不代表可以放心用：公网地址不设防等于是把整台机器交出去。
@@ -259,7 +279,7 @@ fun InstanceForm(
             if (list.isNotEmpty()) {
                 hostVerified = true
                 verifyFailed = false
-                verifyMessage = "连接正常"
+                verifyMessage = context.getString(R.string.connect_verify_ok)
             }
         }
     }
@@ -286,7 +306,7 @@ fun InstanceForm(
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "连接到 QwenPaw",
+                text = stringResource(R.string.connect_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.SemiBold,
                 // 显式给色：这一层没有 Surface 提供 LocalContentColor，
@@ -295,7 +315,7 @@ fun InstanceForm(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "数据始终存放在你自己的机器上",
+                text = stringResource(R.string.connect_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -312,13 +332,13 @@ fun InstanceForm(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "服务器名称",
+                text = stringResource(R.string.connect_server_name),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = "可选",
+                text = stringResource(R.string.connect_optional),
                 style = MaterialTheme.typography.labelSmall,
                 color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
             )
@@ -327,7 +347,7 @@ fun InstanceForm(
         OutlinedTextField(
             value = instanceName,
             onValueChange = { instanceName = it },
-            placeholder = { Text("例如「家里的机器」，留空则使用地址") },
+            placeholder = { Text(stringResource(R.string.connect_name_placeholder)) },
             singleLine = true,
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -339,13 +359,13 @@ fun InstanceForm(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "服务器地址",
+                text = stringResource(R.string.connect_server_address),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = "必填",
+                text = stringResource(R.string.connect_required),
                 style = MaterialTheme.typography.labelSmall,
                 color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
             )
@@ -364,15 +384,14 @@ fun InstanceForm(
         if (fixedPunctuation) {
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "检测到中文标点，已自动更正",
+                text = stringResource(R.string.connect_fixed_punctuation),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.secondary,
             )
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "未写 http:// 或 https:// 时，内网地址按 http 尝试，公网域名按 https 尝试。" +
-                "若服务端只能通过 http 访问，请写明 http://。",
+            text = stringResource(R.string.connect_address_https_hint),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
             modifier = Modifier.fillMaxWidth(),
@@ -389,9 +408,9 @@ fun InstanceForm(
             val canVerify = !hostBlank && !verifying
             Text(
                 text = when {
-                    verifying -> "正在验证"
-                    hostVerified -> "已验证"
-                    else -> "验证连接"
+                    verifying -> stringResource(R.string.connect_verifying)
+                    hostVerified -> stringResource(R.string.connect_verified)
+                    else -> stringResource(R.string.connect_verify)
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = when {
@@ -424,7 +443,12 @@ fun InstanceForm(
                 progress != null && progress.total > 1 -> {
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        text = "正在尝试 ${progress.index}/${progress.total}，${progress.url}",
+                        text = stringResource(
+                            R.string.connect_verify_attempting,
+                            progress.index,
+                            progress.total,
+                            progress.url,
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                         maxLines = 1,
@@ -435,7 +459,7 @@ fun InstanceForm(
                 progress != null -> {
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        text = "正在验证 ${progress.url}",
+                        text = stringResource(R.string.connect_verify_url, progress.url),
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                         maxLines = 1,
@@ -474,7 +498,7 @@ fun InstanceForm(
             )
             Spacer(Modifier.width(4.dp))
             Text(
-                text = "高级选项",
+                text = stringResource(R.string.connect_advanced),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -483,13 +507,13 @@ fun InstanceForm(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "用户名",
+                        text = stringResource(R.string.connect_username),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "可选",
+                        text = stringResource(R.string.connect_optional),
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     )
@@ -505,13 +529,13 @@ fun InstanceForm(
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "密码",
+                        text = stringResource(R.string.connect_password),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "可选",
+                        text = stringResource(R.string.connect_optional),
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     )
@@ -528,8 +552,7 @@ fun InstanceForm(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "仅在服务端开启 Web 登录认证（QWENPAW_AUTH_ENABLED=true）时需要填写；" +
-                        "本机或局域网直连一般留空。",
+                    text = stringResource(R.string.connect_login_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     modifier = Modifier.fillMaxWidth(),
@@ -537,13 +560,13 @@ fun InstanceForm(
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "反向代理账号",
+                        text = stringResource(R.string.connect_proxy_user),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "可选",
+                        text = stringResource(R.string.connect_optional),
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     )
@@ -565,13 +588,13 @@ fun InstanceForm(
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "反向代理密码",
+                        text = stringResource(R.string.connect_proxy_password),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "可选",
+                        text = stringResource(R.string.connect_optional),
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     )
@@ -593,7 +616,7 @@ fun InstanceForm(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。",
+                    text = stringResource(R.string.connect_proxy_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     modifier = Modifier.fillMaxWidth(),
@@ -602,13 +625,13 @@ fun InstanceForm(
                 // 智能体同样是「读列表再挑」，手填 id 只作为读不到列表时的备用。
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "智能体 ID",
+                        text = stringResource(R.string.connect_agent_id),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "备用方式",
+                        text = stringResource(R.string.connect_agent_id_hint),
                         style = MaterialTheme.typography.labelSmall,
                         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     )
@@ -627,8 +650,8 @@ fun InstanceForm(
                     Divider()
                     NavRow(
                         icon = QwenIcons.terminal,
-                        title = "SSH 直连",
-                        subtitle = "地址、私钥或密码；仅在本机配置与连接",
+                        title = stringResource(R.string.connect_ssh_title),
+                        subtitle = stringResource(R.string.connect_ssh_subtitle),
                         onClick = onOpenSshProfile,
                     )
                 }
@@ -643,14 +666,18 @@ fun InstanceForm(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "选择智能体",
+                text = stringResource(R.string.connect_select_agent),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.weight(1f))
             if (agents.isEmpty()) {
                 Text(
-                    text = if (loadingAgents) "正在读取" else "读取列表",
+                    text = if (loadingAgents) {
+                        stringResource(R.string.connect_reading)
+                    } else {
+                        stringResource(R.string.connect_read_list)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = if (hostBlank) {
                         io.qwenpaw.node.ui.theme.LocalCaptionColor.current
@@ -664,7 +691,7 @@ fun InstanceForm(
                 )
             } else {
                 Text(
-                    text = "重新读取",
+                    text = stringResource(R.string.connect_reload),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -692,7 +719,7 @@ fun InstanceForm(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "正在读取智能体列表",
+                    text = stringResource(R.string.connect_loading_agents),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -712,7 +739,7 @@ fun InstanceForm(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "重试",
+                    text = stringResource(R.string.action_retry),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier
@@ -723,7 +750,7 @@ fun InstanceForm(
             }
 
             agents.isEmpty() -> Text(
-                text = "填写地址后点击「读取列表」；也可先保存服务地址",
+                text = stringResource(R.string.connect_agents_empty_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                 modifier = Modifier.fillMaxWidth(),
@@ -744,7 +771,7 @@ fun InstanceForm(
         if (!saved.isNullOrEmpty() && onUseSaved != null) {
             Spacer(Modifier.height(14.dp))
             Text(
-                text = "已保存的实例",
+                text = stringResource(R.string.connect_saved_instances),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),
@@ -801,7 +828,7 @@ fun InstanceForm(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "正在连接",
+                    text = stringResource(R.string.connect_connecting),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onPrimary,
                 )
@@ -816,7 +843,7 @@ fun InstanceForm(
         if (onCancel != null) {
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "取消",
+                text = stringResource(R.string.action_cancel),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -827,7 +854,7 @@ fun InstanceForm(
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "连接时会检查服务端版本和智能体是否可用",
+            text = stringResource(R.string.connect_footer_hint),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )
@@ -904,7 +931,7 @@ fun ConnectScreen(
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "连接到 QwenPaw",
+            text = stringResource(R.string.connect_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
@@ -912,7 +939,7 @@ fun ConnectScreen(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "数据始终存放在你自己的机器上",
+            text = stringResource(R.string.connect_subtitle),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -934,7 +961,7 @@ fun ConnectScreen(
 
         if (saved.isNotEmpty()) {
             Text(
-                text = "已保存的实例",
+                text = stringResource(R.string.connect_saved_instances),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 24.dp),
@@ -959,9 +986,9 @@ fun ConnectScreen(
  */
 internal fun bridgeLabel(status: io.qwenpaw.node.data.plugin.BridgeStatus): String = when (status) {
     is io.qwenpaw.node.data.plugin.BridgeStatus.Ready ->
-        "QwenPaw Node Bridge v${status.info.pluginVersion}"
-    io.qwenpaw.node.data.plugin.BridgeStatus.Absent -> "未安装配套插件"
-    io.qwenpaw.node.data.plugin.BridgeStatus.Unknown -> "配套插件状态未能确认"
+        Texts.get(R.string.connect_bridge_ready, status.info.pluginVersion)
+    io.qwenpaw.node.data.plugin.BridgeStatus.Absent -> Texts.get(R.string.connect_bridge_absent)
+    io.qwenpaw.node.data.plugin.BridgeStatus.Unknown -> Texts.get(R.string.connect_bridge_unknown)
 }
 
 /**
@@ -1090,7 +1117,7 @@ private fun AgentRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
             }
             agent.activeModel?.model?.let { model ->
                 Text(
-                    text = "模型 $model",
+                    text = stringResource(R.string.connect_agent_model, model),
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                 )
@@ -1100,7 +1127,7 @@ private fun AgentRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Icon(
                 imageVector = QwenIcons.check,
-                contentDescription = "已选择",
+                contentDescription = stringResource(R.string.connect_selected),
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.secondary,
             )
@@ -1110,6 +1137,7 @@ private fun AgentRow(agent: AgentDto, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun SavedInstanceRow(instance: InstanceConfig, onClick: () -> Unit) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1136,9 +1164,16 @@ private fun SavedInstanceRow(instance: InstanceConfig, onClick: () -> Unit) {
                 text = buildString {
                     append(instance.labelOf(instance.primaryBaseUrl))
                     if (instance.backupCount > 0) {
-                        append("（+").append(instance.backupCount).append(" 个备用）")
+                        append(
+                            context.getString(
+                                R.string.connect_saved_backups,
+                                instance.backupCount,
+                            ),
+                        )
                     }
-                    instance.serverVersion?.let { append(" 版本 ").append(it) }
+                    instance.serverVersion?.let {
+                        append(context.getString(R.string.connect_saved_version, it))
+                    }
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1147,7 +1182,7 @@ private fun SavedInstanceRow(instance: InstanceConfig, onClick: () -> Unit) {
             )
         }
         Text(
-            text = "连接",
+            text = stringResource(R.string.connect_connect),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.secondary,
         )

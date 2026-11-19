@@ -2,10 +2,12 @@ package io.qwenpaw.node.data
 
 import io.qwenpaw.node.data.remote.ApiException
 import kotlinx.coroutines.runBlocking
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Before
 import org.junit.Test
 import java.io.IOException
 import java.net.ConnectException
@@ -19,6 +21,11 @@ import java.net.UnknownHostException
  * 换早了会掩盖真实错误，换晚了则多地址功能形同虚设。
  */
 class AddressFallbackTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     // ---------------- 候选地址 ----------------
 

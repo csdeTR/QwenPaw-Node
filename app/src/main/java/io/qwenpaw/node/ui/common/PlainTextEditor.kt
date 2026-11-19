@@ -30,12 +30,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
@@ -113,7 +115,7 @@ internal fun PlainTextEditor(
                 Spacer(Modifier.width(8.dp))
             } else if (saved && !dirty) {
                 Text(
-                    text = "已保存",
+                    text = stringResource(R.string.common_editor_saved),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary,
                 )
@@ -122,7 +124,7 @@ internal fun PlainTextEditor(
             TextButton(
                 onClick = onSave,
                 enabled = dirty && !saving,
-            ) { Text("保存") }
+            ) { Text(stringResource(R.string.action_save)) }
         }
         Box(
             modifier = Modifier
@@ -166,15 +168,15 @@ internal fun PlainTextEditor(
 
     if (confirmDiscard) {
         ChoiceDialog(
-            title = "放弃未保存的修改？",
-            message = "当前草稿还没有保存，离开后会丢失。",
-            choices = listOf("放弃修改"),
+            title = stringResource(R.string.common_editor_discard_title),
+            message = stringResource(R.string.common_editor_discard_message),
+            choices = listOf(stringResource(R.string.common_editor_discard_confirm)),
             onPick = {
                 confirmDiscard = false
                 onExit()
             },
             onDismiss = { confirmDiscard = false },
-            dismissLabel = "继续编辑",
+            dismissLabel = stringResource(R.string.common_editor_discard_keep),
         )
     }
 }

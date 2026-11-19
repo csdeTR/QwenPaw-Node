@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 语音转写状态 -->
+    <string name="drest_transcription_unknown">尚未检测转写服务</string>
+    <string name="drest_transcription_ready">服务端转写已就绪</string>
+    <string name="drest_transcription_disabled">服务端未启用语音转写</string>
+    <string name="drest_transcription_misconfigured">服务端转写缺少配置</string>
+    <string name="drest_transcription_unsupported">当前服务端版本不支持语音转写</string>
+
+    <!-- 安全提示 -->
+    <string name="drest_security_login_reason">服务端尚未开启 Web 登录认证，终端本身不可用；请先在服务端开启 Web 登录认证并注册用户。关闭安全提示不会解除这条限制。</string>
+    <string name="drest_security_plain_http_reason">当前地址可从公网访问且使用明文 HTTP，经配套插件下发私钥或登录密码会让凭据在链路上可读；请改用 HTTPS，或在「设置 → 服务器 → 受信任的连接」中确认该地址仅你可访问。</string>
+    <string name="drest_security_unverified_reason">当前地址未通过安全校验，无法使用 SSH 终端。</string>
+
+    <!-- 实例与地址 -->
+    <string name="drest_hosted_agentscope">QwenPaw Node无法添加源于AgentScope Platform的实例，请使用私有化部署方案</string>
+    <string name="drest_hosted_modelscope">QwenPaw Node无法添加通过魔搭创空间创建的实例，请使用私有化部署方案</string>
+    <string name="drest_need_server_address">请填写服务器地址</string>
+    <string name="drest_address_unreachable">地址 %1$d/%2$d 不可达：%3$s</string>
+    <string name="drest_all_addresses_failed">所有地址都无法连接</string>
+    <string name="drest_local_instance">本地实例</string>
+    <string name="drest_backup_export_name">导出-%1$s-%2$d</string>
+    <string name="drest_backup_export_description">临时导出，成功后自动删除</string>
+
+    <!-- 登录与插件探测 -->
+    <string name="drest_login_not_reached">登录接口返回 404。若服务端只接受 https，http 上的登录请求会被跳转改写成 GET 并丢失请求体；请把服务器地址改为 https:// 开头</string>
+    <string name="drest_bad_credentials">用户名或密码不正确</string>
+    <string name="drest_bridge_unknown">尚未检测</string>
+    <string name="drest_bridge_ready">已检测到 QwenPaw Node Bridge v%1$s</string>
+    <string name="drest_bridge_absent">未检测到配套插件</string>
+
+    <!-- 附件预览 -->
+    <string name="drest_history_video_label">[视频] %1$s</string>
+    <string name="drest_history_file_label">[文件] %1$s</string>
+
+    <!-- 日志 -->
+    <string name="drest_log_tag_import">导入</string>
+    <string name="drest_log_kind_network">网络</string>
+    <string name="drest_log_kind_stream">对话流</string>
+    <string name="drest_log_kind_ui">界面</string>
+    <string name="drest_log_kind_storage">存储</string>
+    <string name="drest_log_kind_voice">语音</string>
+    <string name="drest_runlog_empty">（本次运行没有记录日志）\n</string>
+    <string name="drest_runlog_title"># QwenPaw Node 运行日志\n</string>
+    <string name="drest_runlog_count"># 记录条数：%1$d\n</string>
+    <string name="drest_runlog_kinds"># 类别：%1$s\n\n</string>
+    <string name="drest_runlog_kind_separator">、</string>
+
+    <!-- 服务端转写错误 -->
+    <string name="drest_voice_no_result">服务端没有返回识别结果，请说得更清楚一些或检查转写配置</string>
+    <string name="drest_voice_no_upload">无法连接服务器，录音没有上传</string>
+    <string name="drest_voice_disabled">服务端未启用语音转写</string>
+    <string name="drest_voice_bad_format">服务端不接受这种录音格式</string>
+    <string name="drest_voice_rejected">服务端拒绝了这次转写请求</string>
+    <string name="drest_voice_login_expired">登录已失效，请重新连接后再试</string>
+    <string name="drest_voice_unsupported">当前服务端版本不支持语音转写</string>
+    <string name="drest_voice_upload_invalid">录音没有正确上传</string>
+    <string name="drest_voice_too_large">录音文件过大，请缩短录音时长</string>
+    <string name="drest_voice_server_failed">服务端转写失败，请检查服务端的转写配置</string>
+    <string name="drest_voice_http_failed">转写失败（HTTP %1$d）</string>
+</resources>

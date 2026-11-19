@@ -30,11 +30,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.SlashCommandDto
 import io.qwenpaw.node.ui.CommandCopy
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
@@ -73,14 +75,14 @@ internal fun MagicCommandsDialog(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "魔法命令",
+                        text = stringResource(R.string.chatcmd_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     // 长按这一层需要提示，否则没有可发现的入口。
                     Text(
-                        text = "点按填入输入框，长按查看用法",
+                        text = stringResource(R.string.chatcmd_hint),
                         style = MaterialTheme.typography.labelSmall,
                         color = LocalCaptionColor.current,
                     )
@@ -94,7 +96,7 @@ internal fun MagicCommandsDialog(
                 ) {
                     Icon(
                         imageVector = QwenIcons.close,
-                        contentDescription = "关闭",
+                        contentDescription = stringResource(R.string.action_close),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -104,7 +106,7 @@ internal fun MagicCommandsDialog(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             if (groups.isEmpty()) {
                 Text(
-                    text = "没有读取到命令列表。可以在输入框直接输入斜杠命令。",
+                    text = stringResource(R.string.chatcmd_empty),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
@@ -114,7 +116,8 @@ internal fun MagicCommandsDialog(
                     groups.forEach { (category, items) ->
                         item(key = "category-$category") {
                             Text(
-                                text = CommandCopy.category(category).ifBlank { "其他" },
+                                text = CommandCopy.category(category)
+                                    .ifBlank { stringResource(R.string.chatcmd_other) },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(
@@ -198,25 +201,28 @@ private fun CommandDetailDialog(command: SlashCommandDto, onDismiss: () -> Unit)
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = CommandCopy.category(command.category).ifBlank { "其他" },
+                text = CommandCopy.category(command.category)
+                    .ifBlank { stringResource(R.string.chatcmd_other) },
                 style = MaterialTheme.typography.labelSmall,
                 color = LocalCaptionColor.current,
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = "作用",
+                text = stringResource(R.string.chatcmd_section_action),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = CommandCopy.detail(command.name) ?: description ?: "服务端未提供这条命令的说明。",
+                text = CommandCopy.detail(command.name)
+                    ?: description
+                    ?: stringResource(R.string.chatcmd_no_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = "示例",
+                text = stringResource(R.string.chatcmd_section_example),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -234,7 +240,7 @@ private fun CommandDetailDialog(command: SlashCommandDto, onDismiss: () -> Unit)
             )
             Spacer(Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
             }
         }
     }

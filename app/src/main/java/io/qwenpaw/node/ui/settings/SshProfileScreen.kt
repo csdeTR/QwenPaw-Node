@@ -34,9 +34,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.terminal.SshAddress
 import io.qwenpaw.node.data.terminal.SshAuthType
 import io.qwenpaw.node.data.terminal.SshProfile
@@ -77,12 +79,12 @@ fun SshProfileScreen(
 
     fun save() {
         if (!store.available) {
-            message = "本机安全存储不可用，无法保存 SSH 直连凭据"
+            message = context.getString(R.string.sshprofile_storage_unavailable)
             messageError = true
             return
         }
         if (profile.addresses.isEmpty()) {
-            message = "请至少添加一个 SSH 地址"
+            message = context.getString(R.string.sshprofile_need_address)
             messageError = true
             return
         }
@@ -94,7 +96,7 @@ fun SshProfileScreen(
         val secret = when (profile.auth) {
             SshAuthType.KEY -> {
                 if (!hasKey && keyInput.isBlank()) {
-                    message = "请粘贴 SSH 私钥"
+                    message = context.getString(R.string.sshprofile_need_key)
                     messageError = true
                     return
                 }
@@ -105,7 +107,7 @@ fun SshProfileScreen(
             }
             SshAuthType.PASSWORD -> {
                 if (!hasPassword && passwordInput.isBlank()) {
-                    message = "请填写 SSH 登录密码"
+                    message = context.getString(R.string.sshprofile_need_password)
                     messageError = true
                     return
                 }
@@ -113,7 +115,7 @@ fun SshProfileScreen(
             }
         }
         if (!store.save(instanceId, profile, secret)) {
-            message = "保存失败：本机安全存储不可用"
+            message = context.getString(R.string.sshprofile_save_unavailable)
             messageError = true
             return
         }
@@ -122,7 +124,7 @@ fun SshProfileScreen(
         keyInput = ""
         passphraseInput = ""
         passwordInput = ""
-        message = "已保存；终端页的「SSH 直连」立即生效"
+        message = context.getString(R.string.sshprofile_saved)
         messageError = false
     }
 
@@ -135,7 +137,7 @@ fun SshProfileScreen(
                 ),
                 title = {
                     Column {
-                        Text("SSH 直连")
+                        Text(stringResource(R.string.sshprofile_title))
                         Text(
                             instanceName.ifBlank { instanceId },
                             style = MaterialTheme.typography.labelSmall,
@@ -145,7 +147,7 @@ fun SshProfileScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(QwenIcons.arrowLeft, contentDescription = "返回")
+                        Icon(QwenIcons.arrowLeft, contentDescription = stringResource(R.string.action_back))
                     }
                 },
             )
@@ -160,7 +162,7 @@ fun SshProfileScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                "只从本机直接连接目标 SSH，不经过配套插件；私钥与口令加密保存在本机。",
+                stringResource(R.string.sshprofile_intro),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -170,10 +172,10 @@ fun SshProfileScreen(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("连接地址", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.sshprofile_addresses_title), style = MaterialTheme.typography.titleSmall)
                     if (profile.addresses.isEmpty()) {
                         Text(
-                            "还没有地址。添加 host、端口与用户名后，可用手机直连该 SSH。",
+                            stringResource(R.string.sshprofile_addresses_empty),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -190,13 +192,21 @@ fun SshProfileScreen(
                                 )
                                 Text(
                                     "${address.user}@${address.host}:${address.port}" +
-                                        (if (address.default) " · 默认" else "") +
-                                        (if (address.preferOnVpn) " · VPN 优先" else ""),
+                                        (if (address.default) {
+                                            stringResource(R.string.sshprofile_address_default_suffix)
+                                        } else {
+                                            ""
+                                        }) +
+                                        (if (address.preferOnVpn) {
+                                            stringResource(R.string.sshprofile_address_vpn_suffix)
+                                        } else {
+                                            ""
+                                        }),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            TextButton(onClick = { editing = address }) { Text("编辑") }
+                            TextButton(onClick = { editing = address }) { Text(stringResource(R.string.action_edit)) }
                             TextButton(onClick = {
                                 val remaining = profile.addresses.filterNot { it.id == address.id }
                                 val normalized = if (remaining.none { it.default } && remaining.isNotEmpty()) {
@@ -207,10 +217,10 @@ fun SshProfileScreen(
                                     remaining
                                 }
                                 profile = profile.copy(addresses = normalized)
-                            }) { Text("删除") }
+                            }) { Text(stringResource(R.string.action_delete)) }
                         }
                     }
-                    OutlinedButton(onClick = { adding = true }) { Text("添加地址") }
+                    OutlinedButton(onClick = { adding = true }) { Text(stringResource(R.string.sshprofile_add_address)) }
                 }
             }
 
@@ -219,29 +229,33 @@ fun SshProfileScreen(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("认证方式", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.sshprofile_auth_title), style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
                             selected = profile.auth == SshAuthType.KEY,
                             onClick = { profile = profile.copy(auth = SshAuthType.KEY) },
-                            label = { Text("公钥") },
+                            label = { Text(stringResource(R.string.sshprofile_auth_key)) },
                         )
                         FilterChip(
                             selected = profile.auth == SshAuthType.PASSWORD,
                             onClick = { profile = profile.copy(auth = SshAuthType.PASSWORD) },
-                            label = { Text("密码") },
+                            label = { Text(stringResource(R.string.sshprofile_auth_password)) },
                         )
                     }
                     if (profile.auth == SshAuthType.KEY) {
                         Text(
-                            if (hasKey) "已保存私钥；留空表示保留原值" else "尚未配置私钥",
+                            if (hasKey) {
+                                stringResource(R.string.sshprofile_key_saved)
+                            } else {
+                                stringResource(R.string.sshprofile_key_missing)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         OutlinedTextField(
                             value = keyInput,
                             onValueChange = { keyInput = it },
-                            label = { Text("粘贴 RSA/OpenSSH 私钥") },
+                            label = { Text(stringResource(R.string.sshprofile_key_label)) },
                             minLines = 3,
                             maxLines = 6,
                             visualTransformation = if (showKey) {
@@ -252,33 +266,43 @@ fun SshProfileScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         TextButton(onClick = { showKey = !showKey }) {
-                            Text(if (showKey) "隐藏私钥" else "显示私钥")
+                            Text(
+                                if (showKey) {
+                                    stringResource(R.string.sshprofile_key_hide)
+                                } else {
+                                    stringResource(R.string.sshprofile_key_show)
+                                },
+                            )
                         }
                         OutlinedTextField(
                             value = passphraseInput,
                             onValueChange = { passphraseInput = it },
-                            label = { Text("私钥 passphrase（可选，留空保留）") },
+                            label = { Text(stringResource(R.string.sshprofile_passphrase_label)) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     } else {
                         Text(
-                            if (hasPassword) "已保存密码；留空表示保留原值" else "尚未配置密码",
+                            if (hasPassword) {
+                                stringResource(R.string.sshprofile_password_saved)
+                            } else {
+                                stringResource(R.string.sshprofile_password_missing)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         OutlinedTextField(
                             value = passwordInput,
                             onValueChange = { passwordInput = it },
-                            label = { Text("SSH 登录密码") },
+                            label = { Text(stringResource(R.string.sshprofile_password_label)) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     Text(
-                        "首次连接仍需核对主机指纹；指纹变化会拒绝连接，不会自动接受。",
+                        stringResource(R.string.sshprofile_fingerprint_hint),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -290,15 +314,15 @@ fun SshProfileScreen(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("连接行为", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.sshprofile_behavior_title), style = MaterialTheme.typography.titleSmall)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("与当前 QwenPaw 实例同机")
+                            Text(stringResource(R.string.sshprofile_same_host_title))
                             Text(
-                                "连接后进入智能体工作区；目标不是这台 QwenPaw 时请关闭。",
+                                stringResource(R.string.sshprofile_same_host_hint),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -308,10 +332,10 @@ fun SshProfileScreen(
                             onCheckedChange = { profile = profile.copy(sameHost = it) },
                         )
                     }
-                    Text("远端平台", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.sshprofile_platform_title), style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            TerminalPlatform.AUTO to "自动",
+                            TerminalPlatform.AUTO to stringResource(R.string.sshprofile_platform_auto),
                             TerminalPlatform.WINDOWS to "Windows",
                             TerminalPlatform.POSIX to "Linux/Unix",
                         ).forEach { (platform, label) ->
@@ -323,7 +347,7 @@ fun SshProfileScreen(
                         }
                     }
                     val targetPlatform = ShellBootstrap.resolve(profile.platform, null)
-                    Text("默认 shell", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.sshprofile_shell_title), style = MaterialTheme.typography.labelMedium)
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -335,7 +359,7 @@ fun SshProfileScreen(
                                     if (shell == TerminalShell.GIT_BASH) {
                                         Toast.makeText(
                                             context,
-                                            "请先确认目标 Windows 已安装 Bash（Git Bash 或 WSL）；未安装时命令会失败。",
+                                            context.getString(R.string.sshprofile_git_bash_hint),
                                             Toast.LENGTH_LONG,
                                         ).show()
                                     }
@@ -359,7 +383,7 @@ fun SshProfileScreen(
                     },
                 )
             }
-            Button(onClick = { save() }, modifier = Modifier.fillMaxWidth()) { Text("保存") }
+            Button(onClick = { save() }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_save)) }
             Spacer(Modifier.height(12.dp))
         }
     }
@@ -405,46 +429,57 @@ private fun AddressDialog(
     var preferVpn by remember(initial) { mutableStateOf(initial?.preferOnVpn ?: false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val errorHostUser = stringResource(R.string.sshprofile_error_host_user)
+    val errorPort = stringResource(R.string.sshprofile_error_port)
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "添加 SSH 地址" else "编辑 SSH 地址") },
+        title = {
+            Text(
+                if (initial == null) {
+                    stringResource(R.string.sshprofile_dialog_add_title)
+                } else {
+                    stringResource(R.string.sshprofile_dialog_edit_title)
+                },
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = alias,
                     onValueChange = { alias = it },
-                    label = { Text("别名（可选）") },
+                    label = { Text(stringResource(R.string.sshprofile_field_alias)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },
-                    label = { Text("主机名或 IP") },
+                    label = { Text(stringResource(R.string.sshprofile_field_host)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = port,
                     onValueChange = { port = it },
-                    label = { Text("端口") },
+                    label = { Text(stringResource(R.string.sshprofile_field_port)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = user,
                     onValueChange = { user = it },
-                    label = { Text("用户名") },
+                    label = { Text(stringResource(R.string.sshprofile_field_user)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = isDefault, onCheckedChange = { isDefault = it })
-                    Text("设为默认地址")
+                    Text(stringResource(R.string.sshprofile_switch_default))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = preferVpn, onCheckedChange = { preferVpn = it })
-                    Text("VPN/代理下优先")
+                    Text(stringResource(R.string.sshprofile_switch_vpn))
                 }
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
@@ -455,9 +490,9 @@ private fun AddressDialog(
             TextButton(onClick = {
                 val parsedPort = port.trim().toIntOrNull()
                 if (host.isBlank() || user.isBlank()) {
-                    error = "主机与用户名不能为空"
+                    error = errorHostUser
                 } else if (parsedPort == null || parsedPort !in 1..65535) {
-                    error = "端口需在 1–65535"
+                    error = errorPort
                 } else {
                     onSave(
                         SshAddress(
@@ -471,10 +506,10 @@ private fun AddressDialog(
                         ),
                     )
                 }
-            }) { Text("保存") }
+            }) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }

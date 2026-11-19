@@ -1,5 +1,8 @@
 package io.qwenpaw.node.data.terminal
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * shell 切换与进入工作区的命令生成。
  *
@@ -25,11 +28,11 @@ object ShellBootstrap {
         }
 
     fun label(shell: TerminalShell): String = when (shell) {
-        TerminalShell.DEFAULT -> "默认"
+        TerminalShell.DEFAULT -> Texts.get(R.string.ssh_shell_default)
         TerminalShell.BASH -> "bash"
         TerminalShell.DASH -> "dash"
         TerminalShell.POWERSHELL -> "PowerShell"
-        TerminalShell.CMD -> "命令提示符"
+        TerminalShell.CMD -> Texts.get(R.string.ssh_shell_cmd)
         TerminalShell.GIT_BASH -> "Bash"
     }
 

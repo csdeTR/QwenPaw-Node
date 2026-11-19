@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.settings
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,30 +20,33 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 
-internal data class ServerLanguageOption(val code: String, val label: String)
+internal data class ServerLanguageOption(val code: String, @StringRes val labelRes: Int)
 
 /** 与服务端 `_VALID_LANGUAGES` 一一对应；少一个服务端就会 400。 */
 internal val SERVER_LANGUAGES = listOf(
-    ServerLanguageOption("zh", "中文"),
-    ServerLanguageOption("en", "English"),
-    ServerLanguageOption("ja", "日本語"),
-    ServerLanguageOption("ru", "Русский"),
-    ServerLanguageOption("pt-BR", "Português (Brasil)"),
-    ServerLanguageOption("id", "Bahasa Indonesia"),
-    ServerLanguageOption("vi", "Tiếng Việt"),
+    ServerLanguageOption("zh", R.string.lang_name_zh),
+    ServerLanguageOption("en", R.string.lang_name_en),
+    ServerLanguageOption("ja", R.string.lang_name_ja),
+    ServerLanguageOption("ru", R.string.lang_name_ru),
+    ServerLanguageOption("pt-BR", R.string.lang_name_pt_br),
+    ServerLanguageOption("id", R.string.lang_name_id),
+    ServerLanguageOption("vi", R.string.lang_name_vi),
 )
 
 internal fun serverLanguageLabel(code: String): String =
-    SERVER_LANGUAGES.firstOrNull { it.code == code }?.label ?: code
+    SERVER_LANGUAGES.firstOrNull { it.code == code }?.let { Texts.get(it.labelRes) } ?: code
 
 /**
  * 服务端 Web 控制台语言的选择框。
  *
- * 这不是客户端语言：客户端的界面文案只有中文。入口文案与说明都必须写明
+ * 这不是客户端语言：客户端界面目前只有简体中文。入口文案与说明都必须写明
  * 「服务端界面语言」，否则用户会以为切换后手机界面会跟着变。
  */
 @Composable
@@ -53,7 +57,12 @@ internal fun LanguagePickerDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("服务端界面语言", fontWeight = FontWeight.SemiBold) },
+        title = {
+            Text(
+                text = stringResource(R.string.settings_nav_server_language),
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
         text = {
             Column(
                 modifier = Modifier
@@ -61,7 +70,7 @@ internal fun LanguagePickerDialog(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    text = "只影响 QwenPaw Web 控制台的语言，不改变本应用的界面。",
+                    text = stringResource(R.string.serverlang_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -75,14 +84,16 @@ internal fun LanguagePickerDialog(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = option.label,
+                            text = stringResource(option.labelRes),
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f),
                         )
                         if (option.code == current) {
                             Icon(
                                 imageVector = QwenIcons.check,
-                                contentDescription = "当前语言",
+                                contentDescription = stringResource(
+                                    R.string.serverlang_current_desc,
+                                ),
                                 tint = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -92,7 +103,7 @@ internal fun LanguagePickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }

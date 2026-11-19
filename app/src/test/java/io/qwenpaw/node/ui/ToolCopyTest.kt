@@ -1,9 +1,11 @@
 package io.qwenpaw.node.ui
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -13,6 +15,11 @@ import org.junit.Test
  * 它在 `/api/tools` 里有、在 Console 语言包里没有，因此单独补了一条。
  */
 class ToolCopyTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     /** `GET /api/tools` 在 2.2.2.post1 上实测的全部工具名。 */
     private val serverTools = listOf(

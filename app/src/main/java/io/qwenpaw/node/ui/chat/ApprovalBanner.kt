@@ -13,8 +13,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ApprovalDto
 
 /**
@@ -37,7 +39,7 @@ fun ApprovalBanner(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                text = "需要审批：${approval.toolName}",
+                text = stringResource(R.string.approval_needed, approval.toolName),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
@@ -66,8 +68,8 @@ fun ApprovalBanner(
                 modifier = Modifier.padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(onClick = onApprove) { Text("允许") }
-                OutlinedButton(onClick = onDeny) { Text("拒绝") }
+                Button(onClick = onApprove) { Text(stringResource(R.string.approval_allow)) }
+                OutlinedButton(onClick = onDeny) { Text(stringResource(R.string.approval_deny)) }
                 Spacer(Modifier.weight(1f))
             }
         }

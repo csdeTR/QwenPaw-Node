@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.takeOrElse
 import kotlinx.coroutines.launch
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
@@ -397,9 +399,9 @@ private fun CodeBlock(code: String, language: String?) {
         ) {
             Text(
                 text = when {
-                    isMermaid -> "mermaid（源码）"
+                    isMermaid -> stringResource(R.string.markdown_label_mermaid_source)
                     !language.isNullOrBlank() -> language
-                    else -> "代码"
+                    else -> stringResource(R.string.markdown_label_code)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -411,7 +413,7 @@ private fun CodeBlock(code: String, language: String?) {
             ) {
                 Icon(
                     imageVector = QwenIcons.copy,
-                    contentDescription = "复制代码",
+                    contentDescription = stringResource(R.string.markdown_action_copy_code),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -432,7 +434,7 @@ private fun CodeBlock(code: String, language: String?) {
         }
         if (isMermaid) {
             Text(
-                text = "Mermaid 图表暂以源码展示，可复制到支持渲染的工具查看",
+                text = stringResource(R.string.markdown_mermaid_hint),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),

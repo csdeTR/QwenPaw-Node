@@ -1,17 +1,24 @@
 package io.qwenpaw.node.log
 
+import androidx.annotation.StringRes
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * 日志类别。
  *
  * 分类的目的是让用户能关掉不关心的噪音：排查连接问题时只需要 NETWORK，
  * 排查语音时只需要 VOICE。分类集合由设置页控制，未开启的类别不写入。
  */
-enum class LogKind(val label: String) {
-    NETWORK("网络"),
-    STREAM("对话流"),
-    UI("界面"),
-    STORAGE("存储"),
-    VOICE("语音"),
+enum class LogKind(@StringRes val labelRes: Int) {
+    NETWORK(R.string.drest_log_kind_network),
+    STREAM(R.string.drest_log_kind_stream),
+    UI(R.string.drest_log_kind_ui),
+    STORAGE(R.string.drest_log_kind_storage),
+    VOICE(R.string.drest_log_kind_voice),
+    ;
+
+    val label: String get() = Texts.get(labelRes)
 }
 
 /** 一条日志。 */
@@ -122,11 +129,16 @@ object RunLog {
      */
     fun export(): String {
         val snapshot = _entries.value
-        if (snapshot.isEmpty()) return "（本次运行没有记录日志）\n"
+        if (snapshot.isEmpty()) return Texts.get(R.string.drest_runlog_empty)
         return buildString {
-            append("# QwenPaw Node 运行日志\n")
-            append("# 记录条数：").append(snapshot.size).append('\n')
-            append("# 类别：").append(kinds.joinToString("、") { it.label }).append("\n\n")
+            append(Texts.get(R.string.drest_runlog_title))
+            append(Texts.get(R.string.drest_runlog_count, snapshot.size))
+            append(
+                Texts.get(
+                    R.string.drest_runlog_kinds,
+                    kinds.joinToString(Texts.get(R.string.drest_runlog_kind_separator)) { it.label },
+                ),
+            )
             snapshot.forEach { e ->
                 append(e.time).append(" [").append(e.kind.label).append("] ")
                 append(e.tag).append(" · ").append(e.message)

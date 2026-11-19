@@ -34,8 +34,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.BrowseDirsDto
 import io.qwenpaw.node.data.model.ProjectDirDto
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
@@ -92,17 +94,21 @@ fun ProjectDirDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("智能体工作区") },
+        title = { Text(stringResource(R.string.chatdir_title)) },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    text = "智能体在这个目录下读写文件。这里填的是服务端上的绝对路径，不是手机路径。",
+                    text = stringResource(R.string.chatdir_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = if (isDefault) "当前为工作区默认目录" else "当前为自定义目录",
+                    text = if (isDefault) {
+                        stringResource(R.string.chatdir_is_default)
+                    } else {
+                        stringResource(R.string.chatdir_is_custom)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = LocalCaptionColor.current,
                 )
@@ -120,7 +126,7 @@ fun ProjectDirDialog(
                         onClick = onReset,
                         contentPadding = PaddingValues(0.dp),
                     ) {
-                        Text("恢复工作区默认目录")
+                        Text(stringResource(R.string.chatdir_reset))
                     }
                 }
 
@@ -131,7 +137,7 @@ fun ProjectDirDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "浏览目录",
+                        text = stringResource(R.string.chatdir_browse),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
@@ -140,12 +146,22 @@ fun ProjectDirDialog(
                         onClick = { browse?.parent?.let { load(it) } },
                         enabled = !loading && browse?.parent != null,
                         contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("上级", style = MaterialTheme.typography.labelMedium) }
+                    ) {
+                        Text(
+                            stringResource(R.string.chatdir_parent),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                     TextButton(
                         onClick = { load(browse?.current ?: text.ifBlank { "~" }) },
                         enabled = !loading,
                         contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("刷新", style = MaterialTheme.typography.labelMedium) }
+                    ) {
+                        Text(
+                            stringResource(R.string.action_refresh),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
                 Text(
                     text = browse?.current ?: text.ifBlank { "~" },
@@ -169,14 +185,14 @@ fun ProjectDirDialog(
                         )
 
                         failed -> Text(
-                            text = "无法读取这个目录，可能不存在或没有权限",
+                            text = stringResource(R.string.chatdir_error),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.align(Alignment.Center),
                         )
 
                         browse?.dirs.isNullOrEmpty() -> Text(
-                            text = "这个目录下没有子目录",
+                            text = stringResource(R.string.chatdir_empty),
                             style = MaterialTheme.typography.bodySmall,
                             color = LocalCaptionColor.current,
                             modifier = Modifier.align(Alignment.Center),
@@ -216,7 +232,7 @@ fun ProjectDirDialog(
                     TextButton(
                         onClick = { text = path },
                         contentPadding = PaddingValues(0.dp),
-                    ) { Text("使用此目录") }
+                    ) { Text(stringResource(R.string.chatdir_use)) }
                 }
             }
         },
@@ -224,10 +240,10 @@ fun ProjectDirDialog(
             TextButton(
                 onClick = { onSave(text.trim()) },
                 enabled = text.isNotBlank(),
-            ) { Text("保存") }
+            ) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }

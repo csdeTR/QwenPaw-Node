@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 检查点页 -->
+    <string name="checkpoint_title">检查点</string>
+    <string name="checkpoint_load_failed">无法读取检查点</string>
+    <string name="checkpoint_auto_header">自动检查点</string>
+    <string name="checkpoint_auto_title">自动创建检查点</string>
+    <string name="checkpoint_auto_hint">在对话产生变更前自动留档，可随时回滚。</string>
+    <string name="checkpoint_workspace_dir">工作区：%1$s</string>
+    <plurals name="checkpoint_summary">
+        <item quantity="other">共 %1$d 个检查点：自动 %2$d、手动 %3$d、恢复前 %4$d</item>
+    </plurals>
+    <string name="checkpoint_manual_header">手动快照</string>
+    <string name="checkpoint_manual_hint">选择一条会话，查看后为它创建命名检查点。</string>
+    <string name="checkpoint_manual_empty">服务端还没有会话。</string>
+    <plurals name="checkpoint_manual_limit">
+        <item quantity="other">仅列出最近的 %1$d 条会话。</item>
+    </plurals>
+    <string name="checkpoint_timeline_empty">当前工作区还没有检查点。</string>
+    <string name="checkpoint_archived">已归档</string>
+    <string name="checkpoint_node_latest">最新</string>
+    <string name="checkpoint_node_restore">回滚</string>
+
+    <!-- 检查点清理 -->
+    <string name="checkpoint_gc_header">清理</string>
+    <string name="checkpoint_gc_hint">按数量与时间保留最近的检查点，超出部分会被删除。</string>
+    <string name="checkpoint_gc_keep_count">保留数量</string>
+    <string name="checkpoint_gc_keep_days">保留天数</string>
+    <string name="checkpoint_gc_pre_restore_days">恢复前快照保留天数</string>
+    <string name="checkpoint_gc_compact">压缩仓库对象</string>
+    <string name="checkpoint_gc_saving">保存中…</string>
+    <string name="checkpoint_gc_save">保存策略</string>
+    <string name="checkpoint_gc_previewing">预览中…</string>
+    <string name="checkpoint_gc_preview">预览清理</string>
+    <string name="checkpoint_gc_applying">清理中…</string>
+    <string name="checkpoint_gc_apply">执行清理</string>
+    <string name="checkpoint_gc_preview_empty">预览结果：没有需要清理的检查点。</string>
+    <plurals name="checkpoint_gc_preview_result">
+        <item quantity="other">预览结果：将删除 %1$d 个，保留 %2$d 个。</item>
+    </plurals>
+
+    <!-- 检查点重置 -->
+    <string name="checkpoint_danger_header">危险操作</string>
+    <string name="checkpoint_reset_heading">删除全部检查点</string>
+    <string name="checkpoint_reset_hint">删除当前工作区的全部检查点，此操作不可撤销。</string>
+    <string name="checkpoint_reset_action">重置全部检查点</string>
+    <string name="checkpoint_reset_confirm_message">将删除当前工作区的全部检查点，包括自动、手动与恢复前快照。</string>
+    <string name="checkpoint_impact_current_agent">当前智能体</string>
+    <string name="checkpoint_impact_count">检查点数量：%1$d</string>
+    <string name="checkpoint_impact_no_undo">删除后无法回滚到这些检查点。</string>
+    <string name="checkpoint_reset_deleting">正在删除…</string>
+    <string name="checkpoint_reset_confirm">确认删除</string>
+
+    <!-- 手动快照与只读对话页 -->
+    <string name="checkpoint_snapshot_create">创建检查点</string>
+    <string name="checkpoint_snapshot_name_label">名称（可选）</string>
+    <string name="checkpoint_snapshot_creating">创建中…</string>
+    <string name="checkpoint_snapshot_confirm">创建</string>
+    <string name="checkpoint_chat_missing">这条会话在当前实例的对话列表里不存在，无法显示历史记录。</string>
+    <string name="checkpoint_chat_empty">这条会话没有可显示的消息。</string>
+    <string name="checkpoint_chat_readonly">只读查看，不会发送消息。</string>
+
+    <!-- 回滚 -->
+    <string name="checkpoint_restore_title">回滚到检查点</string>
+    <string name="checkpoint_restore_memory">会话记忆</string>
+    <string name="checkpoint_restore_files">工作区文件</string>
+    <string name="checkpoint_restore_select_all">全选</string>
+    <string name="checkpoint_restore_loading_files">正在读取文件列表…</string>
+    <string name="checkpoint_restore_no_files">该检查点没有可恢复的文件。</string>
+    <string name="checkpoint_restore_impacts">影响范围</string>
+    <string name="checkpoint_restore_impact_line">· %1$s</string>
+    <string name="checkpoint_restore_applying">回滚中…</string>
+    <string name="checkpoint_restore_confirm">确认回滚</string>
+    <string name="checkpoint_restore_refresh_preview">刷新预览</string>
+
+    <!-- 节点类型与回滚影响 -->
+    <string name="checkpoint_kind_auto">自动</string>
+    <string name="checkpoint_kind_manual">手动</string>
+    <string name="checkpoint_kind_pre_restore">恢复前</string>
+    <string name="checkpoint_kind_commit">提交</string>
+    <string name="checkpoint_impact_target">回滚目标：%1$s（%2$s）</string>
+    <string name="checkpoint_impact_memory_restore">会话记忆：恢复到该检查点</string>
+    <string name="checkpoint_impact_memory_keep">会话记忆：保持不变</string>
+    <string name="checkpoint_impact_files_keep">工作区文件：保持不变</string>
+    <string name="checkpoint_impact_files_unselected">工作区文件：尚未选择</string>
+    <string name="checkpoint_impact_files_restore">工作区文件：恢复 %1$d 个</string>
+    <string name="checkpoint_impact_delete_files">将删除该检查点之后新增的 %1$d 个文件。</string>
+    <string name="checkpoint_impact_pre_restore">服务端会先创建恢复前快照，可从检查点回滚本次操作。</string>
+    <string name="checkpoint_impact_need_scope">至少选择会话记忆或工作区文件之一。</string>
+
+    <!-- 清理策略校验 -->
+    <string name="checkpoint_gc_error_keep_count_int">保留数量需为整数</string>
+    <string name="checkpoint_gc_error_keep_days_int">保留天数需为整数</string>
+    <string name="checkpoint_gc_error_pre_restore_days_int">恢复前快照保留天数需为整数</string>
+    <string name="checkpoint_gc_error_keep_count_range">保留数量需在 0 到 1000000 之间</string>
+    <string name="checkpoint_gc_error_keep_days_range">保留天数需在 0 到 36500 之间</string>
+    <string name="checkpoint_gc_error_pre_restore_days_range">恢复前快照保留天数需在 0 到 36500 之间</string>
+
+    <!-- 检查点的提示与错误文案 -->
+    <string name="checkpoint_error_not_connected">尚未连接服务器</string>
+    <string name="checkpoint_error_bad_request">请求参数无效</string>
+    <string name="checkpoint_error_not_found">检查点不存在，可能已被清理</string>
+    <string name="checkpoint_error_conflict">服务端已有恢复或清理在进行，请稍后重试</string>
+    <string name="checkpoint_notice_snapshot_created">已创建检查点</string>
+    <string name="checkpoint_notice_restore">已回滚 %1$d 个文件</string>
+    <string name="checkpoint_notice_restore_with_memory">已回滚 %1$d 个文件，会话记忆已恢复</string>
+    <string name="checkpoint_notice_gc_saved">清理策略已保存</string>
+    <string name="checkpoint_notice_gc_applied">已清理 %1$d 个检查点</string>
+    <string name="checkpoint_notice_reset_done">已删除全部检查点</string>
+
+    <!-- 用量统计页 -->
+    <string name="stats_title">用量统计</string>
+    <string name="stats_load_failed">加载用量失败</string>
+    <string name="stats_tap_to_retry">点击重试</string>
+    <string name="stats_no_data">暂无数据</string>
+    <string name="stats_scope_server">全服务端</string>
+    <string name="stats_scope_agent">只统计当前智能体</string>
+    <string name="stats_range_summary_title">区间概览</string>
+    <string name="stats_agent_title">当前智能体</string>
+    <string name="stats_trend_title">调用趋势</string>
+    <string name="stats_models_title">按模型</string>
+    <string name="stats_metric_total_calls">总调用次数</string>
+    <string name="stats_metric_prompt_tokens">输入 tokens</string>
+    <string name="stats_metric_completion_tokens">输出 tokens</string>
+    <string name="stats_metric_cache_hit_rate">缓存命中率</string>
+    <string name="stats_metric_active_sessions">活跃会话</string>
+    <string name="stats_metric_messages">消息数</string>
+    <string name="stats_metric_llm_calls">LLM 调用</string>
+    <string name="stats_metric_tool_calls">工具调用</string>
+    <string name="stats_agent_empty">所选时间范围内没有活动</string>
+    <string name="stats_trend_empty">所选时间范围内没有调用</string>
+    <plurals name="stats_model_call_count">
+        <item quantity="other">%1$s · %2$d 次调用</item>
+    </plurals>
+    <string name="stats_range_d7">近 7 天</string>
+    <string name="stats_range_d30">近 30 天</string>
+    <string name="stats_range_d90">近 90 天</string>
+    <string name="stats_chart_marker_llm">LLM 调用 %1$d</string>
+    <string name="stats_chart_marker_tool">工具调用 %1$d</string>
+    <string name="stats_error_not_connected">尚未连接服务器</string>
+
+    <!-- 运行日志页 -->
+    <string name="runlogui_title">运行日志</string>
+    <plurals name="runlogui_subtitle">
+        <item quantity="other">本机客户端日志，%1$d 条</item>
+    </plurals>
+    <string name="runlogui_import">导入</string>
+    <string name="runlogui_export">导出</string>
+    <string name="runlogui_toggle">记录日志</string>
+    <string name="runlogui_empty_enabled">暂无记录。发起一次对话后即可在此查看。</string>
+    <string name="runlogui_empty_disabled">尚未记录日志。请打开上方的「记录日志」开关。</string>
+</resources>

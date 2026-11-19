@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.agents
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.PortabilityAssetDto
 import io.qwenpaw.node.data.model.PortabilityJobDto
 import io.qwenpaw.node.data.model.PortabilitySelectionDto
@@ -7,6 +8,7 @@ import io.qwenpaw.node.data.model.PortabilitySourceDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,7 +55,9 @@ class PortabilityViewModel(
 
     fun load() {
         val conn = connection() ?: run {
-            _state.update { it.copy(loading = false, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(loading = false, error = Texts.get(R.string.portability_error_not_connected))
+            }
             return
         }
         _state.update { it.copy(loading = true, error = null, notice = null) }
@@ -101,7 +105,7 @@ class PortabilityViewModel(
         val conn = connection() ?: return
         val sources = _state.value.selectedSources.toList()
         if (sources.isEmpty()) {
-            _state.update { it.copy(error = "请至少选择一个来源") }
+            _state.update { it.copy(error = Texts.get(R.string.portability_error_no_source)) }
             return
         }
         _state.update { it.copy(loading = true, error = null, notice = null) }
@@ -148,7 +152,7 @@ class PortabilityViewModel(
         val current = _state.value
         val job = current.job ?: return
         if (current.selectedAssets.isEmpty() && current.sessions.values.none { it }) {
-            _state.update { it.copy(error = "请至少选择一项要导入的内容") }
+            _state.update { it.copy(error = Texts.get(R.string.portability_error_no_selection)) }
             return
         }
         val selections = buildSelections(job, current.selectedAssets, current.sessions)
@@ -312,10 +316,10 @@ internal fun selectionField(assetType: String): String? = when (assetType) {
 }
 
 internal fun resultNotice(job: PortabilityJobDto): String = when (job.state) {
-    "completed" -> "导入完成"
-    "completed_with_issues" -> "导入完成，部分项目未成功"
-    "failed" -> "导入失败"
-    "interrupted" -> "导入被服务端中断"
-    "cancelled" -> "导入已取消"
+    "completed" -> Texts.get(R.string.portability_notice_done)
+    "completed_with_issues" -> Texts.get(R.string.portability_notice_partial)
+    "failed" -> Texts.get(R.string.portability_notice_failed)
+    "interrupted" -> Texts.get(R.string.portability_notice_interrupted)
+    "cancelled" -> Texts.get(R.string.portability_notice_cancelled)
     else -> ""
 }

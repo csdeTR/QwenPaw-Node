@@ -39,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -46,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.SearchHitDto
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -93,12 +96,12 @@ fun SearchScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onBackground,
                         )
                     }
                     Text(
-                        text = "全文检索",
+                        text = stringResource(R.string.chatsearch_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -110,7 +113,7 @@ fun SearchScreen(
                     onValueChange = { input = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    placeholder = { Text("搜索所有对话的内容") },
+                    placeholder = { Text(stringResource(R.string.chatsearch_hint)) },
                     leadingIcon = {
                         Icon(
                             imageVector = QwenIcons.search,
@@ -134,7 +137,11 @@ fun SearchScreen(
                 state.loading && state.items.isEmpty() -> LoadingBlock()
                 state.error != null && state.items.isEmpty() -> HintBlock(state.error)
                 state.items.isEmpty() -> HintBlock(
-                    if (state.query.isEmpty()) "输入关键词后按回车开始检索。" else "没有找到包含该关键词的消息。",
+                    if (state.query.isEmpty()) {
+                        stringResource(R.string.chatsearch_empty_prompt)
+                    } else {
+                        stringResource(R.string.chatsearch_empty_result)
+                    },
                 )
                 else -> Results(
                     state = state,
@@ -157,7 +164,11 @@ private fun Results(
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             Text(
-                text = "共 ${state.total} 条命中",
+                text = pluralStringResource(
+                    R.plurals.chatsearch_total_hits,
+                    state.total,
+                    state.total,
+                ),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.outline,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -179,11 +190,11 @@ private fun Results(
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text("加载更多")
+                    Text(stringResource(R.string.chatsearch_load_more))
                 }
             } else if (state.items.isNotEmpty()) {
                 Text(
-                    text = "已经到底了",
+                    text = stringResource(R.string.chatsearch_end),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier
@@ -213,7 +224,8 @@ private fun HitCard(hit: SearchHitDto, chatName: String?, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = chatName?.takeIf { it.isNotBlank() } ?: "会话 ${hit.sessionId.take(8)}",
+                text = chatName?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.chatsearch_session, hit.sessionId.take(8)),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f, fill = false),
@@ -221,7 +233,11 @@ private fun HitCard(hit: SearchHitDto, chatName: String?, onClick: () -> Unit) {
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
             Text(
-                text = if (hit.role == "user") "我" else "助手",
+                text = if (hit.role == "user") {
+                    stringResource(R.string.chatsearch_role_user)
+                } else {
+                    stringResource(R.string.chatsearch_role_assistant)
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
             )

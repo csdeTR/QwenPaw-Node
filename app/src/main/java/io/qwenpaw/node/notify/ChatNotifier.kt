@@ -9,6 +9,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import io.qwenpaw.node.MainActivity
 import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 
 /**
  * 本地通知。
@@ -25,16 +26,16 @@ object ChatNotifier {
     /** 提示「回复已完成」。点击通知回到对话列表。 */
     fun notifyDone(context: Context, title: String, text: String) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager.getNotificationChannel(DONE_CHANNEL_ID) == null
-        ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 已存在的渠道也会更新名称与描述：切换应用语言后渠道名要跟着变，
+            // 只在 getNotificationChannel == null 时创建会留下旧语言的名称。
             manager.createNotificationChannel(
                 NotificationChannel(
                     DONE_CHANNEL_ID,
-                    context.getString(R.string.channel_done_name),
+                    Texts.get(R.string.channel_done_name),
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
-                    description = context.getString(R.string.channel_done_desc)
+                    description = Texts.get(R.string.channel_done_desc)
                 },
             )
         }

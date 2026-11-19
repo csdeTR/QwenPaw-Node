@@ -11,7 +11,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.UploadConflictPolicy
 import io.qwenpaw.node.ui.common.ChoiceDialog
 import io.qwenpaw.node.ui.common.PlainTextEditor
@@ -33,7 +35,7 @@ internal fun WorkspaceEditor(
 ) {
     PlainTextEditor(
         title = edit.title,
-        backDescription = "返回预览",
+        backDescription = stringResource(R.string.workspace_edit_back),
         draft = edit.draft,
         dirty = edit.dirty,
         saving = edit.saving,
@@ -46,10 +48,12 @@ internal fun WorkspaceEditor(
 
     if (edit.conflict) {
         ChoiceDialog(
-            title = "文件已在别处修改",
-            message = "磁盘上的内容已不是打开时的版本。重新加载会丢弃当前草稿；" +
-                "强制覆盖会保存草稿并覆盖外部改动。",
-            choices = listOf("重新加载", "强制覆盖"),
+            title = stringResource(R.string.workspace_edit_conflict_title),
+            message = stringResource(R.string.workspace_edit_conflict_message),
+            choices = listOf(
+                stringResource(R.string.workspace_edit_reload),
+                stringResource(R.string.workspace_edit_force_overwrite),
+            ),
             onPick = { index ->
                 when (index) {
                     0 -> actions.reloadConflict()
@@ -71,10 +75,15 @@ internal fun UploadDialog(
 ) {
     if (upload.phase == UploadPhase.WAITING_CONFLICT) {
         ChoiceDialog(
-            title = "目标目录已有同名文件",
-            message = "以下文件已存在：${upload.conflicts.joinToString("、")}。" +
-                "覆盖会替换服务端内容，跳过则保留原文件。",
-            choices = listOf("覆盖", "跳过"),
+            title = stringResource(R.string.workspace_upload_conflict_title),
+            message = stringResource(
+                R.string.workspace_upload_conflict_message,
+                upload.conflicts.joinToString(stringResource(R.string.workspace_list_separator)),
+            ),
+            choices = listOf(
+                stringResource(R.string.workspace_upload_overwrite),
+                stringResource(R.string.workspace_upload_skip),
+            ),
             onPick = { index ->
                 onConflict(
                     if (index == 0) UploadConflictPolicy.OVERWRITE else UploadConflictPolicy.SKIP,
@@ -88,12 +97,17 @@ internal fun UploadDialog(
     val running = upload.phase == UploadPhase.RUNNING
     AlertDialog(
         onDismissRequest = { if (!running) onDismiss() },
-        title = { Text("上传文件") },
+        title = { Text(stringResource(R.string.workspace_upload)) },
         text = {
             Column {
                 if (running) {
                     Text(
-                        text = "正在上传 ${upload.index}/${upload.count}：${upload.name}",
+                        text = stringResource(
+                            R.string.workspace_upload_progress,
+                            upload.index,
+                            upload.count,
+                            upload.name,
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -113,9 +127,9 @@ internal fun UploadDialog(
         },
         confirmButton = {
             if (running) {
-                TextButton(onClick = onCancel) { Text("取消") }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
             } else {
-                TextButton(onClick = onDismiss) { Text("关闭") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
             }
         },
     )

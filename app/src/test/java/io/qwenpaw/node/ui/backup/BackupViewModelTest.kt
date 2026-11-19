@@ -1,4 +1,5 @@
 package io.qwenpaw.node.ui.backup
+import io.qwenpaw.node.TestTexts
 
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.DownloadClient
@@ -39,6 +40,7 @@ class BackupViewModelTest {
 
     @Before
     fun setUp() {
+        TestTexts.install()
         Dispatchers.setMain(Dispatchers.Unconfined)
         server = MockWebServer()
         server.start()

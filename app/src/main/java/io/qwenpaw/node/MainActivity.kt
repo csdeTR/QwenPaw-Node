@@ -1,6 +1,7 @@
 package io.qwenpaw.node
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -37,9 +38,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.ui.AppVisibility
 import io.qwenpaw.node.ui.AppViewModel
@@ -47,6 +50,10 @@ import io.qwenpaw.node.ui.chat.ChatListScreen
 import io.qwenpaw.node.ui.chat.ChatScreen
 import io.qwenpaw.node.ui.chat.ChatUiState
 import io.qwenpaw.node.ui.chat.SearchScreen
+import io.qwenpaw.node.ui.i18n.AppLanguage
+import io.qwenpaw.node.ui.i18n.AppLocale
+import io.qwenpaw.node.ui.i18n.LanguageGateScreen
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.settings.AgentPickerDialog
 import io.qwenpaw.node.ui.settings.ConnectScreen
 import io.qwenpaw.node.ui.settings.SettingsScreen
@@ -58,6 +65,10 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
 
     override fun onStart() {
         super.onStart()
@@ -71,6 +82,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 进程可能从旧语言启动，Activity 重建时这里刷新一次，存活的 ViewModel 才能取到新语言。
+        Texts.install(this)
         handleTerminalIntent(intent)
         val app = application as QwenPawApp
         setContent {
@@ -97,19 +110,30 @@ class MainActivity : ComponentActivity() {
                 chatScale = appState.chatScale,
                 misans = misans.takeIf { appState.useMiSans },
             ) {
-                QwenPawNav(
-                    appState = appState,
-                    chatState = chatState,
-                    instances = instances,
-                    activeId = activeId,
-                    viewModel = viewModel,
-                    chatVm = chatVm,
-                    app = app,
-                )
+                if (appState.appLanguage == null) {
+                    // 全新安装的首屏：先选语言，再进入连接或聊天流程。
+                    LanguageGateScreen(
+                        onConfirm = { language ->
+                            viewModel.setAppLanguage(language)
+                            Texts.install(this@MainActivity)
+                        },
+                    )
+                } else {
+                    QwenPawNav(
+                        appState = appState,
+                        chatState = chatState,
+                        instances = instances,
+                        activeId = activeId,
+                        viewModel = viewModel,
+                        chatVm = chatVm,
+                        app = app,
+                    )
+                }
             }
 
             // 通知权限（Android 13+），用于后台回复完成提示。
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // 语言未选定前不申请：系统弹窗会盖在语言选择页上。
+            if (appState.appLanguage != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 val launcher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
                 ) { }
@@ -259,7 +283,7 @@ private fun QwenPawNav(
         avatarStore = app.avatarStore,
         avatarVersion = avatarVersion,
         userName = appState.userName,
-        agentName = connection?.agentId ?: "智能体",
+        agentName = connection?.agentId ?: stringResource(R.string.main_agent_default_name),
         showStats = appState.showMessageStats,
         serverUserAvatar = serverAvatarFile,
         useServerAvatar = appState.useServerAvatar,
@@ -282,7 +306,7 @@ private fun QwenPawNav(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) {
-            toast(context, "已取消导入")
+            toast(context, context.getString(R.string.main_import_cancelled))
             return@rememberLauncherForActivityResult
         }
         scope.launch {
@@ -294,10 +318,10 @@ private fun QwenPawNav(
                 }.getOrNull()
             }
             if (text == null) {
-                toast(context, "无法读取该文件")
+                toast(context, context.getString(R.string.main_read_file_failed))
             } else {
                 viewModel.importLog(text)
-                toast(context, "已载入日志")
+                toast(context, context.getString(R.string.main_log_loaded))
             }
         }
     }
@@ -334,14 +358,14 @@ private fun QwenPawNav(
                 }.getOrNull()
             }
             if (bytes == null) {
-                toast(context, "无法读取该图片")
+                toast(context, context.getString(R.string.main_read_image_failed))
                 return@launch
             }
             val decoded = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 io.qwenpaw.node.avatar.AvatarIntake.decode(bytes)
             }
             if (decoded == null) {
-                toast(context, "该图片无法解析")
+                toast(context, context.getString(R.string.main_image_unreadable))
                 return@launch
             }
             croppingChatId = chatId
@@ -367,7 +391,7 @@ private fun QwenPawNav(
                 }.getOrNull()
             }
             if (bytes == null) {
-                toast(context, "无法读取该图片")
+                toast(context, context.getString(R.string.main_read_image_failed))
                 return@launch
             }
             if (io.qwenpaw.node.avatar.AvatarIntake.isGif(bytes)) {
@@ -378,7 +402,11 @@ private fun QwenPawNav(
                 }
                 toast(
                     context,
-                    if (saved) "动图已保存，头像中仅显示首帧" else "保存失败，请重试",
+                    if (saved) {
+                        context.getString(R.string.main_gif_saved)
+                    } else {
+                        context.getString(R.string.action_save_failed)
+                    },
                 )
                 return@launch
             }
@@ -386,7 +414,7 @@ private fun QwenPawNav(
                 io.qwenpaw.node.avatar.AvatarIntake.decode(bytes)
             }
             if (decoded == null) {
-                toast(context, "该图片无法解析")
+                toast(context, context.getString(R.string.main_image_unreadable))
                 return@launch
             }
             croppingKind = kind
@@ -433,7 +461,7 @@ private fun QwenPawNav(
         val conn = connection
         if (conn == null) {
             speech.resetToIdle()
-            toast(context, "还没有连接服务器")
+            toast(context, context.getString(R.string.main_server_not_connected))
             return
         }
         speech.markTranscribing()
@@ -443,7 +471,9 @@ private fun QwenPawNav(
             }
             result
                 .onSuccess { text -> appendDraft(text) }
-                .onFailure { e -> toast(context, e.message ?: "转写失败") }
+                .onFailure { e ->
+                    toast(context, e.message ?: context.getString(R.string.main_transcribe_failed))
+                }
             speech.resetToIdle()
         }
     }
@@ -452,7 +482,7 @@ private fun QwenPawNav(
     fun beginLocalRecording() {
         val engine = localAsr.createEngine(endpointing = voiceAutoStopNow())
         if (engine == null) {
-            toast(context, "模型文件不完整，重新下载一次")
+            toast(context, context.getString(R.string.main_model_incomplete))
             return
         }
         speech.start(
@@ -476,7 +506,10 @@ private fun QwenPawNav(
                     if (reachedLimit) {
                         toast(
                             context,
-                            "录音已达 ${io.qwenpaw.node.voice.VoiceInput.MAX_DURATION_MS / 1000} 秒上限",
+                            context.getString(
+                                R.string.main_recording_limit,
+                                io.qwenpaw.node.voice.VoiceInput.MAX_DURATION_MS / 1000,
+                            ),
                         )
                     }
                     transcribe(file)
@@ -501,7 +534,7 @@ private fun QwenPawNav(
     val askMic = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) beginRecording() else toast(context, "没有麦克风权限，无法录音")
+        if (granted) beginRecording() else toast(context, context.getString(R.string.main_no_mic_permission))
     }
 
     /**
@@ -574,7 +607,16 @@ private fun QwenPawNav(
                 val url = uploadAttachment(context, app, uri)
                 if (url != null) chatVm.addAttachment(url) else failed++
             }
-            if (failed > 0) toast(context, "$failed 个附件上传失败，请重试")
+            if (failed > 0) {
+                toast(
+                    context,
+                    context.resources.getQuantityString(
+                        R.plurals.main_attach_upload_failed,
+                        failed,
+                        failed,
+                    ),
+                )
+            }
         }
     }
 
@@ -604,13 +646,16 @@ private fun QwenPawNav(
     }
 
     appState.pendingInstanceSwitch?.let { target ->
+        val otherInstance = stringResource(R.string.main_terminal_switch_other)
         AlertDialog(
             onDismissRequest = viewModel::cancelInstanceSwitch,
-            title = { Text("终端会话正在运行") },
+            title = { Text(stringResource(R.string.main_terminal_running_title)) },
             text = {
                 Text(
-                    "切换到「${target.name.ifBlank { "其他实例" }}」会中断当前的终端会话。" +
-                        "可以先打开终端页面处理，或停止全部终端后再切换。",
+                    stringResource(
+                        R.string.main_terminal_switch_message,
+                        target.name.ifBlank { otherInstance },
+                    ),
                 )
             },
             confirmButton = {
@@ -620,9 +665,13 @@ private fun QwenPawNav(
                             viewModel.cancelInstanceSwitch()
                             screen = Screen.TERMINAL
                         },
-                    ) { Text("打开终端页面") }
-                    TextButton(onClick = viewModel::confirmInstanceSwitch) { Text("停止终端") }
-                    TextButton(onClick = viewModel::cancelInstanceSwitch) { Text("取消") }
+                    ) { Text(stringResource(R.string.main_open_terminal_page)) }
+                    TextButton(onClick = viewModel::confirmInstanceSwitch) {
+                        Text(stringResource(R.string.main_stop_terminal))
+                    }
+                    TextButton(onClick = viewModel::cancelInstanceSwitch) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
                 }
             },
         )
@@ -654,7 +703,13 @@ private fun QwenPawNav(
                 croppingChatId = null
                 toast(
                     context,
-                    if (!saved) "保存失败，请重试" else if (chatId != null) "图标已保存" else "头像已保存",
+                    if (!saved) {
+                        context.getString(R.string.action_save_failed)
+                    } else if (chatId != null) {
+                        context.getString(R.string.main_icon_saved)
+                    } else {
+                        context.getString(R.string.main_avatar_saved)
+                    },
                 )
             },
         )
@@ -767,7 +822,7 @@ private fun QwenPawNav(
                     },
                     onCreateGroup = { name ->
                         chatVm.createGroup(name) { ok ->
-                            if (!ok) toast(context, "新建分组失败，请重试")
+                            if (!ok) toast(context, context.getString(R.string.main_create_group_failed))
                         }
                     },
                     onRenameGroup = chatVm::renameGroup,
@@ -1001,7 +1056,9 @@ private fun QwenPawNav(
                         screen = Screen.CHAT
                     },
                     onExport = {
-                        val name = chatVmState.currentChatName.ifBlank { "对话" }.take(40)
+                        val name = chatVmState.currentChatName
+                            .ifBlank { context.getString(R.string.main_default_chat_name) }
+                            .take(40)
                         shareText(context, "$name.md", chatVm.exportMarkdown())
                     },
                     onSetThinking = { level, budget -> chatVm.setThinking(level, budget) },
@@ -1417,10 +1474,14 @@ private fun QwenPawNav(
                             toast(
                                 context,
                                 if (result == null) {
-                                    "无法连接该地址"
+                                    context.getString(R.string.main_connect_failed_address)
                                 } else {
-                                    "连接正常" + result.version.takeIf { it.isNotBlank() }
-                                        ?.let { "，服务端 $it" }.orEmpty()
+                                    val version = result.version.takeIf { it.isNotBlank() }
+                                    if (version == null) {
+                                        context.getString(R.string.main_connect_ok)
+                                    } else {
+                                        context.getString(R.string.main_connect_ok_with_version, version)
+                                    }
                                 },
                             )
                         }
@@ -1436,6 +1497,15 @@ private fun QwenPawNav(
                     onUseMiSans = viewModel::setUseMiSans,
                     onCompactList = viewModel::setCompactList,
                     onKeepScreenOn = viewModel::setKeepScreenOn,
+                    appLanguage = appState.appLanguage ?: AppLanguage.ZH_CN,
+                    onAppLanguage = { language ->
+                        val changed = appState.appLanguage != language
+                        viewModel.setAppLanguage(language)
+                        if (changed) {
+                            Texts.install(context)
+                            (context as? android.app.Activity)?.recreate()
+                        }
+                    },
                     securityHintsEnabled = appState.securityHintsEnabled,
                     onSecurityHintsEnabled = viewModel::setSecurityHintsEnabled,
                     trustedHosts = appState.trustedHosts,
@@ -1485,7 +1555,11 @@ private fun QwenPawNav(
                     onToggleLogKind = viewModel::toggleLogKind,
                     onOpenLogs = { screen = Screen.RUN_LOG },
                     onExportLogs = {
-                        shareText(context, "QwenPaw 运行日志.txt", viewModel.exportLog())
+                        shareText(
+                            context,
+                            context.getString(R.string.main_export_log_file),
+                            viewModel.exportLog(),
+                        )
                     },
                     showMessageStats = appState.showMessageStats,
                     onShowMessageStats = viewModel::setShowMessageStats,
@@ -1501,7 +1575,7 @@ private fun QwenPawNav(
                     },
                     onRemoveAvatar = { kind ->
                         app.avatarStore.clear(kind)
-                        toast(context, "已移除头像")
+                        toast(context, context.getString(R.string.main_avatar_removed))
                     },
                     useServerAvatar = appState.useServerAvatar,
                     onUseServerAvatar = viewModel::setUseServerAvatar,
@@ -1559,7 +1633,11 @@ private fun QwenPawNav(
                     onToggleKind = viewModel::toggleLogKind,
                     onClear = viewModel::clearLog,
                     onExport = {
-                        shareText(context, "QwenPaw 运行日志.txt", viewModel.exportLog())
+                        shareText(
+                            context,
+                            context.getString(R.string.main_export_log_file),
+                            viewModel.exportLog(),
+                        )
                     },
                     onImport = { logImportLauncher.launch(arrayOf("text/plain", "*/*")) },
                     // 日志页从设置进入，返回也回设置，比直接跳聊天页更符合层级。
@@ -1769,7 +1847,9 @@ private fun shareText(context: android.content.Context, subject: String, text: S
         putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
         putExtra(android.content.Intent.EXTRA_TEXT, text)
     }
-    context.startActivity(android.content.Intent.createChooser(send, "分享到"))
+    context.startActivity(
+        android.content.Intent.createChooser(send, context.getString(R.string.main_share_chooser)),
+    )
 }
 
 /**

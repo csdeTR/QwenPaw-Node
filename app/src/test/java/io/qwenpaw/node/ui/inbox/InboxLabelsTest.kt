@@ -1,10 +1,17 @@
 package io.qwenpaw.node.ui.inbox
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 
 /** 来源标签：五个已知来源必须有中文名，未知来源原样返回。 */
 class InboxLabelsTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
     @Test
     fun `五种来源都有中文标签`() {
         assertEquals("定时任务", inboxSourceLabel("cron"))

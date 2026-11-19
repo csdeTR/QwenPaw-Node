@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.chat
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,10 +33,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 聊天页顶栏：标题、状态行、上下文胶囊、更多菜单。 */
@@ -104,7 +108,7 @@ fun ChatTopBar(
             ) {
                 Icon(
                     imageVector = QwenIcons.listBullet,
-                    contentDescription = "对话列表",
+                    contentDescription = stringResource(R.string.chattop_chat_list_desc),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(20.dp),
                 )
@@ -115,7 +119,7 @@ fun ChatTopBar(
                     .padding(horizontal = 4.dp),
             ) {
                 Text(
-                    text = title.ifBlank { "新对话" },
+                    text = title.ifBlank { stringResource(R.string.chattop_new_chat) },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
@@ -139,9 +143,9 @@ fun ChatTopBar(
                             else -> MaterialTheme.colorScheme.secondary
                         }
                         val label = when {
-                            running -> "正在生成"
-                            offline -> "连接中断，点击重连"
-                            link == LinkState.UNKNOWN -> "正在连接…"
+                            running -> stringResource(R.string.chattop_generating)
+                            offline -> stringResource(R.string.chattop_link_offline)
+                            link == LinkState.UNKNOWN -> stringResource(R.string.chattop_link_connecting)
                             else -> connectedLabel(boundUrl, boundLabel, serverName)
                         }
                         Row(
@@ -198,7 +202,7 @@ fun ChatTopBar(
             ) {
                 Icon(
                     imageVector = QwenIcons.moreVertical,
-                    contentDescription = "更多",
+                    contentDescription = stringResource(R.string.chattop_more),
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(20.dp),
                 )
@@ -206,7 +210,7 @@ fun ChatTopBar(
                     // 刷新放在最前：断网恢复后最常见的动作就是它，
                     // 而这一项不改变任何数据，误点的代价只是多一次请求。
                     DropdownMenuItem(
-                        text = { Text("刷新对话") },
+                        text = { Text(stringResource(R.string.chattop_refresh)) },
                         leadingIcon = { MenuIcons.Leading(MenuAction.REFRESH) },
                         onClick = {
                             menu = false
@@ -215,7 +219,7 @@ fun ChatTopBar(
                     )
                     if (readOnly) return@DropdownMenu
                     DropdownMenuItem(
-                        text = { Text("重命名对话") },
+                        text = { Text(stringResource(R.string.chattop_rename)) },
                         leadingIcon = { MenuIcons.Leading(MenuAction.RENAME) },
                         onClick = {
                             menu = false
@@ -223,7 +227,15 @@ fun ChatTopBar(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(if (pinned) "取消置顶" else "置顶对话") },
+                        text = {
+                            Text(
+                                if (pinned) {
+                                    stringResource(R.string.chattop_unpin)
+                                } else {
+                                    stringResource(R.string.chattop_pin)
+                                },
+                            )
+                        },
                         leadingIcon = {
                             MenuIcons.Leading(if (pinned) MenuAction.UNPIN else MenuAction.PIN)
                         },
@@ -238,7 +250,7 @@ fun ChatTopBar(
                     // 菜单里只留对话本身的动作。
                     if (groups.isNotEmpty()) {
                         DropdownMenuItem(
-                            text = { Text("移动到分组") },
+                            text = { Text(stringResource(R.string.chattop_move_to_group)) },
                             leadingIcon = { MenuIcons.Leading(MenuAction.GROUP) },
                             onClick = {
                                 menu = false
@@ -247,7 +259,7 @@ fun ChatTopBar(
                         )
                     }
                     DropdownMenuItem(
-                        text = { Text("分享 Markdown") },
+                        text = { Text(stringResource(R.string.chattop_export)) },
                         leadingIcon = { MenuIcons.Leading(MenuAction.EXPORT) },
                         onClick = {
                             menu = false
@@ -255,7 +267,7 @@ fun ChatTopBar(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("归档对话") },
+                        text = { Text(stringResource(R.string.chattop_archive)) },
                         leadingIcon = { MenuIcons.Leading(MenuAction.ARCHIVE) },
                         onClick = {
                             menu = false
@@ -263,7 +275,7 @@ fun ChatTopBar(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("删除对话") },
+                        text = { Text(stringResource(R.string.chattop_delete)) },
                         leadingIcon = { MenuIcons.Leading(MenuAction.DELETE) },
                         onClick = {
                             menu = false
@@ -359,30 +371,44 @@ internal fun connectedLabel(
     // InstanceConfig.serverDisplayName 过滤掉「名字其实就是地址」的情况，
     // 这里只处理「没起名字」这一种。
     val named = server.isNotEmpty()
-    // 「连接至」后面接中文引号时不留空格，接拉丁产品名时留一个空格。
-    // 两种都写成空格会得到「连接至 「家里的机器」」，排版上多出一个洞。
-    val target = if (named) "「$server」" else " QwenPaw"
+    // 「连接至」接中文引号时不留空格、接拉丁产品名时留一个空格，两种写法的差别
+    // 已经分别落在两条资源里：命名实例用带引号的那条，未命名用带空格的那条。
     return when {
         // 地址与别名都缺失时只剩一句话，此时若设过名称仍应说清连的是哪台。
         label.isEmpty() && url.isEmpty() ->
-            if (named) "已连接至$target" else "已连接"
+            if (named) {
+                Texts.get(R.string.chattop_connected_to_named, server)
+            } else {
+                Texts.get(R.string.chattop_connected)
+            }
 
-        label.isEmpty() || label == url -> "已通过 $shownUrl 连接至$target"
-        else -> "已通过「$label」连接至$target"
+        label.isEmpty() || label == url ->
+            if (named) {
+                Texts.get(R.string.chattop_connected_via_named, shownUrl, server)
+            } else {
+                Texts.get(R.string.chattop_connected_via_default, shownUrl)
+            }
+
+        else ->
+            if (named) {
+                Texts.get(R.string.chattop_connected_via_alias_named, label, server)
+            } else {
+                Texts.get(R.string.chattop_connected_via_alias_default, label)
+            }
     }
 }
 
 /** 思考档位的中文标签。措辞与官方 Web 端一致。 */
 internal fun thinkingLevelLabel(level: String?): String = when (level) {
-    null, "", "inherit" -> "跟随默认"
-    "off" -> "关闭思考"
-    "minimal" -> "极低"
-    "low" -> "低"
-    "medium" -> "中"
-    "high" -> "高"
-    "xhigh" -> "极高"
-    "max" -> "最高"
-    "budget" -> "预算"
+    null, "", "inherit" -> Texts.get(R.string.chattop_thinking_inherit)
+    "off" -> Texts.get(R.string.chattop_thinking_off)
+    "minimal" -> Texts.get(R.string.chattop_thinking_minimal)
+    "low" -> Texts.get(R.string.chattop_thinking_low)
+    "medium" -> Texts.get(R.string.chattop_thinking_medium)
+    "high" -> Texts.get(R.string.chattop_thinking_high)
+    "xhigh" -> Texts.get(R.string.chattop_thinking_xhigh)
+    "max" -> Texts.get(R.string.chattop_thinking_max)
+    "budget" -> Texts.get(R.string.chattop_thinking_budget)
     else -> level
 }
 
@@ -392,15 +418,39 @@ internal fun thinkingLevelLabel(level: String?): String = when (level) {
  * 取值与 qwenpaw web 页一致（`approval_level`），这是**智能体级**配置，
  * 改动会影响该智能体的全部对话。
  */
-internal data class ApprovalOption(val code: String, val label: String, val hint: String)
+internal data class ApprovalOption(
+    val code: String,
+    @StringRes val labelRes: Int,
+    @StringRes val hintRes: Int,
+) {
+    val label: String get() = Texts.get(labelRes)
+    val hint: String get() = Texts.get(hintRes)
+}
 
 internal val APPROVAL_OPTIONS = listOf(
-    ApprovalOption("STRICT", "严格", "每次工具调用和外部文件访问前均需审批"),
-    ApprovalOption("SMART", "智能", "低风险工具调用和外部文件访问操作自动执行，中高风险需审批"),
-    ApprovalOption("AUTO", "自动", "仅命中工具和文件审批规则的操作需审批（默认）"),
-    ApprovalOption("OFF", "关闭防护", "关闭工具和文件审批"),
+    ApprovalOption(
+        code = "STRICT",
+        labelRes = R.string.chattop_approval_strict,
+        hintRes = R.string.chattop_approval_strict_hint,
+    ),
+    ApprovalOption(
+        code = "SMART",
+        labelRes = R.string.chattop_approval_smart,
+        hintRes = R.string.chattop_approval_smart_hint,
+    ),
+    ApprovalOption(
+        code = "AUTO",
+        labelRes = R.string.chattop_approval_auto,
+        hintRes = R.string.chattop_approval_auto_hint,
+    ),
+    ApprovalOption(
+        code = "OFF",
+        labelRes = R.string.chattop_approval_off,
+        hintRes = R.string.chattop_approval_off_hint,
+    ),
 )
 
 /** 审批模式的中文标签。 */
 internal fun approvalLabel(level: String?): String =
-    APPROVAL_OPTIONS.firstOrNull { it.code == level }?.label ?: "未知"
+    APPROVAL_OPTIONS.firstOrNull { it.code == level }?.label
+        ?: Texts.get(R.string.chattop_approval_unknown)

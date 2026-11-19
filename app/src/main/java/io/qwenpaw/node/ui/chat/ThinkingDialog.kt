@@ -24,9 +24,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ThinkingControlDto
 import io.qwenpaw.node.data.model.ThinkingValueDto
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -69,7 +71,7 @@ internal fun ThinkingDialog(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "思考强度",
+                    text = stringResource(R.string.thinking_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -84,7 +86,7 @@ internal fun ThinkingDialog(
                 ) {
                     Icon(
                         imageVector = QwenIcons.close,
-                        contentDescription = "关闭",
+                        contentDescription = stringResource(R.string.action_close),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -93,7 +95,7 @@ internal fun ThinkingDialog(
 
             if (scale == null) {
                 Text(
-                    text = "当前模型不支持调节思考强度",
+                    text = stringResource(R.string.thinking_unsupported),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
@@ -114,7 +116,7 @@ internal fun ThinkingDialog(
                 horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(onClick = { onSet("inherit", null) }) {
-                    Text("恢复默认设置")
+                    Text(stringResource(R.string.thinking_reset))
                 }
             }
         }
@@ -155,7 +157,7 @@ private fun EffortSlider(
         modifier = Modifier.padding(horizontal = 12.dp),
     )
     Text(
-        text = "仅显示当前模型支持的档位。",
+        text = stringResource(R.string.thinking_effort_hint),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 18.dp),
@@ -175,7 +177,11 @@ private fun BudgetSlider(
     val current = tokens.roundToLong()
     val off = scale.supportsOff && tokens < scale.offThreshold
     Text(
-        text = if (off) "关闭思考" else "${current} tokens · ${scale.budgetLabel(current)}",
+        text = if (off) {
+            stringResource(R.string.thinking_off)
+        } else {
+            stringResource(R.string.thinking_budget_value, current, scale.budgetLabel(current))
+        },
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 6.dp),
@@ -195,7 +201,7 @@ private fun BudgetSlider(
         modifier = Modifier.padding(horizontal = 12.dp),
     )
     Text(
-        text = "连续调节思考 Token 上限，文字随比例变化，不代表固定档位。",
+        text = stringResource(R.string.thinking_budget_hint),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 18.dp),

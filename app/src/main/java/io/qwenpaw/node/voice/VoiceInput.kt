@@ -7,6 +7,8 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import androidx.core.content.ContextCompat
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +91,7 @@ class VoiceInput(private val context: Context) {
      */
     fun start(target: VoiceTarget, onError: (String) -> Unit) {
         if (!hasPermission()) {
-            _state.value = VoiceState.Error("没有麦克风权限")
+            _state.value = VoiceState.Error(Texts.get(R.string.voice_error_no_permission))
             return
         }
         stop()
@@ -109,7 +111,7 @@ class VoiceInput(private val context: Context) {
                 openRecorder()
             } catch (e: Exception) {
                 target.releaseEngine()
-                _state.value = VoiceState.Error("无法打开麦克风")
+                _state.value = VoiceState.Error(Texts.get(R.string.voice_error_open_failed))
                 return@launch
             }
             record = recorder
@@ -126,8 +128,8 @@ class VoiceInput(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
-                onError(e.message ?: "录音中断")
-                _state.value = VoiceState.Error(e.message ?: "录音中断")
+                onError(e.message ?: Texts.get(R.string.voice_error_interrupted))
+                _state.value = VoiceState.Error(e.message ?: Texts.get(R.string.voice_error_interrupted))
             } finally {
                 runCatching { recorder.release() }
                 record = null
@@ -143,7 +145,7 @@ class VoiceInput(private val context: Context) {
                 // 交出去之后不在这里复位状态：调用方紧接着会把状态置为「正在转写」，
                 // 这里先写 Idle 会让浮层闪一下。
                 if (_state.value == VoiceState.Recording) _state.value = VoiceState.Idle
-                if (reachedLimit) onError("录音已达 ${MAX_DURATION_MS / 1000} 秒上限")
+                if (reachedLimit) onError(Texts.get(R.string.voice_error_duration_limit, MAX_DURATION_MS / 1000))
                 job = null
             }
         }
@@ -279,7 +281,7 @@ class VoiceInput(private val context: Context) {
         ).also {
             if (it.state != AudioRecord.STATE_INITIALIZED) {
                 it.release()
-                throw IllegalStateException("麦克风不可用")
+                throw IllegalStateException(Texts.get(R.string.voice_error_mic_unavailable))
             }
         }
     }

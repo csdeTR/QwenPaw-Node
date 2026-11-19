@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -85,7 +87,7 @@ class FontManager(private val context: Context) {
             // 全部下完再落位。
             File(root(), "$REGULAR_FILE.tmp").renameTo(regularFile())
             File(root(), "$MEDIUM_FILE.tmp").renameTo(mediumFile())
-            if (!isReady()) throw IllegalStateException("字体文件不完整，重新下载一次")
+            if (!isReady()) throw IllegalStateException(Texts.get(R.string.font_error_incomplete))
             _state.value = FontState.Ready
         } catch (e: Exception) {
             // 清掉半成品，保持「未安装」状态。
@@ -93,7 +95,7 @@ class FontManager(private val context: Context) {
             File(root(), "$MEDIUM_FILE.tmp").delete()
             regularFile().delete()
             mediumFile().delete()
-            _state.value = FontState.Failed(e.message ?: "下载没有完成")
+            _state.value = FontState.Failed(e.message ?: Texts.get(R.string.font_error_download_incomplete))
         }
     }
 
@@ -101,9 +103,9 @@ class FontManager(private val context: Context) {
         val request = Request.Builder().url(url).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IllegalStateException("下载失败，返回 ${response.code}")
+                throw IllegalStateException(Texts.get(R.string.font_error_download_status, response.code))
             }
-            val body = response.body ?: throw IllegalStateException("下载内容为空")
+            val body = response.body ?: throw IllegalStateException(Texts.get(R.string.font_error_download_empty))
             val total = body.contentLength()
             body.byteStream().use { input ->
                 target.outputStream().use { output ->

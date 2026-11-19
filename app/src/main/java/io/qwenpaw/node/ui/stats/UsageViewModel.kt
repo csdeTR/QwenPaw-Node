@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.stats
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AgentStatsSummaryDto
 import io.qwenpaw.node.data.model.LlmToolDailyDto
 import io.qwenpaw.node.data.model.TokenUsageDto
@@ -7,6 +8,7 @@ import io.qwenpaw.node.data.model.TokenUsageRecordDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -86,7 +88,11 @@ class UsageViewModel(
         if (conn == null) {
             if (!force && _state.value.loaded) return
             _state.update {
-                it.copy(loaded = true, loading = false, summaryError = "尚未连接服务器")
+                it.copy(
+                    loaded = true,
+                    loading = false,
+                    summaryError = Texts.get(R.string.stats_error_not_connected),
+                )
             }
             return
         }

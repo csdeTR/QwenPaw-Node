@@ -1,7 +1,9 @@
 package io.qwenpaw.node.data
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -12,6 +14,11 @@ import org.junit.Test
  * 会让之后的真告警一起被忽略。
  */
 class SecurityNoticeTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     @Test
     fun `public host without auth is exposed`() {

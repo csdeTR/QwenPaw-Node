@@ -49,9 +49,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.voice.VoiceState
 import kotlinx.coroutines.launch
@@ -582,7 +584,7 @@ fun ChatScreen(
     if (renaming) {
         AlertDialog(
             onDismissRequest = { renaming = false },
-            title = { Text("重命名对话") },
+            title = { Text(stringResource(R.string.chatscreen_rename_title)) },
             text = {
                 OutlinedTextField(
                     value = renameText,
@@ -594,24 +596,28 @@ fun ChatScreen(
                 TextButton(onClick = {
                     if (renameText.isNotBlank()) onRename(renameText.trim())
                     renaming = false
-                }) { Text("保存") }
+                }) { Text(stringResource(R.string.action_save)) }
             },
             dismissButton = {
-                TextButton(onClick = { renaming = false }) { Text("取消") }
+                TextButton(onClick = { renaming = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
 
     if (deleting) {
+        val impactName = state.currentChatName
+            .ifBlank { stringResource(R.string.chatscreen_untitled) }
         io.qwenpaw.node.ui.common.DestructiveActionDialog(
-            title = "删除对话",
-            message = "删除后无法恢复，确定要删除这个对话吗？",
+            title = stringResource(R.string.chatscreen_delete_title),
+            message = stringResource(R.string.chatscreen_delete_message),
             impacts = listOf(
-                "对话「${state.currentChatName.ifBlank { "未命名对话" }}」的全部消息",
-                "与这些消息一同保存的图片与文件引用",
-                "本机为该对话缓存的离线历史",
+                stringResource(R.string.chatscreen_delete_impact_messages, impactName),
+                stringResource(R.string.chatscreen_delete_impact_files),
+                stringResource(R.string.chatscreen_delete_impact_cache),
             ),
-            confirmLabel = "删除",
+            confirmLabel = stringResource(R.string.action_delete),
             undoable = false,
             onConfirm = {
                 deleting = false
@@ -666,12 +672,12 @@ fun ChatScreen(
             )
         }
         OptionDialog(
-            title = "切换模型",
+            title = stringResource(R.string.chatscreen_model_title),
             items = items,
-            emptyHint = "当前服务端未配置可用模型",
+            emptyHint = stringResource(R.string.chatscreen_model_empty),
             leading = OptionItem(
                 key = "",
-                label = "跟随智能体默认",
+                label = stringResource(R.string.chatscreen_model_default),
                 selected = state.currentModelLabel == null,
             ),
             onPick = { key ->
@@ -690,7 +696,7 @@ fun ChatScreen(
 
     if (showApprovalDialog) {
         OptionDialog(
-            title = "审批模式",
+            title = stringResource(R.string.chatscreen_approval_title),
             items = APPROVAL_OPTIONS.map { option ->
                 OptionItem(
                     key = option.code,
@@ -725,7 +731,7 @@ fun ChatScreen(
     // 对话一旦进了某个分组就无法移回去，只能重新建一个对话。
     if (showGroupDialog) {
         OptionDialog(
-            title = "移动到分组",
+            title = stringResource(R.string.chatscreen_move_to_group),
             items = state.groups.map { group ->
                 OptionItem(
                     key = group.id,
@@ -736,7 +742,7 @@ fun ChatScreen(
             },
             leading = OptionItem(
                 key = "",
-                label = "未分组",
+                label = stringResource(R.string.chatscreen_ungrouped),
                 selected = state.currentChatGroupId.isNullOrBlank(),
             ),
             onPick = { key ->
@@ -830,7 +836,7 @@ private fun BoxScope.JumpToLatestButton(
                 .padding(horizontal = 14.dp, vertical = 7.dp),
         ) {
             Text(
-                text = "跳到最新",
+                text = stringResource(R.string.chatscreen_jump_latest),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.secondary,
             )
@@ -945,7 +951,11 @@ private fun LoadEarlierHint(loading: Boolean) {
             Spacer(Modifier.width(6.dp))
         }
         Text(
-            text = if (loading) "正在加载更早的消息" else "向上滑动可查看更早的消息",
+            text = if (loading) {
+                stringResource(R.string.chatscreen_loading_earlier)
+            } else {
+                stringResource(R.string.chatscreen_scroll_earlier)
+            },
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )
@@ -985,7 +995,7 @@ private fun AwaitingReplyRow() {
         )
         Spacer(Modifier.width(7.dp))
         Text(
-            text = "正在生成",
+            text = stringResource(R.string.chatscreen_generating),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1044,7 +1054,7 @@ private fun ErrorBar(text: String, onClose: () -> Unit) {
         ) {
             Icon(
                 imageVector = QwenIcons.close,
-                contentDescription = "关闭提示",
+                contentDescription = stringResource(R.string.chatscreen_close_error),
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onErrorContainer,
             )

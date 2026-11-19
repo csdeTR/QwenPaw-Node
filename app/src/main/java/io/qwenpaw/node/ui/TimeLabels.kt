@@ -1,5 +1,7 @@
 package io.qwenpaw.node.ui
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZonedDateTime
@@ -18,7 +20,8 @@ object TimeLabels {
 
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     private val shortDateFormatter = DateTimeFormatter.ofPattern("MM-dd")
-    private val monthDayFormatter = DateTimeFormatter.ofPattern("M月d日")
+    private val monthDayFormatter: DateTimeFormatter
+        get() = DateTimeFormatter.ofPattern(Texts.get(R.string.time_pattern_month_day))
     private val fullStampFormatter = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss")
 
     /**
@@ -71,8 +74,8 @@ object TimeLabels {
         val date = time.toLocalDate()
         val days = ChronoUnit.DAYS.between(date, today)
         return when {
-            days == 0L -> "今天"
-            days == 1L -> "昨天"
+            days == 0L -> Texts.get(R.string.time_today)
+            days == 1L -> Texts.get(R.string.time_yesterday)
             date.year == today.year -> date.format(monthDayFormatter)
             else -> date.toString()
         }

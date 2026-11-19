@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.settings
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.CronDispatchTargetItemDto
 import io.qwenpaw.node.data.model.CronExecutionRecordDto
 import io.qwenpaw.node.data.model.CronJobSpecDto
@@ -8,6 +9,7 @@ import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -278,9 +280,9 @@ class CronViewModel(
     private fun actionError(e: Throwable): String {
         val failure = e as? ApiException
         if (failure?.code == 409 && failure.message.contains("promotion", ignoreCase = true)) {
-            return "需先确认：该任务来自导入，审核通过后才能启用"
+            return Texts.get(R.string.cronvm_error_promotion_required)
         }
-        if (failure?.code == 409) return "任务状态已变化，请刷新后重试"
+        if (failure?.code == 409) return Texts.get(R.string.cronvm_error_state_changed)
         return ErrorText.of(e)
     }
 

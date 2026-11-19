@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ChatViewModel -->
+    <string name="chatvm_preview_you">你：%1$s</string>
+    <string name="chatvm_preview_image">[图片]</string>
+    <string name="chatvm_preview_tool">[工具] %1$s</string>
+    <string name="chatvm_chat_fallback">对话</string>
+    <string name="chatvm_archived_name">已归档「%1$s」</string>
+    <string name="chatvm_archive_running">对话正在运行，无法归档，请先停止</string>
+    <plurals name="chatvm_batch_archived">
+        <item quantity="other">已归档 %1$d 个对话</item>
+    </plurals>
+    <plurals name="chatvm_batch_archived_skipped">
+        <item quantity="other">已归档 %1$d 个对话，%2$d 个正在运行已跳过</item>
+    </plurals>
+    <string name="chatvm_batch_archive_running">部分对话正在运行，无法归档</string>
+    <plurals name="chatvm_batch_restored">
+        <item quantity="other">已恢复 %1$d 个对话</item>
+    </plurals>
+    <plurals name="chatvm_batch_restored_skipped">
+        <item quantity="other">已恢复 %1$d 个对话，%2$d 个未能恢复</item>
+    </plurals>
+    <plurals name="chatvm_batch_deleted">
+        <item quantity="other">已删除 %1$d 个对话</item>
+    </plurals>
+    <string name="chatvm_group_created">已创建分组「%1$s」</string>
+    <string name="chatvm_group_builtin_rename">内置分组不可重命名</string>
+    <string name="chatvm_group_builtin_delete">内置分组不可删除</string>
+    <string name="chatvm_no_default_model">服务端没有配置默认模型，无法恢复默认</string>
+    <string name="chatvm_project_dir_invalid">目录不存在或不可用，请确认这是服务端上的绝对路径</string>
+    <string name="chatvm_thinking_unsupported">当前模型不支持这个思考档位</string>
+    <string name="chatvm_search_not_connected">未连接到服务器</string>
+    <string name="chatvm_search_failed">检索失败：%1$s</string>
+    <string name="chatvm_history_decode_failed">服务端返回的历史数据无法解析，显示本地缓存</string>
+    <string name="chatvm_history_offline">无法连接服务器，显示本地缓存</string>
+    <string name="chatvm_busy">当前对话有回复正在生成，请稍候或先停止</string>
+    <string name="chatvm_rate_limited">模型限流：%1$s</string>
+    <string name="chatvm_rate_limited_alternatives">模型限流：%1$s\n可用备选：%2$s</string>
+    <plurals name="chatvm_approvals_pending">
+        <item quantity="other">有 %1$d 个操作等待审批</item>
+    </plurals>
+    <string name="chatvm_notify_reply_done">服务端回复已完成</string>
+    <string name="chatvm_tool_action_offload">转入后台</string>
+    <string name="chatvm_tool_action_extend">延长时限</string>
+    <string name="chatvm_tool_already_ended">该工具调用已结束，无法%1$s</string>
+    <string name="chatvm_tool_state_changed">工具状态已变化，请刷新后再试</string>
+
+    <!-- MessageBubble -->
+    <string name="msg_steps_running">处理中</string>
+    <plurals name="msg_steps_done_count">
+        <item quantity="other">处理完成，%1$d 步</item>
+    </plurals>
+    <string name="msg_steps_done">处理完成</string>
+    <string name="msg_steps_with_latest">%1$s，%2$s</string>
+    <string name="msg_steps_collapse">收起步骤</string>
+    <string name="msg_steps_expand">展开步骤</string>
+    <string name="msg_reasoning">思考</string>
+    <string name="msg_reasoning_title">思考过程</string>
+    <string name="msg_reasoning_preview">思考：%1$s</string>
+    <string name="msg_tool_fallback">工具调用</string>
+    <string name="msg_tool_collapse">收起</string>
+    <string name="msg_tool_expand">展开</string>
+    <string name="msg_expand_full">展开全文</string>
+    <string name="msg_tool_params">参数</string>
+    <string name="msg_tool_output">输出</string>
+    <string name="msg_tool_output_live">输出（实时）</string>
+    <string name="msg_tool_output_truncated">（输出过长，已截断）</string>
+    <string name="msg_cancel_tool_title">取消执行</string>
+    <string name="msg_cancel_tool_message">确定要取消工具「%1$s」的执行吗？</string>
+    <string name="msg_cancel_tool_impact">该工具已产生的执行会被中断，结果不再返回</string>
+    <string name="msg_tool_state_cancelled">已取消</string>
+    <string name="msg_tool_state_offloaded">已转后台</string>
+    <string name="msg_tool_state_done">已完成</string>
+    <string name="msg_tool_state_running">运行中</string>
+    <string name="msg_tool_action_offload">转入后台</string>
+    <string name="msg_tool_action_postpone">推迟转后台</string>
+    <string name="msg_tool_action_extend">延长执行超时</string>
+    <string name="msg_source_dialog_title">是否显示 Markdown/LaTeX 原文？</string>
+    <string name="msg_source_dialog_body">页面上看到的是排版后的结果，公式与表格已重排。看原文可以完整选中并复制其中的标记。</string>
+    <string name="msg_source_show">显示</string>
+    <string name="msg_source_hide">不显示</string>
+    <string name="msg_selection_entered">已进入选择模式，「完成选择」按钮在这条消息下方</string>
+    <string name="msg_action_copy_markdown">复制为 Markdown</string>
+    <string name="msg_action_select_text">选择文本</string>
+    <string name="msg_action_done_selecting">完成选择</string>
+    <string name="msg_copied">已复制</string>
+    <string name="msg_copied_markdown">已复制 Markdown</string>
+    <string name="msg_stats_usage">输入 %1$d，输出 %2$d</string>
+    <string name="msg_stats_usage_model">输入 %1$d，输出 %2$d，%3$s</string>
+    <string name="msg_cd_image">图片</string>
+    <string name="msg_image_failed">图片加载失败</string>
+    <string name="msg_delivered">已发送</string>
+
+    <!-- VoiceGateDialogs -->
+    <string name="voicegate_model_required_title">需要先下载识别模型</string>
+    <string name="voicegate_model_required_body">本地识别要用本机模型，当前尚未下载。模型约 150MB，只需下载一次，之后音频只在本机处理。也可以在设置中改用服务端转写。</string>
+    <string name="voicegate_go_settings">去设置</string>
+    <string name="voicegate_title_disabled">服务端未启用语音转写</string>
+    <string name="voicegate_title_misconfigured">服务端转写缺少配置</string>
+    <string name="voicegate_title_unsupported">当前服务端版本不支持语音转写</string>
+    <string name="voicegate_title_unknown">无法确认转写服务</string>
+    <string name="voicegate_title_ready">语音转写可用</string>
+    <string name="voicegate_body_disabled">服务端关闭了语音转写。在 QwenPaw 服务端的设置中启用转写服务并选定提供商后，此处即可使用。</string>
+    <string name="voicegate_body_misconfigured">服务端已开启语音转写，但没有选定可用的提供商，或本地转写缺少依赖。在 QwenPaw 服务端的设置中补齐转写配置后重试。</string>
+    <string name="voicegate_body_unsupported">这个服务端版本没有语音转写接口，需要升级 QwenPaw 服务端。</string>
+    <string name="voicegate_body_unknown">暂时无法确认服务端是否提供语音转写，请检查连接后重试。</string>
+    <string name="voicegate_body_ready">可以录音并转写。</string>
+    <string name="voicegate_hide_title">是否隐藏语音按钮</string>
+    <string name="voicegate_hide_body">隐藏后输入框不再显示麦克风，「显示语音按钮」开关将同时关闭；需要时可在此重新开启。</string>
+    <string name="voicegate_hide_confirm">隐藏</string>
+    <string name="voicegate_hide_keep">保留</string>
+
+    <!-- VoicePanel -->
+    <string name="voicepanel_intro_title">语音输入</string>
+    <string name="voicepanel_intro_title_model">语音输入需要识别模型</string>
+    <string name="voicepanel_intro_body">可在「本地识别」与「服务端转写」之间选择：前者识别在本机完成，音频不出手机；后者把录音上传到所连接的服务端。</string>
+    <string name="voicepanel_intro_body_model">本地识别需要先下载识别模型，约 150MB，只需下载一次。下载后音频只在本机处理，不再需要联网。</string>
+    <string name="voicepanel_bullet_hold">按住输入框旁的麦克风开始说话，松开后结束。</string>
+    <string name="voicepanel_bullet_tap">点击麦克风开始录音，再次点击结束。</string>
+    <string name="voicepanel_bullet_result">结果填入输入框，不会自动发送。</string>
+    <string name="voicepanel_bullet_settings">转写来源与触发方式可在设置中修改。</string>
+    <string name="voicepanel_got_it">知道了</string>
+    <string name="voicepanel_download_model">去下载模型</string>
+    <string name="voicepanel_not_now">暂不设置</string>
+    <string name="voicepanel_recording_hold">正在录音，松开麦克风结束</string>
+    <string name="voicepanel_recording_tap">正在录音，再次点击麦克风结束</string>
+    <string name="voicepanel_transcribing">正在转写</string>
+    <string name="voicepanel_preparing">准备中</string>
+    <plurals name="voicepanel_recorded_seconds">
+        <item quantity="other">已录制 %1$d 秒</item>
+    </plurals>
+    <string name="voicepanel_uploaded">录音已上传，等待服务端返回文字</string>
+
+    <!-- ContextDetailSheet -->
+    <string name="ctxsheet_title">上下文用量</string>
+    <string name="ctxsheet_usage">约 %1$s / %2$s tokens</string>
+    <string name="ctxsheet_no_usage">服务端尚未返回本轮用量</string>
+    <string name="ctxsheet_remaining">剩余约 %1$d%%</string>
+    <string name="ctxsheet_send_to_show">发送消息后显示</string>
+    <string name="ctxsheet_breakdown">各消息占比（按字符估算）</string>
+    <string name="ctxsheet_empty">当前对话还没有消息</string>
+    <string name="ctxsheet_role_you">你</string>
+    <string name="ctxsheet_role_assistant">助手</string>
+    <string name="ctxsheet_reasoning">思考</string>
+    <string name="ctxsheet_tool">工具</string>
+    <string name="ctxsheet_image">图片</string>
+    <string name="ctxsheet_image_failed">图片加载失败</string>
+    <plurals name="ctxsheet_chars">
+        <item quantity="other">%1$d 字</item>
+    </plurals>
+
+    <!-- ThinkingDialog -->
+    <string name="thinking_title">思考强度</string>
+    <string name="thinking_unsupported">当前模型不支持调节思考强度</string>
+    <string name="thinking_reset">恢复默认设置</string>
+    <string name="thinking_effort_hint">仅显示当前模型支持的档位。</string>
+    <string name="thinking_off">关闭思考</string>
+    <string name="thinking_budget_value">%1$d tokens · %2$s</string>
+    <string name="thinking_budget_hint">连续调节思考 Token 上限，文字随比例变化，不代表固定档位。</string>
+
+    <!-- ApprovalBanner -->
+    <string name="approval_needed">需要审批：%1$s</string>
+    <string name="approval_allow">允许</string>
+    <string name="approval_deny">拒绝</string>
+
+    <!-- MessageSourceScreen -->
+    <string name="msgsrc_title">Markdown 原文</string>
+    <string name="msgsrc_subtitle">可拖动选中，或用右侧「复制全文」</string>
+    <string name="msgsrc_copy_all">复制全文</string>
+
+    <!-- OptionDialog -->
+    <string name="option_empty">没有可选项</string>
+</resources>

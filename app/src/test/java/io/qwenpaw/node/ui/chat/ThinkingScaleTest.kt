@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.chat
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import io.qwenpaw.node.data.model.ThinkingControlDto
 import io.qwenpaw.node.data.model.ThinkingValueDto
@@ -14,6 +16,11 @@ import org.junit.Test
  * 不照抄客户端实现里的常量。
  */
 class ThinkingScaleTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private fun effort(vararg levels: String, off: Boolean = false) = ThinkingControlDto(
         kind = "effort",

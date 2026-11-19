@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chattail_group_load_failed">读取分组列表失败</string>
+
+    <!-- 导出 Markdown -->
+    <string name="chattail_export_title"># %1$s\n\n</string>
+    <string name="chattail_export_default_title">对话</string>
+    <string name="chattail_export_user">**你**</string>
+    <string name="chattail_export_assistant">**助手**</string>
+    <string name="chattail_export_image">![图片](%1$s)\n\n</string>
+    <string name="chattail_export_tool">&gt; 工具 `%1$s`</string>
+    <string name="chattail_export_done">（完成）</string>
+    <string name="chattail_export_running">（运行中）</string>
+    <string name="chattail_export_reasoning">&lt;details&gt;&lt;summary&gt;思考过程&lt;/summary&gt;\n\n</string>
+
+    <!-- 运行日志 -->
+    <string name="chattail_log_history_parse_failed">解析历史失败 chat=%1$s</string>
+    <string name="chattail_log_history_fetch_failed">拉取历史失败 chat=%1$s</string>
+    <string name="chattail_log_new_chat">本次没有当前对话，已新建 %1$s</string>
+    <string name="chattail_log_reuse_chat">复用当前对话 %1$s</string>
+    <string name="chattail_log_send_failed">发送失败 chat=%1$s</string>
+    <string name="chattail_log_send_error">发送异常 chat=%1$s</string>
+    <string name="chattail_log_reconnect_stream">重连既有流 chat=%1$s</string>
+    <string name="chattail_log_reconnect_failed">重连流失败 chat=%1$s</string>
+    <string name="chattail_log_poll_recovered">审批轮询恢复，此前连续失败 %1$d 次</string>
+    <string name="chattail_log_poll_failed">审批轮询失败，已连续 %1$d 次</string>
+    <string name="chattail_deny_reason">用户从手机端拒绝</string>
+    <string name="chattail_new_chat_name">新对话</string>
+    <!-- 服务端注入的固定前缀，不随界面语言变化 -->
+    <string name="chattail_upload_notice_prefix" translatable="false">用户上传文件，已经下载到</string>
+
+    <!-- 思考强度 -->
+    <string name="chattail_thinking_follow">跟随默认</string>
+    <string name="chattail_thinking_off">关闭思考</string>
+    <string name="chattail_thinking_light">轻量思考</string>
+    <string name="chattail_thinking_balanced">均衡思考</string>
+    <string name="chattail_thinking_deep">深入思考</string>
+    <string name="chattail_thinking_full">充分思考</string>
+
+    <!-- 工具时限 -->
+    <string name="chattail_deadline_offload_soon">即将转入后台</string>
+    <string name="chattail_deadline_offload">%1$s 秒后自动转入后台</string>
+    <string name="chattail_deadline_kill_soon">即将中止</string>
+    <string name="chattail_deadline_kill">%1$s 秒后中止</string>
+    <string name="chattail_deadline_combined">%1$s（%2$s）</string>
+
+    <!-- 附件占位 -->
+    <string name="chattail_attachment_none">[附件]</string>
+    <string name="chattail_attachment_file">[文件] %1$s</string>
+</resources>

@@ -1,7 +1,9 @@
 package io.qwenpaw.node.ui.settings
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.CRON_TIMEZONE
 import io.qwenpaw.node.data.model.CronScheduleDto
+import io.qwenpaw.node.ui.i18n.Texts
 import java.time.Instant
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -33,10 +35,19 @@ internal data class CronVisual(
 /** 可视化能产出的分钟间隔。其它步长只在「直接编辑表达式」里使用。 */
 internal val CRON_MINUTE_STEPS = setOf(1, 2, 3, 5, 10, 15, 20, 30)
 
-private val WEEKDAY_NAMES = mapOf(
-    1 to "周一", 2 to "周二", 3 to "周三", 4 to "周四",
-    5 to "周五", 6 to "周六", 7 to "周日",
+/** 周一 … 周日的名称资源：ISO 编号 1–7 对应下标 0–6。 */
+internal val CRON_WEEKDAY_LABELS: List<Int> = listOf(
+    R.string.cron_weekday_mon,
+    R.string.cron_weekday_tue,
+    R.string.cron_weekday_wed,
+    R.string.cron_weekday_thu,
+    R.string.cron_weekday_fri,
+    R.string.cron_weekday_sat,
+    R.string.cron_weekday_sun,
 )
+
+private fun weekdayName(day: Int): String =
+    Texts.get(CRON_WEEKDAY_LABELS[(day - 1).coerceIn(0, CRON_WEEKDAY_LABELS.lastIndex)])
 
 /**
  * 服务端把第 5 段归一化成三字母缩写（`app/crons/models.py::_crontab_dow_to_name`），
@@ -47,16 +58,21 @@ private val DOW_ABBREVIATIONS = mapOf(
     "fri" to 5, "sat" to 6, "sun" to 7,
 )
 
-/** 快捷模式的预设，顺序按使用频率排。 */
-internal val CRON_PRESETS: List<Pair<String, CronVisual>> = listOf(
-    "每 5 分钟" to CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 5),
-    "每 10 分钟" to CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 10),
-    "每 15 分钟" to CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 15),
-    "每 30 分钟" to CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 30),
-    "每小时整点" to CronVisual(frequency = CronFrequency.HOURLY, minute = 0),
-    "每天 09:00" to CronVisual(frequency = CronFrequency.DAILY, hour = 9, minute = 0),
-    "每周一 09:00" to CronVisual(frequency = CronFrequency.WEEKLY, hour = 9, minute = 0),
-    "每月 1 日 09:00" to CronVisual(frequency = CronFrequency.MONTHLY, hour = 9, minute = 0),
+/** 快捷模式的预设，标签是字符串资源 id，顺序按使用频率排。 */
+internal val CRON_PRESETS: List<Pair<Int, CronVisual>> = listOf(
+    R.string.cron_preset_every_5_minutes to
+        CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 5),
+    R.string.cron_preset_every_10_minutes to
+        CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 10),
+    R.string.cron_preset_every_15_minutes to
+        CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 15),
+    R.string.cron_preset_every_30_minutes to
+        CronVisual(frequency = CronFrequency.MINUTES, everyMinutes = 30),
+    R.string.cron_preset_hourly to CronVisual(frequency = CronFrequency.HOURLY, minute = 0),
+    R.string.cron_preset_daily to CronVisual(frequency = CronFrequency.DAILY, hour = 9, minute = 0),
+    R.string.cron_preset_weekly to CronVisual(frequency = CronFrequency.WEEKLY, hour = 9, minute = 0),
+    R.string.cron_preset_monthly to
+        CronVisual(frequency = CronFrequency.MONTHLY, hour = 9, minute = 0),
 )
 
 internal fun CronVisual.toExpression(): String = when (frequency) {
@@ -150,25 +166,48 @@ internal fun cronSummary(schedule: CronScheduleDto): String {
         val at = schedule.runAt?.let { iso ->
             runCatching { ZoneId.of(schedule.timezone) }.getOrNull()?.let { formatIsoInZone(iso, it) }
         }
-        return if (at == null) "一次性任务" else "$at 执行一次"
+        return if (at == null) {
+            Texts.get(R.string.cron_summary_once)
+        } else {
+            Texts.get(R.string.cron_summary_once_at, at)
+        }
     }
     val expression = schedule.cron.orEmpty()
     val visual = parseCronExpression(expression)
-        ?: return if (expression.isBlank()) "未设置执行时间" else "Cron：$expression"
+        ?: return if (expression.isBlank()) {
+            Texts.get(R.string.cron_summary_unset)
+        } else {
+            Texts.get(R.string.cron_summary_expression, expression)
+        }
     return when (visual.frequency) {
-        CronFrequency.MINUTES -> "每 ${visual.everyMinutes} 分钟"
+        CronFrequency.MINUTES -> Texts.get(R.string.cron_summary_every_minutes, visual.everyMinutes)
         CronFrequency.HOURLY ->
-            if (visual.minute == 0) "每小时整点" else "每小时的第 ${visual.minute} 分钟"
-        CronFrequency.DAILY -> "每天 ${hhmm(visual.hour, visual.minute)}"
+            if (visual.minute == 0) {
+                Texts.get(R.string.cron_preset_hourly)
+            } else {
+                Texts.get(R.string.cron_summary_hourly_minute, visual.minute)
+            }
+        CronFrequency.DAILY ->
+            Texts.get(R.string.cron_summary_daily, hhmm(visual.hour, visual.minute))
         CronFrequency.WEEKLY -> {
-            val days = visual.daysOfWeek.sorted().joinToString("、") { WEEKDAY_NAMES[it] ?: "周一" }
-            "每$days ${hhmm(visual.hour, visual.minute)}"
+            val separator = Texts.get(R.string.cron_list_separator)
+            val days = visual.daysOfWeek.sorted().joinToString(separator) { weekdayName(it) }
+            Texts.get(R.string.cron_summary_weekly, days, hhmm(visual.hour, visual.minute))
         }
         CronFrequency.MONTHLY ->
             if (visual.month != null) {
-                "每年 ${visual.month} 月 ${visual.dayOfMonth} 日 ${hhmm(visual.hour, visual.minute)}"
+                Texts.get(
+                    R.string.cron_summary_yearly,
+                    visual.month,
+                    visual.dayOfMonth,
+                    hhmm(visual.hour, visual.minute),
+                )
             } else {
-                "每月 ${visual.dayOfMonth} 日 ${hhmm(visual.hour, visual.minute)}"
+                Texts.get(
+                    R.string.cron_summary_monthly,
+                    visual.dayOfMonth,
+                    hhmm(visual.hour, visual.minute),
+                )
             }
     }
 }
@@ -277,7 +316,7 @@ private fun nextAfter(cursor: ZonedDateTime, visual: CronVisual, zone: ZoneId): 
 /** `MM-dd HH:mm（UTC±X）`，偏移量按该时刻现算，夏令时地区不同月份可能不同。 */
 internal fun formatInZone(instant: Instant, zone: ZoneId): String {
     val zoned = instant.atZone(zone)
-    return "${MMDD_HHMM.format(zoned)}（${offsetText(zoned.offset)}）"
+    return Texts.get(R.string.cron_timezone_time, MMDD_HHMM.format(zoned), offsetText(zoned.offset))
 }
 
 /** `MM-dd HH:mm`，不带偏移，列表里的紧凑写法。 */
@@ -326,24 +365,34 @@ internal fun validateCronDraft(
     schedule: CronScheduleDto,
     silent: Boolean,
 ): String? {
-    if (name.isBlank()) return "请输入任务名称"
-    if (taskType == "text" && text.isBlank()) return "任务类型为消息内容时，内容不能为空"
-    if (taskType == "agent" && request.isBlank()) return "任务类型为 Agent 时，请求内容不能为空"
-    if (taskType == "text" && silent) return "消息内容任务不支持静默投递"
+    if (name.isBlank()) return Texts.get(R.string.cron_validate_name_required)
+    if (taskType == "text" && text.isBlank()) {
+        return Texts.get(R.string.cron_validate_text_required)
+    }
+    if (taskType == "agent" && request.isBlank()) {
+        return Texts.get(R.string.cron_validate_request_required)
+    }
+    if (taskType == "text" && silent) {
+        return Texts.get(R.string.cron_validate_silent_unsupported)
+    }
     if (schedule.type == "cron") {
-        if (schedule.cron.isNullOrBlank()) return "循环任务必须填写 Cron 表达式"
+        if (schedule.cron.isNullOrBlank()) return Texts.get(R.string.cron_validate_cron_required)
     } else {
-        if (schedule.runAt.isNullOrBlank()) return "一次性任务必须选择执行时间"
+        if (schedule.runAt.isNullOrBlank()) return Texts.get(R.string.cron_validate_runat_required)
         when (schedule.repeatEndType) {
             "until" -> {
-                if (schedule.repeatUntil.isNullOrBlank()) return "选择「终止于」时必须填写截止时间"
+                if (schedule.repeatUntil.isNullOrBlank()) {
+                    return Texts.get(R.string.cron_validate_until_required)
+                }
                 val start = schedule.runAt?.let { parseFlexible(it) }
                 val until = schedule.repeatUntil?.let { parseFlexible(it) }
                 if (start != null && until != null && !until.isAfter(start)) {
-                    return "截止时间必须晚于执行时间"
+                    return Texts.get(R.string.cron_validate_until_order)
                 }
             }
-            "count" -> if ((schedule.repeatCount ?: 0) < 1) return "请输入执行次数"
+            "count" -> if ((schedule.repeatCount ?: 0) < 1) {
+                return Texts.get(R.string.cron_validate_count_required)
+            }
         }
     }
     return null

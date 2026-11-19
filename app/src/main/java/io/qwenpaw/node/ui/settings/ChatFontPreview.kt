@@ -21,10 +21,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.Role
 import io.qwenpaw.node.ui.chat.MessageBubble
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.ChatFontScale
 import io.qwenpaw.node.ui.theme.FontScaling
 import kotlin.math.roundToInt
@@ -71,7 +74,7 @@ internal fun ChatFontPreview(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "聊天字号",
+                        text = stringResource(R.string.appearance_chat_scale_title),
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     Spacer(modifier = Modifier.weight(1f))
@@ -91,7 +94,7 @@ internal fun ChatFontPreview(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
-                    text = "只影响对话正文。顶栏与输入框不随字号变化。",
+                    text = stringResource(R.string.appearance_chat_scale_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -106,27 +109,24 @@ private fun previewMessages(): List<ChatMessage> = listOf(
         id = "preview-user-1",
         role = Role.USER,
         kind = ChatMessage.Kind.TEXT,
-        text = "字号调到多少比较合适？",
+        text = Texts.get(R.string.appearance_sample_user_question),
     ),
     ChatMessage(
         id = "preview-agent-1",
         role = Role.ASSISTANT,
         kind = ChatMessage.Kind.TEXT,
-        text = "默认 **100%** 适合多数情况。若平时读长回答多，可以调到 110%–125%；" +
-            "调大后每屏能显示的行数会减少，翻页次数随之增加。",
+        text = Texts.get(R.string.appearance_sample_answer),
     ),
     ChatMessage(
         id = "preview-agent-2",
         role = Role.ASSISTANT,
         kind = ChatMessage.Kind.TEXT,
-        text = "公式与代码也按同一比例缩放：\$E = mc^2\$，" +
-            "以及 `./gradlew :app:testDebugUnitTest`。",
+        text = Texts.get(R.string.appearance_sample_formula),
     ),
     ChatMessage(
         id = "preview-agent-3",
         role = Role.ASSISTANT,
         kind = ChatMessage.Kind.TEXT,
-        text = "这是一段较长的正文，用来观察行高与段间距。字号放大后行高会同步放大，" +
-            "否则行与行会挤在一起；行距按字号的比例计算，因此不同字号下的观感保持一致。",
+        text = Texts.get(R.string.appearance_sample_long_paragraph),
     ),
 )

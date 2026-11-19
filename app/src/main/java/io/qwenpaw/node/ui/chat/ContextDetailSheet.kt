@@ -39,11 +39,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.stream.ChatMessage
 import io.qwenpaw.node.data.stream.Role
@@ -83,7 +86,7 @@ fun ImageViewerDialog(
             when {
                 bitmap != null -> androidx.compose.foundation.Image(
                     bitmap = bitmap!!.asImageBitmap(),
-                    contentDescription = "图片",
+                    contentDescription = stringResource(R.string.ctxsheet_image),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxSize()
@@ -109,7 +112,7 @@ fun ImageViewerDialog(
                 )
 
                 failed -> Text(
-                    text = "图片加载失败",
+                    text = stringResource(R.string.ctxsheet_image_failed),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.White,
                 )
@@ -129,7 +132,7 @@ fun ImageViewerDialog(
             ) {
                 Icon(
                     imageVector = QwenIcons.close,
-                    contentDescription = "关闭",
+                    contentDescription = stringResource(R.string.action_close),
                     tint = Color.White,
                     modifier = Modifier.size(20.dp),
                 )
@@ -161,7 +164,7 @@ fun ContextDetailSheet(
                 .padding(18.dp),
         ) {
             Text(
-                text = "上下文用量",
+                text = stringResource(R.string.ctxsheet_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -179,18 +182,22 @@ fun ContextDetailSheet(
                 Column {
                     Text(
                         text = if (state.contextMax > 0) {
-                            "约 ${formatTokens(state.contextTokens)} / ${formatTokens(state.contextMax)} tokens"
+                            stringResource(
+                                R.string.ctxsheet_usage,
+                                formatTokens(state.contextTokens),
+                                formatTokens(state.contextMax),
+                            )
                         } else {
-                            "服务端尚未返回本轮用量"
+                            stringResource(R.string.ctxsheet_no_usage)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = if (state.contextMax > 0) {
-                            "剩余约 ${((1 - ratio) * 100).toInt()}%"
+                            stringResource(R.string.ctxsheet_remaining, ((1 - ratio) * 100).toInt())
                         } else {
-                            "发送消息后显示"
+                            stringResource(R.string.ctxsheet_send_to_show)
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -218,7 +225,7 @@ fun ContextDetailSheet(
             Spacer(Modifier.height(16.dp))
 
             Text(
-                text = "各消息占比（按字符估算）",
+                text = stringResource(R.string.ctxsheet_breakdown),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -226,7 +233,7 @@ fun ContextDetailSheet(
 
             if (state.messages.isEmpty()) {
                 Text(
-                    text = "当前对话还没有消息",
+                    text = stringResource(R.string.ctxsheet_empty),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -257,7 +264,7 @@ fun ContextDetailSheet(
             TextButton(
                 onClick = onDismiss,
                 modifier = Modifier.align(Alignment.End),
-            ) { Text("关闭") }
+            ) { Text(stringResource(R.string.action_close)) }
         }
     }
 }
@@ -270,13 +277,17 @@ private fun MessageUsageRow(
     chars: Int,
 ) {
     val label = when (message.kind) {
-        ChatMessage.Kind.TEXT -> if (message.role == Role.USER) "你" else "助手"
-        ChatMessage.Kind.REASONING -> "思考"
-        ChatMessage.Kind.TOOL -> "工具"
-        ChatMessage.Kind.IMAGE -> "图片"
+        ChatMessage.Kind.TEXT -> if (message.role == Role.USER) {
+            stringResource(R.string.ctxsheet_role_you)
+        } else {
+            stringResource(R.string.ctxsheet_role_assistant)
+        }
+        ChatMessage.Kind.REASONING -> stringResource(R.string.ctxsheet_reasoning)
+        ChatMessage.Kind.TOOL -> stringResource(R.string.ctxsheet_tool)
+        ChatMessage.Kind.IMAGE -> stringResource(R.string.ctxsheet_image)
     }
     val preview = when (message.kind) {
-        ChatMessage.Kind.IMAGE -> message.imageName ?: "图片"
+        ChatMessage.Kind.IMAGE -> message.imageName ?: stringResource(R.string.ctxsheet_image)
         else -> message.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
     }
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -297,7 +308,7 @@ private fun MessageUsageRow(
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                text = "$chars 字",
+                text = pluralStringResource(R.plurals.ctxsheet_chars, chars, chars),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

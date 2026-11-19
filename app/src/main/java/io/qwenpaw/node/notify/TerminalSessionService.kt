@@ -61,11 +61,17 @@ class TerminalSessionService : Service() {
     }
 
     private fun buildNotification(count: Int) = NotificationCompat.Builder(this, CHANNEL_ID)
-        .setContentTitle("当前有 $count 个终端会话")
-        .setContentText("终端在后台继续运行；划掉 QwenPaw Node 会结束全部会话。")
+        .setContentTitle(
+            resources.getQuantityString(R.plurals.terminal_sessions_title, count, count),
+        )
+        .setContentText(getString(R.string.terminal_sessions_text))
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentIntent(openIntent())
-        .addAction(R.mipmap.ic_launcher, "停止终端", stopIntent())
+        .addAction(
+            R.mipmap.ic_launcher,
+            getString(R.string.terminal_stop_action),
+            stopIntent(),
+        )
         .setOngoing(true)
         .setOnlyAlertOnce(true)
         .setShowWhen(false)

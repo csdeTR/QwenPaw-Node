@@ -3,6 +3,7 @@ package io.qwenpaw.node.ui
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.InstanceRepository
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceDraft
@@ -10,6 +11,7 @@ import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.plugin.bridgeEventStream
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.ui.chat.ChatViewModel
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.FontScaling
 import io.qwenpaw.node.ui.theme.ThemeMode
 import kotlinx.coroutines.CoroutineScope
@@ -51,7 +53,7 @@ enum class VoiceSource {
 }
 
 /** 用户昵称的默认值。设置里清空输入框时回落到它。 */
-const val DEFAULT_USER_NAME = "我"
+val DEFAULT_USER_NAME: String get() = Texts.get(R.string.user_default_name)
 
 /** 应用级状态：连接、实例切换、外观偏好。 */
 data class AppState(
@@ -59,6 +61,8 @@ data class AppState(
     val connectError: String? = null,
     val connected: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** 应用界面语言；null 表示用户尚未选择（仅全新安装会处于此状态）。 */
+    val appLanguage: io.qwenpaw.node.ui.i18n.AppLanguage? = null,
     /** 整体界面缩放。 */
     val uiScale: Float = io.qwenpaw.node.ui.theme.FontScaling.DEFAULT,
     /** 聊天正文的额外缩放。 */
@@ -251,6 +255,16 @@ class AppViewModel(
     private val _state = MutableStateFlow(
         AppState(
             connected = repository.active() != null,
+            // 已有实例的老用户静默迁移为简体中文；全新安装保持 null，由首屏要求选择。
+            appLanguage = io.qwenpaw.node.ui.i18n.AppLocale.read(prefs)
+                ?: io.qwenpaw.node.ui.i18n.AppLanguage.ZH_CN.takeIf {
+                    io.qwenpaw.node.ui.i18n.AppLocale.shouldMigrateToChinese(
+                        languageTag = null,
+                        hasSavedInstances = repository.instances.value.isNotEmpty(),
+                    )
+                }?.also {
+                    io.qwenpaw.node.ui.i18n.AppLocale.write(prefs, it)
+                },
             themeMode = ThemeMode.valueOf(prefs.getString(KEY_THEME, ThemeMode.SYSTEM.name)!!),
             uiScale = prefs.getFloat(KEY_UI_SCALE, io.qwenpaw.node.ui.theme.FontScaling.DEFAULT),
             chatScale = prefs.getFloat(KEY_CHAT_SCALE, io.qwenpaw.node.ui.theme.FontScaling.DEFAULT),
@@ -452,7 +466,7 @@ class AppViewModel(
             io.qwenpaw.node.log.RunLog.d(
                 io.qwenpaw.node.log.LogKind.NETWORK,
                 "AppVM",
-                "地址从 $boundUrl 切换到 $hit",
+                Texts.get(R.string.app_log_address_switch, boundUrl, hit),
             )
             bind(instance)
             chatViewModel.refreshCurrent()
@@ -583,7 +597,7 @@ class AppViewModel(
                     it.copy(
                         connecting = false,
                         connectError = if (expired || revoked) {
-                            "$hint\n在「设置 → 服务器」里找到该实例，点「退出登录」，再重新输入账号密码"
+                            Texts.get(R.string.app_connect_error_logout_hint, hint)
                         } else {
                             hint
                         },
@@ -669,10 +683,13 @@ class AppViewModel(
                 }
                 result.exceptionOrNull()?.let { e ->
                     note = if (e is io.qwenpaw.node.data.remote.ApiException && e.code == 403) {
-                        "该实例未启用 Web 登录认证，本地凭据已清除"
+                        Texts.get(R.string.app_auth_disabled_local_cleared)
                     } else {
                         // 网络失败不阻塞登出：本地凭据必须清掉，否则用户「退不出去」。
-                        "吊销凭据失败：${io.qwenpaw.node.data.remote.ErrorText.of(e)}；本地凭据已清除"
+                        Texts.get(
+                            R.string.app_revoke_failed,
+                            io.qwenpaw.node.data.remote.ErrorText.of(e),
+                        )
                     }
                 }
             }
@@ -688,7 +705,7 @@ class AppViewModel(
             // 登出是一项用户主动发起的状态变更，无论成败都要说一声，
             // 否则点完没有任何反应。通知通道沿用 ChatViewModel 的轻提示，
             // Nav 层已经在订阅它并转成 Toast。
-            chatViewModel.notify(note ?: "已退出登录，重新连接需再次输入账号密码")
+            chatViewModel.notify(note ?: Texts.get(R.string.app_logged_out))
         }
     }
 
@@ -819,6 +836,11 @@ class AppViewModel(
     fun setThemeMode(mode: ThemeMode) {
         prefs.edit().putString(KEY_THEME, mode.name).apply()
         _state.update { it.copy(themeMode = mode) }
+    }
+
+    fun setAppLanguage(language: io.qwenpaw.node.ui.i18n.AppLanguage) {
+        io.qwenpaw.node.ui.i18n.AppLocale.write(prefs, language)
+        _state.update { it.copy(appLanguage = language) }
     }
 
     fun setUiScale(scale: Float) {
@@ -1080,7 +1102,7 @@ class AppViewModel(
                     io.qwenpaw.node.log.LogKind.NETWORK,
                     "BridgeEvents",
                     failure,
-                    "事件流结束，回落到按需刷新",
+                    Texts.get(R.string.app_log_events_fallback),
                 )
             }
         }
@@ -1398,13 +1420,13 @@ class AppViewModel(
             appState = { _state.value },
             instanceId = { repository.active()?.id },
             store = io.qwenpaw.node.data.terminal.TerminalStore(
-                requireNotNull(appContext) { "终端需要 appContext" },
+                requireNotNull(appContext) { "terminal requires appContext" },
             ),
             hostKeys = io.qwenpaw.node.data.terminal.SshHostKeys(
-                requireNotNull(appContext) { "终端需要 appContext" },
+                requireNotNull(appContext) { "terminal requires appContext" },
             ),
             profileStore = io.qwenpaw.node.data.terminal.SshProfileStore(
-                requireNotNull(appContext) { "终端需要 appContext" },
+                requireNotNull(appContext) { "terminal requires appContext" },
             ),
             vpnActive = {
                 network?.current?.value?.kind ==
@@ -1430,7 +1452,7 @@ class AppViewModel(
             connection = ::activeConnection,
             instanceId = { repository.active()?.id },
             store = io.qwenpaw.node.data.terminal.TerminalStore(
-                requireNotNull(appContext) { "Git 需要 appContext" },
+                requireNotNull(appContext) { "git requires appContext" },
             ),
         ).also { gitHolder = it }
 

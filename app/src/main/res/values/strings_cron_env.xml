@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  定时任务、环境变量、工具与后台策略的文案：
+  CronEditorSection.kt、CronSection.kt、CronSchedule.kt、CronViewModel.kt、
+  EnvironmentsSection.kt、EnvCatalogCopy.kt、ToolsSection.kt、OffloadPolicySection.kt。
+-->
+<resources>
+    <!-- 定时任务列表（CronSection.kt） -->
+    <string name="cron_header_jobs">任务</string>
+    <plurals name="cron_count">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <string name="cron_load_failed">加载失败，请重试</string>
+    <string name="cron_empty_jobs">还没有定时任务</string>
+    <string name="cron_action_new">新建任务</string>
+    <string name="cron_action_run">立即执行</string>
+    <string name="cron_action_execute">执行</string>
+    <string name="cron_action_history">执行记录</string>
+    <string name="cron_action_promote">审核通过</string>
+    <string name="cron_run_confirm">确定要立即执行任务「%1$s」吗？</string>
+    <string name="cron_unnamed">未命名</string>
+    <string name="cron_unnamed_task">未命名任务</string>
+    <string name="cron_delete_title">删除任务</string>
+    <string name="cron_delete_message">将删除定时任务「%1$s」。</string>
+    <string name="cron_delete_impact_schedule">该任务的调度规则与运行状态</string>
+    <string name="cron_delete_impact_history">执行记录一并删除，删除后不能恢复</string>
+    <string name="cron_header_timezone_compare">时间对照</string>
+    <string name="cron_beijing_time">北京时间  %1$s</string>
+    <string name="cron_server_time">服务端时区  %1$s</string>
+    <string name="cron_timezone_note">服务端时区与北京时间不同，任务仍按北京时间执行。</string>
+    <string name="cron_tag_review">待迁移审核</string>
+    <string name="cron_more_actions">更多操作</string>
+    <string name="cron_status_needs_review">需审核通过后才能启用或立即执行</string>
+    <string name="cron_status_paused">已暂停</string>
+    <string name="cron_status_paused_with_next">已暂停，启用后下次 %1$s</string>
+    <string name="cron_status_unknown">状态未知</string>
+    <string name="cron_status_next">下次 %1$s</string>
+    <string name="cron_status_next_server">下次 %1$s（服务端 %2$s）</string>
+    <string name="cron_status_last_error">上次失败：%1$s</string>
+    <string name="cron_status_last_failed">上次执行失败</string>
+    <string name="cron_status_running">正在执行</string>
+    <string name="cron_status_never_run">尚未运行</string>
+    <string name="cron_history_title">执行记录：%1$s</string>
+    <string name="cron_history_empty">还没有执行记录</string>
+    <string name="cron_history_success">成功</string>
+    <string name="cron_history_manual">手动</string>
+    <string name="cron_history_scheduled">计划</string>
+
+    <!-- 排期表达式与摘要（CronSchedule.kt） -->
+    <string name="cron_weekday_mon">周一</string>
+    <string name="cron_weekday_tue">周二</string>
+    <string name="cron_weekday_wed">周三</string>
+    <string name="cron_weekday_thu">周四</string>
+    <string name="cron_weekday_fri">周五</string>
+    <string name="cron_weekday_sat">周六</string>
+    <string name="cron_weekday_sun">周日</string>
+    <string name="cron_list_separator">、</string>
+    <string name="cron_timezone_time">%1$s（%2$s）</string>
+    <string name="cron_preset_every_5_minutes">每 5 分钟</string>
+    <string name="cron_preset_every_10_minutes">每 10 分钟</string>
+    <string name="cron_preset_every_15_minutes">每 15 分钟</string>
+    <string name="cron_preset_every_30_minutes">每 30 分钟</string>
+    <string name="cron_preset_hourly">每小时整点</string>
+    <string name="cron_preset_daily">每天 09:00</string>
+    <string name="cron_preset_weekly">每周一 09:00</string>
+    <string name="cron_preset_monthly">每月 1 日 09:00</string>
+    <string name="cron_summary_once">一次性任务</string>
+    <string name="cron_summary_once_at">%1$s 执行一次</string>
+    <string name="cron_summary_unset">未设置执行时间</string>
+    <string name="cron_summary_expression">Cron：%1$s</string>
+    <string name="cron_summary_every_minutes">每 %1$d 分钟</string>
+    <string name="cron_summary_hourly_minute">每小时的第 %1$d 分钟</string>
+    <string name="cron_summary_daily">每天 %1$s</string>
+    <string name="cron_summary_weekly">每%1$s %2$s</string>
+    <string name="cron_summary_yearly">每年 %1$d 月 %2$d 日 %3$s</string>
+    <string name="cron_summary_monthly">每月 %1$d 日 %2$s</string>
+    <string name="cron_validate_name_required">请输入任务名称</string>
+    <string name="cron_validate_text_required">任务类型为消息内容时，内容不能为空</string>
+    <string name="cron_validate_request_required">任务类型为 Agent 时，请求内容不能为空</string>
+    <string name="cron_validate_silent_unsupported">消息内容任务不支持静默投递</string>
+    <string name="cron_validate_cron_required">循环任务必须填写 Cron 表达式</string>
+    <string name="cron_validate_runat_required">一次性任务必须选择执行时间</string>
+    <string name="cron_validate_until_required">选择「终止于」时必须填写截止时间</string>
+    <string name="cron_validate_until_order">截止时间必须晚于执行时间</string>
+    <string name="cron_validate_count_required">请输入执行次数</string>
+
+    <!-- 定时任务表单（CronEditorSection.kt） -->
+    <string name="cronedit_header_basic">基本信息</string>
+    <string name="cronedit_field_task_name">任务名称</string>
+    <string name="cronedit_field_task_type">任务类型</string>
+    <string name="cronedit_task_type_text">消息内容</string>
+    <string name="cronedit_field_request">请求内容</string>
+    <string name="cronedit_header_schedule">调度</string>
+    <string name="cronedit_schedule_cron">循环</string>
+    <string name="cronedit_schedule_once">一次性</string>
+    <string name="cronedit_preset_section">快捷</string>
+    <string name="cronedit_custom_section">自定义</string>
+    <string name="cronedit_freq_minute">每分钟</string>
+    <string name="cronedit_freq_hourly">每小时</string>
+    <string name="cronedit_freq_daily">每天</string>
+    <string name="cronedit_freq_weekly">每周</string>
+    <string name="cronedit_freq_monthly">每月</string>
+    <string name="cronedit_step_minutes">%1$d 分钟</string>
+    <string name="cronedit_label_hour_minute">每小时的第几分</string>
+    <string name="cronedit_label_time">时间</string>
+    <string name="cronedit_day_of_month">%1$d 日</string>
+    <string name="cronedit_direct_edit_title">直接编辑表达式</string>
+    <string name="cronedit_direct_edit_subtitle">关闭时由上方选项自动生成；开启后可自行填写任意 5 段表达式</string>
+    <string name="cronedit_field_cron_expression">Cron 表达式</string>
+    <string name="cronedit_field_run_at">执行时间</string>
+    <string name="cronedit_repeat_title">重复执行</string>
+    <string name="cronedit_repeat_subtitle">按固定间隔再次执行该任务</string>
+    <string name="cronedit_field_every_days">每 N 天</string>
+    <string name="cronedit_field_repeat_end">结束方式</string>
+    <string name="cronedit_repeat_end_never">无限</string>
+    <string name="cronedit_repeat_end_until">截止</string>
+    <string name="cronedit_repeat_end_count">次数</string>
+    <string name="cronedit_field_until">截止时间</string>
+    <string name="cronedit_field_count">执行次数</string>
+    <string name="cronedit_field_timezone">时区</string>
+    <string name="cronedit_timezone_beijing">北京时间（UTC+8）</string>
+    <string name="cronedit_header_dispatch">投递</string>
+    <string name="cronedit_field_channel">频道</string>
+    <string name="cronedit_field_target_session">目标会话</string>
+    <string name="cronedit_select_session">选择会话</string>
+    <string name="cronedit_select">选择</string>
+    <string name="cronedit_silent_title">静默投递</string>
+    <string name="cronedit_silent_subtitle">只执行任务，不把过程推送到频道</string>
+    <string name="cronedit_header_advanced">高级</string>
+    <string name="cronedit_advanced_title">展开高级选项</string>
+    <string name="cronedit_advanced_subtitle">并发、超时与结果归档</string>
+    <string name="cronedit_field_max_concurrency">最大并发</string>
+    <string name="cronedit_field_timeout">超时秒数</string>
+    <string name="cronedit_field_misfire_grace">错过宽限秒数</string>
+    <string name="cronedit_share_session_title">共用目标会话</string>
+    <string name="cronedit_share_session_subtitle">关闭时每次执行使用该任务专属的可见会话</string>
+    <string name="cronedit_tool_safety_title">工具审批检查</string>
+    <string name="cronedit_tool_safety_subtitle">开启后，高风险工具需要审批，无人值守时任务可能停在等待审批</string>
+    <string name="cronedit_field_save_result">结果存入收件箱</string>
+    <string name="cronedit_save_result_auto">自动</string>
+    <string name="cronedit_save_result_yes">存入</string>
+    <string name="cronedit_save_result_no">不存</string>
+    <string name="cronedit_pick_target_title">选择目标会话</string>
+    <string name="cronedit_search_target">搜索会话名称</string>
+    <string name="cronedit_target_empty">服务端没有可用的会话目标，请手动填写</string>
+    <string name="cronedit_target_no_match">没有匹配的会话</string>
+    <string name="cronedit_target_label">%1$s，%2$s</string>
+
+    <!-- 定时任务的动作错误（CronViewModel.kt） -->
+    <string name="cronvm_error_promotion_required">需先确认：该任务来自导入，审核通过后才能启用</string>
+    <string name="cronvm_error_state_changed">任务状态已变化，请刷新后重试</string>
+
+    <!-- 环境变量（EnvironmentsSection.kt） -->
+    <string name="env_header_configured">已配置</string>
+    <plurals name="env_count">
+        <item quantity="other">%1$d 项</item>
+    </plurals>
+    <string name="env_empty_custom">还没有自定义环境变量</string>
+    <string name="env_action_add">添加变量</string>
+    <string name="env_action_reset">恢复默认</string>
+    <string name="env_header_live">实时配置</string>
+    <string name="env_live_hint">改完即生效</string>
+    <string name="env_empty_live">服务端没有提供可实时修改的配置</string>
+    <string name="env_header_readonly">只读配置</string>
+    <string name="env_readonly_tag">仅供查看</string>
+    <string name="env_empty_readonly">服务端没有提供只读配置</string>
+    <string name="env_header_notes">说明</string>
+    <string name="env_notes_body">新变量用「已配置」下方的「添加变量」新建，提交后写入服务端进程的环境变量。实时配置在每次操作开始时读取，修改后立即生效；只读配置在启动时确定，点开可以查看当前值、说明与修改方式。</string>
+    <string name="env_delete_title">删除环境变量</string>
+    <string name="env_delete_message">删除后服务端进程将不再读到这个变量。</string>
+    <string name="env_current_value">当前值：%1$s</string>
+    <string name="env_reset_message">恢复后这一项将回到系统值或代码默认值。</string>
+    <string name="env_tag_modified">已修改</string>
+    <string name="env_view">查看</string>
+    <string name="env_value_empty">（空）</string>
+    <string name="env_detail_current">当前值</string>
+    <string name="env_detail_default">默认值</string>
+    <string name="env_detail_source">来源</string>
+    <string name="env_detail_readonly_reason">只读原因</string>
+    <string name="env_detail_description">说明</string>
+    <string name="env_detail_how_to_modify">修改方式</string>
+    <string name="env_description_missing">服务端暂未提供说明。</string>
+    <string name="env_how_to_modify_missing">由服务端控制，客户端不提供修改。</string>
+    <string name="env_field_name">变量名</string>
+    <string name="env_field_name_placeholder">例如 HTTP_PROXY</string>
+    <string name="env_field_value">变量值</string>
+    <string name="env_hide">隐藏</string>
+    <string name="env_show">显示</string>
+    <string name="env_validate_name_required">请输入变量名</string>
+    <string name="env_validate_name_charset">变量名只能包含字母、数字和下划线，且不能以数字开头</string>
+    <string name="env_validate_uppercase">QwenPaw 内置变量名必须全大写</string>
+    <string name="env_validate_readonly">该变量为服务端只读项，不能修改</string>
+    <string name="env_validate_exists">变量 %1$s 已存在，请直接编辑原值</string>
+
+    <!-- 内置环境变量的说明（EnvCatalogCopy.kt） -->
+    <string name="env_desc_stream_first_content_timeout">等待首个有效流式内容的最长时间；设为 0 可关闭检测。</string>
+    <string name="env_desc_stream_idle_timeout">两个有效流式内容之间的最长等待时间；设为 0 可关闭检测。</string>
+    <string name="env_desc_max_retries">模型调用遇到可重试错误时的最大重试次数；设为 0 表示不重试。</string>
+    <string name="env_desc_backoff_base">重试退避的起始等待时间，单位为秒。</string>
+    <string name="env_desc_backoff_cap">重试退避的等待上限，单位为秒，不能小于起始等待时间。</string>
+    <string name="env_desc_max_concurrent">同时进行的模型调用数量上限，超出的请求排队等待。</string>
+    <string name="env_desc_max_qpm">每分钟允许的模型调用次数，超出后排队；设为 0 表示不限制。</string>
+    <string name="env_desc_rate_limit_pause">收到限流响应后默认暂停的时长，单位为秒。</string>
+    <string name="env_desc_rate_limit_jitter">在暂停时长之外再加一段随机等待，让同时发出的请求不会在同一刻恢复。</string>
+    <string name="env_desc_acquire_timeout">等待并发配额的最长时间，单位为秒，超时后本次调用报错。</string>
+    <string name="env_desc_working_dir">QwenPaw 的数据目录，会话、记忆与配置文件都存放在这里。</string>
+    <string name="env_desc_secret_dir">密钥目录，保存加密后的凭据与访问令牌。</string>
+    <string name="env_desc_config_file">配置文件的位置，相对于数据目录。</string>
+    <string name="env_desc_jobs_file">定时任务列表的文件名，相对于数据目录。</string>
+    <string name="env_desc_chats_file">会话记录的文件名，相对于数据目录。</string>
+    <string name="env_desc_openapi_docs">是否开放接口文档页，取值 true 或 false。</string>
+    <string name="env_desc_running_in_container">是否运行在容器内，取值 true 或 false，影响密钥的存放方式。</string>
+    <string name="env_how_takes_effect_next_call">修改后下一次调用即生效，已运行的 MCP 需要重新加载。</string>
+    <string name="env_hint_startup_only">启动之后才会被读取，修改后需要重启 QwenPaw 才能生效。</string>
+    <string name="env_hint_bootstrap_only">只能通过启动 QwenPaw 时的进程环境变量设置，客户端不能写入。</string>
+    <string name="env_readonly_reason_startup">QwenPaw 启动时确定</string>
+    <string name="env_readonly_reason_initial_default">仅作为 Agent 配置的初始化默认值</string>
+    <string name="env_readonly_reason_agent_owned">由各 Agent 配置管理</string>
+    <string name="env_source_system">系统</string>
+    <string name="env_source_default">默认</string>
+    <string name="env_hot_runtime_hint">每次操作开始时从当前 QwenPaw 进程读取。</string>
+    <string name="env_readonly_hint">仅供查看，QwenPaw 运行期间不能修改。</string>
+
+    <!-- 工具（ToolsSection.kt） -->
+    <string name="tools_header">工具</string>
+    <string name="tools_load_failed">加载失败：%1$s</string>
+    <string name="tools_empty">没有可用的工具</string>
+    <plurals name="tools_count">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <string name="tools_config">配置</string>
+    <plurals name="tools_config_hint">
+        <item quantity="other">填写%1$d 项参数后才能使用</item>
+    </plurals>
+    <string name="tools_fill">填写</string>
+    <string name="tools_sync">同步</string>
+    <string name="tools_async">异步</string>
+    <string name="tools_config_empty">该工具没有可填的配置项</string>
+
+    <!-- 后台策略（OffloadPolicySection.kt） -->
+    <string name="offload_header_timeout">工具超时后</string>
+    <string name="offload_switch_title">转入后台继续执行</string>
+    <string name="offload_switch_subtitle">关闭后，超时的工具会被中止；开启后，工具转到后台继续执行，结果稍后送达</string>
+    <string name="offload_header_notes">说明</string>
+    <string name="offload_notes">这里设置的是默认动作，单个工具仍可在工具页单独指定异步执行。</string>
+</resources>

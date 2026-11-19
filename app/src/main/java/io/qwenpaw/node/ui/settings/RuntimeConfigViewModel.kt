@@ -1,10 +1,12 @@
 package io.qwenpaw.node.ui.settings
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AcpNodeRuntimeDto
 import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -139,7 +141,7 @@ class RuntimeConfigViewModel(
                         nodeRuntime = runtime,
                         nodePath = runtime.nodePath,
                         saving = false,
-                        notice = "Node 运行时已保存",
+                        notice = Texts.get(R.string.runtime_notice_node_path_saved),
                     )
                 }
             }.onFailure { e ->
@@ -163,7 +165,7 @@ class RuntimeConfigViewModel(
                     state.copy(
                         agents = state.agents.map { if (it.name == form.name) updated else it },
                         saving = false,
-                        notice = "已保存 ${form.name}",
+                        notice = Texts.get(R.string.runtime_notice_agent_saved, form.name),
                     )
                 }
             }.onFailure { e ->
@@ -208,7 +210,10 @@ class RuntimeConfigViewModel(
                             if (it.id == provider.id) provider else it
                         },
                         saving = false,
-                        notice = "已刷新 ${provider.name.ifBlank { provider.id }} 的状态",
+                        notice = Texts.get(
+                            R.string.runtime_notice_provider_refreshed,
+                            provider.name.ifBlank { provider.id },
+                        ),
                     )
                 }
             }.onFailure { e ->
@@ -255,7 +260,10 @@ class RuntimeConfigViewModel(
                         it.copy(
                             waitingLogin = null,
                             login = null,
-                            notice = "${provider.name.ifBlank { provider.id }} 已登录",
+                            notice = Texts.get(
+                                R.string.runtime_notice_logged_in,
+                                provider.name.ifBlank { provider.id },
+                            ),
                         )
                     }
                     return@launch
@@ -271,7 +279,12 @@ class RuntimeConfigViewModel(
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.harnessLogout(conn, providerId) } }
                 .onSuccess {
-                    _harness.update { it.copy(saving = false, notice = "已登出") }
+                    _harness.update {
+                        it.copy(
+                            saving = false,
+                            notice = Texts.get(R.string.runtime_notice_logged_out),
+                        )
+                    }
                     loadHarness(force = true)
                 }
                 .onFailure { e ->
@@ -283,13 +296,13 @@ class RuntimeConfigViewModel(
     fun openDetail(providerId: String, kind: String) {
         val conn = connection() ?: return
         val provider = _harness.value.providers.firstOrNull { it.id == providerId }
-        val title = "${provider?.name?.ifBlank { providerId } ?: providerId} · ${
-            when (kind) {
-                "models" -> "模型"
-                "mcp" -> "MCP"
-                else -> "技能"
-            }
-        }"
+        val displayName = provider?.name?.ifBlank { providerId } ?: providerId
+        val kindLabel = when (kind) {
+            "models" -> Texts.get(R.string.runtime_tab_models)
+            "mcp" -> "MCP"
+            else -> Texts.get(R.string.runtime_tab_skills)
+        }
+        val title = Texts.get(R.string.runtime_pair, displayName, kindLabel)
         _harness.update { it.copy(saving = true, error = null) }
         scope.launch {
             runCatching {
@@ -380,8 +393,8 @@ internal fun harnessLines(kind: String, obj: JsonObject): List<String> {
         else -> "skills"
     }
     val array = obj[key] as? kotlinx.serialization.json.JsonArray
-        ?: return listOf("没有可显示的内容")
-    if (array.isEmpty()) return listOf("列表为空")
+        ?: return listOf(Texts.get(R.string.runtime_detail_empty))
+    if (array.isEmpty()) return listOf(Texts.get(R.string.runtime_detail_list_empty))
     return array.mapNotNull { element ->
         val item = element as? JsonObject ?: return@mapNotNull null
         val label = item["name"]?.jsonPrimitive?.contentOrNull
@@ -389,7 +402,7 @@ internal fun harnessLines(kind: String, obj: JsonObject): List<String> {
             ?: item["title"]?.jsonPrimitive?.contentOrNull
             ?: return@mapNotNull null
         val detail = item["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        if (detail.isBlank()) label else "$label · $detail"
+        if (detail.isBlank()) label else Texts.get(R.string.runtime_pair, label, detail)
     }
 }
 
@@ -404,9 +417,9 @@ internal fun JsonObject.toLoginUi(providerId: String): HarnessLoginUi {
         if (text.startsWith("http://") || text.startsWith("https://")) url = text
     }
     val title = when (providerId) {
-        "codex" -> "Codex 登录"
-        "qoder" -> "Qoder 登录"
-        else -> "$providerId 登录"
+        "codex" -> Texts.get(R.string.runtime_login_title_codex)
+        "qoder" -> Texts.get(R.string.runtime_login_title_qoder)
+        else -> Texts.get(R.string.runtime_login_title_generic, providerId)
     }
     return HarnessLoginUi(providerId, title, fields, url)
 }

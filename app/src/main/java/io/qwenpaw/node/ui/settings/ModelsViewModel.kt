@@ -1,5 +1,7 @@
 package io.qwenpaw.node.ui.settings
 
+import androidx.annotation.StringRes
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ActiveModelDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
 import io.qwenpaw.node.data.model.ProviderDto
@@ -8,6 +10,7 @@ import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.ui.chat.ModelChoice
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,9 +24,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** 两个可切换的作用域。`effective` 只读，不设切换入口。 */
-enum class ModelScope(val wire: String, val title: String) {
-    GLOBAL("global", "全局默认"),
-    AGENT("agent", "当前智能体默认"),
+enum class ModelScope(val wire: String, @StringRes val titleRes: Int) {
+    GLOBAL("global", R.string.models_scope_global),
+    AGENT("agent", R.string.models_scope_agent),
 }
 
 /**
@@ -85,7 +88,13 @@ class ModelsViewModel(
 
     fun refresh() {
         val conn = connection() ?: run {
-            _state.update { it.copy(loaded = true, loading = false, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(
+                    loaded = true,
+                    loading = false,
+                    error = Texts.get(R.string.models_error_not_connected),
+                )
+            }
             return
         }
         _state.update { it.copy(loading = true, error = null) }
@@ -174,7 +183,10 @@ class ModelsViewModel(
                     globalDefault = fresh.first.getOrNull()?.activeLlm ?: current.globalDefault,
                     agentDefault = fresh.second.getOrNull()?.activeLlm ?: current.agentDefault,
                     effective = fresh.third.getOrNull()?.activeLlm ?: current.effective,
-                    notice = "${scope.title}已切换",
+                    notice = Texts.get(
+                        R.string.models_scope_switched,
+                        Texts.get(scope.titleRes),
+                    ),
                 )
             }
         }

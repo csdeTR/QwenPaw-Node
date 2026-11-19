@@ -1,5 +1,8 @@
 package io.qwenpaw.node.data
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 import io.qwenpaw.node.data.remote.QwenPawApi
 
 /**
@@ -150,19 +153,15 @@ internal fun assessSshCredentialGate(
     if (notice.exposed) {
         return SshCredentialGate(
             allowed = false,
-            reason = "服务端尚未开启 Web 登录认证，终端本身不可用；请先在服务端开启 Web 登录认证并注册用户。" +
-                "关闭安全提示不会解除这条限制。",
+            reason = Texts.get(R.string.drest_security_login_reason),
         )
     }
     if (isTrustedHost(notice.host, sshTrustedHosts)) {
         return SshCredentialGate(allowed = true)
     }
     val reason = when {
-        notice.noTls ->
-            "当前地址可从公网访问且使用明文 HTTP，经配套插件下发私钥或登录密码会让凭据在链路上可读；" +
-                "请改用 HTTPS，或在「设置 → 服务器 → 受信任的连接」中确认该地址仅你可访问。"
-        else ->
-            "当前地址未通过安全校验，无法使用 SSH 终端。"
+        notice.noTls -> Texts.get(R.string.drest_security_plain_http_reason)
+        else -> Texts.get(R.string.drest_security_unverified_reason)
     }
     return SshCredentialGate(allowed = false, reason = reason)
 }

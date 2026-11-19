@@ -9,6 +9,8 @@ import com.jcraft.jsch.Session
 import com.jcraft.jsch.SocketFactory
 import com.jcraft.jsch.UIKeyboardInteractive
 import com.jcraft.jsch.UserInfo
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -101,7 +103,7 @@ class SshTransport(
     private suspend fun connect() {
         val credential = auth ?: return
         if (endpoints.isEmpty()) {
-            _state.value = TerminalConnection.Failed("尚未配置 SSH 地址")
+            _state.value = TerminalConnection.Failed(Texts.get(R.string.ssh_error_no_address))
             return
         }
         val failures = mutableListOf<String>()
@@ -124,8 +126,14 @@ class SshTransport(
             }
         }
         _state.value = TerminalConnection.Failed(
-            if (failures.size == 1) failures.first()
-            else "所有 SSH 地址均不可用：${failures.joinToString("；")}",
+            if (failures.size == 1) {
+                failures.first()
+            } else {
+                Texts.get(
+                    R.string.ssh_error_all_addresses_failed,
+                    failures.joinToString(Texts.get(R.string.ssh_error_list_separator)),
+                )
+            },
         )
     }
 
@@ -368,10 +376,10 @@ class SshTransport(
 
     private fun sshError(e: Throwable, endpoint: SshEndpoint, socket: Socket?): String {
         when ((socket as? WebSocketSocket)?.closeReason) {
-            "unauthorized" -> return "SSH 中继认证失败：请重新登录服务端"
-            "not configured" -> return "插件尚未配置 SSH 目标与凭据"
-            "busy" -> return "SSH 中继连接数已满，请稍后重试"
-            "target unreachable" -> return "SSH 目标不可达：请检查插件里配置的主机与端口"
+            "unauthorized" -> return Texts.get(R.string.ssh_error_relay_unauthorized)
+            "not configured" -> return Texts.get(R.string.ssh_error_relay_not_configured)
+            "busy" -> return Texts.get(R.string.ssh_error_relay_busy)
+            "target unreachable" -> return Texts.get(R.string.ssh_error_target_unreachable)
         }
         val message = e.message.orEmpty()
         val viaBridge = endpoint.provider.isRelay
@@ -379,27 +387,29 @@ class SshTransport(
             message.contains("Auth fail", true) ||
                 message.contains("auth cancel", true) ||
                 message.contains("Auth cancel", true) ->
-                buildString {
-                    append("SSH 认证失败：请检查用户名、私钥或登录密码。")
-                    if (viaBridge) append("凭据在 Web 控制台 → 插件 → SSH 设置中配置。")
-                    append("若使用 Ed25519 密钥仍失败，请改用 RSA 密钥。")
+                if (viaBridge) {
+                    Texts.get(R.string.ssh_error_auth_failed)
+                } else {
+                    Texts.get(R.string.ssh_error_auth_failed_local)
                 }
             message.contains("HostKey has been changed", true) ||
                 message.contains("HostKey has been rejected", true) ->
-                "主机密钥已变化或未确认，可能被中间人攻击。请清除该主机的旧密钥后重新确认"
+                Texts.get(R.string.ssh_error_host_key_changed)
             message.contains("Algorithm negotiation fail", true) ->
-                "SSH 算法协商失败：服务端与当前设备没有共同支持的算法"
+                Texts.get(R.string.ssh_error_algorithm)
             message.contains("ed25519", true) ||
                 message.contains("EdDSA", true) ||
                 message.contains("no such algorithm", true) ->
-                "当前 Android 版本不支持 Ed25519 密钥；请改用登录密码或 RSA 密钥" +
-                    "（Android 13 及以上可支持 Ed25519）"
+                Texts.get(R.string.ssh_error_ed25519)
             message.contains("WebSocket", true) ||
                 message.contains("Expected HTTP 101", true) ->
-                "SSH 中继连接失败：请确认插件已安装、服务端已开启 Web 登录认证，" +
-                    "且反向代理支持 WebSocket 升级"
+                Texts.get(R.string.ssh_error_relay_failed)
             else ->
-                "无法连接 ${endpoint.label}：${message.ifBlank { e.javaClass.simpleName }}"
+                Texts.get(
+                    R.string.ssh_error_connect,
+                    endpoint.label,
+                    message.ifBlank { e.javaClass.simpleName },
+                )
         }
     }
 

@@ -1,8 +1,10 @@
 package io.qwenpaw.node.data.remote
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.stream.ChatEvent
 import io.qwenpaw.node.data.stream.ChatEventParser
 import io.qwenpaw.node.data.stream.SseReader
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -32,7 +34,7 @@ class ChatStreamClient(
         io.qwenpaw.node.log.RunLog.d(
             io.qwenpaw.node.log.LogKind.STREAM,
             "SSE",
-            if (reconnecting) "挂回既有流" else "建立新流",
+            if (reconnecting) Texts.get(R.string.stream_log_reconnect) else Texts.get(R.string.stream_log_new),
         )
 
         val reader = try {
@@ -43,7 +45,7 @@ class ChatStreamClient(
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "SSE",
-                    "建流被拒：${response.code} $detail",
+                    Texts.get(R.string.stream_log_rejected, response.code, detail),
                 )
                 close(
                     ApiException(
@@ -62,15 +64,20 @@ class ChatStreamClient(
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "SSE",
-                    "响应体为空",
+                    Texts.get(R.string.stream_empty_body),
                 )
-                close(IOException("响应体为空"))
+                close(IOException(Texts.get(R.string.stream_empty_body)))
                 awaitClose { }
                 return@callbackFlow
             }
             stream.buffered()
         } catch (e: IOException) {
-            io.qwenpaw.node.log.RunLog.e(io.qwenpaw.node.log.LogKind.STREAM, "SSE", e, "建流失败")
+            io.qwenpaw.node.log.RunLog.e(
+                io.qwenpaw.node.log.LogKind.STREAM,
+                "SSE",
+                e,
+                Texts.get(R.string.stream_log_open_failed),
+            )
             close(e)
             awaitClose { }
             return@callbackFlow
@@ -92,7 +99,7 @@ class ChatStreamClient(
                 io.qwenpaw.node.log.RunLog.d(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "SSE",
-                    "流正常结束，共 $frames 帧",
+                    Texts.get(R.string.stream_log_finished, frames),
                 )
                 close()
             } catch (e: IOException) {
@@ -101,7 +108,7 @@ class ChatStreamClient(
                     io.qwenpaw.node.log.LogKind.STREAM,
                     "SSE",
                     e,
-                    "读流中断，已收到 $frames 帧",
+                    Texts.get(R.string.stream_log_broken, frames),
                 )
                 close(e)
             } finally {

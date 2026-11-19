@@ -24,12 +24,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
+import io.qwenpaw.node.ui.i18n.Texts
 
 /** 服务端 `mutability` 取值，可热改的那一类。 */
 private const val HOT_RUNTIME = "hot_runtime"
@@ -72,11 +76,18 @@ internal fun EnvironmentsSection(
         modifier = modifier
             .fillMaxWidth(),
     ) {
-        SectionHeader("已配置", trailing = "${vars.size} 项")
+        SectionHeader(
+            stringResource(R.string.env_header_configured),
+            pluralStringResource(R.plurals.env_count, vars.size, vars.size),
+        )
         Card {
             if (vars.isEmpty()) {
                 Text(
-                    text = if (loading) "正在加载" else "还没有自定义环境变量",
+                    text = if (loading) {
+                        stringResource(R.string.action_loading)
+                    } else {
+                        stringResource(R.string.env_empty_custom)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
@@ -95,19 +106,26 @@ internal fun EnvironmentsSection(
                         onReset = { pendingReset = v },
                         // 内置变量只能重置：DELETE 会返回 400「Known variable must be reset」。
                         onDelete = { pendingDelete = v }.takeIf { spec == null },
-                        resetLabel = if (spec != null) "恢复默认" else null,
+                        resetLabel = if (spec != null) stringResource(R.string.env_action_reset) else null,
                     )
                     Divider()
                 }
             }
-            ActionRow(text = "添加变量", onClick = { adding = true })
+            ActionRow(text = stringResource(R.string.env_action_add), onClick = { adding = true })
         }
 
-        SectionHeader("实时配置", trailing = "改完即生效")
+        SectionHeader(
+            stringResource(R.string.env_header_live),
+            stringResource(R.string.env_live_hint),
+        )
         Card {
             if (liveSpecs.isEmpty()) {
                 Text(
-                    text = if (loading) "正在加载" else "服务端没有提供可实时修改的配置",
+                    text = if (loading) {
+                        stringResource(R.string.action_loading)
+                    } else {
+                        stringResource(R.string.env_empty_live)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
@@ -128,11 +146,18 @@ internal fun EnvironmentsSection(
             }
         }
 
-        SectionHeader("只读配置", trailing = "仅供查看")
+        SectionHeader(
+            stringResource(R.string.env_header_readonly),
+            stringResource(R.string.env_readonly_tag),
+        )
         Card {
             if (readonlySpecs.isEmpty()) {
                 Text(
-                    text = if (loading) "正在加载" else "服务端没有提供只读配置",
+                    text = if (loading) {
+                        stringResource(R.string.action_loading)
+                    } else {
+                        stringResource(R.string.env_empty_readonly)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
@@ -145,11 +170,9 @@ internal fun EnvironmentsSection(
             }
         }
 
-        SectionHeader("说明")
+        SectionHeader(stringResource(R.string.env_header_notes))
         Text(
-            text = "新变量用「已配置」下方的「添加变量」新建，提交后写入服务端进程的环境变量。" +
-                "实时配置在每次操作开始时读取，修改后立即生效；只读配置在启动时确定，" +
-                "点开可以查看当前值、说明与修改方式。",
+            text = stringResource(R.string.env_notes_body),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp),
@@ -191,10 +214,13 @@ internal fun EnvironmentsSection(
 
     pendingDelete?.let { target ->
         DestructiveActionDialog(
-            title = "删除环境变量",
-            message = "删除后服务端进程将不再读到这个变量。",
-            impacts = listOf(target.key, "当前值：${maskValue(target.value)}"),
-            confirmLabel = "删除",
+            title = stringResource(R.string.env_delete_title),
+            message = stringResource(R.string.env_delete_message),
+            impacts = listOf(
+                target.key,
+                stringResource(R.string.env_current_value, maskValue(target.value)),
+            ),
+            confirmLabel = stringResource(R.string.action_delete),
             onConfirm = {
                 onDelete(target.key)
                 pendingDelete = null
@@ -205,10 +231,13 @@ internal fun EnvironmentsSection(
 
     pendingReset?.let { target ->
         DestructiveActionDialog(
-            title = "恢复默认",
-            message = "恢复后这一项将回到系统值或代码默认值。",
-            impacts = listOf(target.key, "当前值：${maskValue(target.value)}"),
-            confirmLabel = "恢复默认",
+            title = stringResource(R.string.env_action_reset),
+            message = stringResource(R.string.env_reset_message),
+            impacts = listOf(
+                target.key,
+                stringResource(R.string.env_current_value, maskValue(target.value)),
+            ),
+            confirmLabel = stringResource(R.string.env_action_reset),
             confirmDanger = false,
             onConfirm = {
                 onReset(target.key)
@@ -254,7 +283,7 @@ private fun LiveEnvRow(
                 )
                 if (configured) {
                     Spacer(Modifier.width(6.dp))
-                    MiniTag("已修改")
+                    MiniTag(stringResource(R.string.env_tag_modified))
                 }
             }
             Spacer(Modifier.height(3.dp))
@@ -266,7 +295,7 @@ private fun LiveEnvRow(
             )
         }
         Spacer(Modifier.width(8.dp))
-        SmallAction(text = "编辑", onClick = onEdit)
+        SmallAction(text = stringResource(R.string.action_edit), onClick = onEdit)
     }
 }
 
@@ -292,14 +321,18 @@ private fun ReadonlyEnvRow(spec: EnvCatalogDto, onClick: () -> Unit) {
             )
             Spacer(Modifier.height(3.dp))
             Text(
-                text = if (spec.effectiveValue.isEmpty()) "（空）" else spec.effectiveValue,
+                text = if (spec.effectiveValue.isEmpty()) {
+                    stringResource(R.string.env_value_empty)
+                } else {
+                    spec.effectiveValue
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            text = "查看",
+            text = stringResource(R.string.env_view),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.secondary,
         )
@@ -316,22 +349,46 @@ private fun ReadonlyEnvDialog(spec: EnvCatalogDto, onDismiss: () -> Unit) {
         text = {
             Column {
                 Text(
-                    text = READONLY_HINT,
+                    text = stringResource(READONLY_HINT),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(12.dp))
-                DetailLine("当前值", if (spec.effectiveValue.isEmpty()) "（空）" else spec.effectiveValue)
-                DetailLine("默认值", if (spec.default.isEmpty()) "（空）" else spec.default)
-                DetailLine("来源", envSourceText(spec.source))
-                readonlyReasonText(spec.readonlyReasonCode)?.let { DetailLine("只读原因", it) }
-                DetailLine("说明", copy?.description ?: "服务端暂未提供说明。")
-                DetailLine("修改方式", copy?.howToModify ?: "由服务端控制，客户端不提供修改。")
+                DetailLine(
+                    stringResource(R.string.env_detail_current),
+                    if (spec.effectiveValue.isEmpty()) {
+                        stringResource(R.string.env_value_empty)
+                    } else {
+                        spec.effectiveValue
+                    },
+                )
+                DetailLine(
+                    stringResource(R.string.env_detail_default),
+                    if (spec.default.isEmpty()) {
+                        stringResource(R.string.env_value_empty)
+                    } else {
+                        spec.default
+                    },
+                )
+                DetailLine(stringResource(R.string.env_detail_source), envSourceText(spec.source))
+                readonlyReasonText(spec.readonlyReasonCode)?.let {
+                    DetailLine(stringResource(R.string.env_detail_readonly_reason), it)
+                }
+                DetailLine(
+                    stringResource(R.string.env_detail_description),
+                    copy?.let { stringResource(it.description) }
+                        ?: stringResource(R.string.env_description_missing),
+                )
+                DetailLine(
+                    stringResource(R.string.env_detail_how_to_modify),
+                    copy?.let { stringResource(it.howToModify) }
+                        ?: stringResource(R.string.env_how_to_modify_missing),
+                )
             }
         },
         confirmButton = {
             Text(
-                text = "关闭",
+                text = stringResource(R.string.action_close),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -410,15 +467,15 @@ private fun EnvAddDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加变量", style = MaterialTheme.typography.titleMedium) },
+        title = { Text(stringResource(R.string.env_action_add), style = MaterialTheme.typography.titleMedium) },
         text = {
             Column {
                 OutlinedTextField(
                     value = keyText,
                     onValueChange = { keyText = it; submitted = false },
                     singleLine = true,
-                    label = { Text("变量名") },
-                    placeholder = { Text("例如 HTTP_PROXY") },
+                    label = { Text(stringResource(R.string.env_field_name)) },
+                    placeholder = { Text(stringResource(R.string.env_field_name_placeholder)) },
                     isError = keyError != null,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -436,7 +493,7 @@ private fun EnvAddDialog(
                     value = valueText,
                     onValueChange = { valueText = it },
                     singleLine = true,
-                    label = { Text("变量值") },
+                    label = { Text(stringResource(R.string.env_field_value)) },
                     visualTransformation = if (visible) {
                         VisualTransformation.None
                     } else {
@@ -445,7 +502,11 @@ private fun EnvAddDialog(
                     keyboardOptions = KeyboardOptions.Default,
                     trailingIcon = {
                         Text(
-                            text = if (visible) "隐藏" else "显示",
+                            text = if (visible) {
+                                stringResource(R.string.env_hide)
+                            } else {
+                                stringResource(R.string.env_show)
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier
@@ -459,7 +520,7 @@ private fun EnvAddDialog(
         },
         confirmButton = {
             Text(
-                text = "保存",
+                text = stringResource(R.string.action_save),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -469,7 +530,7 @@ private fun EnvAddDialog(
         },
         dismissButton = {
             Text(
-                text = "取消",
+                text = stringResource(R.string.action_cancel),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -502,19 +563,19 @@ internal fun validateNewEnvKey(
     existing: List<EnvVarDto>,
     catalog: List<EnvCatalogDto>,
 ): String? {
-    if (key.isBlank()) return "请输入变量名"
+    if (key.isBlank()) return Texts.get(R.string.env_validate_name_required)
     if (!Regex("^[A-Za-z_][A-Za-z0-9_]*$").matches(key)) {
-        return "变量名只能包含字母、数字和下划线，且不能以数字开头"
+        return Texts.get(R.string.env_validate_name_charset)
     }
     if (key.uppercase().startsWith("QWENPAW_") && key != key.uppercase()) {
-        return "QwenPaw 内置变量名必须全大写"
+        return Texts.get(R.string.env_validate_uppercase)
     }
     val spec = catalog.firstOrNull { it.key == key }
     if (spec != null && !spec.editable) {
-        return "该变量为服务端只读项，不能修改"
+        return Texts.get(R.string.env_validate_readonly)
     }
     if (existing.any { it.key.uppercase() == key.uppercase() }) {
-        return "变量 $key 已存在，请直接编辑原值"
+        return Texts.get(R.string.env_validate_exists, key)
     }
     return null
 }
@@ -548,7 +609,7 @@ private fun EnvRow(
                 // 标记这一项同时出现在下方「实时配置」段里，避免用户以为两处是不同变量。
                 if (live) {
                     Spacer(Modifier.width(6.dp))
-                    MiniTag("实时配置")
+                    MiniTag(stringResource(R.string.env_header_live))
                 }
             }
             Spacer(Modifier.height(3.dp))
@@ -565,7 +626,7 @@ private fun EnvRow(
         }
         if (onDelete != null) {
             Spacer(Modifier.width(8.dp))
-            SmallAction(text = "删除", onClick = onDelete, danger = true)
+            SmallAction(text = stringResource(R.string.action_delete), onClick = onDelete, danger = true)
         }
     }
 }
@@ -617,7 +678,11 @@ private fun EnvEditDialog(
                     keyboardOptions = KeyboardOptions.Default,
                     trailingIcon = {
                         Text(
-                            text = if (visible) "隐藏" else "显示",
+                            text = if (visible) {
+                                stringResource(R.string.env_hide)
+                            } else {
+                                stringResource(R.string.env_show)
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier
@@ -631,7 +696,7 @@ private fun EnvEditDialog(
         },
         confirmButton = {
             Text(
-                text = "保存",
+                text = stringResource(R.string.action_save),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -641,7 +706,7 @@ private fun EnvEditDialog(
         },
         dismissButton = {
             Text(
-                text = "取消",
+                text = stringResource(R.string.action_cancel),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -659,7 +724,7 @@ private fun EnvEditDialog(
  * 而长度本身对猜密钥是有用信息。
  */
 internal fun maskValue(value: String): String =
-    if (value.isEmpty()) "（空）" else "••••••••"
+    if (value.isEmpty()) Texts.get(R.string.env_value_empty) else "••••••••"
 
 /** 只读判定：`editable=false` 的项不允许提交。 */
 internal fun isEnvEditable(spec: EnvCatalogDto?): Boolean = spec?.editable ?: true

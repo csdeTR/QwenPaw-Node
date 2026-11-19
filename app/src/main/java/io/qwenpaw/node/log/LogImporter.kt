@@ -1,5 +1,8 @@
 package io.qwenpaw.node.log
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * 解析导出的日志文本。
  *
@@ -25,7 +28,7 @@ object LogImporter {
                 out += LogEntry(
                     time = "",
                     kind = LogKind.UI,
-                    tag = "导入",
+                    tag = Texts.get(R.string.drest_log_tag_import),
                     message = line.trim(),
                     error = null,
                 )

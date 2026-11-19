@@ -1,5 +1,7 @@
 package io.qwenpaw.node.log
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import okhttp3.Interceptor
 import okhttp3.Response
 import java.io.IOException
@@ -36,12 +38,20 @@ class LoggingInterceptor(
             val cost = (System.nanoTime() - started) / 1_000_000
             // 3xx 只有在 network interceptor 里才看得到：application interceptor
             // 拿到的是跟随跳转之后的最终响应，中间那一跳被 OkHttp 内部消化了。
-            val note = if (response.code in 300..399) "（重定向，未跟随）" else ""
-            RunLog.d(kind, "HTTP", "$label → ${response.code}$note（${cost}ms）")
+            val note = if (response.code in 300..399) {
+                Texts.get(R.string.runlog_http_redirect_note)
+            } else {
+                ""
+            }
+            RunLog.d(
+                kind,
+                "HTTP",
+                Texts.get(R.string.runlog_http_result, label, response.code, note, cost),
+            )
             response
         } catch (e: IOException) {
             val cost = (System.nanoTime() - started) / 1_000_000
-            RunLog.e(kind, "HTTP", e, "$label 失败，耗时 ${cost}ms")
+            RunLog.e(kind, "HTTP", e, Texts.get(R.string.runlog_http_failed, label, cost))
             throw e
         }
     }

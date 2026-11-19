@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.checkpoint
 
+import io.qwenpaw.node.TestTexts
 import io.qwenpaw.node.data.model.CheckpointNodeDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -48,6 +49,7 @@ class CheckpointViewModelTest {
 
     @Before
     fun setUp() {
+        TestTexts.install()
         Dispatchers.setMain(Dispatchers.Unconfined)
         server = MockWebServer()
         server.dispatcher = object : Dispatcher() {

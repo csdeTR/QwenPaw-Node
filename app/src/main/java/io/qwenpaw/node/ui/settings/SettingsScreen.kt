@@ -47,15 +47,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.NetworkMonitor
 import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.font.FontState
 import io.qwenpaw.node.ui.VoiceTrigger
+import io.qwenpaw.node.ui.i18n.AppLanguage
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.ThemeMode
 import io.qwenpaw.node.ui.theme.QwenIcons
 import androidx.compose.ui.platform.LocalContext
@@ -155,6 +160,9 @@ fun SettingsScreen(
     onUseMiSans: (Boolean) -> Unit,
     onCompactList: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
+    /** 应用界面语言。1.0.0 之前只有简体中文。 */
+    appLanguage: AppLanguage = AppLanguage.ZH_CN,
+    onAppLanguage: (AppLanguage) -> Unit = {},
     /** 是否在公网地址未设防时提醒。 */
     securityHintsEnabled: Boolean = true,
     onSecurityHintsEnabled: (Boolean) -> Unit = {},
@@ -251,6 +259,7 @@ fun SettingsScreen(
     var addMode by remember { mutableStateOf<AddMode?>(null) }
     var editing by remember { mutableStateOf<InstanceConfig?>(null) }
     var languagePicker by remember { mutableStateOf(false) }
+    var appLanguagePicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // 每次进入设置页核对一次服务端头像。不做轮询：头像不是时效性数据，
@@ -313,17 +322,32 @@ fun SettingsScreen(
         )
     }
 
+    if (appLanguagePicker) {
+        AppLanguagePickerDialog(
+            current = appLanguage,
+            onPick = { language ->
+                appLanguagePicker = false
+                onAppLanguage(language)
+            },
+            onDismiss = { appLanguagePicker = false },
+        )
+    }
+
     // 移除实例的确认。不提供撤销：服务端与本机都没有回收站，
     // 承诺一个做不到的撤销比多弹一次确认更糟。
     pendingRemove?.let { instance ->
+        val unnamed = stringResource(R.string.settings_instance_unnamed)
         io.qwenpaw.node.ui.common.DestructiveActionDialog(
-            title = "移除实例",
-            message = "将移除「${instance.name.ifBlank { "未命名" }}」及其地址配置。",
-            impacts = listOf(
-                "该实例的地址列表、地址偏好与智能体选择",
-                "本机缓存的离线消息仍会保留，重新添加同一实例后可继续查看",
+            title = stringResource(R.string.settings_instance_remove_title),
+            message = stringResource(
+                R.string.settings_instance_remove_message,
+                instance.name.ifBlank { unnamed },
             ),
-            confirmLabel = "移除",
+            impacts = listOf(
+                stringResource(R.string.settings_instance_remove_impact_addresses),
+                stringResource(R.string.settings_instance_remove_impact_cache),
+            ),
+            confirmLabel = stringResource(R.string.action_remove),
             undoable = false,
             onConfirm = {
                 onRemove(instance.id)
@@ -337,21 +361,25 @@ fun SettingsScreen(
     logoutFor?.let { instance ->
         AlertDialog(
             onDismissRequest = { logoutFor = null },
-            title = { Text("退出登录") },
+            title = { Text(stringResource(R.string.settings_logout_title)) },
             text = {
-                Text(
-                    "将吊销服务端签发给你这台手机的凭据，并清除本机保存的 token。" +
-                        "实例与地址会保留，再次连接时需要重新输入账号密码。",
-                )
+                Text(stringResource(R.string.settings_logout_message))
             },
             confirmButton = {
                 TextButton(onClick = {
                     onLogout(instance.id)
                     logoutFor = null
-                }) { Text("退出登录", color = MaterialTheme.colorScheme.error) }
+                }) {
+                    Text(
+                        text = stringResource(R.string.settings_logout_title),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             },
             dismissButton = {
-                TextButton(onClick = { logoutFor = null }) { Text("取消") }
+                TextButton(onClick = { logoutFor = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -393,9 +421,9 @@ fun SettingsScreen(
                         if (addMode != null) addMode = null else adding = false
                     },
                     subtitle = when (current.addMode) {
-                        null -> "添加实例"
-                        AddMode.FORM -> "添加实例（填表）"
-                        AddMode.WIZARD -> "添加实例（引导式）"
+                        null -> stringResource(R.string.settings_add_instance)
+                        AddMode.FORM -> stringResource(R.string.settings_add_instance_form)
+                        AddMode.WIZARD -> stringResource(R.string.settings_add_instance_wizard)
                     },
                 )
                 // 读 current 而不是外部 addMode：退出中的旧槽位要保留它自己那一页的内容。
@@ -424,7 +452,7 @@ fun SettingsScreen(
                         },
                         currentNetKind = currentNetKind,
                         currentSsid = currentSsid,
-                        submitLabel = "添加",
+                        submitLabel = stringResource(R.string.action_add),
                         isTrustedHost = isTrustedHost,
                         onCancel = { addMode = null },
                     )
@@ -467,7 +495,10 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .padding(padding),
             ) {
-                SettingsTopBar(onBack = { editing = null }, subtitle = "编辑实例")
+                SettingsTopBar(
+                    onBack = { editing = null },
+                    subtitle = stringResource(R.string.settings_edit_instance),
+                )
                 InstanceForm(
                     showHeader = false,
                     connecting = false,
@@ -515,7 +546,7 @@ fun SettingsScreen(
                     loadAgentsWithToken = { onLoadAgentsFor(instance) },
                     currentNetKind = currentNetKind,
                     currentSsid = currentSsid,
-                    submitLabel = "保存",
+                    submitLabel = stringResource(R.string.action_save),
                     isTrustedHost = isTrustedHost,
                     onOpenSshProfile = { showSshProfile = true },
                     onCancel = { editing = null },
@@ -578,7 +609,7 @@ fun SettingsScreen(
                     }
                 },
                 subtitle = if (page == SettingsPage.MAIN) {
-                    "QwenPaw Node 版本 $appVersion"
+                    stringResource(R.string.settings_version_subtitle, appVersion)
                 } else {
                     sectionTitle(page)
                 },
@@ -603,61 +634,61 @@ fun SettingsScreen(
                     Card {
                         NavRow(
                             icon = QwenIcons.server,
-                            title = "服务器",
+                            title = stringResource(R.string.settings_nav_server),
                             subtitle = serverSummary(instances, activeId),
                             onClick = { section = SettingsPage.SERVER },
                         )
                     }
-                    SectionHeader("个人资料与外观")
+                    SectionHeader(stringResource(R.string.settings_section_profile_appearance))
                     Card {
                         NavRow(
                             icon = QwenIcons.user,
-                            title = "我的资料",
-                            subtitle = "昵称、我的头像与智能体头像",
+                            title = stringResource(R.string.settings_nav_profile),
+                            subtitle = stringResource(R.string.settings_nav_profile_subtitle),
                             onClick = { section = SettingsPage.PROFILE },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.palette,
-                            title = "外观",
-                            subtitle = "深浅色、字号、MiSans 字体",
+                            title = stringResource(R.string.settings_nav_appearance),
+                            subtitle = stringResource(R.string.settings_nav_appearance_subtitle),
                             onClick = { section = SettingsPage.APPEARANCE },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.messageSquare,
-                            title = "消息显示",
-                            subtitle = "折叠方式、用量显示、操作行样式",
+                            title = stringResource(R.string.settings_nav_messages),
+                            subtitle = stringResource(R.string.settings_nav_messages_subtitle),
                             onClick = { section = SettingsPage.MESSAGES },
                         )
                     }
-                    SectionHeader("此手机")
+                    SectionHeader(stringResource(R.string.settings_section_this_phone))
                     Card {
                         NavRow(
                             icon = QwenIcons.mic,
-                            title = "语音",
-                            subtitle = "语音按钮、转写来源与触发方式",
+                            title = stringResource(R.string.settings_nav_voice),
+                            subtitle = stringResource(R.string.settings_nav_voice_subtitle),
                             onClick = { section = SettingsPage.VOICE },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.bell,
-                            title = "通知与行为",
-                            subtitle = "紧凑排版、屏幕常亮",
+                            title = stringResource(R.string.settings_nav_behavior),
+                            subtitle = stringResource(R.string.settings_nav_behavior_subtitle),
                             onClick = { section = SettingsPage.BEHAVIOR },
                         )
                         Divider()
                         NavRow(
                             icon = QwenIcons.receiptText,
-                            title = "运行日志",
-                            subtitle = "记录开关、记录类型、查看与分享",
+                            title = stringResource(R.string.settings_nav_logs),
+                            subtitle = stringResource(R.string.settings_nav_logs_subtitle),
                             onClick = { section = SettingsPage.LOGS },
                         )
                     }
                     // 三张配置表单都改的是服务端状态，挂在独立的「服务端配置」下，
                     // 避免与「此手机」里的本机偏好混在一起。
                     if (config != null) {
-                        SectionHeader("服务端配置")
+                        SectionHeader(stringResource(R.string.settings_section_server_config))
                         Card {
                             // 插件行放在最前：后续所有「需要插件」的功能都以它为前提，
                             // 用户排查功能不可用时应先看到这一行。
@@ -679,22 +710,21 @@ fun SettingsScreen(
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "配套插件",
+                                        text = stringResource(R.string.settings_bridge_title),
                                         style = MaterialTheme.typography.bodyLarge,
                                     )
+                                    val featureLine = when {
+                                        bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready &&
+                                            bridgeFeaturesEnabled ->
+                                            stringResource(R.string.settings_bridge_feature_on)
+                                        bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready ->
+                                            stringResource(R.string.settings_bridge_feature_off)
+                                        else -> stringResource(R.string.settings_bridge_unavailable)
+                                    }
                                     Text(
-                                        text = buildString {
-                                            append(bridgeStatus.label)
-                                            // 状态另起一行：两者挤在一行时，行宽恰好落在
-                                            // 「关闭」两个字中间，换行后看起来像错字。
-                                            append("\n")
-                                            if (bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready) {
-                                                append("功能")
-                                                append(if (bridgeFeaturesEnabled) "已开启" else "已关闭")
-                                            } else {
-                                                append("未安装时不可开启")
-                                            }
-                                        },
+                                        // 状态另起一行：两者挤在一行时，行宽恰好落在
+                                        // 「关闭」两个字中间，换行后看起来像错字。
+                                        text = bridgeStatus.label + "\n" + featureLine,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         // 不限制行数：这一行载有插件名与功能状态两段信息，
@@ -713,11 +743,16 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.wrench,
-                                title = "工具",
+                                title = stringResource(R.string.settings_nav_tools),
                                 subtitle = if (config.tools.loaded) {
-                                    "${config.tools.tools.count { it.enabled }} / ${config.tools.tools.size} 个已启用"
+                                    pluralStringResource(
+                                        R.plurals.settings_tools_enabled_summary,
+                                        config.tools.tools.size,
+                                        config.tools.tools.count { it.enabled },
+                                        config.tools.tools.size,
+                                    )
                                 } else {
-                                    "开关与异步执行"
+                                    stringResource(R.string.settings_nav_tools_subtitle)
                                 },
                                 onClick = {
                                     config.onLoadTools()
@@ -727,11 +762,15 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.zap,
-                                title = "环境变量",
+                                title = stringResource(R.string.settings_nav_envs),
                                 subtitle = if (config.envs.loaded) {
-                                    "${config.envs.vars.size} 项已配置"
+                                    pluralStringResource(
+                                        R.plurals.settings_envs_configured_summary,
+                                        config.envs.vars.size,
+                                        config.envs.vars.size,
+                                    )
                                 } else {
-                                    "读写服务端环境变量"
+                                    stringResource(R.string.settings_nav_envs_subtitle)
                                 },
                                 onClick = {
                                     config.onLoadEnvs()
@@ -741,11 +780,15 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.calendarClock,
-                                title = "定时任务",
+                                title = stringResource(R.string.settings_nav_cron),
                                 subtitle = if (config.cron.loaded) {
-                                    "${config.cron.jobs.size} 个任务"
+                                    pluralStringResource(
+                                        R.plurals.settings_cron_jobs_summary,
+                                        config.cron.jobs.size,
+                                        config.cron.jobs.size,
+                                    )
                                 } else {
-                                    "按计划自动执行"
+                                    stringResource(R.string.settings_nav_cron_subtitle)
                                 },
                                 onClick = {
                                     config.onLoadCron()
@@ -755,88 +798,88 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.zap,
-                                title = "模型与提供商",
-                                subtitle = "默认模型与连通性测试",
+                                title = stringResource(R.string.settings_nav_models),
+                                subtitle = stringResource(R.string.settings_nav_models_subtitle),
                                 onClick = onOpenModels,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.sparkles,
-                                title = "智能体管理",
-                                subtitle = "新建、复制、启停、排序与导出",
+                                title = stringResource(R.string.settings_nav_agents),
+                                subtitle = stringResource(R.string.settings_nav_agents_subtitle),
                                 onClick = onOpenAgents,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.workflow,
-                                title = "运行时",
-                                subtitle = "ACP 命令、Node 运行时与外部智能体登录",
+                                title = stringResource(R.string.settings_nav_runtime),
+                                subtitle = stringResource(R.string.settings_nav_runtime_subtitle),
                                 onClick = onOpenRuntime,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.blocks,
-                                title = "App 中心",
-                                subtitle = "查看已安装的 PawApp 并在浏览器打开",
+                                title = stringResource(R.string.settings_nav_app_center),
+                                subtitle = stringResource(R.string.settings_nav_app_center_subtitle),
                                 onClick = onOpenAppCenter,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.sparkles,
-                                title = "技能",
-                                subtitle = "浏览、启停与编辑 SKILL.md",
+                                title = stringResource(R.string.settings_nav_skills),
+                                subtitle = stringResource(R.string.settings_nav_skills_subtitle),
                                 onClick = onOpenSkills,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.blocks,
-                                title = "MCP",
-                                subtitle = "客户端开关、工具白名单与策略",
+                                title = stringResource(R.string.settings_nav_mcp),
+                                subtitle = stringResource(R.string.settings_nav_mcp_subtitle),
                                 onClick = onOpenMcp,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.library,
-                                title = "扩展市场",
-                                subtitle = "技能市场与插件目录，只读",
+                                title = stringResource(R.string.settings_nav_market),
+                                subtitle = stringResource(R.string.settings_nav_market_subtitle),
                                 onClick = onOpenMarket,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.folder,
-                                title = "工作区文件",
-                                subtitle = "浏览、预览与下载服务端文件",
+                                title = stringResource(R.string.settings_nav_workspace),
+                                subtitle = stringResource(R.string.settings_nav_workspace_subtitle),
                                 onClick = onOpenWorkspace,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.terminal,
-                                title = "终端",
-                                subtitle = "服务端 PTY 与 SSH 两种来源",
+                                title = stringResource(R.string.settings_nav_terminal),
+                                subtitle = stringResource(R.string.settings_nav_terminal_subtitle),
                                 onClick = onOpenTerminal,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.packageIcon,
-                                title = "备份",
-                                subtitle = "创建、导出与恢复服务端配置与工作区",
+                                title = stringResource(R.string.settings_nav_backup),
+                                subtitle = stringResource(R.string.settings_nav_backup_subtitle),
                                 onClick = onOpenBackup,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.workflow,
-                                title = "检查点",
-                                subtitle = "查看时间线并回滚到之前的状态",
+                                title = stringResource(R.string.settings_nav_checkpoint),
+                                subtitle = stringResource(R.string.settings_nav_checkpoint_subtitle),
                                 onClick = onOpenCheckpoint,
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.clock,
-                                title = "后台策略",
+                                title = stringResource(R.string.settings_nav_offload),
                                 subtitle = if (config.offload.action == OFFLOAD) {
-                                    "工具超时后转入后台"
+                                    stringResource(R.string.settings_nav_offload_subtitle_offload)
                                 } else {
-                                    "工具超时后直接中止"
+                                    stringResource(R.string.settings_nav_offload_subtitle_abort)
                                 },
                                 onClick = {
                                     config.onLoadOffload()
@@ -846,8 +889,8 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.settings,
-                                title = "运行配置",
-                                subtitle = "最大迭代、输入长度与上下文压缩",
+                                title = stringResource(R.string.settings_nav_running_config),
+                                subtitle = stringResource(R.string.settings_nav_running_config_subtitle),
                                 onClick = {
                                     config.onLoadRunningConfig()
                                     onOpenRunningConfig()
@@ -856,8 +899,8 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.shieldCheck,
-                                title = "安全",
-                                subtitle = "工具与文件防护、沙箱、技能扫描",
+                                title = stringResource(R.string.settings_nav_security),
+                                subtitle = stringResource(R.string.settings_nav_security_subtitle),
                                 onClick = {
                                     config.onLoadSecurity()
                                     onOpenSecurity()
@@ -866,7 +909,7 @@ fun SettingsScreen(
                             Divider()
                             NavRow(
                                 icon = QwenIcons.languages,
-                                title = "服务端界面语言",
+                                title = stringResource(R.string.settings_nav_server_language),
                                 subtitle = serverLanguageLabel(config.serverSettings.language),
                                 onClick = {
                                     config.onLoadServerSettings()
@@ -875,28 +918,30 @@ fun SettingsScreen(
                             )
                             Divider()
                             SettingLabel(
-                                title = "上传上限",
+                                title = stringResource(R.string.settings_upload_limit_title),
                                 subtitle = when {
-                                    !config.serverSettings.loaded -> "尚未读取"
-                                    config.serverSettings.uploadLimitMb == null -> "不限制"
+                                    !config.serverSettings.loaded ->
+                                        stringResource(R.string.settings_upload_limit_unread)
+                                    config.serverSettings.uploadLimitMb == null ->
+                                        stringResource(R.string.settings_upload_limit_none)
                                     else -> "${config.serverSettings.uploadLimitMb} MB"
                                 },
                             )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.barChart,
-                                title = "用量统计",
-                                subtitle = "Token、调用与工具趋势",
+                                title = stringResource(R.string.settings_nav_usage),
+                                subtitle = stringResource(R.string.settings_nav_usage_subtitle),
                                 onClick = onOpenUsage,
                             )
                         }
                     }
-                    SectionHeader("关于")
+                    SectionHeader(stringResource(R.string.settings_nav_about))
                     Card {
                         NavRow(
                             icon = QwenIcons.info,
-                            title = "关于",
-                            subtitle = "版本 $appVersion",
+                            title = stringResource(R.string.settings_nav_about),
+                            subtitle = stringResource(R.string.settings_version, appVersion),
                             onClick = { section = SettingsPage.ABOUT },
                         )
                     }
@@ -904,7 +949,14 @@ fun SettingsScreen(
 
                 // 服务器实例
                 SettingsPage.SERVER -> {
-                SectionHeader("服务器实例", "${instances.size} 个")
+                SectionHeader(
+                    stringResource(R.string.settings_section_server_instances),
+                    pluralStringResource(
+                        R.plurals.settings_item_count_summary,
+                        instances.size,
+                        instances.size,
+                    ),
+                )
                 Card {
                     instances.forEachIndexed { index, instance ->
                         InstanceRow(
@@ -926,12 +978,19 @@ fun SettingsScreen(
                     // 受信任的连接紧挨实例清单：它记的正是这些实例的地址。
                     NavRow(
                         icon = QwenIcons.shieldCheck,
-                        title = "受信任的连接",
-                        subtitle = "${trustedHosts.size} 个地址不会触发安全提示",
+                        title = stringResource(R.string.settings_nav_trusted),
+                        subtitle = pluralStringResource(
+                            R.plurals.settings_trusted_hosts_summary,
+                            trustedHosts.size,
+                            trustedHosts.size,
+                        ),
                         onClick = { section = SettingsPage.TRUSTED },
                     )
                     Divider()
-                    ActionRow(text = "添加实例", onClick = { adding = true })
+                    ActionRow(
+                        text = stringResource(R.string.settings_add_instance),
+                        onClick = { adding = true },
+                    )
                 }
                 }
 
@@ -949,6 +1008,14 @@ fun SettingsScreen(
 
                 SettingsPage.APPEARANCE -> {
                 Card {
+                    // 语言放在最前：它决定界面文案，其余外观项都建立在语言之上。
+                    NavRow(
+                        icon = QwenIcons.globe,
+                        title = stringResource(R.string.settings_app_language_title),
+                        subtitle = stringResource(appLanguage.labelRes),
+                        onClick = { appLanguagePicker = true },
+                    )
+                    Divider()
                     // 主题不另起一行标题：三张预览卡下方各自写着「跟随系统」「浅色」「深色」，
                     // 选中的那张有描边，再加一行说明只是把同一件事说第二遍。
                     ThemeSelector(
@@ -957,8 +1024,11 @@ fun SettingsScreen(
                     )
                     Divider()
                     ScaleSlider(
-                        title = "界面字号",
-                        subtitle = "当前 ${percent(uiScale)}",
+                        title = stringResource(R.string.settings_ui_scale_title),
+                        subtitle = stringResource(
+                            R.string.settings_ui_scale_subtitle,
+                            percent(uiScale),
+                        ),
                         value = uiScale,
                         min = io.qwenpaw.node.ui.theme.FontScaling.UI_MIN,
                         max = io.qwenpaw.node.ui.theme.FontScaling.UI_MAX,
@@ -966,8 +1036,11 @@ fun SettingsScreen(
                     )
                     Divider()
                     ScaleSlider(
-                        title = "聊天字号",
-                        subtitle = "只影响对话正文；当前 ${percent(chatScale)}",
+                        title = stringResource(R.string.settings_chat_scale_title),
+                        subtitle = stringResource(
+                            R.string.settings_chat_scale_subtitle,
+                            percent(chatScale),
+                        ),
                         value = chatScale,
                         min = io.qwenpaw.node.ui.theme.FontScaling.CHAT_MIN,
                         max = io.qwenpaw.node.ui.theme.FontScaling.CHAT_MAX,
@@ -977,11 +1050,11 @@ fun SettingsScreen(
                     Divider()
                     // MiSans 与字号同属「字怎么显示」，放在外观组而不是通知组。
                     SwitchRow(
-                        title = "使用 MiSans 字体",
+                        title = stringResource(R.string.settings_use_misans_title),
                         subtitle = if (fontState is FontState.Ready) {
-                            "替换系统默认字体"
+                            stringResource(R.string.settings_use_misans_ready)
                         } else {
-                            "需先在下方下载字体"
+                            stringResource(R.string.settings_use_misans_not_ready)
                         },
                         checked = useMiSans,
                         enabled = fontState is FontState.Ready,
@@ -1010,8 +1083,8 @@ fun SettingsScreen(
                 SettingsPage.PROFILE -> {
                 Card {
                     AvatarRow(
-                        title = "我的头像",
-                        subtitle = "显示在消息右侧",
+                        title = stringResource(R.string.settings_avatar_user_title),
+                        subtitle = stringResource(R.string.settings_avatar_user_subtitle),
                         kind = io.qwenpaw.node.avatar.AvatarStore.KIND_USER,
                         store = avatarStore,
                         version = avatarVersion,
@@ -1020,8 +1093,8 @@ fun SettingsScreen(
                     )
                     Divider()
                     AvatarRow(
-                        title = "智能体头像",
-                        subtitle = "显示在消息左侧",
+                        title = stringResource(R.string.settings_avatar_agent_title),
+                        subtitle = stringResource(R.string.settings_avatar_agent_subtitle),
                         kind = io.qwenpaw.node.avatar.AvatarStore.KIND_AGENT,
                         store = avatarStore,
                         version = avatarVersion,
@@ -1030,8 +1103,8 @@ fun SettingsScreen(
                     )
                     Divider()
                     SwitchRow(
-                        title = "使用 QwenPaw 服务端头像",
-                        subtitle = "读取网页端设置的头像；本机头像优先",
+                        title = stringResource(R.string.settings_use_server_avatar_title),
+                        subtitle = stringResource(R.string.settings_use_server_avatar_subtitle),
                         checked = useServerAvatar,
                         onCheckedChange = onUseServerAvatar,
                     )
@@ -1041,9 +1114,8 @@ fun SettingsScreen(
                     NicknameRow(value = userName, onCommit = onUserName)
                     Divider()
                     SettingLabel(
-                        "图片处理",
-                        "静态图片裁剪为正方形并压缩到 500×500；GIF 动图原样保存并循环播放。" +
-                            "头像在对话里显示为 32dp 的圆形，超过这个尺寸的部分会被裁掉",
+                        stringResource(R.string.settings_image_processing_title),
+                        stringResource(R.string.settings_image_processing_subtitle),
                     )
                 }
                 }
@@ -1051,16 +1123,19 @@ fun SettingsScreen(
                 SettingsPage.MESSAGES -> {
                 Card {
                     SettingLabel(
-                        "智能体消息折叠",
-                        "默认值与官方网页一致",
+                        stringResource(R.string.settings_assistant_collapse_title),
+                        stringResource(R.string.settings_assistant_collapse_subtitle),
                     )
                     ChipRow {
                         io.qwenpaw.node.ui.chat.AssistantCollapse.entries.forEach { mode ->
                             Chip(
                                 text = when (mode) {
-                                    io.qwenpaw.node.ui.chat.AssistantCollapse.EXPANDED -> "全部展开"
-                                    io.qwenpaw.node.ui.chat.AssistantCollapse.PROCESS_COLLAPSED -> "折叠过程"
-                                    io.qwenpaw.node.ui.chat.AssistantCollapse.RESULT_COLLAPSED -> "折叠结果"
+                                    io.qwenpaw.node.ui.chat.AssistantCollapse.EXPANDED ->
+                                        stringResource(R.string.settings_collapse_expanded)
+                                    io.qwenpaw.node.ui.chat.AssistantCollapse.PROCESS_COLLAPSED ->
+                                        stringResource(R.string.settings_collapse_process)
+                                    io.qwenpaw.node.ui.chat.AssistantCollapse.RESULT_COLLAPSED ->
+                                        stringResource(R.string.settings_collapse_result)
                                 },
                                 selected = assistantCollapse == mode,
                                 onClick = { onAssistantCollapse(mode) },
@@ -1069,37 +1144,38 @@ fun SettingsScreen(
                     }
                     Divider()
                     SwitchRow(
-                        title = "在回复末尾显示用量",
-                        subtitle = "显示本轮回复的输入输出 token、所用模型与完成时间",
+                        title = stringResource(R.string.settings_show_stats_title),
+                        subtitle = stringResource(R.string.settings_show_stats_subtitle),
                         checked = showMessageStats,
                         onCheckedChange = onShowMessageStats,
                     )
                     Divider()
                     SwitchRow(
-                        title = "用户消息渲染 Markdown",
-                        subtitle = "关闭后按原文显示，数学公式不参与排版",
+                        title = stringResource(R.string.settings_render_user_markdown_title),
+                        subtitle = stringResource(R.string.settings_render_markdown_subtitle),
                         checked = renderUserMarkdown,
                         onCheckedChange = onRenderUserMarkdown,
                     )
                     Divider()
                     SwitchRow(
-                        title = "智能体消息渲染 Markdown",
-                        subtitle = "关闭后按原文显示，数学公式不参与排版",
+                        title = stringResource(R.string.settings_render_agent_markdown_title),
+                        subtitle = stringResource(R.string.settings_render_markdown_subtitle),
                         checked = renderAssistantMarkdown,
                         onCheckedChange = onRenderAssistantMarkdown,
                     )
                     Divider()
                     SettingLabel(
-                        "消息操作行",
-                        "只影响消息下方的「复制」「复制为 Markdown」「选择文本」三项；" +
-                            "选择图标显示时，三项的图形比较接近；长按菜单里始终显示文字",
+                        stringResource(R.string.settings_action_row_title),
+                        stringResource(R.string.settings_action_row_subtitle),
                     )
                     ChipRow {
                         io.qwenpaw.node.ui.chat.ActionStyle.entries.forEach { style ->
                             Chip(
                                 text = when (style) {
-                                    io.qwenpaw.node.ui.chat.ActionStyle.TEXT -> "文字"
-                                    io.qwenpaw.node.ui.chat.ActionStyle.ICON -> "图标"
+                                    io.qwenpaw.node.ui.chat.ActionStyle.TEXT ->
+                                        stringResource(R.string.settings_action_style_text)
+                                    io.qwenpaw.node.ui.chat.ActionStyle.ICON ->
+                                        stringResource(R.string.settings_action_style_icon)
                                 },
                                 selected = actionStyle == style,
                                 onClick = { onActionStyle(style) },
@@ -1112,15 +1188,15 @@ fun SettingsScreen(
                 SettingsPage.BEHAVIOR -> {
                 Card {
                     SwitchRow(
-                        title = "对话列表紧凑排版",
-                        subtitle = "仅显示名称与时间，单屏可容纳更多对话",
+                        title = stringResource(R.string.settings_compact_list_title),
+                        subtitle = stringResource(R.string.settings_compact_list_subtitle),
                         checked = compactList,
                         onCheckedChange = onCompactList,
                     )
                     Divider()
                     SwitchRow(
-                        title = "生成中保持屏幕常亮",
-                        subtitle = "仅在生成回复期间生效",
+                        title = stringResource(R.string.settings_keep_screen_on_title),
+                        subtitle = stringResource(R.string.settings_keep_screen_on_subtitle),
                         checked = keepScreenOn,
                         onCheckedChange = onKeepScreenOn,
                     )
@@ -1130,8 +1206,8 @@ fun SettingsScreen(
                 SettingsPage.VOICE -> {
                     Card {
                         SwitchRow(
-                            title = "显示语音按钮",
-                            subtitle = "录音后转写为文字",
+                            title = stringResource(R.string.settings_voice_enabled_title),
+                            subtitle = stringResource(R.string.settings_voice_enabled_subtitle),
                             checked = voiceEnabled,
                             onCheckedChange = onVoiceEnabled,
                         )
@@ -1140,7 +1216,7 @@ fun SettingsScreen(
                         if (localAsrAvailable) {
                             Divider()
                             Text(
-                                text = "转写来源",
+                                text = stringResource(R.string.settings_voice_source_title),
                                 style = MaterialTheme.typography.bodyLarge,
                                 modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp),
                             )
@@ -1148,8 +1224,10 @@ fun SettingsScreen(
                                 io.qwenpaw.node.ui.VoiceSource.entries.forEach { source ->
                                     Chip(
                                         text = when (source) {
-                                            io.qwenpaw.node.ui.VoiceSource.LOCAL -> "本地识别"
-                                            io.qwenpaw.node.ui.VoiceSource.SERVER -> "服务端转写"
+                                            io.qwenpaw.node.ui.VoiceSource.LOCAL ->
+                                                stringResource(R.string.settings_voice_source_local)
+                                            io.qwenpaw.node.ui.VoiceSource.SERVER ->
+                                                stringResource(R.string.settings_voice_source_server)
                                         },
                                         selected = voiceSource == source,
                                         onClick = { onVoiceSource(source) },
@@ -1159,9 +1237,9 @@ fun SettingsScreen(
                             Text(
                                 text = when (voiceSource) {
                                     io.qwenpaw.node.ui.VoiceSource.LOCAL ->
-                                        "识别在本机完成，音频不出手机；需先下载识别模型。"
+                                        stringResource(R.string.settings_voice_source_local_hint)
                                     io.qwenpaw.node.ui.VoiceSource.SERVER ->
-                                        "录音上传至所连接的服务端转写；需联网且服务端已配置转写服务。"
+                                        stringResource(R.string.settings_voice_source_server_hint)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
@@ -1170,7 +1248,7 @@ fun SettingsScreen(
                         }
                         Divider()
                         Text(
-                            text = "触发方式",
+                            text = stringResource(R.string.settings_voice_trigger_title),
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.padding(
                                 start = 14.dp,
@@ -1183,8 +1261,10 @@ fun SettingsScreen(
                             VoiceTrigger.entries.forEach { trigger ->
                                 Chip(
                                     text = when (trigger) {
-                                        VoiceTrigger.TAP -> "点击开始"
-                                        VoiceTrigger.HOLD -> "按住说话"
+                                        VoiceTrigger.TAP ->
+                                            stringResource(R.string.settings_voice_trigger_tap)
+                                        VoiceTrigger.HOLD ->
+                                            stringResource(R.string.settings_voice_trigger_hold)
                                     },
                                     selected = voiceTrigger == trigger,
                                     onClick = { onVoiceTrigger(trigger) },
@@ -1199,8 +1279,8 @@ fun SettingsScreen(
                         ) {
                             Divider()
                             SwitchRow(
-                                title = "说完自动停止",
-                                subtitle = "关闭时需再次点击麦克风结束",
+                                title = stringResource(R.string.settings_voice_autostop_title),
+                                subtitle = stringResource(R.string.settings_voice_autostop_subtitle),
                                 checked = voiceAutoStop,
                                 onCheckedChange = onVoiceAutoStop,
                             )
@@ -1229,13 +1309,16 @@ fun SettingsScreen(
                 SettingsPage.LOGS -> {
                     Card {
                         SwitchRow(
-                            title = "记录运行日志",
-                            subtitle = "只记录本次运行期间的事件",
+                            title = stringResource(R.string.settings_log_enabled_title),
+                            subtitle = stringResource(R.string.settings_log_enabled_subtitle),
                             checked = logEnabled,
                             onCheckedChange = onLogEnabled,
                         )
                         Divider()
-                        SettingLabel("记录类型", "排查某一类问题时，可关闭其余类别以减少干扰")
+                        SettingLabel(
+                            stringResource(R.string.settings_log_kinds_title),
+                            stringResource(R.string.settings_log_kinds_subtitle),
+                        )
                         ChipRow {
                             io.qwenpaw.node.log.LogKind.entries.forEach { kind ->
                                 Chip(
@@ -1247,15 +1330,15 @@ fun SettingsScreen(
                         }
                         Divider()
                         LinkRow(
-                            title = "查看运行日志",
-                            subtitle = "按时间查看本次运行记录的事件",
+                            title = stringResource(R.string.settings_log_view_title),
+                            subtitle = stringResource(R.string.settings_log_view_subtitle),
                             onClick = onOpenLogs,
                         )
                         Divider()
                         LinkRow(
-                            title = "分享运行日志",
-                            subtitle = "通过系统分享发送给其它应用，便于反馈问题时一并提供",
-                            action = "分享",
+                            title = stringResource(R.string.settings_log_share_title),
+                            subtitle = stringResource(R.string.settings_log_share_subtitle),
+                            action = stringResource(R.string.settings_action_share),
                             onClick = onExportLogs,
                         )
                     }
@@ -1368,65 +1451,61 @@ fun SettingsScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = "基于 QwenPaw 接口构建的第三方 Android 客户端。" +
-                                "离线时只保留草稿和缓存历史，不会自动重新发送。",
+                            text = stringResource(R.string.settings_about_description),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Divider()
                     LinkRow(
-                        title = "项目仓库",
+                        title = stringResource(R.string.settings_about_repo_title),
                         subtitle = io.qwenpaw.node.BuildConfig.REPO_URL,
-                        action = "前往",
+                        action = stringResource(R.string.settings_action_visit),
                         onClick = { openUrl(context, io.qwenpaw.node.BuildConfig.REPO_URL) },
                     )
                     Divider()
                     LinkRow(
-                        title = "配套插件仓库",
+                        title = stringResource(R.string.settings_about_bridge_repo_title),
                         subtitle = io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL,
-                        action = "前往",
+                        action = stringResource(R.string.settings_action_visit),
                         onClick = { openUrl(context, io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL) },
                     )
                     Divider()
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = "第三方资源",
+                            text = stringResource(R.string.settings_about_credits_title),
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Spacer(Modifier.height(6.dp))
                         CreditLine(
                             name = "agentscope-ai/QwenPaw",
                             url = "https://github.com/agentscope-ai/QwenPaw",
-                            detail = "本项目连接的服务端。QwenPaw Node 是它的第三方 Android 客户端，" +
-                                "全部功能通过它的 HTTP 接口实现",
+                            detail = stringResource(R.string.settings_about_credit_qwenpaw),
                         )
                         CreditLine(
                             name = "openclaw/openclaw",
                             url = "https://github.com/openclaw/openclaw",
-                            detail = "部分交互与节点能力的设计参考了它的 Android 客户端",
+                            detail = stringResource(R.string.settings_about_credit_openclaw),
                         )
                         CreditLine(
                             name = "k2-fsa/sherpa-onnx",
                             url = "https://github.com/k2-fsa/sherpa-onnx",
-                            detail = "端上流式识别引擎（Apache-2.0），仅标准包内置；" +
-                                "识别模型按需从该仓库下载",
+                            detail = stringResource(R.string.settings_about_credit_sherpa),
                         )
                         CreditLine(
                             name = "adivenxnataly/MiSans",
                             url = "https://github.com/adivenxnataly/MiSans",
-                            detail = "可选字体，版权归小米科技有限责任公司；" +
-                                "遵循 MiSans 字体许可协议，按需从该仓库下载",
+                            detail = stringResource(R.string.settings_about_credit_misans),
                         )
                         CreditLine(
                             name = "coil-kt/coil",
                             url = "https://github.com/coil-kt/coil",
-                            detail = "头像图片加载与 GIF 逐帧解码（Apache-2.0）",
+                            detail = stringResource(R.string.settings_about_credit_coil),
                         )
                         Spacer(Modifier.height(10.dp))
                         // 结尾这句不挂链接：它不是某一项资源，硬塞一个地址会误导点击。
                         Text(
-                            text = "QwenPaw Node 的诞生离不开这些开源项目",
+                            text = stringResource(R.string.settings_about_credits_footer),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -1491,22 +1570,22 @@ private data class SettingsNav(
 
 /** 子页标题。与一级列表的入口文案保持一致，避免同一个页有两个名字。 */
 private fun sectionTitle(section: SettingsPage): String = when (section) {
-    SettingsPage.SERVER -> "服务器"
-    SettingsPage.TRUSTED -> "受信任的连接"
-    SettingsPage.PROFILE -> "我的资料"
-    SettingsPage.APPEARANCE -> "外观"
-    SettingsPage.APPEARANCE_PREVIEW -> "字号预览"
-    SettingsPage.MESSAGES -> "消息显示"
-    SettingsPage.VOICE -> "语音"
-    SettingsPage.BEHAVIOR -> "通知与行为"
-    SettingsPage.LOGS -> "运行日志"
-    SettingsPage.ABOUT -> "关于"
-    SettingsPage.TOOLS -> "工具"
-    SettingsPage.ENVIRONMENTS -> "环境变量"
-    SettingsPage.OFFLOAD -> "后台策略"
-    SettingsPage.CRON -> "定时任务"
-    SettingsPage.CRON_EDIT -> "新建任务 / 编辑任务"
-    else -> "设置"
+    SettingsPage.SERVER -> Texts.get(R.string.settings_nav_server)
+    SettingsPage.TRUSTED -> Texts.get(R.string.settings_nav_trusted)
+    SettingsPage.PROFILE -> Texts.get(R.string.settings_nav_profile)
+    SettingsPage.APPEARANCE -> Texts.get(R.string.settings_nav_appearance)
+    SettingsPage.APPEARANCE_PREVIEW -> Texts.get(R.string.settings_section_font_preview)
+    SettingsPage.MESSAGES -> Texts.get(R.string.settings_nav_messages)
+    SettingsPage.VOICE -> Texts.get(R.string.settings_nav_voice)
+    SettingsPage.BEHAVIOR -> Texts.get(R.string.settings_nav_behavior)
+    SettingsPage.LOGS -> Texts.get(R.string.settings_nav_logs)
+    SettingsPage.ABOUT -> Texts.get(R.string.settings_nav_about)
+    SettingsPage.TOOLS -> Texts.get(R.string.settings_nav_tools)
+    SettingsPage.ENVIRONMENTS -> Texts.get(R.string.settings_nav_envs)
+    SettingsPage.OFFLOAD -> Texts.get(R.string.settings_nav_offload)
+    SettingsPage.CRON -> Texts.get(R.string.settings_nav_cron)
+    SettingsPage.CRON_EDIT -> Texts.get(R.string.settings_section_cron_edit)
+    else -> Texts.get(R.string.settings_title)
 }
 
 /**
@@ -1559,11 +1638,16 @@ data class SettingsConfig(
 /** 一级列表「服务器」行的副标题：当前实例名与地址，没有实例时如实说明。 */
 private fun serverSummary(instances: List<InstanceConfig>, activeId: String?): String {
     val active = instances.firstOrNull { it.id == activeId } ?: instances.firstOrNull()
-        ?: return "尚未添加服务器"
-    val host = active.addresses.firstOrNull()?.url?.let { compactUrl(it) } ?: "未设置地址"
+        ?: return Texts.get(R.string.settings_server_summary_empty)
+    val host = active.addresses.firstOrNull()?.url?.let { compactUrl(it) }
+        ?: Texts.get(R.string.settings_server_summary_no_address)
     // 名称留空时连接流程会用地址当名称，两者相同就只说一次。
     val name = active.name.ifBlank { "" }
-    return if (name.isEmpty() || name == host) host else "$name（$host）"
+    return if (name.isEmpty() || name == host) {
+        host
+    } else {
+        Texts.get(R.string.settings_server_summary_named, name, host)
+    }
 }
 
 @Composable
@@ -1584,12 +1668,16 @@ private fun SettingsTopBar(onBack: () -> Unit, subtitle: String) {
             ) {
                 Icon(
                     imageVector = QwenIcons.arrowLeft,
-                    contentDescription = "返回",
+                    contentDescription = stringResource(R.string.action_back),
                     modifier = Modifier.size(20.dp),
                 )
             }
             Column(modifier = Modifier.padding(start = 4.dp)) {
-                Text("设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = stringResource(R.string.settings_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
@@ -1609,15 +1697,24 @@ private fun ModelRow(
     Column(modifier = Modifier.padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = "语音识别模型", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = stringResource(R.string.settings_asr_model_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Text(
                     text = when (state) {
                         // 模型是本地识别的前提，不是可选增强。
-                        io.qwenpaw.node.voice.LocalModelState.NotInstalled -> "未下载，本地识别暂不可用"
-                        io.qwenpaw.node.voice.LocalModelState.Ready -> "已安装，本地识别可用"
+                        io.qwenpaw.node.voice.LocalModelState.NotInstalled ->
+                            stringResource(R.string.settings_asr_model_not_installed)
+                        io.qwenpaw.node.voice.LocalModelState.Ready ->
+                            stringResource(R.string.settings_asr_model_ready)
                         is io.qwenpaw.node.voice.LocalModelState.Downloading ->
-                            "正在下载 ${(state.progress * 100).toInt()}%"
-                        io.qwenpaw.node.voice.LocalModelState.Installing -> "正在解压"
+                            stringResource(
+                                R.string.settings_asr_model_downloading,
+                                (state.progress * 100).toInt(),
+                            )
+                        io.qwenpaw.node.voice.LocalModelState.Installing ->
+                            stringResource(R.string.settings_asr_model_installing)
                         is io.qwenpaw.node.voice.LocalModelState.Failed -> state.message
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -1630,9 +1727,12 @@ private fun ModelRow(
             }
             Spacer(Modifier.width(10.dp))
             when (state) {
-                io.qwenpaw.node.voice.LocalModelState.NotInstalled -> MiniButton("下载", onDownload)
-                is io.qwenpaw.node.voice.LocalModelState.Failed -> MiniButton("重试", onDownload)
-                io.qwenpaw.node.voice.LocalModelState.Ready -> MiniButton("删除", onRemove, danger = true)
+                io.qwenpaw.node.voice.LocalModelState.NotInstalled ->
+                    MiniButton(stringResource(R.string.settings_action_download), onDownload)
+                is io.qwenpaw.node.voice.LocalModelState.Failed ->
+                    MiniButton(stringResource(R.string.action_retry), onDownload)
+                io.qwenpaw.node.voice.LocalModelState.Ready ->
+                    MiniButton(stringResource(R.string.action_delete), onRemove, danger = true)
                 else -> CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
@@ -1648,7 +1748,7 @@ private fun ModelRow(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "来自 sherpa-onnx；约 150MB，识别全程在本机完成",
+            text = stringResource(R.string.settings_asr_model_source),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )
@@ -1663,7 +1763,10 @@ private fun TranscribeRow(
     Column(modifier = Modifier.padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = "服务端转写", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = stringResource(R.string.settings_voice_source_server),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Text(
                     text = status.label,
                     style = MaterialTheme.typography.labelSmall,
@@ -1676,12 +1779,11 @@ private fun TranscribeRow(
             }
             Spacer(Modifier.width(10.dp))
             // 配置在服务端改，不会自动通知；提供重探入口，改完不必重启应用。
-            MiniButton("重新检测", onRefresh)
+            MiniButton(stringResource(R.string.settings_asr_transcribe_refresh), onRefresh)
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "语音转写由服务端完成，需先在服务端配置转写服务；" +
-                "录音会发送到所连接的服务器，识别结果填入输入框。",
+            text = stringResource(R.string.settings_transcribe_hint),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )
@@ -1837,6 +1939,35 @@ private fun InstanceRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                // 带「地址：」前缀是必须的：不带前缀时这一行紧接在实例名下方，
+                // 字号又小一号，读起来就是「实例名的别名」，而不是「这台服务器连在哪」。
+                val addressAlias = instance.addresses.firstOrNull { it.url == shown }?.alias
+                val addressLine = if (addressAlias.isNullOrBlank()) {
+                    stringResource(R.string.settings_instance_address, compactUrl(shown))
+                } else {
+                    stringResource(
+                        R.string.settings_instance_address_with_alias,
+                        addressAlias,
+                        compactUrl(shown),
+                    )
+                }
+                val backupSuffix = if (instance.backupCount > 0) {
+                    pluralStringResource(
+                        R.plurals.settings_instance_backup_suffix,
+                        instance.backupCount,
+                        instance.backupCount,
+                    )
+                } else {
+                    ""
+                }
+                // 「临时」与「已保存」要分清楚：前者重启即失效，后者长期有效。
+                val pickMarker = when {
+                    sessionPick != null && sessionPick == shown ->
+                        stringResource(R.string.settings_instance_address_marker_session)
+                    chosen != null && chosen == shown ->
+                        stringResource(R.string.settings_instance_address_marker_saved)
+                    else -> ""
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = instance.name,
@@ -1855,7 +1986,7 @@ private fun InstanceRow(
                                 .padding(horizontal = 7.dp, vertical = 1.dp),
                         ) {
                             Text(
-                                text = "当前",
+                                text = stringResource(R.string.settings_instance_current),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
@@ -1864,25 +1995,7 @@ private fun InstanceRow(
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = buildString {
-                        // 带「地址：」前缀是必须的：不带前缀时这一行紧接在实例名下方，
-                        // 字号又小一号，读起来就是「实例名的别名」，而不是「这台服务器连在哪」。
-                        append("地址：")
-                        val alias = instance.addresses
-                            .firstOrNull { it.url == shown }?.alias
-                        if (!alias.isNullOrBlank()) {
-                            append(alias).append("，")
-                        }
-                        append(compactUrl(shown))
-                        if (instance.backupCount > 0) {
-                            append("（+").append(instance.backupCount).append(" 个备用）")
-                        }
-                        // 「临时」与「已保存」要分清楚：前者重启即失效，后者长期有效。
-                        when {
-                            sessionPick != null && sessionPick == shown -> append("（本次指定）")
-                            chosen != null && chosen == shown -> append("（已指定）")
-                        }
-                    },
+                    text = addressLine + backupSuffix + pickMarker,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1892,7 +2005,7 @@ private fun InstanceRow(
                 // 而多智能体实例下不同智能体的对话互不可见，串号时用户没有可对照的线索。
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "智能体：${instance.agentId}",
+                    text = stringResource(R.string.settings_instance_agent_line, instance.agentId),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -1912,7 +2025,10 @@ private fun InstanceRow(
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     ) {
                         Text(
-                            text = "智能体 ${instance.agentId}",
+                            text = stringResource(
+                                R.string.settings_instance_agent_chip,
+                                instance.agentId,
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary,
                         )
@@ -1932,7 +2048,11 @@ private fun InstanceRow(
                                 .padding(horizontal = 8.dp, vertical = 2.dp),
                         ) {
                             Text(
-                                text = if (pickingAddress) "收起地址" else "选择地址",
+                                text = if (pickingAddress) {
+                                    stringResource(R.string.settings_instance_address_collapse)
+                                } else {
+                                    stringResource(R.string.settings_instance_address_choose)
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.secondary,
                             )
@@ -1941,7 +2061,7 @@ private fun InstanceRow(
                     instance.serverVersion?.let {
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "版本 $it",
+                            text = stringResource(R.string.settings_version, it),
                             style = MaterialTheme.typography.labelSmall,
                             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                         )
@@ -1950,11 +2070,15 @@ private fun InstanceRow(
             }
             Spacer(Modifier.width(8.dp))
             if (active) {
-                MiniButton("编辑", onClick = onEdit)
+                MiniButton(stringResource(R.string.action_edit), onClick = onEdit)
             } else {
-                MiniButton("切换", onClick = onSwitch)
+                MiniButton(stringResource(R.string.settings_action_switch), onClick = onSwitch)
                 Spacer(Modifier.width(6.dp))
-                MiniButton("移除", onClick = onRemove, danger = true)
+                MiniButton(
+                    text = stringResource(R.string.action_remove),
+                    onClick = onRemove,
+                    danger = true,
+                )
             }
         }
         // 「退出登录」只在实例确实持有 token 时出现：没有 token 的实例上执行
@@ -1967,12 +2091,16 @@ private fun InstanceRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "本机已保存登录凭据",
+                    text = stringResource(R.string.settings_instance_credentials_saved),
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                 )
                 Spacer(Modifier.weight(1f))
-                MiniButton("退出登录", onClick = onLogout, danger = true)
+                MiniButton(
+                    text = stringResource(R.string.settings_logout_title),
+                    onClick = onLogout,
+                    danger = true,
+                )
             }
         }
         // 展开后的地址清单。
@@ -1982,22 +2110,21 @@ private fun InstanceRow(
         // - 长期偏好由编辑实例表单里的「使用时机」决定。
         if (pickingAddress) {
             Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
+                val sessionCurrent = sessionPick
+                val sessionLabel = if (sessionCurrent.isNullOrBlank()) {
+                    stringResource(R.string.settings_session_address_auto)
+                } else {
+                    instance.addresses.firstOrNull { it.url == sessionCurrent }?.label
+                        ?: sessionCurrent
+                }
                 Text(
-                    text = buildString {
-                        append("本次使用：")
-                        val current = sessionPick
-                        if (current.isNullOrBlank()) {
-                            append("自动选择")
-                        } else {
-                            append(instance.addresses.firstOrNull { it.url == current }?.label ?: current)
-                        }
-                    },
+                    text = stringResource(R.string.settings_session_address_label, sessionLabel),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary,
                 )
                 Spacer(Modifier.height(6.dp))
                 AddressChoice(
-                    label = "自动选择（按列表顺序）",
+                    label = stringResource(R.string.settings_instance_address_auto_ordered),
                     selected = sessionPick.isNullOrBlank() && chosen == null,
                     onClick = {
                         // 「自动」要同时清掉临时选择与长期偏好，否则用户点了自动却仍被旧偏好挡住。
@@ -2025,7 +2152,7 @@ private fun InstanceRow(
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "「本次使用」只影响这次打开；长期偏好请在编辑实例里设置。",
+                    text = stringResource(R.string.settings_session_address_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                 )
@@ -2074,7 +2201,7 @@ private fun AddressChoice(
             Spacer(Modifier.width(6.dp))
             Icon(
                 imageVector = QwenIcons.check,
-                contentDescription = "已选择",
+                contentDescription = stringResource(R.string.settings_address_selected_desc),
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.secondary,
             )
@@ -2095,7 +2222,7 @@ private fun AddressChoice(
                     .padding(horizontal = 7.dp, vertical = 2.dp),
             ) {
                 Text(
-                    text = "验证",
+                    text = stringResource(R.string.settings_action_verify),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary,
                 )
@@ -2167,7 +2294,7 @@ private fun TrustedHostsPage(
     var ownershipConfirmed by remember { mutableStateOf(false) }
     val recognized = io.qwenpaw.node.data.normalizeTrustedHost(input) != null
     val errorText = if (input.isNotBlank() && !recognized) {
-        "无法识别这个地址，请填写主机名或 IP"
+        stringResource(R.string.settings_trusted_invalid_host)
     } else {
         null
     }
@@ -2183,8 +2310,8 @@ private fun TrustedHostsPage(
     Column {
         Card {
             SwitchRow(
-                title = "安全提示",
-                subtitle = "服务器地址可从公网访问，且服务端未开启「Web 登录认证」或未使用 HTTPS 时提醒",
+                title = stringResource(R.string.settings_security_hints_title),
+                subtitle = stringResource(R.string.settings_security_hints_subtitle),
                 checked = securityHintsEnabled,
                 onCheckedChange = { want ->
                     if (want) onSecurityHintsEnabled(true) else confirmDisableHints = true
@@ -2192,8 +2319,7 @@ private fun TrustedHostsPage(
             )
         }
         Text(
-            text = "这些地址不再弹出安全提示。只有进一步确认该地址仅你可访问后，" +
-                "才允许经配套插件向本机下发 SSH 私钥或口令。",
+            text = stringResource(R.string.settings_trusted_page_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
@@ -2207,14 +2333,16 @@ private fun TrustedHostsPage(
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                placeholder = { Text("例如 192.168.1.5 或 example.com") },
+                placeholder = {
+                    Text(stringResource(R.string.settings_trusted_input_placeholder))
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "添加",
+                text = stringResource(R.string.action_add),
                 style = MaterialTheme.typography.labelLarge,
                 color = if (recognized) {
                     MaterialTheme.colorScheme.onPrimary
@@ -2245,12 +2373,19 @@ private fun TrustedHostsPage(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
         }
-        SectionHeader("已添加", "${hosts.size} 个")
+        SectionHeader(
+            stringResource(R.string.settings_section_trusted_added),
+            pluralStringResource(
+                R.plurals.settings_item_count_summary,
+                hosts.size,
+                hosts.size,
+            ),
+        )
         Card {
             val sorted = hosts.sorted()
             if (sorted.isEmpty()) {
                 Text(
-                    text = "还没有添加任何地址",
+                    text = stringResource(R.string.settings_trusted_empty),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
@@ -2273,9 +2408,9 @@ private fun TrustedHostsPage(
                             )
                             Text(
                                 text = if (sshAllowed) {
-                                    "提示豁免 + SSH 凭据授权"
+                                    stringResource(R.string.settings_trusted_ssh_allowed)
                                 } else {
-                                    "仅提示豁免，未确认用于 SSH"
+                                    stringResource(R.string.settings_trusted_ssh_pending)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (sshAllowed) {
@@ -2287,7 +2422,7 @@ private fun TrustedHostsPage(
                         }
                         if (!sshAllowed) {
                             Text(
-                                text = "确认用于 SSH",
+                                text = stringResource(R.string.settings_trusted_confirm_ssh),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier
@@ -2301,7 +2436,7 @@ private fun TrustedHostsPage(
                         }
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "移除",
+                            text = stringResource(R.string.action_remove),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier
@@ -2319,31 +2454,29 @@ private fun TrustedHostsPage(
     if (confirmDisableHints) {
         AlertDialog(
             onDismissRequest = { confirmDisableHints = false },
-            title = { Text("关闭安全提示") },
+            title = { Text(stringResource(R.string.settings_security_hints_off_title)) },
             text = {
                 Column {
-                    Text(
-                        "关闭后，服务器地址可从公网访问、且服务端未开启「Web 登录认证」或未使用 HTTPS 时，不再提醒。",
-                    )
+                    Text(stringResource(R.string.settings_security_hints_off_message))
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "这可能使你无法及时发现服务器、对话内容或 SSH 凭据被他人访问，属于严重安全风险。",
+                        text = stringResource(R.string.settings_security_hints_off_warning),
                         color = MaterialTheme.colorScheme.error,
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        "关闭提示不会解除 SSH 终端的凭据下发限制；要放行某台主机，仍须在下方确认该地址仅你可访问。",
-                    )
+                    Text(stringResource(R.string.settings_security_hints_off_ssh_note))
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDisableHints = false
                     onSecurityHintsEnabled(false)
-                }) { Text("仍然关闭") }
+                }) { Text(stringResource(R.string.settings_security_hints_off_confirm)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmDisableHints = false }) { Text("保持开启") }
+                TextButton(onClick = { confirmDisableHints = false }) {
+                    Text(stringResource(R.string.settings_security_hints_keep))
+                }
             },
         )
     }
@@ -2354,22 +2487,30 @@ private fun TrustedHostsPage(
         AlertDialog(
             onDismissRequest = { closeConfirm() },
             title = {
-                Text(if (isNew) "确认添加受信任的地址" else "确认用于 SSH 凭据下发")
+                Text(
+                    if (isNew) {
+                        stringResource(R.string.settings_trusted_add_title)
+                    } else {
+                        stringResource(R.string.settings_trusted_ssh_title)
+                    },
+                )
             },
             text = {
                 Column {
-                    Text("请确认 $target 仅你可访问（例如内网地址，或已配置访问控制的公网地址）。")
+                    Text(
+                        stringResource(R.string.settings_trusted_confirm_message, target),
+                    )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         if (isNew) {
-                            "添加后，该地址不再触发安全提示，并允许经配套插件向本机下发 SSH 私钥或登录密码。"
+                            stringResource(R.string.settings_trusted_add_body)
                         } else {
-                            "该地址已在受信任列表里，本次只补充「允许经配套插件向本机下发 SSH 私钥或登录密码」。"
+                            stringResource(R.string.settings_trusted_ssh_body)
                         },
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "若该地址实际由他人控制，凭据可能被窃取。",
+                        text = stringResource(R.string.settings_trusted_risk),
                         color = MaterialTheme.colorScheme.error,
                     )
                     Spacer(Modifier.height(10.dp))
@@ -2378,7 +2519,7 @@ private fun TrustedHostsPage(
                             checked = ownershipConfirmed,
                             onCheckedChange = { ownershipConfirmed = it },
                         )
-                        Text("我确认该地址/域名仅我可访问")
+                        Text(stringResource(R.string.settings_trusted_ownership))
                     }
                 }
             },
@@ -2398,10 +2539,20 @@ private fun TrustedHostsPage(
                         }
                         closeConfirm()
                     },
-                ) { Text(if (isNew) "添加" else "确认") }
+                ) {
+                    Text(
+                        if (isNew) {
+                            stringResource(R.string.action_add)
+                        } else {
+                            stringResource(R.string.settings_action_confirm)
+                        },
+                    )
+                }
             },
             dismissButton = {
-                TextButton(onClick = { closeConfirm() }) { Text("取消") }
+                TextButton(onClick = { closeConfirm() }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -2539,9 +2690,9 @@ private fun ThemeSelector(current: ThemeMode, onPick: (ThemeMode) -> Unit) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = when (mode) {
-                        ThemeMode.SYSTEM -> "跟随系统"
-                        ThemeMode.LIGHT -> "浅色"
-                        ThemeMode.DARK -> "深色"
+                        ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
+                        ThemeMode.LIGHT -> stringResource(R.string.settings_theme_light)
+                        ThemeMode.DARK -> stringResource(R.string.settings_theme_dark)
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (selected) MaterialTheme.colorScheme.secondary
@@ -2576,7 +2727,7 @@ private fun ScaleSlider(
             }
             if (onPreview != null) {
                 Text(
-                    text = "预览",
+                    text = stringResource(R.string.settings_action_preview),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -2586,7 +2737,7 @@ private fun ScaleSlider(
                 )
             }
             Text(
-                text = "重置",
+                text = stringResource(R.string.settings_action_reset),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -2616,7 +2767,7 @@ private fun ScaleSlider(
 private fun LinkRow(
     title: String,
     subtitle: String,
-    action: String = "查看",
+    action: String = stringResource(R.string.settings_action_view),
     onClick: () -> Unit,
 ) {
     Row(
@@ -2740,19 +2891,19 @@ private fun AddModeChooser(onPickFill: () -> Unit, onPickWizard: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         ModeCard(
-            title = "填表添加",
-            subtitle = "逐项填写地址、账号与智能体，可配置多个地址",
+            title = stringResource(R.string.settings_add_mode_form_title),
+            subtitle = stringResource(R.string.settings_add_mode_form_subtitle),
             onClick = onPickFill,
         )
         Spacer(Modifier.height(10.dp))
         ModeCard(
-            title = "引导式添加",
-            subtitle = "一步一条，先验证服务器再选智能体",
+            title = stringResource(R.string.settings_add_mode_wizard_title),
+            subtitle = stringResource(R.string.settings_add_mode_wizard_subtitle),
             onClick = onPickWizard,
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "SSH 直连在实例保存后，到该实例的编辑页配置。",
+            stringResource(R.string.settings_add_mode_ssh_note),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -2796,6 +2947,11 @@ private fun AvatarRow(
     onRemove: (String) -> Unit,
 ) {
     val hasAvatar = store?.kindFor(kind)?.let { it != io.qwenpaw.node.avatar.AvatarKind.NONE } == true
+    val fallbackName = if (kind == io.qwenpaw.node.avatar.AvatarStore.KIND_USER) {
+        stringResource(R.string.settings_avatar_me)
+    } else {
+        stringResource(R.string.settings_avatar_agent)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2805,7 +2961,7 @@ private fun AvatarRow(
         io.qwenpaw.node.ui.chat.ChatAvatar(
             store = store,
             kind = kind,
-            name = if (kind == io.qwenpaw.node.avatar.AvatarStore.KIND_USER) "我" else "智能体",
+            name = fallbackName,
             size = 40.dp,
             version = version,
         )
@@ -2819,10 +2975,21 @@ private fun AvatarRow(
             )
         }
         Spacer(Modifier.width(8.dp))
-        MiniButton(if (hasAvatar) "更换" else "选择", onClick = { onPick(kind) })
+        MiniButton(
+            text = if (hasAvatar) {
+                stringResource(R.string.settings_avatar_change)
+            } else {
+                stringResource(R.string.settings_avatar_choose)
+            },
+            onClick = { onPick(kind) },
+        )
         if (hasAvatar) {
             Spacer(Modifier.width(6.dp))
-            MiniButton("移除", onClick = { onRemove(kind) }, danger = true)
+            MiniButton(
+                text = stringResource(R.string.action_remove),
+                onClick = { onRemove(kind) },
+                danger = true,
+            )
         }
     }
 }
@@ -2844,15 +3011,22 @@ private fun ServerAvatarRow(file: java.io.File?) {
         io.qwenpaw.node.ui.chat.ChatAvatar(
             store = null,
             kind = io.qwenpaw.node.avatar.AvatarStore.KIND_USER,
-            name = "我",
+            name = stringResource(R.string.settings_avatar_me),
             size = 40.dp,
             serverImage = file,
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "服务端头像", style = MaterialTheme.typography.bodyLarge)
             Text(
-                text = if (file == null) "服务端未设置头像" else "已读取网页端的头像",
+                text = stringResource(R.string.settings_server_avatar_title),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = if (file == null) {
+                    stringResource(R.string.settings_server_avatar_none)
+                } else {
+                    stringResource(R.string.settings_server_avatar_loaded)
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2876,9 +3050,12 @@ private fun NicknameRow(value: String, onCommit: (String) -> Unit) {
     var text by remember { mutableStateOf(value) }
 
     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-        Text(text = "我的昵称", style = MaterialTheme.typography.bodyLarge)
         Text(
-            text = "显示在自己发出的消息头部",
+            text = stringResource(R.string.settings_nickname_title),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Text(
+            text = stringResource(R.string.settings_nickname_subtitle),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -2906,12 +3083,19 @@ private fun FontRow(
     Column(modifier = Modifier.padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = "MiSans 字体包", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = stringResource(R.string.settings_font_package_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Text(
                     text = when (state) {
-                        FontState.NotInstalled -> "下载后可用，两个字重约 16MB"
-                        FontState.Ready -> "已下载，占用约 16MB"
-                        is FontState.Downloading -> "正在下载 ${(state.progress * 100).toInt()}%"
+                        FontState.NotInstalled ->
+                            stringResource(R.string.settings_font_not_installed)
+                        FontState.Ready -> stringResource(R.string.settings_font_ready)
+                        is FontState.Downloading -> stringResource(
+                            R.string.settings_font_downloading,
+                            (state.progress * 100).toInt(),
+                        )
                         is FontState.Failed -> state.message
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -2924,9 +3108,11 @@ private fun FontRow(
             }
             Spacer(Modifier.width(10.dp))
             when (state) {
-                FontState.NotInstalled -> MiniButton("下载", onDownload)
-                is FontState.Failed -> MiniButton("重试", onDownload)
-                FontState.Ready -> MiniButton("删除", onRemove, danger = true)
+                FontState.NotInstalled ->
+                    MiniButton(stringResource(R.string.settings_action_download), onDownload)
+                is FontState.Failed -> MiniButton(stringResource(R.string.action_retry), onDownload)
+                FontState.Ready ->
+                    MiniButton(stringResource(R.string.action_delete), onRemove, danger = true)
                 else -> CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
@@ -2942,8 +3128,10 @@ private fun FontRow(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "字体版权归小米科技有限责任公司所有，遵循 MiSans 字体许可协议；" +
-                "应用内按需从 GitHub 项目 ${io.qwenpaw.node.font.FontManager.SOURCE_REPO} 下载，不随安装包分发。",
+            text = stringResource(
+                R.string.settings_font_note,
+                io.qwenpaw.node.font.FontManager.SOURCE_REPO,
+            ),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )

@@ -46,12 +46,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.avatar.resolveChatIcon
 import io.qwenpaw.node.data.model.ChatSpecDto
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
@@ -294,7 +298,7 @@ fun ChatListScreen(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "新建对话",
+                            text = stringResource(R.string.chatlist_new_chat),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
@@ -326,9 +330,9 @@ fun ChatListScreen(
                 ) {
                     Text(
                         text = when {
-                            chats.isEmpty() -> "还没有对话"
-                            query.isNotBlank() -> "没有匹配的对话"
-                            else -> "该频道没有对话"
+                            chats.isEmpty() -> stringResource(R.string.chatlist_empty_no_chats)
+                            query.isNotBlank() -> stringResource(R.string.chatlist_empty_no_match)
+                            else -> stringResource(R.string.chatlist_empty_no_channel)
                         },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -336,9 +340,9 @@ fun ChatListScreen(
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = when {
-                            chats.isEmpty() -> "点击下方按钮即可新建对话"
-                            query.isNotBlank() -> "请更换关键词后重试"
-                            else -> "请切换到「全部」或其它频道"
+                            chats.isEmpty() -> stringResource(R.string.chatlist_empty_hint_create)
+                            query.isNotBlank() -> stringResource(R.string.chatlist_empty_hint_query)
+                            else -> stringResource(R.string.chatlist_empty_hint_channel)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -426,7 +430,7 @@ fun ChatListScreen(
     renaming?.let { chat ->
         AlertDialog(
             onDismissRequest = { renaming = null },
-            title = { Text("重命名对话") },
+            title = { Text(stringResource(R.string.chatlist_rename_title)) },
             text = {
                 OutlinedTextField(
                     value = renameText,
@@ -438,24 +442,26 @@ fun ChatListScreen(
                 TextButton(onClick = {
                     if (renameText.isNotBlank()) onRename(chat.id, renameText.trim())
                     renaming = null
-                }) { Text("保存") }
+                }) { Text(stringResource(R.string.action_save)) }
             },
             dismissButton = {
-                TextButton(onClick = { renaming = null }) { Text("取消") }
+                TextButton(onClick = { renaming = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
 
     deleting?.let { chat ->
         io.qwenpaw.node.ui.common.DestructiveActionDialog(
-            title = "删除对话",
-            message = "删除后无法恢复，确定要删除「${chat.name}」吗？",
+            title = stringResource(R.string.chatlist_delete_title),
+            message = stringResource(R.string.chatlist_delete_message, chat.name),
             impacts = listOf(
-                "该对话的全部消息记录",
-                "与这些消息一同保存的图片与文件引用",
-                "本机为该对话缓存的离线历史",
+                stringResource(R.string.chatlist_delete_impact_messages),
+                stringResource(R.string.chatlist_delete_impact_files),
+                stringResource(R.string.chatlist_delete_impact_cache),
             ),
-            confirmLabel = "删除",
+            confirmLabel = stringResource(R.string.action_delete),
             undoable = false,
             onConfirm = {
                 onDelete(chat.id)
@@ -467,7 +473,7 @@ fun ChatListScreen(
 
     movingToGroup?.let { chat ->
         OptionDialog(
-            title = "移动到分组",
+            title = stringResource(R.string.chatlist_move_to_group),
             items = groups.filter { it.kind != "default" }.map { group ->
                 OptionItem(
                     key = group.id,
@@ -477,7 +483,7 @@ fun ChatListScreen(
             },
             leading = OptionItem(
                 key = "",
-                label = "未分组",
+                label = stringResource(R.string.chatlist_ungrouped),
                 // 服务端的默认分组 id 是 default，不是 null。
                 selected = chat.groupId.isNullOrBlank() || chat.groupId == "default",
             ),
@@ -495,10 +501,12 @@ fun ChatListScreen(
     archiving?.let { chat ->
         AlertDialog(
             onDismissRequest = { archiving = null },
-            title = { Text("归档对话") },
+            title = { Text(stringResource(R.string.chatlist_archive_title)) },
             text = {
                 Column {
-                    Text("归档后可在「已归档」中恢复，确定归档「${chat.name}」吗？")
+                    Text(
+                        stringResource(R.string.chatlist_archive_message, chat.name),
+                    )
                     ArchiveTipRow(
                         checked = archiveTipChecked,
                         onCheckedChange = { archiveTipChecked = it },
@@ -510,10 +518,12 @@ fun ChatListScreen(
                     if (archiveTipChecked) onSuppressArchiveTip()
                     onArchive(chat.id)
                     archiving = null
-                }) { Text("归档") }
+                }) { Text(stringResource(R.string.chatlist_archive)) }
             },
             dismissButton = {
-                TextButton(onClick = { archiving = null }) { Text("取消") }
+                TextButton(onClick = { archiving = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -545,14 +555,26 @@ fun ChatListScreen(
         val count = selected.size
         if (action == BatchAction.DELETE) {
             io.qwenpaw.node.ui.common.DestructiveActionDialog(
-                title = "批量删除",
-                message = "将删除选中的 $count 个对话，删除后无法恢复。",
-                impacts = listOf(
-                    "共 $count 个对话的全部消息记录",
-                    "与这些消息一同保存的图片与文件引用",
-                    "本机为这些对话缓存的离线历史",
+                title = stringResource(R.string.chatlist_batch_delete_title),
+                message = pluralStringResource(
+                    R.plurals.chatlist_batch_delete_message,
+                    count,
+                    count,
                 ),
-                confirmLabel = "删除 $count 个对话",
+                impacts = listOf(
+                    pluralStringResource(
+                        R.plurals.chatlist_batch_delete_impact_messages,
+                        count,
+                        count,
+                    ),
+                    stringResource(R.string.chatlist_delete_impact_files),
+                    stringResource(R.string.chatlist_batch_delete_impact_cache),
+                ),
+                confirmLabel = pluralStringResource(
+                    R.plurals.chatlist_batch_delete_confirm,
+                    count,
+                    count,
+                ),
                 undoable = false,
                 onConfirm = {
                     onBatchDelete(selected.toList())
@@ -565,12 +587,15 @@ fun ChatListScreen(
         }
         AlertDialog(
             onDismissRequest = { confirmBatch = null },
-            title = { Text("批量归档") },
+            title = { Text(stringResource(R.string.chatlist_batch_archive_title)) },
             text = {
                 Column {
                     Text(
-                        "将归档选中的 $count 个对话，之后可在「已归档」中恢复。" +
-                            "正在运行的对话会被跳过。",
+                        pluralStringResource(
+                            R.plurals.chatlist_batch_archive_message,
+                            count,
+                            count,
+                        ),
                     )
                     // 「今日不再提示」只对归档有意义：删除不可恢复，每次都该确认。
                     ArchiveTipRow(
@@ -586,11 +611,19 @@ fun ChatListScreen(
                     confirmBatch = null
                     exitSelection()
                 }) {
-                    Text(if (action == BatchAction.ARCHIVE) "归档" else "删除")
+                    Text(
+                        if (action == BatchAction.ARCHIVE) {
+                            stringResource(R.string.chatlist_archive)
+                        } else {
+                            stringResource(R.string.action_delete)
+                        },
+                    )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmBatch = null }) { Text("取消") }
+                TextButton(onClick = { confirmBatch = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -600,12 +633,12 @@ fun ChatListScreen(
     if (creatingGroup) {
         AlertDialog(
             onDismissRequest = { creatingGroup = false },
-            title = { Text("新建分组") },
+            title = { Text(stringResource(R.string.chatlist_group_create_title)) },
             text = {
                 OutlinedTextField(
                     value = groupNameText,
                     onValueChange = { groupNameText = it },
-                    placeholder = { Text("分组名称") },
+                    placeholder = { Text(stringResource(R.string.chatlist_group_name)) },
                     singleLine = true,
                 )
             },
@@ -617,10 +650,12 @@ fun ChatListScreen(
                         creatingGroup = false
                         groupNameText = ""
                     },
-                ) { Text("创建") }
+                ) { Text(stringResource(R.string.chatlist_group_create)) }
             },
             dismissButton = {
-                TextButton(onClick = { creatingGroup = false }) { Text("取消") }
+                TextButton(onClick = { creatingGroup = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -631,7 +666,7 @@ fun ChatListScreen(
             title = { Text(group.name.ifBlank { group.id }) },
             text = {
                 Column {
-                    Text("可重命名、调整顺序或删除该分组；删除后组内对话将移回「未分组」。")
+                    Text(stringResource(R.string.chatlist_group_menu_hint))
                     Spacer(Modifier.height(10.dp))
                     // 调整顺序只对自建分组开放：内置分组的相对位置由服务端固定，
                     // 移了也不会生效，给入口反而像是坏了。
@@ -643,18 +678,18 @@ fun ChatListScreen(
                                 onReorderGroup(group.id, -1)
                                 groupMenuFor = null
                             },
-                        ) { Text("上移") }
+                        ) { Text(stringResource(R.string.chatlist_group_move_up)) }
                         TextButton(
                             enabled = movable,
                             onClick = {
                                 onReorderGroup(group.id, 1)
                                 groupMenuFor = null
                             },
-                        ) { Text("下移") }
+                        ) { Text(stringResource(R.string.chatlist_group_move_down)) }
                     }
                     if (!movable) {
                         Text(
-                            text = "内置分组的顺序固定，不可调整",
+                            text = stringResource(R.string.chatlist_group_order_fixed),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -668,17 +703,24 @@ fun ChatListScreen(
                         groupNameText = group.name
                         renamingGroup = group
                     },
-                ) { Text("重命名") }
+                ) { Text(stringResource(R.string.chatlist_group_rename)) }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { groupMenuFor = null }) { Text("取消") }
+                    TextButton(onClick = { groupMenuFor = null }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
                     TextButton(
                         onClick = {
                             groupMenuFor = null
                             deletingGroup = group
                         },
-                    ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                    ) {
+                        Text(
+                            stringResource(R.string.action_delete),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             },
         )
@@ -687,7 +729,7 @@ fun ChatListScreen(
     renamingGroup?.let { group ->
         AlertDialog(
             onDismissRequest = { renamingGroup = null },
-            title = { Text("重命名分组") },
+            title = { Text(stringResource(R.string.chatlist_group_rename_title)) },
             text = {
                 OutlinedTextField(
                     value = groupNameText,
@@ -702,10 +744,12 @@ fun ChatListScreen(
                         if (name.isNotBlank()) onRenameGroup(group.id, name)
                         renamingGroup = null
                     },
-                ) { Text("保存") }
+                ) { Text(stringResource(R.string.action_save)) }
             },
             dismissButton = {
-                TextButton(onClick = { renamingGroup = null }) { Text("取消") }
+                TextButton(onClick = { renamingGroup = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -713,11 +757,13 @@ fun ChatListScreen(
     deletingGroup?.let { group ->
         AlertDialog(
             onDismissRequest = { deletingGroup = null },
-            title = { Text("删除分组") },
+            title = { Text(stringResource(R.string.chatlist_group_delete_title)) },
             text = {
                 Text(
-                    "删除「${group.name.ifBlank { group.id }}」后，组内对话会移回「未分组」，" +
-                        "对话本身不会被删除。",
+                    stringResource(
+                        R.string.chatlist_group_delete_message,
+                        group.name.ifBlank { group.id },
+                    ),
                 )
             },
             confirmButton = {
@@ -726,10 +772,17 @@ fun ChatListScreen(
                         onDeleteGroup(group.id)
                         deletingGroup = null
                     },
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) {
+                    Text(
+                        stringResource(R.string.action_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             },
             dismissButton = {
-                TextButton(onClick = { deletingGroup = null }) { Text("取消") }
+                TextButton(onClick = { deletingGroup = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -748,7 +801,7 @@ private fun ArchiveTipRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) 
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
         Spacer(Modifier.width(4.dp))
         Text(
-            text = "今日不再提示",
+            text = stringResource(R.string.chatlist_archive_tip),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -775,18 +828,22 @@ private fun BatchActionBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (count == 0) "选择对话" else "已选 $count 个",
+            text = if (count == 0) {
+                stringResource(R.string.chatlist_select_chats)
+            } else {
+                pluralStringResource(R.plurals.chatlist_selected_count, count, count)
+            },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
         BatchButton(
-            text = "归档",
+            text = stringResource(R.string.chatlist_archive),
             enabled = count > 0,
             onClick = onArchive,
         )
         BatchButton(
-            text = "删除",
+            text = stringResource(R.string.action_delete),
             enabled = count > 0,
             danger = true,
             onClick = onDelete,
@@ -859,14 +916,26 @@ private fun ListHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (selecting) {
                 Text(
-                    text = if (selectedCount == 0) "选择对话" else "已选 $selectedCount 个",
+                    text = if (selectedCount == 0) {
+                        stringResource(R.string.chatlist_select_chats)
+                    } else {
+                        pluralStringResource(
+                            R.plurals.chatlist_selected_count,
+                            selectedCount,
+                            selectedCount,
+                        )
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    text = if (selectedCount == count && count > 0) "取消全选" else "全选",
+                    text = if (selectedCount == count && count > 0) {
+                        stringResource(R.string.chatlist_deselect_all)
+                    } else {
+                        stringResource(R.string.chatlist_select_all)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -875,7 +944,7 @@ private fun ListHeader(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
                 Text(
-                    text = "完成",
+                    text = stringResource(R.string.action_done),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -886,19 +955,19 @@ private fun ListHeader(
             } else {
                 IconButtonCell(
                     icon = QwenIcons.arrowLeft,
-                    description = "返回聊天",
+                    description = stringResource(R.string.chatlist_back_to_chat),
                     onClick = onBack,
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = "对话",
+                    text = stringResource(R.string.chatlist_title),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "$count 个",
+                    text = pluralStringResource(R.plurals.chatlist_total_count, count, count),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -908,7 +977,15 @@ private fun ListHeader(
                 Box(contentAlignment = Alignment.TopEnd) {
                     IconButtonCell(
                         icon = QwenIcons.bell,
-                        description = if (inboxUnread > 0) "收件箱 $inboxUnread 条未读" else "收件箱",
+                        description = if (inboxUnread > 0) {
+                            pluralStringResource(
+                                R.plurals.chatlist_inbox_unread,
+                                inboxUnread,
+                                inboxUnread,
+                            )
+                        } else {
+                            stringResource(R.string.chatlist_inbox)
+                        },
                         onClick = onOpenInbox,
                     )
                     if (inboxUnread > 0) {
@@ -930,30 +1007,34 @@ private fun ListHeader(
                 if (archivedCount > 0) {
                     IconButtonCell(
                         icon = QwenIcons.packageIcon,
-                        description = "已归档 $archivedCount 个",
+                        description = pluralStringResource(
+                            R.plurals.chatlist_archived_count,
+                            archivedCount,
+                            archivedCount,
+                        ),
                         onClick = onOpenArchived,
                     )
                 }
                 IconButtonCell(
                     icon = QwenIcons.barChart,
-                    description = "用量统计",
+                    description = stringResource(R.string.chatlist_token_usage),
                     onClick = onOpenTokenUsage,
                 )
                 if (count > 0) {
                     IconButtonCell(
                         icon = QwenIcons.clipboardList,
-                        description = "批量管理",
+                        description = stringResource(R.string.chatlist_batch_manage),
                         onClick = onToggleSelecting,
                     )
                 }
                 IconButtonCell(
                     icon = QwenIcons.terminal,
-                    description = "终端",
+                    description = stringResource(R.string.chatlist_terminal),
                     onClick = onOpenTerminal,
                 )
                 IconButtonCell(
                     icon = QwenIcons.settings,
-                    description = "设置",
+                    description = stringResource(R.string.chatlist_settings),
                     onClick = onOpenSettings,
                 )
             }
@@ -989,7 +1070,7 @@ private fun ListHeader(
                     Box(modifier = Modifier.weight(1f)) {
                         if (query.isEmpty()) {
                             Text(
-                                text = "搜索对话名称",
+                                text = stringResource(R.string.chatlist_search_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1016,7 +1097,7 @@ private fun ListHeader(
                         ) {
                             Icon(
                                 imageVector = QwenIcons.close,
-                                contentDescription = "清空搜索",
+                                contentDescription = stringResource(R.string.chatlist_search_clear),
                                 modifier = Modifier.size(13.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1063,7 +1144,7 @@ private fun ListHeader(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = "新建分组",
+                            text = stringResource(R.string.chatlist_group_create_title),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary,
                         )
@@ -1104,7 +1185,7 @@ private fun ListHeader(
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            text = "全文检索",
+                            text = stringResource(R.string.chatlist_full_search),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (globalSearch != null) MaterialTheme.colorScheme.onSurfaceVariant
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
@@ -1113,7 +1194,7 @@ private fun ListHeader(
                 }
                 if (globalSearch == null) {
                     Text(
-                        text = "需要配套插件",
+                        text = stringResource(R.string.chatlist_need_plugin),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -1129,7 +1210,10 @@ private fun ListHeader(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    ChannelChip(label = "全部", selected = channel == null) { onChannel(null) }
+                    ChannelChip(
+                        label = stringResource(R.string.chatlist_channel_all),
+                        selected = channel == null,
+                    ) { onChannel(null) }
                     channels.forEach { name ->
                         ChannelChip(label = name, selected = channel == name) { onChannel(name) }
                     }
@@ -1202,7 +1286,11 @@ private fun SectionHeaderRow(
     ) {
         Icon(
             imageVector = if (collapsed) QwenIcons.chevronDown else QwenIcons.chevronUp,
-            contentDescription = if (collapsed) "已折叠，点击展开" else "点击折叠",
+            contentDescription = if (collapsed) {
+                stringResource(R.string.chatlist_expand_desc)
+            } else {
+                stringResource(R.string.chatlist_collapse_desc)
+            },
             modifier = Modifier.size(15.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1224,7 +1312,7 @@ private fun SectionHeaderRow(
         if (collapsed) {
             Spacer(Modifier.width(6.dp))
             Text(
-                text = "已折叠",
+                text = stringResource(R.string.chatlist_collapsed),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.secondary,
             )
@@ -1429,14 +1517,14 @@ fun ChatRowContent(
                 if (chat.pinned) {
                     Icon(
                         imageVector = QwenIcons.pin,
-                        contentDescription = "已置顶",
+                        contentDescription = stringResource(R.string.chatlist_pinned_desc),
                         modifier = Modifier.size(13.dp),
                         tint = MaterialTheme.colorScheme.tertiary,
                     )
                     Spacer(Modifier.width(4.dp))
                 }
                 Text(
-                    text = chat.name.ifBlank { "未命名对话" },
+                    text = chat.name.ifBlank { stringResource(R.string.chatlist_untitled) },
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -1471,7 +1559,10 @@ fun ChatRowContent(
             if (!compact && running) {
                 Spacer(Modifier.height(5.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatusTag("运行中", MaterialTheme.colorScheme.primary)
+                    StatusTag(
+                        stringResource(R.string.chatlist_running),
+                        MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
         }
@@ -1500,7 +1591,7 @@ private fun SelectionCheck(checked: Boolean) {
         if (checked) {
             Icon(
                 imageVector = QwenIcons.check,
-                contentDescription = "已选择",
+                contentDescription = stringResource(R.string.chatlist_selected_desc),
                 modifier = Modifier.size(13.dp),
                 tint = MaterialTheme.colorScheme.onPrimary,
             )
@@ -1565,12 +1656,20 @@ private fun ChatRowMenu(
         onDismissRequest = onDismiss,
     ) {
         androidx.compose.material3.DropdownMenuItem(
-            text = { Text("重命名") },
+            text = { Text(stringResource(R.string.chatlist_group_rename)) },
             leadingIcon = { MenuIcons.Leading(MenuAction.RENAME) },
             onClick = onRename,
         )
         androidx.compose.material3.DropdownMenuItem(
-            text = { Text(if (pinned) "取消置顶" else "置顶") },
+            text = {
+                Text(
+                    if (pinned) {
+                        stringResource(R.string.chatlist_unpin)
+                    } else {
+                        stringResource(R.string.chatlist_pin)
+                    },
+                )
+            },
             leadingIcon = {
                 MenuIcons.Leading(if (pinned) MenuAction.UNPIN else MenuAction.PIN)
             },
@@ -1578,25 +1677,25 @@ private fun ChatRowMenu(
         )
         if (onSetIcon != null) {
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text("设置图标") },
+                text = { Text(stringResource(R.string.chatlist_set_icon)) },
                 leadingIcon = { MenuIcons.Leading(MenuAction.SET_ICON) },
                 onClick = onSetIcon,
             )
         }
         if (onMoveToGroup != null) {
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text("移动到分组") },
+                text = { Text(stringResource(R.string.chatlist_move_to_group)) },
                 leadingIcon = { MenuIcons.Leading(MenuAction.GROUP) },
                 onClick = onMoveToGroup,
             )
         }
         androidx.compose.material3.DropdownMenuItem(
-            text = { Text("归档") },
+            text = { Text(stringResource(R.string.chatlist_archive)) },
             leadingIcon = { MenuIcons.Leading(MenuAction.ARCHIVE) },
             onClick = onArchive,
         )
         androidx.compose.material3.DropdownMenuItem(
-            text = { Text("删除") },
+            text = { Text(stringResource(R.string.action_delete)) },
             leadingIcon = { MenuIcons.Leading(MenuAction.DELETE) },
             onClick = onDelete,
         )
@@ -1623,13 +1722,14 @@ private fun ChatIconDialog(
 ) {
     val currentPreset = remember(chat.id, version) { store?.presetFor(chat.id) }
     val hasImage = remember(chat.id, version) { store?.fileFor(chat.id) != null }
+    val displayName = chat.name.ifBlank { stringResource(R.string.chatlist_untitled) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("对话图标") },
+        title = { Text(stringResource(R.string.chatlist_icon_title)) },
         text = {
             Column {
                 Text(
-                    text = "「${chat.name.ifBlank { "未命名对话" }}」使用哪个图标",
+                    text = stringResource(R.string.chatlist_icon_message, displayName),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1691,19 +1791,25 @@ private fun ChatIconDialog(
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "自选图片会裁剪为正方形并压缩，优先于上面的预设显示。",
+                    text = stringResource(R.string.chatlist_icon_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onPickImage) { Text("从相册选择") }
+            TextButton(onClick = onPickImage) {
+                Text(stringResource(R.string.chatlist_pick_image))
+            }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onReset) { Text("恢复默认") }
-                TextButton(onClick = onDismiss) { Text("取消") }
+                TextButton(onClick = onReset) {
+                    Text(stringResource(R.string.chatlist_reset_icon))
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             }
         },
     )
@@ -1725,10 +1831,19 @@ internal fun timeLabel(chat: ChatSpecDto): String {
     val hhmm = time.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
     return when {
         diffDays == 0 -> hhmm
-        diffDays == 1 -> "昨天 $hhmm"
+        diffDays == 1 -> Texts.get(R.string.chatlist_yesterday, hhmm)
         diffDays in 2..6 -> {
             val weekday = date.dayOfWeek.value // 1=周一 .. 7=周日
-            "周" + "一二三四五六日"[weekday - 1] + " " + hhmm
+            val weekdayRes = when (weekday) {
+                1 -> R.string.chatlist_time_monday
+                2 -> R.string.chatlist_time_tuesday
+                3 -> R.string.chatlist_time_wednesday
+                4 -> R.string.chatlist_time_thursday
+                5 -> R.string.chatlist_time_friday
+                6 -> R.string.chatlist_time_saturday
+                else -> R.string.chatlist_time_sunday
+            }
+            Texts.get(weekdayRes, hhmm)
         }
         else -> date.toString().substring(5) + " " + hhmm
     }

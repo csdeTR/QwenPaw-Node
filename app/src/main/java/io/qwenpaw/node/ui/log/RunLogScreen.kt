@@ -35,8 +35,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.log.LogEntry
 import io.qwenpaw.node.log.LogKind
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
@@ -87,27 +90,27 @@ fun RunLogScreen(
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = QwenIcons.arrowLeft,
-                    contentDescription = "返回",
+                    contentDescription = stringResource(R.string.action_back),
                     tint = MaterialTheme.colorScheme.onSurface,
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "运行日志",
+                    text = stringResource(R.string.runlogui_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "本机客户端日志，${list.size} 条",
+                    text = pluralStringResource(R.plurals.runlogui_subtitle, list.size, list.size),
                     style = MaterialTheme.typography.labelSmall,
                     color = LocalCaptionColor.current,
                 )
             }
-            SmallAction("清空", onClick = onClear)
+            SmallAction(stringResource(R.string.action_clear), onClick = onClear)
             Spacer(Modifier.width(6.dp))
-            SmallAction("导入", onClick = onImport)
+            SmallAction(stringResource(R.string.runlogui_import), onClick = onImport)
             Spacer(Modifier.width(6.dp))
-            SmallAction("导出", onClick = onExport)
+            SmallAction(stringResource(R.string.runlogui_export), onClick = onExport)
             Spacer(Modifier.width(4.dp))
         }
 
@@ -120,7 +123,7 @@ fun RunLogScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "记录日志",
+                text = stringResource(R.string.runlogui_toggle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -155,9 +158,9 @@ fun RunLogScreen(
             ) {
                 Text(
                     text = if (enabled) {
-                        "暂无记录。发起一次对话后即可在此查看。"
+                        stringResource(R.string.runlogui_empty_enabled)
                     } else {
-                        "尚未记录日志。请打开上方的「记录日志」开关。"
+                        stringResource(R.string.runlogui_empty_disabled)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

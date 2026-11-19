@@ -24,8 +24,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.chat.APPROVAL_OPTIONS
 import io.qwenpaw.node.ui.common.AdminTopBar
 
@@ -51,9 +53,9 @@ fun RunningConfigScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             AdminTopBar(
-                title = "运行配置",
+                title = stringResource(R.string.runconfig_title),
                 onBack = onBack,
-                action = "保存",
+                action = stringResource(R.string.action_save),
                 busy = state.saving,
                 onAction = { onSave(form) },
             )
@@ -66,11 +68,11 @@ fun RunningConfigScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp),
         ) {
-            SectionHeader("说明")
+            SectionHeader(stringResource(R.string.runconfig_section_note))
             Card {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "以下配置属于当前智能体。保存时会整份回写，未列出的字段保持不变。",
+                        text = stringResource(R.string.runconfig_note),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -105,30 +107,30 @@ fun RunningConfigScreen(
                 )
             }
 
-            SectionHeader("循环与输入")
+            SectionHeader(stringResource(R.string.runconfig_section_loop))
             Card {
                 Column(modifier = Modifier.padding(14.dp)) {
                     NumberField(
-                        label = "最大迭代次数",
-                        hint = "单轮任务允许的最大推理-行动次数",
+                        label = stringResource(R.string.runconfig_max_iters),
+                        hint = stringResource(R.string.runconfig_max_iters_hint),
                         value = form.maxIters,
                         onValueChange = { form = form.copy(maxIters = it) },
                     )
                     NumberField(
-                        label = "最大输入长度",
-                        hint = "单次请求允许的最大输入长度",
+                        label = stringResource(R.string.runconfig_max_input_length),
+                        hint = stringResource(R.string.runconfig_max_input_length_hint),
                         value = form.maxInputLength,
                         onValueChange = { form = form.copy(maxInputLength = it) },
                     )
                     NumberField(
-                        label = "历史保留长度",
-                        hint = "上下文中保留的历史长度",
+                        label = stringResource(R.string.runconfig_history_length),
+                        hint = stringResource(R.string.runconfig_history_length_hint),
                         value = form.historyMaxLength,
                         onValueChange = { form = form.copy(historyMaxLength = it) },
                     )
                     NumberField(
-                        label = "命令超时（秒）",
-                        hint = "shell 命令允许的最长执行时间",
+                        label = stringResource(R.string.runconfig_shell_timeout),
+                        hint = stringResource(R.string.runconfig_shell_timeout_hint),
                         value = form.shellCommandTimeout,
                         decimal = true,
                         onValueChange = { form = form.copy(shellCommandTimeout = it) },
@@ -136,30 +138,30 @@ fun RunningConfigScreen(
                 }
             }
 
-            SectionHeader("模型调用")
+            SectionHeader(stringResource(R.string.runconfig_section_model))
             Card {
                 Column(modifier = Modifier.padding(14.dp)) {
                     SwitchRow(
-                        title = "自动重试",
-                        subtitle = "模型接口临时失败时自动重试",
+                        title = stringResource(R.string.runconfig_retry_title),
+                        subtitle = stringResource(R.string.runconfig_retry_hint),
                         checked = form.llmRetryEnabled,
                         onCheckedChange = { form = form.copy(llmRetryEnabled = it) },
                     )
                     Divider()
                     NumberField(
-                        label = "最大重试次数",
-                        hint = "仅在开启自动重试时生效",
+                        label = stringResource(R.string.runconfig_max_retries),
+                        hint = stringResource(R.string.runconfig_max_retries_hint),
                         value = form.llmMaxRetries,
                         onValueChange = { form = form.copy(llmMaxRetries = it) },
                     )
                 }
             }
 
-            SectionHeader("审批模式")
+            SectionHeader(stringResource(R.string.runconfig_section_approval))
             Card {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "审批模式作用于该智能体的全部对话。",
+                        text = stringResource(R.string.runconfig_approval_hint),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -176,19 +178,19 @@ fun RunningConfigScreen(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = APPROVAL_OPTIONS.firstOrNull { it.code == form.approvalLevel }?.hint
-                            ?: "未知审批模式",
+                            ?: stringResource(R.string.runconfig_approval_unknown),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            SectionHeader("上下文压缩")
+            SectionHeader(stringResource(R.string.runconfig_section_compact))
             Card {
                 Column(modifier = Modifier.padding(14.dp)) {
                     NumberField(
-                        label = "压缩阈值",
-                        hint = "0 到 1 之间；达到该比例时触发上下文压缩",
+                        label = stringResource(R.string.runconfig_compact_threshold),
+                        hint = stringResource(R.string.runconfig_compact_threshold_hint),
                         value = form.compactThresholdRatio,
                         decimal = true,
                         onValueChange = { form = form.copy(compactThresholdRatio = it) },
@@ -198,7 +200,7 @@ fun RunningConfigScreen(
 
             if (state.notice != null || state.error != null) {
                 Text(
-                    text = "点此清除提示",
+                    text = stringResource(R.string.runconfig_action_clear_notice),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier

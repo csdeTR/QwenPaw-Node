@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.mcp
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.McpClientDto
 import io.qwenpaw.node.data.model.McpPolicyDto
 import io.qwenpaw.node.data.model.McpToolDto
@@ -7,6 +8,7 @@ import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,7 +69,13 @@ class McpViewModel(
 
     fun refresh() {
         val conn = connection() ?: run {
-            _state.update { it.copy(loaded = true, loading = false, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(
+                    loaded = true,
+                    loading = false,
+                    error = Texts.get(R.string.mcp_error_not_connected),
+                )
+            }
             return
         }
         _state.update { it.copy(loading = true, error = null) }
@@ -165,7 +173,11 @@ class McpViewModel(
                         current.copy(
                             clients = current.clients.map { if (it.key == key) updated else it },
                             rowErrors = current.rowErrors - key,
-                            notice = if (updated.enabled) "已启用「${updated.name}」" else "已停用「${updated.name}」",
+                            notice = if (updated.enabled) {
+                                Texts.get(R.string.mcp_notice_enabled, updated.name)
+                            } else {
+                                Texts.get(R.string.mcp_notice_disabled, updated.name)
+                            },
                             tools = if (!updated.enabled) emptyList() else current.tools,
                             draftEnabled = if (!updated.enabled) emptySet() else current.draftEnabled,
                             toolsDirty = false,
@@ -215,7 +227,7 @@ class McpViewModel(
                             draftEnabled = list.filter { it.enabled }.map { it.name }.toSet(),
                             toolsDirty = false,
                             savingTools = false,
-                            notice = "工具白名单已保存",
+                            notice = Texts.get(R.string.mcp_notice_tools_saved),
                             // 客户端卡片上的 `tools` 也要同步，否则重进详情时勾选会回退。
                             clients = state.clients.map { client ->
                                 if (client.key == key) client.copy(tools = payload) else client
@@ -269,7 +281,7 @@ class McpViewModel(
                         state.copy(
                             policy = saved,
                             savingPolicy = false,
-                            notice = "访问策略已保存",
+                            notice = Texts.get(R.string.mcp_notice_policy_saved),
                             clients = state.clients.map { client ->
                                 if (client.key == key) {
                                     client.copy(
@@ -307,7 +319,7 @@ class McpViewModel(
     private fun toolsFailureText(e: Throwable): String {
         val ex = e as? ApiException ?: return ErrorText.of(e)
         return when (ex.code) {
-            502 -> "无法读取工具列表：MCP 服务端没有响应。请确认它在服务端可访问后重试。"
+            502 -> Texts.get(R.string.mcp_error_tools_unreachable)
             else -> ErrorText.of(e)
         }
     }

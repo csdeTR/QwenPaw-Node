@@ -5,7 +5,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.transcription.TranscriptionStatus
+import io.qwenpaw.node.ui.i18n.Texts
 
 /**
  * 点击麦克风但本地识别模型尚未下载时的一级提示。
@@ -21,20 +24,19 @@ fun VoiceModelRequiredDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("需要先下载识别模型") },
+        title = { Text(stringResource(R.string.voicegate_model_required_title)) },
         text = {
             Text(
-                text = "本地识别要用本机模型，当前尚未下载。模型约 150MB，只需下载一次，" +
-                    "之后音频只在本机处理。也可以在设置中改用服务端转写。",
+                text = stringResource(R.string.voicegate_model_required_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         },
         confirmButton = {
-            TextButton(onClick = onGoToSettings) { Text("去设置") }
+            TextButton(onClick = onGoToSettings) { Text(stringResource(R.string.voicegate_go_settings)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
         },
     )
 }
@@ -68,17 +70,17 @@ fun VoiceUnavailableDialog(
         },
         confirmButton = {
             // 按钮文案用「关闭」而非「以后再说」，避免暗示「稍后会自动提醒」。
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
         },
     )
 }
 
 private fun titleOf(status: TranscriptionStatus): String = when (status) {
-    TranscriptionStatus.Disabled -> "服务端未启用语音转写"
-    TranscriptionStatus.Misconfigured -> "服务端转写缺少配置"
-    TranscriptionStatus.Unsupported -> "当前服务端版本不支持语音转写"
-    TranscriptionStatus.Unknown -> "无法确认转写服务"
-    TranscriptionStatus.Ready -> "语音转写可用"
+    TranscriptionStatus.Disabled -> Texts.get(R.string.voicegate_title_disabled)
+    TranscriptionStatus.Misconfigured -> Texts.get(R.string.voicegate_title_misconfigured)
+    TranscriptionStatus.Unsupported -> Texts.get(R.string.voicegate_title_unsupported)
+    TranscriptionStatus.Unknown -> Texts.get(R.string.voicegate_title_unknown)
+    TranscriptionStatus.Ready -> Texts.get(R.string.voicegate_title_ready)
 }
 
 /**
@@ -89,16 +91,15 @@ private fun titleOf(status: TranscriptionStatus): String = when (status) {
  */
 private fun bodyOf(status: TranscriptionStatus): String = when (status) {
     TranscriptionStatus.Disabled ->
-        "服务端关闭了语音转写。在 QwenPaw 服务端的设置中启用转写服务并选定提供商后，此处即可使用。"
+        Texts.get(R.string.voicegate_body_disabled)
     TranscriptionStatus.Misconfigured ->
-        "服务端已开启语音转写，但没有选定可用的提供商，或本地转写缺少依赖。" +
-            "在 QwenPaw 服务端的设置中补齐转写配置后重试。"
+        Texts.get(R.string.voicegate_body_misconfigured)
     TranscriptionStatus.Unsupported ->
-        "这个服务端版本没有语音转写接口，需要升级 QwenPaw 服务端。"
+        Texts.get(R.string.voicegate_body_unsupported)
     TranscriptionStatus.Unknown ->
-        "暂时无法确认服务端是否提供语音转写，请检查连接后重试。"
+        Texts.get(R.string.voicegate_body_unknown)
     TranscriptionStatus.Ready ->
-        "可以录音并转写。"
+        Texts.get(R.string.voicegate_body_ready)
 }
 
 /**
@@ -113,20 +114,19 @@ fun HideVoiceButtonDialog(
 ) {
     AlertDialog(
         onDismissRequest = onKeep,
-        title = { Text("是否隐藏语音按钮") },
+        title = { Text(stringResource(R.string.voicegate_hide_title)) },
         text = {
             Text(
-                text = "隐藏后输入框不再显示麦克风，「显示语音按钮」开关将同时关闭；" +
-                    "需要时可在此重新开启。",
+                text = stringResource(R.string.voicegate_hide_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         },
         confirmButton = {
-            TextButton(onClick = onHide) { Text("隐藏") }
+            TextButton(onClick = onHide) { Text(stringResource(R.string.voicegate_hide_confirm)) }
         },
         dismissButton = {
-            TextButton(onClick = onKeep) { Text("保留") }
+            TextButton(onClick = onKeep) { Text(stringResource(R.string.voicegate_hide_keep)) }
         },
     )
 }

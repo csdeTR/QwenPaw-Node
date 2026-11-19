@@ -1,11 +1,13 @@
 package io.qwenpaw.node.ui.checkpoint
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.CheckpointNodeDto
 import io.qwenpaw.node.data.model.CheckpointSessionDto
 import io.qwenpaw.node.data.model.GcRequestDto
 import io.qwenpaw.node.data.model.GcSettingsDto
 import io.qwenpaw.node.data.model.RestoreCheckpointRequestDto
 import io.qwenpaw.node.data.model.RestoreResultDto
+import io.qwenpaw.node.ui.i18n.Texts
 
 /** 时间线分组。组内节点按时间倒序，最多保留 [CHECKPOINT_GROUP_LIMIT] 条。 */
 data class CheckpointGroup(
@@ -53,10 +55,10 @@ fun groupCheckpointNodes(
 
 /** 节点类型的中文标签。未知类型原样显示，便于排查服务端新增的类型。 */
 fun checkpointKindLabel(kind: String): String = when (kind) {
-    "auto" -> "自动"
-    "snap" -> "手动"
-    "pre-restore" -> "恢复前"
-    "sha" -> "提交"
+    "auto" -> Texts.get(R.string.checkpoint_kind_auto)
+    "snap" -> Texts.get(R.string.checkpoint_kind_manual)
+    "pre-restore" -> Texts.get(R.string.checkpoint_kind_pre_restore)
+    "sha" -> Texts.get(R.string.checkpoint_kind_commit)
     else -> kind
 }
 
@@ -99,29 +101,29 @@ data class CheckpointRestoreDraft(
         val name = node.name.takeIf { it.isNotBlank() }
             ?: node.subject.takeIf { it.isNotBlank() }
             ?: node.sha.take(7)
-        lines += "回滚目标：$name（${node.sha.take(7)}）"
+        lines += Texts.get(R.string.checkpoint_impact_target, name, node.sha.take(7))
         lines += if (includeMemory) {
-            "会话记忆：恢复到该检查点"
+            Texts.get(R.string.checkpoint_impact_memory_restore)
         } else {
-            "会话记忆：保持不变"
+            Texts.get(R.string.checkpoint_impact_memory_keep)
         }
         lines += if (!includeFiles) {
-            "工作区文件：保持不变"
+            Texts.get(R.string.checkpoint_impact_files_keep)
         } else if (selectedFiles.isEmpty()) {
-            "工作区文件：尚未选择"
+            Texts.get(R.string.checkpoint_impact_files_unselected)
         } else {
-            "工作区文件：恢复 ${selectedFiles.size} 个"
+            Texts.get(R.string.checkpoint_impact_files_restore, selectedFiles.size)
         }
         if (preview != null) {
             if (preview.deletedPaths.isNotEmpty()) {
-                lines += "将删除该检查点之后新增的 ${preview.deletedPaths.size} 个文件。"
+                lines += Texts.get(R.string.checkpoint_impact_delete_files, preview.deletedPaths.size)
             }
             if (preview.preRestoreRef != null) {
-                lines += "服务端会先创建恢复前快照，可从检查点回滚本次操作。"
+                lines += Texts.get(R.string.checkpoint_impact_pre_restore)
             }
         }
         if (!canApply) {
-            lines += "至少选择会话记忆或工作区文件之一。"
+            lines += Texts.get(R.string.checkpoint_impact_need_scope)
         }
         return lines
     }
@@ -157,12 +159,24 @@ data class GcDraft(
 
     /** 校验失败时的说明；合法时返回 null。 */
     fun validationError(): String? {
-        if (keepCount.trim().toIntOrNull() == null) return "保留数量需为整数"
-        if (keepDays.trim().toIntOrNull() == null) return "保留天数需为整数"
-        if (preRestoreDays.trim().toIntOrNull() == null) return "恢复前快照保留天数需为整数"
-        if (keepCount.trim().toInt() !in 0..1_000_000) return "保留数量需在 0 到 1000000 之间"
-        if (keepDays.trim().toInt() !in 0..36_500) return "保留天数需在 0 到 36500 之间"
-        if (preRestoreDays.trim().toInt() !in 0..36_500) return "恢复前快照保留天数需在 0 到 36500 之间"
+        if (keepCount.trim().toIntOrNull() == null) {
+            return Texts.get(R.string.checkpoint_gc_error_keep_count_int)
+        }
+        if (keepDays.trim().toIntOrNull() == null) {
+            return Texts.get(R.string.checkpoint_gc_error_keep_days_int)
+        }
+        if (preRestoreDays.trim().toIntOrNull() == null) {
+            return Texts.get(R.string.checkpoint_gc_error_pre_restore_days_int)
+        }
+        if (keepCount.trim().toInt() !in 0..1_000_000) {
+            return Texts.get(R.string.checkpoint_gc_error_keep_count_range)
+        }
+        if (keepDays.trim().toInt() !in 0..36_500) {
+            return Texts.get(R.string.checkpoint_gc_error_keep_days_range)
+        }
+        if (preRestoreDays.trim().toInt() !in 0..36_500) {
+            return Texts.get(R.string.checkpoint_gc_error_pre_restore_days_range)
+        }
         return null
     }
 

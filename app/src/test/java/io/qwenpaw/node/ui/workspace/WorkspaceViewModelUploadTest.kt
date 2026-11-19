@@ -1,4 +1,5 @@
 package io.qwenpaw.node.ui.workspace
+import io.qwenpaw.node.TestTexts
 
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.DownloadClient
@@ -37,6 +38,7 @@ class WorkspaceViewModelUploadTest {
 
     @Before
     fun setUp() {
+        TestTexts.install()
         Dispatchers.setMain(Dispatchers.Unconfined)
         server = MockWebServer()
         server.start()

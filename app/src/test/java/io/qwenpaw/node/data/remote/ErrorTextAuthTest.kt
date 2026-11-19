@@ -1,9 +1,11 @@
 package io.qwenpaw.node.data.remote
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -14,6 +16,11 @@ import org.junit.Test
  * 怎么失效了」——文案把人引向一个不存在状态。
  */
 class ErrorTextAuthTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     @Test
     fun `www-authenticate basic wins over detail`() {

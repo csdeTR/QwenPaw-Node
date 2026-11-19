@@ -16,9 +16,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
@@ -40,7 +42,7 @@ fun DestructiveActionDialog(
     title: String,
     message: String,
     impacts: List<String> = emptyList(),
-    confirmLabel: String = "删除",
+    confirmLabel: String = stringResource(R.string.action_delete),
     undoable: Boolean = false,
     confirmDanger: Boolean = true,
     onConfirm: () -> Unit,
@@ -69,7 +71,11 @@ fun DestructiveActionDialog(
                 if (impacts.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        text = if (undoable) "将影响以下内容（可撤销）" else "将影响以下内容（不可撤销）",
+                        text = if (undoable) {
+                            stringResource(R.string.common_impact_undoable)
+                        } else {
+                            stringResource(R.string.common_impact_permanent)
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
                         color = if (undoable) {
@@ -116,7 +122,7 @@ fun DestructiveActionDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }

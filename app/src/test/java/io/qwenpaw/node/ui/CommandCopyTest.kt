@@ -1,10 +1,12 @@
 package io.qwenpaw.node.ui
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -15,6 +17,11 @@ import org.junit.Test
  * 用户就会在候选列表里看到一条本不该出现的 dump_history。
  */
 class CommandCopyTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     /** 服务端 `GET /api/workspace/commands/available` 在 2.2.2.post1 上实测的全部命令名。 */
     private val serverCommands = listOf(

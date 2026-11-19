@@ -1,9 +1,12 @@
 package io.qwenpaw.node.ui.settings
 
+import androidx.annotation.StringRes
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.chat.APPROVAL_OPTIONS
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -78,31 +81,44 @@ internal object RunningConfigEdit {
 
     /** 返回需要展示给用户的错误；null 表示可以提交。 */
     fun validate(form: RunningConfigForm): String? {
-        nonNegativeInt(form.maxIters, "最大迭代次数", allowZero = false)?.let { return it }
-        nonNegativeInt(form.maxInputLength, "最大输入长度", allowZero = true)?.let { return it }
-        nonNegativeInt(form.historyMaxLength, "历史保留长度", allowZero = true)?.let { return it }
+        nonNegativeInt(form.maxIters, R.string.runconfig_max_iters, allowZero = false)?.let { return it }
+        nonNegativeInt(
+            form.maxInputLength,
+            R.string.runconfig_max_input_length,
+            allowZero = true,
+        )?.let { return it }
+        nonNegativeInt(
+            form.historyMaxLength,
+            R.string.runconfig_history_length,
+            allowZero = true,
+        )?.let { return it }
         val timeout = form.shellCommandTimeout.trim()
         if (timeout.isNotEmpty()) {
             val value = timeout.toDoubleOrNull()
-                ?: return "命令超时必须是数字"
-            if (value <= 0) return "命令超时必须大于 0"
+                ?: return Texts.get(R.string.runconfig_error_timeout_nan)
+            if (value <= 0) return Texts.get(R.string.runconfig_error_timeout_positive)
         }
-        nonNegativeInt(form.llmMaxRetries, "重试次数", allowZero = true)?.let { return it }
-        if (APPROVAL_OPTIONS.none { it.code == form.approvalLevel }) return "审批模式取值无效"
+        nonNegativeInt(form.llmMaxRetries, R.string.runconfig_retries_label, allowZero = true)
+            ?.let { return it }
+        if (APPROVAL_OPTIONS.none { it.code == form.approvalLevel }) {
+            return Texts.get(R.string.runconfig_error_approval_invalid)
+        }
         val ratio = form.compactThresholdRatio.trim()
         if (ratio.isNotEmpty()) {
-            val value = ratio.toDoubleOrNull() ?: return "上下文压缩阈值必须是数字"
-            if (value < 0 || value > 1) return "上下文压缩阈值应在 0 到 1 之间"
+            val value = ratio.toDoubleOrNull()
+                ?: return Texts.get(R.string.runconfig_error_ratio_nan)
+            if (value < 0 || value > 1) return Texts.get(R.string.runconfig_error_ratio_range)
         }
         return null
     }
 
-    private fun nonNegativeInt(text: String, label: String, allowZero: Boolean): String? {
+    private fun nonNegativeInt(text: String, @StringRes labelRes: Int, allowZero: Boolean): String? {
         val value = text.trim()
         if (value.isEmpty()) return null
-        val parsed = value.toIntOrNull() ?: return "$label 必须是整数"
+        val parsed = value.toIntOrNull()
+            ?: return Texts.get(R.string.runconfig_error_must_be_int, Texts.get(labelRes))
         val min = if (allowZero) 0 else 1
-        if (parsed < min) return "$label 不能小于 $min"
+        if (parsed < min) return Texts.get(R.string.runconfig_error_min, Texts.get(labelRes), min)
         return null
     }
 

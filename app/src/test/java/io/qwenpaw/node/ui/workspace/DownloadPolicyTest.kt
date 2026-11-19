@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.workspace
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -8,6 +10,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DownloadPolicyTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     @Test
     fun `100 MB boundary triggers warning`() {

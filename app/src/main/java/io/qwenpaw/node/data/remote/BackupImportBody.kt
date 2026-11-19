@@ -3,6 +3,8 @@ package io.qwenpaw.node.data.remote
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType
@@ -69,7 +71,9 @@ class SafZipSource private constructor(
                     fileName = displayName,
                     length = size,
                     openStream = {
-                        resolver.openInputStream(uri) ?: throw IOException("无法读取所选文件")
+                        resolver.openInputStream(uri) ?: throw IOException(
+                            Texts.get(R.string.backupbody_read_failed),
+                        )
                     },
                     tempFile = null,
                 )
@@ -79,7 +83,7 @@ class SafZipSource private constructor(
             try {
                 resolver.openInputStream(uri)?.use { input ->
                     temp.outputStream().use { output -> input.copyTo(output) }
-                } ?: throw IOException("无法读取所选文件")
+                } ?: throw IOException(Texts.get(R.string.backupbody_read_failed))
             } catch (e: IOException) {
                 temp.delete()
                 throw e

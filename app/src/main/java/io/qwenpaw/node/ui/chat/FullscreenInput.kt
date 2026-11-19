@@ -34,7 +34,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
@@ -84,7 +87,7 @@ fun FullscreenInput(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "全屏输入",
+                    text = stringResource(R.string.chatfull_title),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -97,7 +100,7 @@ fun FullscreenInput(
                 ) {
                     Icon(
                         imageVector = QwenIcons.close,
-                        contentDescription = "关闭",
+                        contentDescription = stringResource(R.string.action_close),
                         modifier = Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -112,7 +115,7 @@ fun FullscreenInput(
             ) {
                 if (draft.isEmpty()) {
                     Text(
-                        text = "输入消息",
+                        text = stringResource(R.string.chatfull_placeholder),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -132,7 +135,11 @@ fun FullscreenInput(
 
             if (attachments.isNotEmpty()) {
                 Text(
-                    text = "已附加 ${attachments.size} 个文件",
+                    text = pluralStringResource(
+                        R.plurals.chatfull_attachments,
+                        attachments.size,
+                        attachments.size,
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 6.dp),
@@ -157,7 +164,7 @@ fun FullscreenInput(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "发送",
+                        text = stringResource(R.string.chatfull_send),
                         style = MaterialTheme.typography.labelLarge,
                         color = if (canSend) MaterialTheme.colorScheme.onPrimary
                         else MaterialTheme.colorScheme.onSurfaceVariant,

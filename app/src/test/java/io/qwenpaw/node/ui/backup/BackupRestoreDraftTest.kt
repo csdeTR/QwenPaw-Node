@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.backup
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import io.qwenpaw.node.data.model.BackupAgentStatsDto
 import io.qwenpaw.node.data.model.BackupDetailDto
@@ -16,6 +18,11 @@ import org.junit.Test
  * 备份不含密钥时不能把开关值带进请求；full 模式必须提示会移除新建智能体。
  */
 class BackupRestoreDraftTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private fun detail(scope: BackupScopeDto = BackupScopeDto()) = BackupDetailDto(
         id = "b1",

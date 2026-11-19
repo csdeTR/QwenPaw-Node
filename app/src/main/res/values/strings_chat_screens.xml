@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 对话列表 ChatListScreen -->
+    <string name="chatlist_new_chat">新建对话</string>
+    <string name="chatlist_empty_no_chats">还没有对话</string>
+    <string name="chatlist_empty_no_match">没有匹配的对话</string>
+    <string name="chatlist_empty_no_channel">该频道没有对话</string>
+    <string name="chatlist_empty_hint_create">点击下方按钮即可新建对话</string>
+    <string name="chatlist_empty_hint_query">请更换关键词后重试</string>
+    <string name="chatlist_empty_hint_channel">请切换到「全部」或其它频道</string>
+    <string name="chatlist_rename_title">重命名对话</string>
+    <string name="chatlist_delete_title">删除对话</string>
+    <string name="chatlist_delete_message">删除后无法恢复，确定要删除「%1$s」吗？</string>
+    <string name="chatlist_delete_impact_messages">该对话的全部消息记录</string>
+    <string name="chatlist_delete_impact_files">与这些消息一同保存的图片与文件引用</string>
+    <string name="chatlist_delete_impact_cache">本机为该对话缓存的离线历史</string>
+    <string name="chatlist_batch_delete_impact_cache">本机为这些对话缓存的离线历史</string>
+    <string name="chatlist_move_to_group">移动到分组</string>
+    <string name="chatlist_ungrouped">未分组</string>
+    <string name="chatlist_archive_title">归档对话</string>
+    <string name="chatlist_archive_message">归档后可在「已归档」中恢复，确定归档「%1$s」吗？</string>
+    <string name="chatlist_archive">归档</string>
+    <string name="chatlist_batch_delete_title">批量删除</string>
+    <string name="chatlist_batch_archive_title">批量归档</string>
+    <string name="chatlist_archive_tip">今日不再提示</string>
+    <string name="chatlist_group_create_title">新建分组</string>
+    <string name="chatlist_group_name">分组名称</string>
+    <string name="chatlist_group_create">创建</string>
+    <string name="chatlist_group_menu_hint">可重命名、调整顺序或删除该分组；删除后组内对话将移回「未分组」。</string>
+    <string name="chatlist_group_move_up">上移</string>
+    <string name="chatlist_group_move_down">下移</string>
+    <string name="chatlist_group_order_fixed">内置分组的顺序固定，不可调整</string>
+    <string name="chatlist_group_rename">重命名</string>
+    <string name="chatlist_group_rename_title">重命名分组</string>
+    <string name="chatlist_group_delete_title">删除分组</string>
+    <string name="chatlist_group_delete_message">删除「%1$s」后，组内对话会移回「未分组」，对话本身不会被删除。</string>
+    <string name="chatlist_select_chats">选择对话</string>
+    <string name="chatlist_select_all">全选</string>
+    <string name="chatlist_deselect_all">取消全选</string>
+    <string name="chatlist_back_to_chat">返回聊天</string>
+    <string name="chatlist_title">对话</string>
+    <string name="chatlist_search_hint">搜索对话名称</string>
+    <string name="chatlist_search_clear">清空搜索</string>
+    <string name="chatlist_inbox">收件箱</string>
+    <string name="chatlist_token_usage">用量统计</string>
+    <string name="chatlist_batch_manage">批量管理</string>
+    <string name="chatlist_terminal">终端</string>
+    <string name="chatlist_settings">设置</string>
+    <string name="chatlist_full_search">全文检索</string>
+    <string name="chatlist_need_plugin">需要配套插件</string>
+    <string name="chatlist_channel_all">全部</string>
+    <string name="chatlist_collapsed">已折叠</string>
+    <string name="chatlist_expand_desc">已折叠，点击展开</string>
+    <string name="chatlist_collapse_desc">点击折叠</string>
+    <string name="chatlist_pinned_desc">已置顶</string>
+    <string name="chatlist_untitled">未命名对话</string>
+    <string name="chatlist_running">运行中</string>
+    <string name="chatlist_selected_desc">已选择</string>
+    <string name="chatlist_pin">置顶</string>
+    <string name="chatlist_unpin">取消置顶</string>
+    <string name="chatlist_set_icon">设置图标</string>
+    <string name="chatlist_icon_title">对话图标</string>
+    <string name="chatlist_icon_message">「%1$s」使用哪个图标</string>
+    <string name="chatlist_icon_hint">自选图片会裁剪为正方形并压缩，优先于上面的预设显示。</string>
+    <string name="chatlist_pick_image">从相册选择</string>
+    <string name="chatlist_reset_icon">恢复默认</string>
+    <string name="chatlist_yesterday">昨天 %1$s</string>
+    <string name="chatlist_time_monday">周一 %1$s</string>
+    <string name="chatlist_time_tuesday">周二 %1$s</string>
+    <string name="chatlist_time_wednesday">周三 %1$s</string>
+    <string name="chatlist_time_thursday">周四 %1$s</string>
+    <string name="chatlist_time_friday">周五 %1$s</string>
+    <string name="chatlist_time_saturday">周六 %1$s</string>
+    <string name="chatlist_time_sunday">周日 %1$s</string>
+    <plurals name="chatlist_selected_count">
+        <item quantity="other">已选 %1$d 个</item>
+    </plurals>
+    <plurals name="chatlist_total_count">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <plurals name="chatlist_inbox_unread">
+        <item quantity="other">收件箱 %1$d 条未读</item>
+    </plurals>
+    <plurals name="chatlist_archived_count">
+        <item quantity="other">已归档 %1$d 个</item>
+    </plurals>
+    <plurals name="chatlist_batch_delete_message">
+        <item quantity="other">将删除选中的 %1$d 个对话，删除后无法恢复。</item>
+    </plurals>
+    <plurals name="chatlist_batch_delete_impact_messages">
+        <item quantity="other">共 %1$d 个对话的全部消息记录</item>
+    </plurals>
+    <plurals name="chatlist_batch_delete_confirm">
+        <item quantity="other">删除 %1$d 个对话</item>
+    </plurals>
+    <plurals name="chatlist_batch_archive_message">
+        <item quantity="other">将归档选中的 %1$d 个对话，之后可在「已归档」中恢复。正在运行的对话会被跳过。</item>
+    </plurals>
+
+    <!-- 聊天页顶栏 ChatTopBar -->
+    <string name="chattop_chat_list_desc">对话列表</string>
+    <string name="chattop_new_chat">新对话</string>
+    <string name="chattop_generating">正在生成</string>
+    <string name="chattop_link_offline">连接中断，点击重连</string>
+    <string name="chattop_link_connecting">正在连接…</string>
+    <string name="chattop_more">更多</string>
+    <string name="chattop_refresh">刷新对话</string>
+    <string name="chattop_rename">重命名对话</string>
+    <string name="chattop_unpin">取消置顶</string>
+    <string name="chattop_pin">置顶对话</string>
+    <string name="chattop_move_to_group">移动到分组</string>
+    <string name="chattop_export">分享 Markdown</string>
+    <string name="chattop_archive">归档对话</string>
+    <string name="chattop_delete">删除对话</string>
+    <string name="chattop_connected">已连接</string>
+    <string name="chattop_connected_to_named">已连接至「%1$s」</string>
+    <string name="chattop_connected_via_named">已通过 %1$s 连接至「%2$s」</string>
+    <string name="chattop_connected_via_default">已通过 %1$s 连接至 QwenPaw</string>
+    <string name="chattop_connected_via_alias_named">已通过「%1$s」连接至「%2$s」</string>
+    <string name="chattop_connected_via_alias_default">已通过「%1$s」连接至 QwenPaw</string>
+    <string name="chattop_thinking_inherit">跟随默认</string>
+    <string name="chattop_thinking_off">关闭思考</string>
+    <string name="chattop_thinking_minimal">极低</string>
+    <string name="chattop_thinking_low">低</string>
+    <string name="chattop_thinking_medium">中</string>
+    <string name="chattop_thinking_high">高</string>
+    <string name="chattop_thinking_xhigh">极高</string>
+    <string name="chattop_thinking_max">最高</string>
+    <string name="chattop_thinking_budget">预算</string>
+    <string name="chattop_approval_strict">严格</string>
+    <string name="chattop_approval_strict_hint">每次工具调用和外部文件访问前均需审批</string>
+    <string name="chattop_approval_smart">智能</string>
+    <string name="chattop_approval_smart_hint">低风险工具调用和外部文件访问操作自动执行，中高风险需审批</string>
+    <string name="chattop_approval_auto">自动</string>
+    <string name="chattop_approval_auto_hint">仅命中工具和文件审批规则的操作需审批（默认）</string>
+    <string name="chattop_approval_off">关闭防护</string>
+    <string name="chattop_approval_off_hint">关闭工具和文件审批</string>
+    <string name="chattop_approval_unknown">未知</string>
+
+    <!-- 已归档列表 ArchivedScreen -->
+    <string name="chatarchive_title">已归档</string>
+    <string name="chatarchive_select">选择</string>
+    <string name="chatarchive_untitled">未命名对话</string>
+    <string name="chatarchive_empty_title">还没有归档的对话</string>
+    <string name="chatarchive_empty_hint">在对话列表中长按对话即可归档</string>
+    <string name="chatarchive_delete_title">删除对话</string>
+    <string name="chatarchive_delete_message">删除后无法恢复，确定要删除「%1$s」吗？</string>
+    <string name="chatarchive_delete_impact_messages">该对话的全部消息记录</string>
+    <string name="chatarchive_delete_impact_files">与这些消息一同保存的图片与文件引用</string>
+    <string name="chatarchive_delete_impact_cache">本机为该对话缓存的离线历史</string>
+    <string name="chatarchive_batch_delete_message">删除后无法恢复。</string>
+    <string name="chatarchive_batch_delete_impact_cache">本机为它们缓存的离线历史</string>
+    <string name="chatarchive_select_chats">选择对话</string>
+    <string name="chatarchive_select_all">全选</string>
+    <string name="chatarchive_deselect_all">取消全选</string>
+    <string name="chatarchive_restore">恢复</string>
+    <plurals name="chatarchive_selected_count">
+        <item quantity="other">已选 %1$d 个</item>
+    </plurals>
+    <plurals name="chatarchive_total_count">
+        <item quantity="other">%1$d 个</item>
+    </plurals>
+    <plurals name="chatarchive_batch_delete_title">
+        <item quantity="other">删除 %1$d 个对话</item>
+    </plurals>
+    <plurals name="chatarchive_batch_delete_impact_messages">
+        <item quantity="other">这 %1$d 个对话的全部消息记录</item>
+    </plurals>
+
+    <!-- 全文检索 SearchScreen -->
+    <string name="chatsearch_title">全文检索</string>
+    <string name="chatsearch_hint">搜索所有对话的内容</string>
+    <string name="chatsearch_empty_prompt">输入关键词后按回车开始检索。</string>
+    <string name="chatsearch_empty_result">没有找到包含该关键词的消息。</string>
+    <string name="chatsearch_load_more">加载更多</string>
+    <string name="chatsearch_end">已经到底了</string>
+    <string name="chatsearch_session">会话 %1$s</string>
+    <string name="chatsearch_role_user">我</string>
+    <string name="chatsearch_role_assistant">助手</string>
+    <plurals name="chatsearch_total_hits">
+        <item quantity="other">共 %1$d 条命中</item>
+    </plurals>
+
+    <!-- 分组 ChatGrouping -->
+    <string name="chatgroup_mode_time">按时间</string>
+    <string name="chatgroup_mode_source">按来源</string>
+    <string name="chatgroup_mode_none">不分组</string>
+    <string name="chatgroup_pinned">置顶</string>
+    <string name="chatgroup_ungrouped">未分组</string>
+    <string name="chatgroup_today">今天</string>
+    <string name="chatgroup_recent">近 7 天</string>
+    <string name="chatgroup_earlier">更早</string>
+    <string name="chatgroup_cron">定时任务对话</string>
+    <string name="chatgroup_subagents">子智能体对话</string>
+
+    <!-- 输入条 ChatInputBar -->
+    <string name="chatinput_placeholder">输入消息</string>
+    <string name="chatinput_thinking_strength">思考强度</string>
+    <string name="chatinput_thinking_strength_value">思考强度：%1$s</string>
+    <string name="chatinput_voice_hold">按住说话</string>
+    <string name="chatinput_voice_tap">点击开始录音</string>
+    <string name="chatinput_more">更多输入方式</string>
+    <string name="chatinput_attach">添加附件</string>
+    <string name="chatinput_magic_commands">魔法命令</string>
+    <string name="chatinput_approval_mode">审批模式</string>
+    <string name="chatinput_fullscreen">全屏输入</string>
+    <string name="chatinput_workspace">智能体工作区</string>
+    <string name="chatinput_send">发送</string>
+    <string name="chatinput_remove_attachment">移除附件</string>
+
+    <!-- 空对话首页 EmptyChatHome -->
+    <string name="chatempty_confirm_title">发送这条消息？</string>
+    <string name="chatempty_send">发送</string>
+    <string name="chatempty_greeting">你好，我今天能帮你做什么？</string>
+    <string name="chatempty_intro">我是一个智能助手，可以帮助你解答问题。</string>
+    <string name="chatempty_preset_journey">让我们开启一段新的旅程吧！</string>
+    <string name="chatempty_preset_skills">能告诉我你有哪些技能吗？</string>
+
+    <!-- 全屏输入 FullscreenInput -->
+    <string name="chatfull_title">全屏输入</string>
+    <string name="chatfull_placeholder">输入消息</string>
+    <string name="chatfull_send">发送</string>
+    <plurals name="chatfull_attachments">
+        <item quantity="other">已附加 %1$d 个文件</item>
+    </plurals>
+
+    <!-- 智能体工作区 ProjectDirDialog -->
+    <string name="chatdir_title">智能体工作区</string>
+    <string name="chatdir_desc">智能体在这个目录下读写文件。这里填的是服务端上的绝对路径，不是手机路径。</string>
+    <string name="chatdir_is_default">当前为工作区默认目录</string>
+    <string name="chatdir_is_custom">当前为自定义目录</string>
+    <string name="chatdir_reset">恢复工作区默认目录</string>
+    <string name="chatdir_browse">浏览目录</string>
+    <string name="chatdir_parent">上级</string>
+    <string name="chatdir_error">无法读取这个目录，可能不存在或没有权限</string>
+    <string name="chatdir_empty">这个目录下没有子目录</string>
+    <string name="chatdir_use">使用此目录</string>
+
+    <!-- 魔法命令 MagicCommandsDialog -->
+    <string name="chatcmd_title">魔法命令</string>
+    <string name="chatcmd_hint">点按填入输入框，长按查看用法</string>
+    <string name="chatcmd_empty">没有读取到命令列表。可以在输入框直接输入斜杠命令。</string>
+    <string name="chatcmd_other">其他</string>
+    <string name="chatcmd_section_action">作用</string>
+    <string name="chatcmd_no_description">服务端未提供这条命令的说明。</string>
+    <string name="chatcmd_section_example">示例</string>
+
+    <!-- 聊天页 ChatScreen -->
+    <string name="chatscreen_rename_title">重命名对话</string>
+    <string name="chatscreen_delete_title">删除对话</string>
+    <string name="chatscreen_delete_message">删除后无法恢复，确定要删除这个对话吗？</string>
+    <string name="chatscreen_delete_impact_messages">对话「%1$s」的全部消息</string>
+    <string name="chatscreen_untitled">未命名对话</string>
+    <string name="chatscreen_delete_impact_files">与这些消息一同保存的图片与文件引用</string>
+    <string name="chatscreen_delete_impact_cache">本机为该对话缓存的离线历史</string>
+    <string name="chatscreen_model_title">切换模型</string>
+    <string name="chatscreen_model_empty">当前服务端未配置可用模型</string>
+    <string name="chatscreen_model_default">跟随智能体默认</string>
+    <string name="chatscreen_approval_title">审批模式</string>
+    <string name="chatscreen_move_to_group">移动到分组</string>
+    <string name="chatscreen_ungrouped">未分组</string>
+    <string name="chatscreen_jump_latest">跳到最新</string>
+    <string name="chatscreen_loading_earlier">正在加载更早的消息</string>
+    <string name="chatscreen_scroll_earlier">向上滑动可查看更早的消息</string>
+    <string name="chatscreen_generating">正在生成</string>
+    <string name="chatscreen_close_error">关闭提示</string>
+</resources>

@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.settings
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -16,6 +18,11 @@ import org.junit.Test
  * 以及数字输入的校验在提交前就把明显错误拦住。
  */
 class RunningConfigEditTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
 

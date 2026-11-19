@@ -40,10 +40,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.chat.MarkdownText
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
@@ -133,7 +136,11 @@ fun SkillsScreen(
                     .statusBarsPadding(),
             ) {
                 PageTopBar(
-                    title = if (page == SkillPage.LIST) "技能" else "技能详情",
+                    title = if (page == SkillPage.LIST) {
+                        stringResource(R.string.skills_title)
+                    } else {
+                        stringResource(R.string.skills_title_detail)
+                    },
                     onBack = {
                         if (page == SkillPage.DETAIL) {
                             page = SkillPage.LIST
@@ -142,7 +149,11 @@ fun SkillsScreen(
                             onBack()
                         }
                     },
-                    action = if (page == SkillPage.LIST) "新建" else null,
+                    action = if (page == SkillPage.LIST) {
+                        stringResource(R.string.skills_action_new)
+                    } else {
+                        null
+                    },
                     onAction = { creating = true },
                 )
                 Box(
@@ -159,7 +170,7 @@ fun SkillsScreen(
                 // 编辑态整页交给编辑器：它有顶栏与保存按钮，再套一层页面壳会多出一条返回。
                 state.edit != null -> PlainTextEditor(
                     title = state.edit.name,
-                    backDescription = "返回技能详情",
+                    backDescription = stringResource(R.string.skills_back_to_detail),
                     draft = state.edit.draft,
                     dirty = state.edit.dirty,
                     saving = state.edit.saving,
@@ -213,11 +224,11 @@ fun SkillsScreen(
     state.notice?.let { text ->
         AlertDialog(
             onDismissRequest = onDismissNotice,
-            title = { Text("提示") },
+            title = { Text(stringResource(R.string.skills_notice_title)) },
             text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
                 Text(
-                    text = "知道了",
+                    text = stringResource(R.string.skills_action_got_it),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -230,11 +241,14 @@ fun SkillsScreen(
 
     deleting?.let { name ->
         DestructiveActionDialog(
-            title = "删除技能「$name」？",
-            message = "技能目录与其中的文件会一并删除，服务端没有回收站。",
-            impacts = listOf("技能目录 $name 下的全部文件", "该技能在当前智能体上的启用状态"),
+            title = stringResource(R.string.skills_delete_title, name),
+            message = stringResource(R.string.skills_delete_message),
+            impacts = listOf(
+                stringResource(R.string.skills_delete_impact_files, name),
+                stringResource(R.string.skills_delete_impact_enabled),
+            ),
             undoable = false,
-            confirmLabel = "删除",
+            confirmLabel = stringResource(R.string.action_delete),
             onConfirm = {
                 deleting = null
                 onDelete(name)
@@ -246,23 +260,27 @@ fun SkillsScreen(
     if (importDialog) {
         AlertDialog(
             onDismissRequest = { importDialog = false },
-            title = { Text("导入技能 zip") },
-            text = { Text("选择导入到当前智能体，或导入到技能池。") },
+            title = { Text(stringResource(R.string.skills_import_title)) },
+            text = { Text(stringResource(R.string.skills_import_message)) },
             confirmButton = {
                 Row {
                     TextButton(onClick = {
                         importDialog = false
                         importToPool = false
                         importLauncher.launch("application/zip")
-                    }) { Text("当前智能体") }
+                    }) { Text(stringResource(R.string.skills_import_current)) }
                     TextButton(onClick = {
                         importDialog = false
                         importToPool = true
                         importLauncher.launch("application/zip")
-                    }) { Text("技能池") }
+                    }) { Text(stringResource(R.string.skills_import_pool)) }
                 }
             },
-            dismissButton = { TextButton(onClick = { importDialog = false }) { Text("取消") } },
+            dismissButton = {
+                TextButton(onClick = { importDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
         )
     }
 
@@ -276,7 +294,7 @@ fun SkillsScreen(
         }
         AlertDialog(
             onDismissRequest = onDismissImportConflicts,
-            title = { Text("技能已存在") },
+            title = { Text(stringResource(R.string.skills_conflict_title)) },
             text = {
                 Column(
                     modifier = Modifier
@@ -284,7 +302,7 @@ fun SkillsScreen(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     Text(
-                        "以下技能与已有技能同名。改名后可重新导入；不存在的目标会按原名写入。",
+                        stringResource(R.string.skills_conflict_message),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     state.importConflicts.forEach { conflict ->
@@ -293,7 +311,14 @@ fun SkillsScreen(
                             onValueChange = { value ->
                                 names = names + (conflict.skillName to value)
                             },
-                            label = { Text("原名 ${conflict.skillName} 的新名字") },
+                            label = {
+                                Text(
+                                    stringResource(
+                                        R.string.skills_conflict_field,
+                                        conflict.skillName,
+                                    ),
+                                )
+                            },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -302,17 +327,21 @@ fun SkillsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { onRetryImport(names.filterValues { it.isNotBlank() }) }) {
-                    Text("改名导入")
+                    Text(stringResource(R.string.skills_action_rename_import))
                 }
             },
-            dismissButton = { TextButton(onClick = onDismissImportConflicts) { Text("取消") } },
+            dismissButton = {
+                TextButton(onClick = onDismissImportConflicts) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
         )
     }
 
     state.broadcast?.let { broadcast ->
         AlertDialog(
             onDismissRequest = onDismissBroadcast,
-            title = { Text("广播「${broadcast.skillName}」") },
+            title = { Text(stringResource(R.string.skills_broadcast_title, broadcast.skillName)) },
             text = {
                 Column(
                     modifier = Modifier
@@ -320,7 +349,10 @@ fun SkillsScreen(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     if (state.agentOptions.isEmpty()) {
-                        Text("没有可选的智能体", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            stringResource(R.string.skills_broadcast_empty),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                     state.agentOptions.forEach { agent ->
                         Row(
@@ -346,12 +378,17 @@ fun SkillsScreen(
                     if (broadcast.conflicts.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "冲突工作区：${broadcast.conflicts.joinToString { it.workspaceName.ifBlank { it.workspaceId } }}",
+                            text = stringResource(
+                                R.string.skills_broadcast_conflicts,
+                                broadcast.conflicts.joinToString {
+                                    it.workspaceName.ifBlank { it.workspaceId }
+                                },
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
                         Text(
-                            "广播是全有或全无；覆盖会替换目标工作区里的同名技能。",
+                            stringResource(R.string.skills_broadcast_conflict_hint),
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
@@ -360,15 +397,19 @@ fun SkillsScreen(
             confirmButton = {
                 if (broadcast.conflicts.isNotEmpty()) {
                     TextButton(enabled = !broadcast.running, onClick = { onRunBroadcast(true) }) {
-                        Text("覆盖并重试")
+                        Text(stringResource(R.string.skills_action_overwrite_retry))
                     }
                 } else {
                     TextButton(enabled = !broadcast.running, onClick = { onRunBroadcast(false) }) {
-                        Text("广播")
+                        Text(stringResource(R.string.skills_action_broadcast))
                     }
                 }
             },
-            dismissButton = { TextButton(onClick = onDismissBroadcast) { Text("取消") } },
+            dismissButton = {
+                TextButton(onClick = onDismissBroadcast) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
         )
     }
 }
@@ -391,16 +432,26 @@ private fun SkillList(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onImport) { Text("导入 zip") }
+            TextButton(onClick = onImport) {
+                Text(stringResource(R.string.skills_action_import_zip))
+            }
         }
-        SectionTitle("当前智能体", "${state.skills.size} 个")
+        SectionTitle(
+            title = stringResource(R.string.skills_section_current),
+            trailing = pluralStringResource(
+                R.plurals.skills_count,
+                state.skills.size,
+                state.skills.size,
+            ),
+        )
         CardBox {
             if (state.skills.isEmpty()) {
                 EmptyLine(
                     text = when {
-                        state.loading -> "正在加载"
-                        state.error != null -> "加载失败：${state.error}"
-                        else -> "当前智能体没有技能"
+                        state.loading -> stringResource(R.string.skills_state_loading)
+                        state.error != null ->
+                            stringResource(R.string.skills_state_load_failed, state.error)
+                        else -> stringResource(R.string.skills_state_empty_current)
                     },
                     error = state.error != null,
                     onClick = onRefresh,
@@ -425,14 +476,18 @@ private fun SkillList(
             }
         }
 
-        SectionTitle("技能池", "只读")
+        SectionTitle(
+            title = stringResource(R.string.skills_section_pool),
+            trailing = stringResource(R.string.skills_badge_readonly),
+        )
         CardBox {
             if (state.pool.isEmpty()) {
                 EmptyLine(
                     text = when {
-                        state.loading -> "正在加载"
-                        state.poolError != null -> "加载失败：${state.poolError}"
-                        else -> "技能池为空"
+                        state.loading -> stringResource(R.string.skills_state_loading)
+                        state.poolError != null ->
+                            stringResource(R.string.skills_state_load_failed, state.poolError)
+                        else -> stringResource(R.string.skills_state_empty_pool)
                     },
                     error = state.poolError != null,
                     onClick = onRefresh,
@@ -458,13 +513,15 @@ private fun SkillList(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
-                        TextButton(onClick = { onBroadcast(skill.name) }) { Text("广播") }
+                        TextButton(onClick = { onBroadcast(skill.name) }) {
+                            Text(stringResource(R.string.skills_action_broadcast))
+                        }
                     }
                     if (index != state.pool.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 14.dp))
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 14.dp))
                 Text(
-                    text = "技能池的广播在手机上完成；自动同步与配置仍在 Web 控制台。",
+                    text = stringResource(R.string.skills_pool_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -500,7 +557,7 @@ private fun SkillDetail(
     if (detail == null && poolDetail == null) {
         CenterBox {
             Text(
-                text = "没有可显示的技能",
+                text = stringResource(R.string.skills_detail_empty),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -542,12 +599,27 @@ private fun SkillDetail(
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                MetaLine("来源", SkillCopy.sourceLabel(source))
-                if (versionText.isNotBlank()) MetaLine("版本", versionText)
-                if (detail != null) MetaLine("通道", SkillCopy.channelsLabel(channels))
-                if (detail != null) MetaLine("预加载", if (preload) "已开启" else "未开启")
+                MetaLine(stringResource(R.string.skills_label_source), SkillCopy.sourceLabel(source))
+                if (versionText.isNotBlank()) {
+                    MetaLine(stringResource(R.string.skills_label_version), versionText)
+                }
+                if (detail != null) {
+                    MetaLine(stringResource(R.string.skills_label_channels), SkillCopy.channelsLabel(channels))
+                }
+                if (detail != null) {
+                    MetaLine(
+                        stringResource(R.string.skills_label_preload),
+                        if (preload) {
+                            stringResource(R.string.skills_value_on)
+                        } else {
+                            stringResource(R.string.skills_value_off)
+                        },
+                    )
+                }
                 val updatedLabel = SkillCopy.updatedLabel(updated)
-                if (updatedLabel.isNotBlank()) MetaLine("更新时间", updatedLabel)
+                if (updatedLabel.isNotBlank()) {
+                    MetaLine(stringResource(R.string.skills_label_updated), updatedLabel)
+                }
             }
         }
 
@@ -557,14 +629,23 @@ private fun SkillDetail(
                     // 需求是「跑这个技能需要什么」，用户在启用前就该看到，
                     // 否则只会在一次失败的调用之后才发现少了一个命令行工具。
                     Text(
-                        text = "运行依赖",
+                        text = stringResource(R.string.skills_section_requirements),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.height(6.dp))
-                    RequirementLine("命令行工具", requirements.requireBins)
-                    RequirementLine("环境变量", requirements.requireEnvs)
-                    RequirementLine("MCP 客户端", requirements.requireMcps)
+                    RequirementLine(
+                        stringResource(R.string.skills_requirement_bins),
+                        requirements.requireBins,
+                    )
+                    RequirementLine(
+                        stringResource(R.string.skills_requirement_envs),
+                        requirements.requireEnvs,
+                    )
+                    RequirementLine(
+                        stringResource(R.string.skills_requirement_mcps),
+                        requirements.requireMcps,
+                    )
                 }
             }
         }
@@ -577,13 +658,13 @@ private fun SkillDetail(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 ActionButton(
-                    text = "编辑正文",
+                    text = stringResource(R.string.skills_action_edit_content),
                     primary = true,
                     modifier = Modifier.weight(1f),
                     onClick = onBeginEdit,
                 )
                 ActionButton(
-                    text = "删除",
+                    text = stringResource(R.string.action_delete),
                     primary = false,
                     modifier = Modifier.weight(1f),
                     onClick = { onDelete(name) },
@@ -591,7 +672,7 @@ private fun SkillDetail(
             }
         } else {
             Text(
-                text = "技能池内的技能只读。需要启停或修改，请先从 Web 控制台分发到工作区。",
+                text = stringResource(R.string.skills_detail_readonly),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -607,7 +688,7 @@ private fun SkillDetail(
                 Spacer(Modifier.height(8.dp))
                 if (content.isBlank()) {
                     Text(
-                        text = "没有正文",
+                        text = stringResource(R.string.skills_detail_no_content),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -632,35 +713,32 @@ private fun CreateSkillDialog(
     onDismiss: () -> Unit,
     onCreate: (String, String, onResult: (Boolean) -> Unit) -> Unit,
 ) {
+    val template = stringResource(R.string.skills_create_template)
     var name by remember { mutableStateOf("") }
-    var content by remember {
-        mutableStateOf(
-            "---\nname: \ndescription: \n---\n\n# 技能说明\n",
-        )
-    }
+    var content by remember { mutableStateOf(template) }
     var submitting by remember { mutableStateOf(false) }
 
     val hint = when {
-        name.isBlank() -> "请先填写技能名称"
+        name.isBlank() -> stringResource(R.string.skills_error_name_required)
         else -> SkillCopy.frontmatterHint(content)
     }
 
     AlertDialog(
         onDismissRequest = { if (!submitting) onDismiss() },
-        title = { Text("新建技能") },
+        title = { Text(stringResource(R.string.skills_dialog_create)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("名称") },
+                    label = { Text(stringResource(R.string.skills_field_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 )
                 OutlinedTextField(
                     value = content,
                     onValueChange = { content = it },
-                    label = { Text("SKILL.md 正文") },
+                    label = { Text(stringResource(R.string.skills_field_content)) },
                     minLines = 6,
                     textStyle = MaterialTheme.typography.bodySmall.copy(
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
@@ -680,7 +758,11 @@ private fun CreateSkillDialog(
         },
         confirmButton = {
             Text(
-                text = if (submitting) "创建中" else "创建",
+                text = if (submitting) {
+                    stringResource(R.string.skills_action_creating)
+                } else {
+                    stringResource(R.string.skills_action_create)
+                },
                 style = MaterialTheme.typography.labelLarge,
                 color = if (hint == null && !submitting) {
                     MaterialTheme.colorScheme.secondary
@@ -700,7 +782,7 @@ private fun CreateSkillDialog(
         },
         dismissButton = {
             Text(
-                text = "取消",
+                text = stringResource(R.string.action_cancel),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -800,7 +882,7 @@ private fun RequirementLine(title: String, items: List<String>) {
             modifier = Modifier.width(88.dp),
         )
         Text(
-            text = items.joinToString("、"),
+            text = items.joinToString(stringResource(R.string.skills_list_separator)),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
@@ -871,7 +953,7 @@ private fun PageTopBar(
         ) {
             Icon(
                 imageVector = QwenIcons.arrowLeft,
-                contentDescription = "返回",
+                contentDescription = stringResource(R.string.action_back),
                 tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(20.dp),
             )

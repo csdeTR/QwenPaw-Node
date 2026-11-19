@@ -2,20 +2,27 @@ package io.qwenpaw.node.avatar
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.vector.ImageVector
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 会话图标的预设项。 */
 data class ChatIconPreset(
     val key: String,
-    val label: String,
+    /** 展示名对应的字符串资源；切换语言后无需重建清单。 */
+    @StringRes val labelRes: Int,
     val icon: ImageVector,
-)
+) {
+    /** 展示名。界面直接读它，取的是当前语言的资源。 */
+    val label: String get() = Texts.get(labelRes)
+}
 
 /**
  * 会话图标存储。
@@ -100,14 +107,14 @@ class ChatIconStore(private val context: Context, private val prefs: android.con
         /** 8 个预设，全部用 Material 矢量图标，免去打包位图。 */
         val presets: List<ChatIconPreset>
             get() = listOf(
-                ChatIconPreset("chat", "对话", QwenIcons.messageCircle),
-                ChatIconPreset("code", "代码", QwenIcons.code),
-                ChatIconPreset("translate", "翻译", QwenIcons.languages),
-                ChatIconPreset("lightbulb", "想法", QwenIcons.lightbulb),
-                ChatIconPreset("science", "研究", QwenIcons.microscope),
-                ChatIconPreset("work", "工作", QwenIcons.briefcase),
-                ChatIconPreset("star", "收藏", QwenIcons.star),
-                ChatIconPreset("book", "阅读", QwenIcons.bookOpen),
+                ChatIconPreset("chat", R.string.avatar_icon_chat, QwenIcons.messageCircle),
+                ChatIconPreset("code", R.string.avatar_icon_code, QwenIcons.code),
+                ChatIconPreset("translate", R.string.avatar_icon_translate, QwenIcons.languages),
+                ChatIconPreset("lightbulb", R.string.avatar_icon_lightbulb, QwenIcons.lightbulb),
+                ChatIconPreset("science", R.string.avatar_icon_science, QwenIcons.microscope),
+                ChatIconPreset("work", R.string.avatar_icon_work, QwenIcons.briefcase),
+                ChatIconPreset("star", R.string.avatar_icon_star, QwenIcons.star),
+                ChatIconPreset("book", R.string.avatar_icon_book, QwenIcons.bookOpen),
             )
 
         /**

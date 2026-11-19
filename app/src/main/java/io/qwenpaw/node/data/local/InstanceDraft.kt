@@ -1,5 +1,8 @@
 package io.qwenpaw.node.data.local
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * 表单与引导页交给仓库的连接参数。
  *
@@ -37,6 +40,6 @@ data class InstanceDraft(
         val trimmed = instanceName.trim()
         if (trimmed.isNotEmpty()) return trimmed
         return addresses.firstOrNull { it.url.isNotBlank() }?.url?.trim().orEmpty()
-            .ifBlank { "本地实例" }
+            .ifBlank { Texts.get(R.string.drest_local_instance) }
     }
 }

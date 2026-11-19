@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.terminal
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.assessSshCredentialGate
 import io.qwenpaw.node.data.model.SshConfigDto
 import io.qwenpaw.node.data.model.TerminalDto
@@ -33,6 +34,7 @@ import io.qwenpaw.node.data.terminal.TerminalEvent
 import org.connectbot.terminal.TerminalEmulator
 import org.connectbot.terminal.TerminalEmulatorFactory
 import io.qwenpaw.node.ui.AppState
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -127,7 +129,9 @@ class TerminalViewModel(
         val conn = connection()
         val inst = instanceId()
         if (conn == null || inst == null) {
-            _state.update { it.copy(loading = false, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(loading = false, error = Texts.get(R.string.terminal_error_not_connected))
+            }
             return
         }
         scope.launch {
@@ -152,8 +156,8 @@ class TerminalViewModel(
                 sshConfig = withContext(Dispatchers.IO) {
                     runCatching { api.bridgeSshConfig(conn) }.getOrElse { e ->
                         sshError = when ((e as? ApiException)?.code) {
-                            404 -> "尚未在 Web 控制台 → 插件 → SSH 设置中配置目标与凭据"
-                            403 -> "SSH 需要服务端已开启 Web 登录认证"
+                            404 -> Texts.get(R.string.terminal_error_ssh_not_configured)
+                            403 -> Texts.get(R.string.terminal_error_ssh_needs_login)
                             else -> ErrorText.of(e)
                         }
                         null
@@ -167,24 +171,24 @@ class TerminalViewModel(
                 ?: project?.workspaceDir?.takeIf { it.isNotBlank() }
             instancePlatform = ShellBootstrap.resolve(TerminalPlatform.AUTO, workspacePath)
             val localReason = when {
-                auth == null -> "无法读取服务端 Web 登录认证状态，请检查连接"
-                !auth.enabled -> "服务端未开启 Web 登录认证。请先在服务端开启并注册用户。"
-                !auth.hasUsers -> "服务端已开启 Web 登录认证但还没有注册用户，请先在 Web 控制台注册。"
-                local == null -> "无法读取终端状态"
+                auth == null -> Texts.get(R.string.terminal_error_auth_unreadable)
+                !auth.enabled -> Texts.get(R.string.terminal_error_auth_disabled)
+                !auth.hasUsers -> Texts.get(R.string.terminal_error_no_users)
+                local == null -> Texts.get(R.string.terminal_error_terminal_status)
                 !local.enabled -> local.reason?.let {
-                    "服务端缺少终端依赖：$it"
-                } ?: "服务端终端不可用"
+                    Texts.get(R.string.terminal_error_missing_dependency, it)
+                } ?: Texts.get(R.string.terminal_error_terminal_unavailable)
                 else -> null
             }
             val sshReason = when {
-                bridge !is BridgeStatus.Ready -> "未安装配套插件 QwenPaw Node Bridge"
-                !sshCap -> "配套插件版本低于 v0.4.0（缺少 ssh 能力）"
-                auth == null -> "无法读取服务端 Web 登录认证状态"
-                !auth.enabled -> "服务端未开启 Web 登录认证，Bridge 中继不可用"
-                !auth.hasUsers -> "服务端还没有注册用户，请先在 Web 控制台注册"
+                bridge !is BridgeStatus.Ready -> Texts.get(R.string.terminal_reason_bridge_missing)
+                !sshCap -> Texts.get(R.string.terminal_reason_bridge_old)
+                auth == null -> Texts.get(R.string.terminal_reason_auth_unreadable)
+                !auth.enabled -> Texts.get(R.string.terminal_reason_auth_disabled)
+                !auth.hasUsers -> Texts.get(R.string.terminal_reason_no_users)
                 !gate.allowed -> gate.reason
                 sshError != null -> sshError
-                sshConfig == null -> "尚未配置 SSH 目标与凭据"
+                sshConfig == null -> Texts.get(R.string.terminal_reason_ssh_not_configured)
                 else -> null
             }
             val directReason = directReason(inst)
@@ -260,7 +264,11 @@ class TerminalViewModel(
 
     fun newTab() {
         if (!_state.value.canAdd) {
-            _state.update { it.copy(notice = "最多同时打开 $MAX_TABS 个终端") }
+            _state.update {
+                it.copy(
+                    notice = Texts.quantity(R.plurals.terminal_limit_tabs, MAX_TABS, MAX_TABS),
+                )
+            }
             return
         }
         val inst = instanceId()
@@ -307,7 +315,11 @@ class TerminalViewModel(
                 tabs = remaining,
                 activeTabId = next,
                 sourceDialog = remaining.isEmpty(),
-                notice = if (remaining.isEmpty()) "没有打开的终端" else current.notice,
+                notice = if (remaining.isEmpty()) {
+                    Texts.get(R.string.terminal_notice_no_tabs)
+                } else {
+                    current.notice
+                },
             )
         }
         onSessionCountChanged(_state.value.tabs.size)
@@ -382,7 +394,9 @@ class TerminalViewModel(
     fun clearHostKey() {
         val id = _state.value.activeTabId ?: return
         sshTransports[id]?.clearHostKey()
-        _state.update { it.copy(notice = "已清除该主机的旧密钥，请重新连接") }
+        _state.update {
+            it.copy(notice = Texts.get(R.string.terminal_notice_host_key_cleared))
+        }
     }
 
     fun dismissNotice() {
@@ -436,7 +450,7 @@ class TerminalViewModel(
             _state.update {
                 it.copy(
                     busy = false,
-                    error = "最多同时打开 $MAX_TABS 个终端",
+                    error = Texts.quantity(R.plurals.terminal_limit_tabs, MAX_TABS, MAX_TABS),
                     sourceDialog = fromDialog,
                 )
             }
@@ -455,7 +469,9 @@ class TerminalViewModel(
         val conn = connection()
         val inst = instanceId()
         if (conn == null || inst == null) {
-            _state.update { it.copy(loading = false, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(loading = false, error = Texts.get(R.string.terminal_error_not_connected))
+            }
             return
         }
         scope.launch {
@@ -513,10 +529,11 @@ class TerminalViewModel(
             scope = scope,
             initialInput = ShellBootstrap.switchCommand(shell, instancePlatform),
         )
+        val defaultTitle = Texts.get(R.string.terminal_source_local)
         val title = if (shell == TerminalShell.DEFAULT) {
-            target.title.ifBlank { "默认" }
+            target.title.ifBlank { defaultTitle }
         } else {
-            "${target.title.ifBlank { "默认" }} · ${ShellBootstrap.label(shell)}"
+            "${target.title.ifBlank { defaultTitle }} · ${ShellBootstrap.label(shell)}"
         }
         addTab(
             TerminalTab(
@@ -538,7 +555,7 @@ class TerminalViewModel(
         inst: String,
         creation: TerminalCreation,
     ) {
-        val config = sshConfig ?: error("尚未配置 SSH 目标与凭据")
+        val config = sshConfig ?: error(Texts.get(R.string.terminal_reason_ssh_not_configured))
         val gate = assessSshCredentialGate(
             conn.baseUrl,
             loginRequired,
@@ -556,11 +573,11 @@ class TerminalViewModel(
             else -> credential.privateKey
                 ?.takeIf { it.isNotBlank() }
                 ?.let { SshAuth.Key(it, credential.passphrase) }
-        } ?: error("插件没有返回可用的 SSH 凭据")
+        } ?: error(Texts.get(R.string.terminal_error_no_ssh_credential))
         val endpoint = SshEndpoint(
             address = SshAddress(
                 id = "bridge",
-                alias = "Bridge 中继",
+                alias = Texts.get(R.string.terminal_source_relay),
                 host = config.host,
                 port = config.port,
                 user = config.user,
@@ -583,7 +600,7 @@ class TerminalViewModel(
             TerminalTab(
                 id = UUID.randomUUID().toString(),
                 source = TerminalSource.SSH_RELAY,
-                title = "Bridge 中继",
+                title = Texts.get(R.string.terminal_source_relay),
                 shell = shell,
                 transport = transport,
             ),
@@ -596,7 +613,8 @@ class TerminalViewModel(
         inst: String,
         creation: TerminalCreation,
     ) {
-        val profile = profileStore.load(inst) ?: error("尚未配置 SSH 直连地址")
+        val profile = profileStore.load(inst)
+            ?: error(Texts.get(R.string.terminal_reason_direct_not_configured))
         val secret = profileStore.secret(inst)
         val auth = when (profile.auth) {
             SshAuthType.KEY -> secret.privateKey()
@@ -605,14 +623,14 @@ class TerminalViewModel(
             SshAuthType.PASSWORD -> secret.password()
                 ?.takeIf { it.isNotBlank() }
                 ?.let { SshAuth.Password(it) }
-        } ?: error("SSH 直连凭据未配置")
+        } ?: error(Texts.get(R.string.terminal_error_direct_no_credential))
         val endpoints = SshEndpointOrder.order(profile.addresses, vpnActive()).map {
             SshEndpoint(
                 address = it,
                 provider = DirectSocketProvider(it.host.trim(), it.port),
             )
         }
-        if (endpoints.isEmpty()) error("SSH 直连没有可用地址")
+        if (endpoints.isEmpty()) error(Texts.get(R.string.terminal_error_direct_no_address))
         val platform = ShellBootstrap.resolve(profile.platform, workspacePath)
         val selected = shellFor(creation.shell, TerminalSource.SSH_DIRECT, profile)
         val shell = if (selected == TerminalShell.DEFAULT &&
@@ -636,7 +654,7 @@ class TerminalViewModel(
             TerminalTab(
                 id = UUID.randomUUID().toString(),
                 source = TerminalSource.SSH_DIRECT,
-                title = "SSH 直连",
+                title = Texts.get(R.string.terminal_source_direct),
                 shell = shell,
                 transport = transport,
             ),
@@ -727,15 +745,18 @@ class TerminalViewModel(
     }
 
     private fun directReason(instanceId: String): String? {
-        if (!profileStore.available) return "本机安全存储不可用，无法保存 SSH 直连凭据"
-        val profile = profileStore.load(instanceId) ?: return "尚未配置 SSH 直连地址"
+        if (!profileStore.available) {
+            return Texts.get(R.string.terminal_reason_secure_storage)
+        }
+        val profile = profileStore.load(instanceId)
+            ?: return Texts.get(R.string.terminal_reason_direct_not_configured)
         if (profile.addresses.none { it.host.isNotBlank() && it.user.isNotBlank() }) {
-            return "尚未配置 SSH 直连地址"
+            return Texts.get(R.string.terminal_reason_direct_not_configured)
         }
         if (!profileStore.hasCredentials(instanceId, profile.auth)) {
             return when (profile.auth) {
-                SshAuthType.KEY -> "尚未配置 SSH 直连私钥"
-                SshAuthType.PASSWORD -> "尚未配置 SSH 直连密码"
+                SshAuthType.KEY -> Texts.get(R.string.terminal_reason_direct_no_key)
+                SshAuthType.PASSWORD -> Texts.get(R.string.terminal_reason_direct_no_password)
             }
         }
         return null

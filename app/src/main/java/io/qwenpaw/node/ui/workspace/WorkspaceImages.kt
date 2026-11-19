@@ -6,7 +6,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 /** 图片预览的上限保护。超过时不再继续读，提示用户直接下载。 */
-internal class ImageTooLargeException : IOException("图片超过预览上限")
+internal class ImageTooLargeException : IOException("image exceeds preview limit")
 
 /**
  * 有上限的内存流。

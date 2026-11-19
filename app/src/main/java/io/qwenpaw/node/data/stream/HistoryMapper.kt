@@ -1,7 +1,9 @@
 package io.qwenpaw.node.data.stream
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ContentBlockDto
 import io.qwenpaw.node.data.model.MessageDto
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 
@@ -221,7 +223,12 @@ object HistoryMapper {
                                         flushText()
                                         part++
                                     }
-                                    textBuffer.append("[视频] ").append(block.filename ?: url)
+                                    textBuffer.append(
+                                        Texts.get(
+                                            R.string.drest_history_video_label,
+                                            block.filename ?: url,
+                                        ),
+                                    )
                                 }
                             }
 
@@ -232,7 +239,12 @@ object HistoryMapper {
                                         flushText()
                                         part++
                                     }
-                                    textBuffer.append("[文件] ").append(block.filename ?: url)
+                                    textBuffer.append(
+                                        Texts.get(
+                                            R.string.drest_history_file_label,
+                                            block.filename ?: url,
+                                        ),
+                                    )
                                 }
                             }
                         }

@@ -29,8 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.stream.DeliveredFile
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -113,7 +115,7 @@ private fun DeliveredFileRow(
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            text = "已发送",
+            text = stringResource(R.string.msg_delivered),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.secondary,
         )

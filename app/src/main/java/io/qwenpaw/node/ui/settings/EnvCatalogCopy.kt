@@ -1,5 +1,9 @@
 package io.qwenpaw.node.ui.settings
 
+import androidx.annotation.StringRes
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 /**
  * 内置环境变量的说明与修改方式，用于只读项的详情弹窗。
  *
@@ -11,83 +15,86 @@ package io.qwenpaw.node.ui.settings
  * [howToModify] 分两种：位于 `_PROTECTED_BOOTSTRAP_KEYS` 的目录两项即使落盘，
  * 重启时也会被 `store.py:362` 跳过，只能靠启动时的进程环境变量；其余项虽然不能在
  * 运行期生效，但可以落盘，重启后会被读到。
+ *
+ * 与 [io.qwenpaw.node.ui.CommandCopy] 同样的做法：表里只存资源 id，取值时再解析，
+ * 这样切换界面语言后弹窗里的文案跟着变。
  */
 internal data class EnvSpecCopy(
-    val description: String,
-    val howToModify: String,
+    @StringRes val description: Int,
+    @StringRes val howToModify: Int,
 )
 
-private const val STARTUP_ONLY_HINT = "启动之后才会被读取，修改后需要重启 QwenPaw 才能生效。"
-private const val BOOTSTRAP_HINT = "只能通过启动 QwenPaw 时的进程环境变量设置，客户端不能写入。"
+private val STARTUP_ONLY_HINT = R.string.env_hint_startup_only
+private val BOOTSTRAP_HINT = R.string.env_hint_bootstrap_only
 
 /** 键 → 说明。只收 `GET /api/envs/catalog` 会下发的内置项。 */
 internal val ENV_SPEC_COPY: Map<String, EnvSpecCopy> = mapOf(
     "QWENPAW_LLM_STREAM_FIRST_CONTENT_TIMEOUT" to EnvSpecCopy(
-        description = "等待首个有效流式内容的最长时间；设为 0 可关闭检测。",
-        howToModify = "修改后下一次调用即生效，已运行的 MCP 需要重新加载。",
+        description = R.string.env_desc_stream_first_content_timeout,
+        howToModify = R.string.env_how_takes_effect_next_call,
     ),
     "QWENPAW_LLM_STREAM_IDLE_TIMEOUT" to EnvSpecCopy(
-        description = "两个有效流式内容之间的最长等待时间；设为 0 可关闭检测。",
-        howToModify = "修改后下一次调用即生效，已运行的 MCP 需要重新加载。",
+        description = R.string.env_desc_stream_idle_timeout,
+        howToModify = R.string.env_how_takes_effect_next_call,
     ),
     "QWENPAW_LLM_MAX_RETRIES" to EnvSpecCopy(
-        description = "模型调用遇到可重试错误时的最大重试次数；设为 0 表示不重试。",
+        description = R.string.env_desc_max_retries,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_BACKOFF_BASE" to EnvSpecCopy(
-        description = "重试退避的起始等待时间，单位为秒。",
+        description = R.string.env_desc_backoff_base,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_BACKOFF_CAP" to EnvSpecCopy(
-        description = "重试退避的等待上限，单位为秒，不能小于起始等待时间。",
+        description = R.string.env_desc_backoff_cap,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_MAX_CONCURRENT" to EnvSpecCopy(
-        description = "同时进行的模型调用数量上限，超出的请求排队等待。",
+        description = R.string.env_desc_max_concurrent,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_MAX_QPM" to EnvSpecCopy(
-        description = "每分钟允许的模型调用次数，超出后排队；设为 0 表示不限制。",
+        description = R.string.env_desc_max_qpm,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_RATE_LIMIT_PAUSE" to EnvSpecCopy(
-        description = "收到限流响应后默认暂停的时长，单位为秒。",
+        description = R.string.env_desc_rate_limit_pause,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_RATE_LIMIT_JITTER" to EnvSpecCopy(
-        description = "在暂停时长之外再加一段随机等待，让同时发出的请求不会在同一刻恢复。",
+        description = R.string.env_desc_rate_limit_jitter,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_LLM_ACQUIRE_TIMEOUT" to EnvSpecCopy(
-        description = "等待并发配额的最长时间，单位为秒，超时后本次调用报错。",
+        description = R.string.env_desc_acquire_timeout,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_WORKING_DIR" to EnvSpecCopy(
-        description = "QwenPaw 的数据目录，会话、记忆与配置文件都存放在这里。",
+        description = R.string.env_desc_working_dir,
         howToModify = BOOTSTRAP_HINT,
     ),
     "QWENPAW_SECRET_DIR" to EnvSpecCopy(
-        description = "密钥目录，保存加密后的凭据与访问令牌。",
+        description = R.string.env_desc_secret_dir,
         howToModify = BOOTSTRAP_HINT,
     ),
     "QWENPAW_CONFIG_FILE" to EnvSpecCopy(
-        description = "配置文件的位置，相对于数据目录。",
+        description = R.string.env_desc_config_file,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_JOBS_FILE" to EnvSpecCopy(
-        description = "定时任务列表的文件名，相对于数据目录。",
+        description = R.string.env_desc_jobs_file,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_CHATS_FILE" to EnvSpecCopy(
-        description = "会话记录的文件名，相对于数据目录。",
+        description = R.string.env_desc_chats_file,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_OPENAPI_DOCS" to EnvSpecCopy(
-        description = "是否开放接口文档页，取值 true 或 false。",
+        description = R.string.env_desc_openapi_docs,
         howToModify = STARTUP_ONLY_HINT,
     ),
     "QWENPAW_RUNNING_IN_CONTAINER" to EnvSpecCopy(
-        description = "是否运行在容器内，取值 true 或 false，影响密钥的存放方式。",
+        description = R.string.env_desc_running_in_container,
         howToModify = STARTUP_ONLY_HINT,
     ),
 )
@@ -101,22 +108,24 @@ internal fun envSpecCopy(key: String): EnvSpecCopy? = ENV_SPEC_COPY[key]
  * 界面据此不显示这一行，而不是编一个理由。
  */
 internal fun readonlyReasonText(code: String?): String? = when (code) {
-    "startup" -> "QwenPaw 启动时确定"
-    "initial_default" -> "仅作为 Agent 配置的初始化默认值"
-    "agent_owned" -> "由各 Agent 配置管理"
+    "startup" -> Texts.get(R.string.env_readonly_reason_startup)
+    "initial_default" -> Texts.get(R.string.env_readonly_reason_initial_default)
+    "agent_owned" -> Texts.get(R.string.env_readonly_reason_agent_owned)
     else -> null
 }
 
 /** 当前值的来源，取自 catalog 的 `source`。 */
 internal fun envSourceText(source: String): String = when (source) {
     "user" -> "QwenPaw"
-    "system" -> "系统"
-    "default" -> "默认"
+    "system" -> Texts.get(R.string.env_source_system)
+    "default" -> Texts.get(R.string.env_source_default)
     else -> source
 }
 
 /** 实时配置项的说明，与官方 `mutabilityDescription.hot_runtime` 一致。 */
-internal const val HOT_RUNTIME_HINT = "每次操作开始时从当前 QwenPaw 进程读取。"
+@StringRes
+internal val HOT_RUNTIME_HINT = R.string.env_hot_runtime_hint
 
 /** 只读项的开场提示，与官方 `mutabilityDescription.startup_only` 一字不差。 */
-internal const val READONLY_HINT = "仅供查看，QwenPaw 运行期间不能修改。"
+@StringRes
+internal val READONLY_HINT = R.string.env_readonly_hint

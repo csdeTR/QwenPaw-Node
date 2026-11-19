@@ -27,9 +27,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.avatar.AvatarStore
 import io.qwenpaw.node.ui.common.ChoiceDialog
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -53,9 +55,9 @@ internal fun EmptyChatHome(
 
     pending?.let { text ->
         ChoiceDialog(
-            title = "发送这条消息？",
+            title = stringResource(R.string.chatempty_confirm_title),
             message = text,
-            choices = listOf("发送"),
+            choices = listOf(stringResource(R.string.chatempty_send)),
             onPick = {
                 pending = null
                 onSendPreset(text)
@@ -81,7 +83,7 @@ internal fun EmptyChatHome(
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "你好，我今天能帮你做什么？",
+            text = stringResource(R.string.chatempty_greeting),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
@@ -89,15 +91,15 @@ internal fun EmptyChatHome(
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "我是一个智能助手，可以帮助你解答问题。",
+            text = stringResource(R.string.chatempty_intro),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
-        PresetCard("让我们开启一段新的旅程吧！") { pending = it }
+        PresetCard(stringResource(R.string.chatempty_preset_journey)) { pending = it }
         Spacer(Modifier.height(10.dp))
-        PresetCard("能告诉我你有哪些技能吗？") { pending = it }
+        PresetCard(stringResource(R.string.chatempty_preset_skills)) { pending = it }
     }
 }
 

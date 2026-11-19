@@ -1,5 +1,8 @@
 package io.qwenpaw.node.voice
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
+
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -35,13 +38,13 @@ class ServerTranscriber(private val api: QwenPawApi) {
         try {
             val text = api.transcribeAudio(conn, file, file.name).trim()
             if (text.isEmpty()) {
-                throw TranscriptionException("服务端没有返回识别结果，请说得更清楚一些或检查转写配置")
+                throw TranscriptionException(Texts.get(R.string.drest_voice_no_result))
             }
             return text
         } catch (e: ApiException) {
             throw TranscriptionException(messageFor(e))
         } catch (e: IOException) {
-            throw TranscriptionException("无法连接服务器，录音没有上传")
+            throw TranscriptionException(Texts.get(R.string.drest_voice_no_upload))
         } finally {
             file.delete()
         }
@@ -51,16 +54,16 @@ class ServerTranscriber(private val api: QwenPawApi) {
         val detail = e.detail.orEmpty()
         return when (e.code) {
             400 -> when {
-                detail.contains("TRANSCRIPTION_DISABLED") -> "服务端未启用语音转写"
-                detail.contains("UNSUPPORTED_FILE_TYPE") -> "服务端不接受这种录音格式"
-                else -> "服务端拒绝了这次转写请求"
+                detail.contains("TRANSCRIPTION_DISABLED") -> Texts.get(R.string.drest_voice_disabled)
+                detail.contains("UNSUPPORTED_FILE_TYPE") -> Texts.get(R.string.drest_voice_bad_format)
+                else -> Texts.get(R.string.drest_voice_rejected)
             }
-            401, 403 -> "登录已失效，请重新连接后再试"
-            404 -> "当前服务端版本不支持语音转写"
-            422 -> "录音没有正确上传"
-            413 -> "录音文件过大，请缩短录音时长"
-            500, 502, 503, 504 -> "服务端转写失败，请检查服务端的转写配置"
-            else -> "转写失败（HTTP ${e.code}）"
+            401, 403 -> Texts.get(R.string.drest_voice_login_expired)
+            404 -> Texts.get(R.string.drest_voice_unsupported)
+            422 -> Texts.get(R.string.drest_voice_upload_invalid)
+            413 -> Texts.get(R.string.drest_voice_too_large)
+            500, 502, 503, 504 -> Texts.get(R.string.drest_voice_server_failed)
+            else -> Texts.get(R.string.drest_voice_http_failed, e.code)
         }
     }
 }

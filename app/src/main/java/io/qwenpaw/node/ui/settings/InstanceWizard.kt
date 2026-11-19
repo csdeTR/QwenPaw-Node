@@ -37,11 +37,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.VerifyResult
 import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceDraft
@@ -170,12 +172,23 @@ fun InstanceWizard(
                         // 不是「连不上」：地址是通的，被反代拦住了。就地展开凭据输入，
                         // 比让用户回到地址那一步重填有用得多。
                         proxyExpanded = true
-                        verifyMessage = "该地址由反向代理保护，请填写反向代理账号与密码后重新验证"
+                        verifyMessage = context.getString(R.string.wizard_proxy_protected)
                     } else {
                         verifyMessage = buildString {
-                            append("连接正常")
-                            if (result.version.isNotBlank()) append("，服务端 ").append(result.version)
-                            append("，").append(bridgeLabel(result.bridge))
+                            append(
+                                if (result.version.isNotBlank()) {
+                                    context.getString(
+                                        R.string.wizard_verify_ok_version,
+                                        result.version,
+                                        bridgeLabel(result.bridge),
+                                    )
+                                } else {
+                                    context.getString(
+                                        R.string.wizard_verify_ok_bridge,
+                                        bridgeLabel(result.bridge),
+                                    )
+                                },
+                            )
                         }
                     }
                     // 验证已经顺带查过 `/api/auth/status`，而且带着反代凭据。
@@ -241,7 +254,11 @@ fun InstanceWizard(
         if (needsLogin == false) {
             // 只在首次判定时提示；从第 3 步返回时不再重复弹，避免每次返回都被打断。
             if (fresh) {
-                Toast.makeText(context, "该服务端未开启 Web 登录认证，已跳过", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.wizard_skip_login_toast),
+                    Toast.LENGTH_SHORT,
+                ).show()
             }
             step = 3
         }
@@ -262,9 +279,9 @@ fun InstanceWizard(
         Spacer(Modifier.height(18.dp))
         Text(
             text = when (step) {
-                1 -> "服务器"
-                2 -> "登录"
-                else -> "智能体"
+                1 -> stringResource(R.string.wizard_title_server)
+                2 -> stringResource(R.string.wizard_title_login)
+                else -> stringResource(R.string.wizard_title_agent)
             },
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
@@ -368,9 +385,13 @@ fun InstanceWizard(
         }
         WizardButton(
             text = when (step) {
-                1 -> "下一步"
-                2 -> "下一步"
-                else -> if (connecting) "正在连接" else "完成"
+                1 -> stringResource(R.string.action_next)
+                2 -> stringResource(R.string.action_next)
+                else -> if (connecting) {
+                    stringResource(R.string.wizard_connecting)
+                } else {
+                    stringResource(R.string.action_done)
+                }
             },
             enabled = canNext,
             busy = connecting || checkingLogin,
@@ -404,7 +425,7 @@ fun InstanceWizard(
         Spacer(Modifier.height(8.dp))
         if (step > 1) {
             Text(
-                text = "上一步",
+                text = stringResource(R.string.action_previous),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -430,11 +451,11 @@ fun InstanceWizard(
     loginIssue?.let { issue ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { loginIssue = null },
-            title = { Text("无法登录") },
+            title = { Text(stringResource(R.string.wizard_login_failed)) },
             text = { Text(issue, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = { loginIssue = null }) {
-                    Text("知道了")
+                    Text(stringResource(R.string.wizard_got_it))
                 }
             },
         )
@@ -474,18 +495,16 @@ internal fun SecurityNoticeDialog(
     when (stage) {
         SecurityStage.AUTH -> androidx.compose.material3.AlertDialog(
             onDismissRequest = advance,
-            title = { Text("这个地址可能可以从公网访问") },
+            title = { Text(stringResource(R.string.wizard_security_title)) },
             text = {
                 Column {
                     Text(
-                        text = "未检测到 Web 登录认证。任何能访问到 ${notice.host} 的人" +
-                            "都可以操作这台机器上的智能体、读取对话记录。",
+                        text = stringResource(R.string.wizard_security_auth_body, notice.host),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "当前状态无异于将设备向全世界公开，为确保安全，" +
-                            "请尽快开启 QwenPaw「Web 登录认证」，保护控制台免受未授权访问",
+                        text = stringResource(R.string.wizard_security_auth_advice),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -493,7 +512,9 @@ internal fun SecurityNoticeDialog(
                 }
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = advance) { Text("知道了") }
+                androidx.compose.material3.TextButton(onClick = advance) {
+                    Text(stringResource(R.string.wizard_got_it))
+                }
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(
@@ -501,24 +522,22 @@ internal fun SecurityNoticeDialog(
                         runCatching { uriHandler.openUri(docUrl) }
                         advance()
                     },
-                ) { Text("文档") }
+                ) { Text(stringResource(R.string.wizard_doc)) }
             },
         )
 
         SecurityStage.TLS -> androidx.compose.material3.AlertDialog(
             onDismissRequest = advance,
-            title = { Text("通信内容未加密") },
+            title = { Text(stringResource(R.string.wizard_security_tls_title)) },
             text = {
                 Column {
                     Text(
-                        text = "QwenPaw Node 与 QwenPaw 之间的通信内容将明文传输，" +
-                            "存在被窃听的风险。",
+                        text = stringResource(R.string.wizard_security_tls_body),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "建议为访问地址启用HTTPS与TLS加密。你可以直接为该地址配置SSL证书，" +
-                            "或在前方部署带证书的反向代理。",
+                        text = stringResource(R.string.wizard_security_tls_advice),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -526,7 +545,9 @@ internal fun SecurityNoticeDialog(
                 }
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = advance) { Text("知道了") }
+                androidx.compose.material3.TextButton(onClick = advance) {
+                    Text(stringResource(R.string.wizard_got_it))
+                }
             },
         )
     }
@@ -544,8 +565,7 @@ private enum class SecurityStage { AUTH, TLS }
 private fun TrustedHostHint() {
     Spacer(Modifier.height(10.dp))
     Text(
-        text = "如果这个地址仅你可访问，请在「设置 → 服务器 → 受信任的连接」里" +
-            "添加该地址，之后不再弹出本条提示。",
+        text = stringResource(R.string.wizard_trusted_hint),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -591,18 +611,21 @@ private fun StepServer(
 ) {
     // 名称在上、地址与别名收在同一个灰框里：与填表添加的步骤 1 同构，
     // 两处填的是同一批字段，排版不同会让人以为其中一个少填了什么。
-    FieldLabel("服务器名称", "可选")
+    FieldLabel(
+        title = stringResource(R.string.wizard_server_name),
+        hint = stringResource(R.string.wizard_optional),
+    )
     OutlinedTextField(
         value = instanceName,
         onValueChange = onInstanceName,
-        placeholder = { Text("例如「家里的机器」") },
+        placeholder = { Text(stringResource(R.string.wizard_name_placeholder)) },
         singleLine = true,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(4.dp))
     Text(
-        text = "将在实例列表显示，可随时修改，留空则显示地址",
+        text = stringResource(R.string.wizard_name_hint),
         style = MaterialTheme.typography.labelSmall,
         color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
     )
@@ -615,36 +638,41 @@ private fun StepServer(
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
             .padding(12.dp),
     ) {
-        FieldLabel("服务器地址", "必填")
+        FieldLabel(
+            title = stringResource(R.string.wizard_server_address),
+            hint = stringResource(R.string.wizard_required),
+        )
         OutlinedTextField(
             value = url,
             onValueChange = { onUrl(foldFullWidth(it)) },
-            placeholder = { Text("例如 chat.example.com 或 192.168.1.10:8088") },
+            placeholder = { Text(stringResource(R.string.wizard_address_placeholder)) },
             singleLine = true,
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "未写 http:// 或 https:// 时，内网地址按 http 尝试，公网域名按 https 尝试。" +
-                "若服务端只能通过 http 访问，请写明 http://。",
+            text = stringResource(R.string.wizard_address_https_hint),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )
         Spacer(Modifier.height(12.dp))
 
-        FieldLabel("此地址的别名", "可选")
+        FieldLabel(
+            title = stringResource(R.string.wizard_alias),
+            hint = stringResource(R.string.wizard_optional),
+        )
         OutlinedTextField(
             value = alias,
             onValueChange = onAlias,
-            placeholder = { Text("例如「局域网」「EasyTier」") },
+            placeholder = { Text(stringResource(R.string.wizard_alias_placeholder)) },
             singleLine = true,
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "只改这条地址在实例卡片上的显示名，留空则显示地址本身",
+            text = stringResource(R.string.wizard_alias_hint),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )
@@ -654,7 +682,11 @@ private fun StepServer(
     // 反向代理验证收在折叠项里：多数人没有反代，把它铺开会让第 1 步多出两个
     // 用不到的输入框。只有验证时真的被拦住，才自动展开并给说明。
     Text(
-        text = if (proxyExpanded) "收起反向代理验证" else "反向代理验证（可选）",
+        text = if (proxyExpanded) {
+            stringResource(R.string.wizard_proxy_collapse)
+        } else {
+            stringResource(R.string.wizard_proxy_expand)
+        },
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
@@ -666,10 +698,9 @@ private fun StepServer(
         Spacer(Modifier.height(6.dp))
         Text(
             text = if (proxyRequired) {
-                "该地址由反向代理保护，需要填写账号与密码才能访问服务端"
+                stringResource(R.string.wizard_proxy_required)
             } else {
-                "仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。" +
-                    "它与「Web 登录认证」无关。"
+                stringResource(R.string.wizard_proxy_hint)
             },
             style = MaterialTheme.typography.labelSmall,
             color = if (proxyRequired) {
@@ -682,7 +713,7 @@ private fun StepServer(
         OutlinedTextField(
             value = basicUser,
             onValueChange = onBasicUser,
-            placeholder = { Text("反向代理用户名") },
+            placeholder = { Text(stringResource(R.string.wizard_proxy_user)) },
             singleLine = true,
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -691,7 +722,7 @@ private fun StepServer(
         OutlinedTextField(
             value = basicPassword,
             onValueChange = onBasicPassword,
-            placeholder = { Text("反向代理密码") },
+            placeholder = { Text(stringResource(R.string.wizard_proxy_password)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -700,7 +731,7 @@ private fun StepServer(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "两个都填写才会生效；只填一项按未启用处理",
+            text = stringResource(R.string.wizard_proxy_both_hint),
             style = MaterialTheme.typography.labelSmall,
             color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
         )
@@ -711,9 +742,9 @@ private fun StepServer(
         val canVerify = url.isNotBlank() && !verifying
         Text(
             text = when {
-                verifying -> "正在验证"
-                verified -> "已验证"
-                else -> "验证连接"
+                verifying -> stringResource(R.string.wizard_verifying)
+                verified -> stringResource(R.string.wizard_verified)
+                else -> stringResource(R.string.wizard_verify)
             },
             style = MaterialTheme.typography.labelMedium,
             color = when {
@@ -775,7 +806,7 @@ private fun StepLogin(
             CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "正在检查该服务器是否需要登录",
+                text = stringResource(R.string.wizard_checking_login),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -784,19 +815,22 @@ private fun StepLogin(
     }
     if (!needsLogin) {
         Text(
-            text = "该服务器未开启 Web 登录认证，正在进入下一步。",
+            text = stringResource(R.string.wizard_no_login),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         return
     }
     Text(
-        text = "这台服务器开启了 Web 登录认证，需要填写账号与密码。",
+        text = stringResource(R.string.wizard_login_required),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Spacer(Modifier.height(14.dp))
-    FieldLabel("用户名", "必填")
+    FieldLabel(
+        title = stringResource(R.string.wizard_username),
+        hint = stringResource(R.string.wizard_required),
+    )
     OutlinedTextField(
         value = username,
         onValueChange = onUsername,
@@ -805,7 +839,10 @@ private fun StepLogin(
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(12.dp))
-    FieldLabel("密码", "必填")
+    FieldLabel(
+        title = stringResource(R.string.wizard_password),
+        hint = stringResource(R.string.wizard_required),
+    )
     OutlinedTextField(
         value = password,
         onValueChange = onPassword,
@@ -836,7 +873,7 @@ private fun StepAgent(
             CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "正在读取智能体列表",
+                text = stringResource(R.string.wizard_loading_agents),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -850,7 +887,7 @@ private fun StepAgent(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "重试",
+                text = stringResource(R.string.action_retry),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -861,7 +898,7 @@ private fun StepAgent(
         }
 
         agents.isEmpty() -> Text(
-            text = "没有读到可用的智能体，可以在下面手动填写 ID。",
+            text = stringResource(R.string.wizard_agents_empty),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -888,7 +925,11 @@ private fun StepAgent(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (manual) "收起手动填写" else "手动填写 ID",
+            text = if (manual) {
+                stringResource(R.string.wizard_manual_collapse)
+            } else {
+                stringResource(R.string.wizard_manual_expand)
+            },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.secondary,
         )
@@ -951,7 +992,7 @@ private fun WizardAgentRow(agent: AgentDto, selected: Boolean, onClick: () -> Un
             Spacer(Modifier.width(8.dp))
             Icon(
                 imageVector = QwenIcons.check,
-                contentDescription = "已选择",
+                contentDescription = stringResource(R.string.wizard_selected),
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.secondary,
             )

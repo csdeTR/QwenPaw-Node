@@ -21,8 +21,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.NetworkMonitor
 import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.NetworkHint
@@ -79,7 +81,15 @@ fun AddressListEditor(
                             replace(index, entry.copy(url = folded), folded != raw)
                         },
                         placeholder = { Text(if (index == 0) "192.168.1.10:8088" else "10.8.0.2:8088") },
-                        label = { Text(if (index == 0) "默认地址" else "备用地址 $index") },
+                        label = {
+                            Text(
+                                if (index == 0) {
+                                    stringResource(R.string.address_default)
+                                } else {
+                                    stringResource(R.string.address_backup, index)
+                                },
+                            )
+                        },
                         singleLine = true,
                         isError = isError && index == 0 && entry.url.isBlank(),
                         shape = RoundedCornerShape(10.dp),
@@ -90,7 +100,7 @@ fun AddressListEditor(
                     if (index > 0) {
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "删除",
+                            text = stringResource(R.string.action_delete),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
@@ -105,26 +115,26 @@ fun AddressListEditor(
                 OutlinedTextField(
                     value = entry.alias.orEmpty(),
                     onValueChange = { replace(index, entry.copy(alias = it.ifBlank { null })) },
-                    placeholder = { Text("别名，例如「本地」「EasyTier」") },
+                    placeholder = { Text(stringResource(R.string.address_alias_placeholder)) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "使用时机",
+                    text = stringResource(R.string.address_usage),
                     style = MaterialTheme.typography.labelSmall,
                     color = LocalCaptionColor.current,
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PreferChip(
-                        text = "不自动切换",
+                        text = stringResource(R.string.address_prefer_none),
                         selected = entry.preferOn == null,
                         onClick = { replace(index, entry.copy(preferOn = null)) },
                     )
                     PreferChip(
-                        text = "VPN 时优先",
+                        text = stringResource(R.string.address_prefer_vpn),
                         selected = entry.preferOn?.kind == NetworkMonitor.Snapshot.KIND_VPN,
                         onClick = {
                             replace(
@@ -134,7 +144,11 @@ fun AddressListEditor(
                         },
                     )
                     PreferChip(
-                        text = if (currentSsid.isNullOrBlank()) "WiFi 时优先" else "当前 WiFi 优先",
+                        text = if (currentSsid.isNullOrBlank()) {
+                            stringResource(R.string.address_prefer_wifi)
+                        } else {
+                            stringResource(R.string.address_prefer_current_wifi)
+                        },
                         selected = entry.preferOn?.kind == NetworkMonitor.Snapshot.KIND_WIFI,
                         onClick = {
                             replace(
@@ -152,7 +166,7 @@ fun AddressListEditor(
                 if (hitNow) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "当前网络正使用这条地址",
+                        text = stringResource(R.string.address_hit_now),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.secondary,
                     )
@@ -160,7 +174,7 @@ fun AddressListEditor(
                 entry.preferOn?.ssid?.takeIf { it.isNotBlank() }?.let { ssid ->
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = "仅在网络「$ssid」下优先",
+                        text = stringResource(R.string.address_only_on_network, ssid),
                         style = MaterialTheme.typography.labelSmall,
                         color = LocalCaptionColor.current,
                     )
@@ -171,7 +185,7 @@ fun AddressListEditor(
 
         if (entries.size < maxCount) {
             Text(
-                text = "添加地址",
+                text = stringResource(R.string.address_add),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
@@ -180,8 +194,7 @@ fun AddressListEditor(
             )
         }
         Text(
-            text = "连接失败时，QwenPaw Node依次尝试各条地址，" +
-                "便于外出时通过可用链路（如EasyTier）访问",
+            text = stringResource(R.string.address_fallback_hint),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp),

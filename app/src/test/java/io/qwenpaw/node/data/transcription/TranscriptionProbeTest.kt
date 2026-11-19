@@ -1,5 +1,6 @@
 package io.qwenpaw.node.data.transcription
 
+import io.qwenpaw.node.TestTexts
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
 import kotlinx.coroutines.runBlocking
@@ -28,6 +29,7 @@ class TranscriptionProbeTest {
 
     @Before
     fun setUp() {
+        TestTexts.install()
         server = MockWebServer()
         server.start()
         probe = TranscriptionProbe(QwenPawApi())

@@ -1,7 +1,9 @@
 package io.qwenpaw.node.ui.chat
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ThinkingControlDto
 import io.qwenpaw.node.data.model.ThinkingValueDto
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlin.math.roundToLong
 
 /**
@@ -52,8 +54,9 @@ internal data class ThinkingScale(
 
     /** 当前档位的展示名。budget 档由 token 数换算成强度描述。 */
     fun label(value: ThinkingValueDto?): String = when {
-        value == null || value.level.isBlank() || value.level == "inherit" -> "跟随默认"
-        value.level == "off" -> "关闭思考"
+        value == null || value.level.isBlank() || value.level == "inherit" ->
+            Texts.get(R.string.chattail_thinking_follow)
+        value.level == "off" -> Texts.get(R.string.chattail_thinking_off)
         isBudget && value.level == "budget" -> budgetLabel(value.budgetTokens)
         else -> thinkingLevelLabel(value.level)
     }
@@ -67,10 +70,10 @@ internal data class ThinkingScale(
             1.0
         }
         return when {
-            ratio < 0.25 -> "轻量思考"
-            ratio < 0.60 -> "均衡思考"
-            ratio < 0.85 -> "深入思考"
-            else -> "充分思考"
+            ratio < 0.25 -> Texts.get(R.string.chattail_thinking_light)
+            ratio < 0.60 -> Texts.get(R.string.chattail_thinking_balanced)
+            ratio < 0.85 -> Texts.get(R.string.chattail_thinking_deep)
+            else -> Texts.get(R.string.chattail_thinking_full)
         }
     }
 

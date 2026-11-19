@@ -1,5 +1,7 @@
 package io.qwenpaw.node.data.remote
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -51,7 +53,7 @@ class DownloadClient(
                         request.url.queryParameter("token") != null,
                 )
             }
-            val body = response.body ?: throw IOException("响应体为空")
+            val body = response.body ?: throw IOException(Texts.get(R.string.download_empty_body))
             val total = body.contentLength().takeIf { it >= 0 }
             val source = body.source()
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)

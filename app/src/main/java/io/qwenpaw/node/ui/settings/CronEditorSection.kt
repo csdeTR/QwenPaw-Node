@@ -30,8 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.CRON_TIMEZONE
 import io.qwenpaw.node.data.model.CronDispatchDto
 import io.qwenpaw.node.data.model.CronDispatchTargetItemDto
@@ -39,6 +41,7 @@ import io.qwenpaw.node.data.model.CronJobSpecDto
 import io.qwenpaw.node.data.model.CronRuntimeDto
 import io.qwenpaw.node.data.model.CronScheduleDto
 import io.qwenpaw.node.data.model.CronTargetDto
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -257,21 +260,24 @@ internal fun CronEditorSection(
             )
         }
 
-        SectionHeader("基本信息")
+        SectionHeader(stringResource(R.string.cronedit_header_basic))
         Card {
             Column(modifier = Modifier.padding(14.dp)) {
                 OutlinedTextField(
                     value = draft.name,
                     onValueChange = { draft = draft.copy(name = it) },
-                    label = { Text("任务名称") },
+                    label = { Text(stringResource(R.string.cronedit_field_task_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(10.dp))
-                Text("任务类型", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.cronedit_field_task_type),
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("消息内容", draft.taskType == "text") {
+                    Chip(stringResource(R.string.cronedit_task_type_text), draft.taskType == "text") {
                         draft = draft.copy(taskType = "text", silent = false)
                     }
                     Chip("Agent", draft.taskType == "agent") {
@@ -288,7 +294,15 @@ internal fun CronEditorSection(
                             draft.copy(request = value)
                         }
                     },
-                    label = { Text(if (draft.taskType == "text") "消息内容" else "请求内容") },
+                    label = {
+                        Text(
+                            if (draft.taskType == "text") {
+                                stringResource(R.string.cronedit_task_type_text)
+                            } else {
+                                stringResource(R.string.cronedit_field_request)
+                            },
+                        )
+                    },
                     minLines = 2,
                     maxLines = 5,
                     modifier = Modifier.fillMaxWidth(),
@@ -296,25 +310,28 @@ internal fun CronEditorSection(
             }
         }
 
-        SectionHeader("调度")
+        SectionHeader(stringResource(R.string.cronedit_header_schedule))
         Card {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("循环", draft.scheduleType == "cron") {
+                    Chip(stringResource(R.string.cronedit_schedule_cron), draft.scheduleType == "cron") {
                         draft = draft.copy(scheduleType = "cron")
                     }
-                    Chip("一次性", draft.scheduleType == "once") {
+                    Chip(stringResource(R.string.cronedit_schedule_once), draft.scheduleType == "once") {
                         draft = draft.copy(scheduleType = "once")
                     }
                 }
                 Spacer(Modifier.height(10.dp))
                 if (draft.scheduleType == "cron") {
-                    Text("快捷", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        stringResource(R.string.cronedit_preset_section),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                     Spacer(Modifier.height(4.dp))
                     CRON_PRESETS.chunked(2).forEach { pair ->
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            pair.forEach { (label, visual) ->
-                                Chip(label, draft.expression == visual.toExpression()) {
+                            pair.forEach { (labelRes, visual) ->
+                                Chip(stringResource(labelRes), draft.expression == visual.toExpression()) {
                                     applyVisual(visual)
                                 }
                             }
@@ -322,24 +339,42 @@ internal fun CronEditorSection(
                         Spacer(Modifier.height(4.dp))
                     }
                     Spacer(Modifier.height(6.dp))
-                    Text("自定义", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        stringResource(R.string.cronedit_custom_section),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Chip("每分钟", draft.visual.frequency == CronFrequency.MINUTES) {
+                        Chip(
+                            stringResource(R.string.cronedit_freq_minute),
+                            draft.visual.frequency == CronFrequency.MINUTES,
+                        ) {
                             applyVisual(draft.visual.copy(frequency = CronFrequency.MINUTES))
                         }
-                        Chip("每小时", draft.visual.frequency == CronFrequency.HOURLY) {
+                        Chip(
+                            stringResource(R.string.cronedit_freq_hourly),
+                            draft.visual.frequency == CronFrequency.HOURLY,
+                        ) {
                             applyVisual(draft.visual.copy(frequency = CronFrequency.HOURLY))
                         }
-                        Chip("每天", draft.visual.frequency == CronFrequency.DAILY) {
+                        Chip(
+                            stringResource(R.string.cronedit_freq_daily),
+                            draft.visual.frequency == CronFrequency.DAILY,
+                        ) {
                             applyVisual(draft.visual.copy(frequency = CronFrequency.DAILY))
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Chip("每周", draft.visual.frequency == CronFrequency.WEEKLY) {
+                        Chip(
+                            stringResource(R.string.cronedit_freq_weekly),
+                            draft.visual.frequency == CronFrequency.WEEKLY,
+                        ) {
                             applyVisual(draft.visual.copy(frequency = CronFrequency.WEEKLY))
                         }
-                        Chip("每月", draft.visual.frequency == CronFrequency.MONTHLY) {
+                        Chip(
+                            stringResource(R.string.cronedit_freq_monthly),
+                            draft.visual.frequency == CronFrequency.MONTHLY,
+                        ) {
                             applyVisual(draft.visual.copy(frequency = CronFrequency.MONTHLY))
                         }
                     }
@@ -349,21 +384,24 @@ internal fun CronEditorSection(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             CRON_MINUTE_STEPS.filter { it <= 30 }.forEach { step ->
-                                Chip("$step 分钟", draft.visual.everyMinutes == step) {
+                                Chip(
+                                    stringResource(R.string.cronedit_step_minutes, step),
+                                    draft.visual.everyMinutes == step,
+                                ) {
                                     applyVisual(draft.visual.copy(everyMinutes = step))
                                 }
                             }
                         }
 
                         CronFrequency.HOURLY -> TimeRow(
-                            label = "每小时的第几分",
+                            label = stringResource(R.string.cronedit_label_hour_minute),
                             value = LocalTime.of(0, draft.visual.minute),
                             onPick = { draft = draft.copy(visual = draft.visual.copy(minute = it.minute)) },
                             onExpression = { draft = draft.copy(expression = draft.visual.toExpression()) },
                         )
 
                         CronFrequency.DAILY -> TimeRow(
-                            label = "每天",
+                            label = stringResource(R.string.cronedit_freq_daily),
                             value = LocalTime.of(draft.visual.hour, draft.visual.minute),
                             onPick = { draft = draft.copy(visual = draft.visual.copy(hour = it.hour, minute = it.minute)) },
                             onExpression = { draft = draft.copy(expression = draft.visual.toExpression()) },
@@ -372,7 +410,10 @@ internal fun CronEditorSection(
                         CronFrequency.WEEKLY -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 (1..7).forEach { day ->
-                                    Chip(WEEKDAY_LABELS[day - 1], draft.visual.daysOfWeek.contains(day)) {
+                                    Chip(
+                                        stringResource(CRON_WEEKDAY_LABELS[day - 1]),
+                                        draft.visual.daysOfWeek.contains(day),
+                                    ) {
                                         val days = if (draft.visual.daysOfWeek.contains(day)) {
                                             draft.visual.daysOfWeek - day
                                         } else {
@@ -383,7 +424,7 @@ internal fun CronEditorSection(
                                 }
                             }
                             TimeRow(
-                                label = "时间",
+                                label = stringResource(R.string.cronedit_label_time),
                                 value = LocalTime.of(draft.visual.hour, draft.visual.minute),
                                 onPick = { draft = draft.copy(visual = draft.visual.copy(hour = it.hour, minute = it.minute)) },
                                 onExpression = { draft = draft.copy(expression = draft.visual.toExpression()) },
@@ -393,13 +434,16 @@ internal fun CronEditorSection(
                         CronFrequency.MONTHLY -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 listOf(1, 15, 28, 31).forEach { day ->
-                                    Chip("$day 日", draft.visual.dayOfMonth == day) {
+                                    Chip(
+                                        stringResource(R.string.cronedit_day_of_month, day),
+                                        draft.visual.dayOfMonth == day,
+                                    ) {
                                         applyVisual(draft.visual.copy(dayOfMonth = day))
                                     }
                                 }
                             }
                             TimeRow(
-                                label = "时间",
+                                label = stringResource(R.string.cronedit_label_time),
                                 value = LocalTime.of(draft.visual.hour, draft.visual.minute),
                                 onPick = { draft = draft.copy(visual = draft.visual.copy(hour = it.hour, minute = it.minute)) },
                                 onExpression = { draft = draft.copy(expression = draft.visual.toExpression()) },
@@ -408,8 +452,8 @@ internal fun CronEditorSection(
                     }
                     Spacer(Modifier.height(8.dp))
                     SwitchRow(
-                        title = "直接编辑表达式",
-                        subtitle = "关闭时由上方选项自动生成；开启后可自行填写任意 5 段表达式",
+                        title = stringResource(R.string.cronedit_direct_edit_title),
+                        subtitle = stringResource(R.string.cronedit_direct_edit_subtitle),
                         checked = draft.directEdit,
                         onCheckedChange = { direct ->
                             draft = draft.copy(directEdit = direct)
@@ -422,21 +466,21 @@ internal fun CronEditorSection(
                             draft = draft.copy(expression = value)
                             parseCronExpression(value)?.let { draft = draft.copy(visual = it) }
                         },
-                        label = { Text("Cron 表达式") },
+                        label = { Text(stringResource(R.string.cronedit_field_cron_expression)) },
                         singleLine = true,
                         readOnly = !draft.directEdit,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
                     DateTimeRow(
-                        label = "执行时间",
+                        label = stringResource(R.string.cronedit_field_run_at),
                         value = draft.runAt,
                         onPick = { draft = draft.copy(runAt = it) },
                     )
                     Spacer(Modifier.height(4.dp))
                     SwitchRow(
-                        title = "重复执行",
-                        subtitle = "按固定间隔再次执行该任务",
+                        title = stringResource(R.string.cronedit_repeat_title),
+                        subtitle = stringResource(R.string.cronedit_repeat_subtitle),
                         checked = draft.repeatEveryDays != null,
                         onCheckedChange = { on ->
                             draft = draft.copy(
@@ -450,31 +494,43 @@ internal fun CronEditorSection(
                     draft.repeatEveryDays?.let { every ->
                         Column(modifier = Modifier.padding(start = 4.dp)) {
                             NumberRow(
-                                label = "每 N 天",
+                                label = stringResource(R.string.cronedit_field_every_days),
                                 value = every,
                                 onChange = { draft = draft.copy(repeatEveryDays = it) },
                             )
-                            Text("结束方式", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                stringResource(R.string.cronedit_field_repeat_end),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Chip("无限", draft.repeatEndType == "never") {
+                                Chip(
+                                    stringResource(R.string.cronedit_repeat_end_never),
+                                    draft.repeatEndType == "never",
+                                ) {
                                     draft = draft.copy(repeatEndType = "never", repeatUntil = null, repeatCount = null)
                                 }
-                                Chip("截止", draft.repeatEndType == "until") {
+                                Chip(
+                                    stringResource(R.string.cronedit_repeat_end_until),
+                                    draft.repeatEndType == "until",
+                                ) {
                                     draft = draft.copy(repeatEndType = "until")
                                 }
-                                Chip("次数", draft.repeatEndType == "count") {
+                                Chip(
+                                    stringResource(R.string.cronedit_repeat_end_count),
+                                    draft.repeatEndType == "count",
+                                ) {
                                     draft = draft.copy(repeatEndType = "count")
                                 }
                             }
                             when (draft.repeatEndType) {
                                 "until" -> DateTimeRow(
-                                    label = "截止时间",
+                                    label = stringResource(R.string.cronedit_field_until),
                                     value = draft.repeatUntil,
                                     onPick = { draft = draft.copy(repeatUntil = it) },
                                 )
 
                                 "count" -> NumberRow(
-                                    label = "执行次数",
+                                    label = stringResource(R.string.cronedit_field_count),
                                     value = draft.repeatCount ?: 0,
                                     onChange = { draft = draft.copy(repeatCount = it) },
                                 )
@@ -483,10 +539,16 @@ internal fun CronEditorSection(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("时区", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.cronedit_field_timezone),
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Chip("北京时间（UTC+8）", draft.timezone == CRON_TIMEZONE) {
+                    Chip(
+                        stringResource(R.string.cronedit_timezone_beijing),
+                        draft.timezone == CRON_TIMEZONE,
+                    ) {
                         draft = draft.copy(timezone = CRON_TIMEZONE)
                     }
                     Chip("UTC", draft.timezone == "UTC") {
@@ -504,10 +566,13 @@ internal fun CronEditorSection(
             }
         }
 
-        SectionHeader("投递")
+        SectionHeader(stringResource(R.string.cronedit_header_dispatch))
         Card {
             Column(modifier = Modifier.padding(14.dp)) {
-                Text("频道", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.cronedit_field_channel),
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 Spacer(Modifier.height(4.dp))
                 // `console` 是网页/手机端自己的通道，界面上不显示它，也不给选项：
                 // 定时任务在移动端唯一可用的投递通道就是它，列出名字反而让人以为要选什么。
@@ -521,7 +586,10 @@ internal fun CronEditorSection(
                     Spacer(Modifier.height(10.dp))
                 }
                 val selected = targets.firstOrNull { it.sessionId == draft.targetSessionId }
-                Text("目标会话", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.cronedit_field_target_session),
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -532,12 +600,17 @@ internal fun CronEditorSection(
                 ) {
                     Text(
                         text = selected?.let { targetLabel(it, chatNames) }
-                            ?: draft.targetSessionId.ifBlank { "选择会话" },
+                            ?: draft.targetSessionId.ifBlank {
+                                stringResource(R.string.cronedit_select_session)
+                            },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f),
                     )
-                    Text("选择", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        stringResource(R.string.cronedit_select),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
                 // 拉不到目标列表时退回手填，不挡住保存。
                 if (targets.isEmpty() || selected == null) {
@@ -560,8 +633,8 @@ internal fun CronEditorSection(
                 if (draft.taskType == "agent") {
                     Spacer(Modifier.height(4.dp))
                     SwitchRow(
-                        title = "静默投递",
-                        subtitle = "只执行任务，不把过程推送到频道",
+                        title = stringResource(R.string.cronedit_silent_title),
+                        subtitle = stringResource(R.string.cronedit_silent_subtitle),
                         checked = draft.silent,
                         onCheckedChange = { draft = draft.copy(silent = it) },
                     )
@@ -569,48 +642,63 @@ internal fun CronEditorSection(
             }
         }
 
-        SectionHeader("高级")
+        SectionHeader(stringResource(R.string.cronedit_header_advanced))
         Card {
             SwitchRow(
-                title = "展开高级选项",
-                subtitle = "并发、超时与结果归档",
+                title = stringResource(R.string.cronedit_advanced_title),
+                subtitle = stringResource(R.string.cronedit_advanced_subtitle),
                 checked = advancedOpen,
                 onCheckedChange = { advancedOpen = it },
             )
             if (advancedOpen) {
                 Divider()
                 Column(modifier = Modifier.padding(14.dp)) {
-                    NumberRow("最大并发", draft.maxConcurrency) {
+                    NumberRow(stringResource(R.string.cronedit_field_max_concurrency), draft.maxConcurrency) {
                         draft = draft.copy(maxConcurrency = it)
                     }
-                    NumberRow("超时秒数", draft.timeoutSeconds) {
+                    NumberRow(stringResource(R.string.cronedit_field_timeout), draft.timeoutSeconds) {
                         draft = draft.copy(timeoutSeconds = it)
                     }
-                    NumberRow("错过宽限秒数", draft.misfireGraceSeconds) {
+                    NumberRow(
+                        stringResource(R.string.cronedit_field_misfire_grace),
+                        draft.misfireGraceSeconds,
+                    ) {
                         draft = draft.copy(misfireGraceSeconds = it)
                     }
                     SwitchRow(
-                        title = "共用目标会话",
-                        subtitle = "关闭时每次执行使用该任务专属的可见会话",
+                        title = stringResource(R.string.cronedit_share_session_title),
+                        subtitle = stringResource(R.string.cronedit_share_session_subtitle),
                         checked = draft.shareSession,
                         onCheckedChange = { draft = draft.copy(shareSession = it) },
                     )
                     SwitchRow(
-                        title = "工具审批检查",
-                        subtitle = "开启后，高风险工具需要审批，无人值守时任务可能停在等待审批",
+                        title = stringResource(R.string.cronedit_tool_safety_title),
+                        subtitle = stringResource(R.string.cronedit_tool_safety_subtitle),
                         checked = draft.toolSafety,
                         onCheckedChange = { draft = draft.copy(toolSafety = it) },
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("结果存入收件箱", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        stringResource(R.string.cronedit_field_save_result),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Chip("自动", draft.saveResultToInbox == null) {
+                        Chip(
+                            stringResource(R.string.cronedit_save_result_auto),
+                            draft.saveResultToInbox == null,
+                        ) {
                             draft = draft.copy(saveResultToInbox = null)
                         }
-                        Chip("存入", draft.saveResultToInbox == true) {
+                        Chip(
+                            stringResource(R.string.cronedit_save_result_yes),
+                            draft.saveResultToInbox == true,
+                        ) {
                             draft = draft.copy(saveResultToInbox = true)
                         }
-                        Chip("不存", draft.saveResultToInbox == false) {
+                        Chip(
+                            stringResource(R.string.cronedit_save_result_no),
+                            draft.saveResultToInbox == false,
+                        ) {
                             draft = draft.copy(saveResultToInbox = false)
                         }
                     }
@@ -630,7 +718,7 @@ internal fun CronEditorSection(
                 Spacer(Modifier.width(10.dp))
             }
             Text(
-                text = "保存",
+                text = stringResource(R.string.action_save),
                 style = MaterialTheme.typography.labelLarge,
                 color = if (saving) MaterialTheme.colorScheme.onSurfaceVariant
                 else MaterialTheme.colorScheme.secondary,
@@ -661,7 +749,12 @@ internal fun CronEditorSection(
     if (pickingTarget) {
         AlertDialog(
             onDismissRequest = { pickingTarget = false },
-            title = { Text("选择目标会话", style = MaterialTheme.typography.titleMedium) },
+            title = {
+                Text(
+                    stringResource(R.string.cronedit_pick_target_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            },
             text = {
                 var keyword by remember { mutableStateOf("") }
                 // 按关键词过滤：名称优先，session_id 也参与匹配，便于按 id 定位。
@@ -675,7 +768,7 @@ internal fun CronEditorSection(
                     OutlinedTextField(
                         value = keyword,
                         onValueChange = { keyword = it },
-                        placeholder = { Text("搜索会话名称") },
+                        placeholder = { Text(stringResource(R.string.cronedit_search_target)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -716,9 +809,9 @@ internal fun CronEditorSection(
                         if (filtered.isEmpty()) {
                             Text(
                                 text = if (targets.isEmpty()) {
-                                    "服务端没有可用的会话目标，请手动填写"
+                                    stringResource(R.string.cronedit_target_empty)
                                 } else {
-                                    "没有匹配的会话"
+                                    stringResource(R.string.cronedit_target_no_match)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -729,7 +822,7 @@ internal fun CronEditorSection(
             },
             confirmButton = {
                 Text(
-                    text = "取消",
+                    text = stringResource(R.string.action_cancel),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
@@ -755,25 +848,23 @@ private fun CronTimezoneCompare(expression: String, timezone: String, serverTime
         if (runs.isNotEmpty()) {
             runs.forEach { instant ->
                 Text(
-                    text = "北京时间  ${formatInZone(instant, clientZone)}",
+                    text = stringResource(R.string.cron_beijing_time, formatInZone(instant, clientZone)),
                     style = MaterialTheme.typography.labelSmall,
                 )
                 Text(
-                    text = "服务端时区  ${formatInZone(instant, serverZone)}",
+                    text = stringResource(R.string.cron_server_time, formatInZone(instant, serverZone)),
                     style = MaterialTheme.typography.labelSmall,
                 )
                 Spacer(Modifier.height(4.dp))
             }
         }
         Text(
-            text = "服务端时区与北京时间不同，任务仍按北京时间执行。",
+            text = stringResource(R.string.cron_timezone_note),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
-
-private val WEEKDAY_LABELS = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 /** 目标会话的主行文字：有名称用名称，没有才退回 session_id。 */
 internal fun CronDispatchTargetItemDto.displayName(names: Map<String, String>): String =
@@ -782,7 +873,11 @@ internal fun CronDispatchTargetItemDto.displayName(names: Map<String, String>): 
 /** 已选目标的单行写法：名称 + session_id，丢掉无信息量的 channel。 */
 internal fun targetLabel(item: CronDispatchTargetItemDto, names: Map<String, String>): String {
     val name = names[item.sessionId]?.takeIf { it.isNotBlank() }
-    return if (name == null) item.sessionId else "$name，${item.sessionId}"
+    return if (name == null) {
+        item.sessionId
+    } else {
+        Texts.get(R.string.cronedit_target_label, name, item.sessionId)
+    }
 }
 
 @Composable

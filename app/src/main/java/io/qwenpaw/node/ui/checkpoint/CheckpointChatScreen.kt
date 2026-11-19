@@ -21,8 +21,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.ui.chat.AssistantCollapse
 import io.qwenpaw.node.ui.chat.ChatImageLoader
@@ -102,12 +104,12 @@ fun CheckpointChatScreen(
                 .padding(padding),
         ) {
             when {
-                chatMissing -> CenteredHint("这条会话在当前实例的对话列表里不存在，无法显示历史记录。")
+                chatMissing -> CenteredHint(stringResource(R.string.checkpoint_chat_missing))
                 state.loading -> Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator() }
-                timeline.isEmpty() -> CenteredHint("这条会话没有可显示的消息。")
+                timeline.isEmpty() -> CenteredHint(stringResource(R.string.checkpoint_chat_empty))
                 else -> ChatMessageList(
                     state = state,
                     timeline = timeline,
@@ -142,7 +144,7 @@ private fun SnapshotActionBar(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
             Text(
-                text = "只读查看，不会发送消息。",
+                text = stringResource(R.string.checkpoint_chat_readonly),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -152,7 +154,13 @@ private fun SnapshotActionBar(
                 enabled = !creating,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (creating) "创建中…" else "创建检查点")
+                Text(
+                    if (creating) {
+                        stringResource(R.string.checkpoint_snapshot_creating)
+                    } else {
+                        stringResource(R.string.checkpoint_snapshot_create)
+                    },
+                )
             }
             error?.let { message ->
                 Spacer(Modifier.height(6.dp))

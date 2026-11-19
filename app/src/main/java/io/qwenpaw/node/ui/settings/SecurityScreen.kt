@@ -22,8 +22,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 
@@ -53,15 +56,15 @@ fun SecurityScreen(
     LaunchedEffect(Unit) { onEnsureLoaded() }
 
     val confirmText = when (pendingDisable) {
-        GuardKind.TOOL -> "关闭工具防护后，内置的危险命令检查不再拦截工具调用。"
-        GuardKind.FILE -> "关闭文件防护后，敏感文件的读写不再经过防护检查。"
-        GuardKind.SANDBOX -> "关闭沙箱后，命令将在宿主机环境中直接执行。"
+        GuardKind.TOOL -> stringResource(R.string.security_confirm_tool_guard)
+        GuardKind.FILE -> stringResource(R.string.security_confirm_file_guard)
+        GuardKind.SANDBOX -> stringResource(R.string.security_confirm_sandbox)
         null -> ""
     }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { AdminTopBar(title = "安全", onBack = onBack) },
+        topBar = { AdminTopBar(title = stringResource(R.string.security_title), onBack = onBack) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -98,11 +101,11 @@ fun SecurityScreen(
                 )
             }
 
-            SectionHeader("工具防护")
+            SectionHeader(stringResource(R.string.security_section_tool_guard))
             Card {
                 SwitchRow(
-                    title = "拦截危险工具调用",
-                    subtitle = "按内置规则检查命令注入、破坏性操作等风险",
+                    title = stringResource(R.string.security_tool_guard_title),
+                    subtitle = stringResource(R.string.security_tool_guard_hint),
                     checked = state.toolGuardEnabled,
                     enabled = !state.saving,
                     onCheckedChange = { enabled ->
@@ -117,23 +120,40 @@ fun SecurityScreen(
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "内置规则 ${state.rules.size} 条",
+                        text = pluralStringResource(
+                            R.plurals.security_rules_count,
+                            state.rules.size,
+                            state.rules.size,
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = { showRules = !showRules }) {
-                        Text(if (showRules) "收起" else "查看")
+                        Text(
+                            stringResource(
+                                if (showRules) {
+                                    R.string.security_action_collapse
+                                } else {
+                                    R.string.security_action_view
+                                },
+                            ),
+                        )
                     }
                 }
                 if (showRules) {
                     state.rules.take(30).forEach { rule ->
+                        val severity = if (rule.severity.isBlank()) {
+                            stringResource(R.string.security_rule_severity_unknown)
+                        } else {
+                            rule.severity
+                        }
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 14.dp, vertical = 6.dp),
                         ) {
                             Text(
-                                text = "${rule.severity.ifBlank { "规则" }} · ${rule.id}",
+                                text = stringResource(R.string.security_pair, severity, rule.id),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -147,7 +167,7 @@ fun SecurityScreen(
                     }
                     if (state.rules.size > 30) {
                         Text(
-                            text = "仅显示前 30 条，完整规则请在 Web 控制台查看。",
+                            text = stringResource(R.string.security_rules_limited),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -156,11 +176,11 @@ fun SecurityScreen(
                 }
             }
 
-            SectionHeader("文件防护")
+            SectionHeader(stringResource(R.string.security_section_file_guard))
             Card {
                 SwitchRow(
-                    title = "保护敏感文件",
-                    subtitle = "限制工作区外敏感文件的读写与预览",
+                    title = stringResource(R.string.security_file_guard_title),
+                    subtitle = stringResource(R.string.security_file_guard_hint),
                     checked = state.fileGuard?.enabled == true,
                     enabled = !state.saving,
                     onCheckedChange = { enabled ->
@@ -170,13 +190,13 @@ fun SecurityScreen(
                 Divider()
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(
-                        text = "受保护路径",
+                        text = stringResource(R.string.security_protected_paths),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     val paths = state.fileGuard?.paths.orEmpty()
                     if (paths.isEmpty()) {
                         Text(
-                            text = "未配置额外路径",
+                            text = stringResource(R.string.security_no_extra_paths),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -191,7 +211,11 @@ fun SecurityScreen(
                         }
                         if (paths.size > 20) {
                             Text(
-                                text = "另有 ${paths.size - 20} 条，请在 Web 控制台查看。",
+                                text = pluralStringResource(
+                                    R.plurals.security_more_paths,
+                                    paths.size - 20,
+                                    paths.size - 20,
+                                ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -200,11 +224,11 @@ fun SecurityScreen(
                 }
             }
 
-            SectionHeader("沙箱")
+            SectionHeader(stringResource(R.string.security_section_sandbox))
             Card {
                 SwitchRow(
-                    title = "启用沙箱",
-                    subtitle = "限制命令可访问的目录与系统能力",
+                    title = stringResource(R.string.security_sandbox_title),
+                    subtitle = stringResource(R.string.security_sandbox_hint),
                     checked = state.sandbox?.enabled == true,
                     enabled = !state.saving,
                     onCheckedChange = { enabled ->
@@ -215,9 +239,9 @@ fun SecurityScreen(
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     val sandbox = state.sandbox
                     val effectiveText = when {
-                        sandbox == null -> "尚未读取"
-                        sandbox.effective -> "当前已生效"
-                        else -> "当前未生效"
+                        sandbox == null -> stringResource(R.string.security_sandbox_unread)
+                        sandbox.effective -> stringResource(R.string.security_sandbox_effective)
+                        else -> stringResource(R.string.security_sandbox_ineffective)
                     }
                     Text(
                         text = effectiveText,
@@ -238,20 +262,20 @@ fun SecurityScreen(
                 }
             }
 
-            SectionHeader("技能扫描器")
+            SectionHeader(stringResource(R.string.security_section_skill_scanner))
             Card {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text(
-                        text = "导入技能时检查其中的脚本与配置。阻止模式会拒绝不安全技能，警告模式只记录。",
+                        text = stringResource(R.string.security_skill_scanner_hint),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            SKILL_SCANNER_BLOCK to "阻止",
-                            SKILL_SCANNER_WARN to "警告",
-                            SKILL_SCANNER_OFF to "关闭",
+                            SKILL_SCANNER_BLOCK to stringResource(R.string.security_scanner_block),
+                            SKILL_SCANNER_WARN to stringResource(R.string.security_scanner_warn),
+                            SKILL_SCANNER_OFF to stringResource(R.string.security_scanner_off),
                         ).forEach { (code, label) ->
                             Chip(
                                 text = label,
@@ -268,7 +292,7 @@ fun SecurityScreen(
                     onClick = onDismissNotice,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
-                    Text("清除提示")
+                    Text(stringResource(R.string.security_action_clear_notice))
                 }
             }
         }
@@ -276,13 +300,13 @@ fun SecurityScreen(
 
     pendingDisable?.let { kind ->
         DestructiveActionDialog(
-            title = "关闭防护",
+            title = stringResource(R.string.security_disable_title),
             message = confirmText,
             impacts = listOf(
-                "该修改立即生效，无需重启服务端。",
-                "可在本页重新开启。",
+                stringResource(R.string.security_disable_impact_immediate),
+                stringResource(R.string.security_disable_impact_reopen),
             ),
-            confirmLabel = "关闭",
+            confirmLabel = stringResource(R.string.action_close),
             onConfirm = {
                 when (kind) {
                     GuardKind.TOOL -> onToolGuard(false)

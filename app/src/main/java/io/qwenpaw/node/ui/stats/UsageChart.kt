@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
@@ -28,6 +29,7 @@ import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.core.cartesian.marker.DefaultCartesianMarker
 import com.patrykandpatrick.vico.core.cartesian.marker.LineCartesianLayerMarkerTarget
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.LlmToolDailyDto
 import io.qwenpaw.node.ui.chat.formatTokens
 
@@ -40,6 +42,7 @@ import io.qwenpaw.node.ui.chat.formatTokens
 @Composable
 fun UsageChart(trend: List<LlmToolDailyDto>, modifier: Modifier = Modifier) {
     if (trend.isEmpty()) return
+    val context = LocalContext.current
     val producer = remember { CartesianChartModelProducer() }
     val dates = remember(trend) { trend.map { it.date } }
     val llmColor = MaterialTheme.colorScheme.primary
@@ -121,8 +124,14 @@ fun UsageChart(trend: List<LlmToolDailyDto>, modifier: Modifier = Modifier) {
                             append(dates.getOrNull(target.x.toInt())?.let { DateLabels.short(it) }.orEmpty())
                             target.points.forEachIndexed { seriesIndex, point ->
                                 append("\n")
-                                append(if (seriesIndex == 0) "LLM 调用 " else "工具调用 ")
-                                append(point.entry.y.toInt())
+                                val count = point.entry.y.toInt()
+                                append(
+                                    if (seriesIndex == 0) {
+                                        context.getString(R.string.stats_chart_marker_llm, count)
+                                    } else {
+                                        context.getString(R.string.stats_chart_marker_tool, count)
+                                    },
+                                )
                             }
                         }
                     }

@@ -1,6 +1,8 @@
 package io.qwenpaw.node.ui.workspace
 
 import android.graphics.Bitmap
+import androidx.annotation.StringRes
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.NetworkMonitor
 import io.qwenpaw.node.data.model.WorkspaceEntryDto
 import io.qwenpaw.node.data.remote.ApiException
@@ -13,6 +15,7 @@ import io.qwenpaw.node.data.remote.PagedList
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.data.remote.UploadConflictException
 import io.qwenpaw.node.data.remote.UploadConflictPolicy
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,10 +34,10 @@ import java.io.IOException
 import java.io.OutputStream
 
 /** 工作区的三个根。`param` 直接作为 `root` 查询参数。 */
-enum class WorkspaceRoot(val param: String, val title: String) {
-    WORKSPACE("workspace", "工作区"),
-    PROJECT("project", "项目目录"),
-    MEMORY("memory", "记忆"),
+enum class WorkspaceRoot(val param: String, @StringRes val titleRes: Int) {
+    WORKSPACE("workspace", R.string.workspace_root_workspace),
+    PROJECT("project", R.string.workspace_root_project),
+    MEMORY("memory", R.string.workspace_root_memory),
 }
 
 /** 列表项。`previewKind` 来自服务端，取值为 `directory` / `text` / `binary` / `image`。 */
@@ -93,7 +96,9 @@ sealed interface DownloadPlan {
     ) : DownloadPlan {
         override val title: String get() = entry.name
         override val subtitle: String
-            get() = entry.size?.let { "单文件，${DownloadPolicy.formatBytes(it)}" } ?: "单文件，大小未知"
+            get() = entry.size?.let {
+                Texts.get(R.string.workspace_download_single_size, DownloadPolicy.formatBytes(it))
+            } ?: Texts.get(R.string.workspace_download_single_unknown)
     }
 
     data class Directory(
@@ -102,11 +107,21 @@ sealed interface DownloadPlan {
         val totalBytes: Long?,
         override val warning: String?,
     ) : DownloadPlan {
-        override val title: String get() = "下载目录"
+        override val title: String get() = Texts.get(R.string.workspace_download_directory_title)
         override val subtitle: String
-            get() = buildString {
-                append("共 ${files.size} 个文件")
-                if (totalBytes != null) append("，合计 ${DownloadPolicy.formatBytes(totalBytes)}")
+            get() = if (totalBytes != null) {
+                Texts.quantity(
+                    R.plurals.workspace_download_directory_count_total,
+                    files.size,
+                    files.size,
+                    DownloadPolicy.formatBytes(totalBytes),
+                )
+            } else {
+                Texts.quantity(
+                    R.plurals.workspace_download_directory_count,
+                    files.size,
+                    files.size,
+                )
             }
     }
 }
@@ -177,10 +192,11 @@ data class WorkspaceUiState(
         get() {
             val text = preview as? WorkspacePreview.Text ?: return null
             return when {
-                root == WorkspaceRoot.MEMORY -> "记忆文件不支持编辑"
-                !text.eof -> "文件尚未完整加载，先点「继续加载」"
-                text.etag == null -> "未取得版本信息，暂时无法编辑"
-                text.content.length > EDIT_MAX_CHARS -> "文件超过 2 MB，请在服务端编辑"
+                root == WorkspaceRoot.MEMORY -> Texts.get(R.string.workspace_edit_blocked_memory)
+                !text.eof -> Texts.get(R.string.workspace_edit_blocked_incomplete)
+                text.etag == null -> Texts.get(R.string.workspace_edit_blocked_no_version)
+                text.content.length > EDIT_MAX_CHARS ->
+                    Texts.get(R.string.workspace_edit_blocked_too_large)
                 else -> null
             }
         }
@@ -303,7 +319,13 @@ class WorkspaceViewModel(
     /** 手动刷新：清空当前列表重来。 */
     fun refresh() {
         val conn = connection() ?: run {
-            _state.update { it.copy(loading = false, loaded = true, error = "尚未连接服务器") }
+            _state.update {
+                it.copy(
+                    loading = false,
+                    loaded = true,
+                    error = Texts.get(R.string.workspace_not_connected),
+                )
+            }
             return
         }
         val gen = ++generation
@@ -606,7 +628,11 @@ class WorkspaceViewModel(
                             title = entry.name,
                             bitmap = bitmap,
                             loading = false,
-                            error = if (bitmap == null) "无法解码这张图片，可下载后查看" else null,
+                            error = if (bitmap == null) {
+                                Texts.get(R.string.workspace_error_image_decode)
+                            } else {
+                                null
+                            },
                         ),
                     )
                 }
@@ -619,7 +645,7 @@ class WorkspaceViewModel(
                         preview = WorkspacePreview.Image(
                             title = entry.name,
                             loading = false,
-                            error = "图片超过 20 MB，可下载后查看",
+                            error = Texts.get(R.string.workspace_error_image_too_large),
                         ),
                     )
                 }
@@ -684,7 +710,11 @@ class WorkspaceViewModel(
         if (edit.saving) return
         val conn = connection() ?: return
         if (isDownloading()) {
-            _state.update { it.copy(edit = it.edit?.copy(error = "请等待当前下载结束")) }
+            _state.update {
+                it.copy(
+                    edit = it.edit?.copy(error = Texts.get(R.string.workspace_error_download_busy)),
+                )
+            }
             return
         }
         editJob?.cancel()
@@ -747,7 +777,9 @@ class WorkspaceViewModel(
                 val (text, etag) = withContext(Dispatchers.IO) {
                     readWholeText(conn, edit.rootParam, edit.path)
                 }
-                if (etag.isNullOrBlank()) throw IOException("未取得版本信息，无法继续编辑")
+                if (etag.isNullOrBlank()) {
+                    throw IOException(Texts.get(R.string.workspace_error_version_missing))
+                }
                 _state.update { state ->
                     val current = state.edit ?: return@update state
                     state.copy(
@@ -896,7 +928,12 @@ class WorkspaceViewModel(
             uploadTarget = null
             _state.update { state ->
                 state.upload?.let {
-                    state.copy(upload = it.copy(phase = UploadPhase.CANCELLED, message = "上传已取消"))
+                    state.copy(
+                        upload = it.copy(
+                            phase = UploadPhase.CANCELLED,
+                            message = Texts.get(R.string.workspace_upload_cancelled),
+                        ),
+                    )
                 } ?: state
             }
             return
@@ -923,7 +960,12 @@ class WorkspaceViewModel(
             deleteStaged(files)
             _state.update { state ->
                 state.upload?.let {
-                    state.copy(upload = it.copy(phase = UploadPhase.FAILED, message = "尚未连接服务器"))
+                    state.copy(
+                        upload = it.copy(
+                            phase = UploadPhase.FAILED,
+                            message = Texts.get(R.string.workspace_not_connected),
+                        ),
+                    )
                 } ?: state
             }
             return
@@ -965,7 +1007,7 @@ class WorkspaceViewModel(
                 } catch (e: Exception) {
                     failed++
                     lastError = if (e is ApiException && e.code == 404) {
-                        "目标目录不存在，可能已被删除"
+                        Texts.get(R.string.workspace_error_upload_target_missing)
                     } else {
                         workspaceError(e)
                     }
@@ -980,7 +1022,12 @@ class WorkspaceViewModel(
             withContext(NonCancellable) {
                 deleteStaged(files.filter { file -> conflicts.none { it === file } })
                 if (cancelled) {
-                    updateUpload { it.copy(phase = UploadPhase.CANCELLED, message = "上传已取消") }
+                    updateUpload {
+                        it.copy(
+                            phase = UploadPhase.CANCELLED,
+                            message = Texts.get(R.string.workspace_upload_cancelled),
+                        )
+                    }
                 }
             }
         }
@@ -991,7 +1038,11 @@ class WorkspaceViewModel(
                 it.copy(
                     phase = UploadPhase.WAITING_CONFLICT,
                     conflicts = conflicts.map { file -> file.name },
-                    message = "有 ${conflicts.size} 个文件已存在",
+                    message = Texts.quantity(
+                        R.plurals.workspace_upload_conflicts_pending,
+                        conflicts.size,
+                        conflicts.size,
+                    ),
                 )
             }
             return
@@ -1008,10 +1059,16 @@ class WorkspaceViewModel(
         lastError: String?,
     ) {
         val message = buildString {
-            append("已上传 $succeeded 个文件")
-            if (failed > 0) append("，失败 $failed 个")
-            if (skipped > 0) append("，跳过 $skipped 个")
-            if (succeeded == 0 && failed > 0 && lastError != null) append("：$lastError")
+            append(Texts.quantity(R.plurals.workspace_upload_done, succeeded, succeeded))
+            if (failed > 0) {
+                append(Texts.quantity(R.plurals.workspace_upload_failed_part, failed, failed))
+            }
+            if (skipped > 0) {
+                append(Texts.quantity(R.plurals.workspace_upload_skipped_part, skipped, skipped))
+            }
+            if (succeeded == 0 && failed > 0 && lastError != null) {
+                append(Texts.get(R.string.workspace_upload_error_part, lastError))
+            }
         }
         val phase = if (succeeded == 0 && skipped == 0 && failed > 0) {
             UploadPhase.FAILED
@@ -1079,7 +1136,12 @@ class WorkspaceViewModel(
             try {
                 val files = withContext(Dispatchers.IO) { collectFiles(conn, root.param, basePath) }
                 if (files.isEmpty()) {
-                    _state.update { it.copy(preparing = false, error = "这个目录里没有可下载的文件") }
+                    _state.update {
+                        it.copy(
+                            preparing = false,
+                            error = Texts.get(R.string.workspace_error_directory_empty),
+                        )
+                    }
                     return@launch
                 }
                 val total = files.mapNotNull { it.size }.takeIf { it.size == files.size }?.sum()
@@ -1152,14 +1214,17 @@ class WorkspaceViewModel(
             updateDownload(gen) {
                 it.copy(
                     phase = DownloadPhase.FAILED,
-                    message = "无法写入所选位置：${workspaceError(e)}",
+                    message = Texts.get(R.string.workspace_error_write_target, workspaceError(e)),
                 )
             }
             return
         }
         if (out == null) {
             updateDownload(gen) {
-                it.copy(phase = DownloadPhase.FAILED, message = "无法写入所选位置，请换一个目录")
+                it.copy(
+                    phase = DownloadPhase.FAILED,
+                    message = Texts.get(R.string.workspace_error_write_target_hint),
+                )
             }
             return
         }
@@ -1175,12 +1240,18 @@ class WorkspaceViewModel(
                 }
             }
             updateDownload(gen) {
-                it.copy(phase = DownloadPhase.DONE, message = "已保存到所选位置")
+                it.copy(
+                    phase = DownloadPhase.DONE,
+                    message = Texts.get(R.string.workspace_download_saved),
+                )
             }
         } catch (e: CancellationException) {
             withContext(NonCancellable) { runCatching { sink.discard() } }
             updateDownload(gen) {
-                it.copy(phase = DownloadPhase.CANCELLED, message = "下载已取消")
+                it.copy(
+                    phase = DownloadPhase.CANCELLED,
+                    message = Texts.get(R.string.workspace_download_cancelled),
+                )
             }
         } catch (e: Exception) {
             withContext(NonCancellable) { runCatching { sink.discard() } }
@@ -1199,7 +1270,7 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 download = DownloadState(
-                    title = "下载目录",
+                    title = Texts.get(R.string.workspace_download_directory_title),
                     fileIndex = 0,
                     fileCount = plan.files.size,
                     total = plan.totalBytes,
@@ -1240,7 +1311,10 @@ class WorkspaceViewModel(
             } catch (e: CancellationException) {
                 withContext(NonCancellable) { runCatching { sink.discardFile(file.relative) } }
                 updateDownload(gen) {
-                    it.copy(phase = DownloadPhase.CANCELLED, message = "下载已取消，已完成的文件会保留")
+                    it.copy(
+                        phase = DownloadPhase.CANCELLED,
+                        message = Texts.get(R.string.workspace_download_cancelled_partial),
+                    )
                 }
                 return
             } catch (_: Exception) {
@@ -1253,9 +1327,18 @@ class WorkspaceViewModel(
                 phase = DownloadPhase.DONE,
                 fileIndex = plan.files.size,
                 message = if (failures == 0) {
-                    "已保存 ${plan.files.size} 个文件"
+                    Texts.quantity(
+                        R.plurals.workspace_download_saved_count,
+                        plan.files.size,
+                        plan.files.size,
+                    )
                 } else {
-                    "已完成 ${plan.files.size - failures} 个，失败 $failures 个"
+                    Texts.quantity(
+                        R.plurals.workspace_download_partial_count,
+                        plan.files.size - failures,
+                        plan.files.size - failures,
+                        failures,
+                    )
                 },
             )
         }
@@ -1284,7 +1367,7 @@ class WorkspaceViewModel(
                         entry.kind == "directory" -> stack.add(entry.path)
                         entry.kind == "file" -> {
                             if (result.size >= MAX_DIRECTORY_FILES) {
-                                throw IOException("目录内文件过多，请分批下载")
+                                throw IOException(Texts.get(R.string.workspace_error_too_many_files))
                             }
                             result += DirectoryFile(
                                 path = entry.path,
@@ -1327,11 +1410,11 @@ class WorkspaceViewModel(
     }
 
     private fun workspaceError(e: Throwable): String = when {
-        e is ApiException && e.code == 404 -> "文件或目录不存在，可能已被删除"
+        e is ApiException && e.code == 404 -> Texts.get(R.string.workspace_error_not_found)
         e is ApiException && e.code == 403 ->
-            e.detail?.takeIf { it.isNotBlank() } ?: "没有权限访问这个位置"
+            e.detail?.takeIf { it.isNotBlank() } ?: Texts.get(R.string.workspace_error_forbidden)
         e is ApiException && e.code == 400 ->
-            e.detail?.takeIf { it.isNotBlank() } ?: "请求参数无效"
+            e.detail?.takeIf { it.isNotBlank() } ?: Texts.get(R.string.workspace_error_bad_request)
         else -> ErrorText.of(e)
     }
 

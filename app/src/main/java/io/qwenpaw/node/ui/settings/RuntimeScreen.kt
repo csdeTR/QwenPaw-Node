@@ -29,8 +29,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
@@ -72,7 +75,7 @@ fun RuntimeScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             AdminTopBar(
-                title = "运行时",
+                title = stringResource(R.string.runtime_title),
                 onBack = onBack,
                 busy = acp.saving || harness.saving,
             )
@@ -133,7 +136,7 @@ fun RuntimeScreen(
                 Column {
                     login.fields.forEach { (key, value) ->
                         Text(
-                            text = "$key：$value",
+                            text = stringResource(R.string.runtime_login_field, key, value),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(vertical = 2.dp),
                         )
@@ -149,7 +152,7 @@ fun RuntimeScreen(
                                 strokeWidth = 2.dp,
                             )
                             Text(
-                                text = "等待授权完成，最长等待 2 分钟",
+                                text = stringResource(R.string.runtime_waiting_login),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -166,10 +169,14 @@ fun RuntimeScreen(
                                 android.net.Uri.parse(url),
                             ),
                         )
-                    }) { Text("打开验证页面") }
+                    }) { Text(stringResource(R.string.runtime_open_verify_page)) }
                 }
             },
-            dismissButton = { TextButton(onClick = onDismissHarnessLogin) { Text("关闭") } },
+            dismissButton = {
+                TextButton(onClick = onDismissHarnessLogin) {
+                    Text(stringResource(R.string.action_close))
+                }
+            },
         )
     }
 
@@ -193,17 +200,22 @@ fun RuntimeScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = onDismissHarnessDetail) { Text("关闭") }
+                TextButton(onClick = onDismissHarnessDetail) {
+                    Text(stringResource(R.string.action_close))
+                }
             },
         )
     }
 
     logoutTarget?.let { provider ->
         DestructiveActionDialog(
-            title = "登出 ${provider.name.ifBlank { provider.id }}",
-            message = "将清除该运行时在服务端保存的登录状态。",
-            impacts = listOf("该运行时的模型与能力需要重新登录后才能使用"),
-            confirmLabel = "登出",
+            title = stringResource(
+                R.string.runtime_logout_title,
+                provider.name.ifBlank { provider.id },
+            ),
+            message = stringResource(R.string.runtime_logout_message),
+            impacts = listOf(stringResource(R.string.runtime_logout_impact)),
+            confirmLabel = stringResource(R.string.runtime_action_logout),
             confirmDanger = false,
             onConfirm = {
                 onLogoutHarness(provider.id)
@@ -223,11 +235,11 @@ private fun AcpTab(
 ) {
     var nodePath by remember(state.nodePath) { mutableStateOf(state.nodePath) }
 
-    SectionHeader("说明")
+    SectionHeader(stringResource(R.string.runtime_section_note))
     Card {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                text = "ACP 的命令与参数会在服务端执行任意命令；关闭 trusted 会改变审批行为。修改前请确认命令来源。",
+                text = stringResource(R.string.runtime_acp_notice),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -251,15 +263,17 @@ private fun AcpTab(
         )
     }
     if (state.error != null || state.notice != null) {
-        TextButton(onClick = onDismissNotice) { Text("清除提示") }
+        TextButton(onClick = onDismissNotice) {
+            Text(stringResource(R.string.runtime_action_clear_notice))
+        }
     }
 
-    SectionHeader("Node 运行时")
+    SectionHeader(stringResource(R.string.runtime_section_node_runtime))
     Card {
         Column(modifier = Modifier.padding(14.dp)) {
             state.nodeRuntime?.effectiveNodePath?.takeIf { it.isNotBlank() }?.let {
                 Text(
-                    text = "当前生效：$it",
+                    text = stringResource(R.string.runtime_node_effective, it),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -267,19 +281,32 @@ private fun AcpTab(
             OutlinedTextField(
                 value = nodePath,
                 onValueChange = { nodePath = it },
-                label = { Text("Node 路径") },
-                supportingText = { Text("留空使用自动探测的结果") },
+                label = { Text(stringResource(R.string.runtime_node_path_label)) },
+                supportingText = { Text(stringResource(R.string.runtime_node_path_hint)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             TextButton(
                 enabled = !state.saving,
                 onClick = { onSaveNodePath(nodePath) },
-            ) { Text("保存 Node 路径") }
+            ) { Text(stringResource(R.string.runtime_action_save_node_path)) }
             state.nodeRuntime?.candidates?.take(6)?.forEach { candidate ->
+                val version = if (candidate.nodeVersion.isBlank()) {
+                    stringResource(R.string.runtime_node_version_unknown)
+                } else {
+                    candidate.nodeVersion
+                }
                 Text(
-                    text = "${candidate.label} · ${candidate.nodeVersion.ifBlank { "版本未知" }}" +
-                        if (candidate.available) "" else " · 不可用：${candidate.reason}",
+                    text = if (candidate.available) {
+                        stringResource(R.string.runtime_pair, candidate.label, version)
+                    } else {
+                        stringResource(
+                            R.string.runtime_node_candidate_unavailable,
+                            candidate.label,
+                            version,
+                            candidate.reason,
+                        )
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -287,7 +314,14 @@ private fun AcpTab(
         }
     }
 
-    SectionHeader("内置 ACP 智能体", "${state.agents.size} 个")
+    SectionHeader(
+        stringResource(R.string.runtime_section_builtin_agents),
+        pluralStringResource(
+            R.plurals.runtime_item_count,
+            state.agents.size,
+            state.agents.size,
+        ),
+    )
     state.agents.forEach { form ->
         Card {
             Column(modifier = Modifier.padding(14.dp)) {
@@ -298,13 +332,27 @@ private fun AcpTab(
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Medium,
                         )
+                        val status = stringResource(
+                            if (form.enabled) {
+                                R.string.runtime_agent_enabled
+                            } else {
+                                R.string.runtime_agent_disabled
+                            },
+                        )
+                        val command = if (form.command.isBlank()) {
+                            stringResource(R.string.runtime_agent_command_unset)
+                        } else {
+                            form.command
+                        }
                         Text(
-                            text = "${if (form.enabled) "已启用" else "已停用"} · ${form.command.ifBlank { "未设置命令" }}",
+                            text = stringResource(R.string.runtime_pair, status, command),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = { onEdit(form) }) { Text("编辑") }
+                    TextButton(onClick = { onEdit(form) }) {
+                        Text(stringResource(R.string.action_edit))
+                    }
                 }
             }
         }
@@ -338,10 +386,19 @@ private fun HarnessTab(
         )
     }
     if (state.error != null || state.notice != null) {
-        TextButton(onClick = onDismissNotice) { Text("清除提示") }
+        TextButton(onClick = onDismissNotice) {
+            Text(stringResource(R.string.runtime_action_clear_notice))
+        }
     }
 
-    SectionHeader("外部智能体运行时", "${state.providers.size} 个")
+    SectionHeader(
+        stringResource(R.string.runtime_section_external_runtimes),
+        pluralStringResource(
+            R.plurals.runtime_item_count,
+            state.providers.size,
+            state.providers.size,
+        ),
+    )
     state.providers.forEach { provider ->
         Card {
             Column(modifier = Modifier.padding(14.dp)) {
@@ -375,21 +432,25 @@ private fun HarnessTab(
                     TextButton(
                         enabled = provider.available,
                         onClick = { onProbe(provider.id) },
-                    ) { Text("探测") }
+                    ) { Text(stringResource(R.string.runtime_action_probe)) }
                     TextButton(
                         enabled = provider.available && provider.installed && !provider.authenticated,
                         onClick = { onLogin(provider.id) },
-                    ) { Text("登录") }
+                    ) { Text(stringResource(R.string.runtime_action_login)) }
                     TextButton(
                         enabled = provider.authenticated,
                         onClick = { onLogout(provider) },
-                    ) { Text("登出") }
+                    ) { Text(stringResource(R.string.runtime_action_logout)) }
                 }
                 if (provider.available && provider.installed) {
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        TextButton(onClick = { onDetail(provider.id, "models") }) { Text("模型") }
+                        TextButton(onClick = { onDetail(provider.id, "models") }) {
+                            Text(stringResource(R.string.runtime_tab_models))
+                        }
                         TextButton(onClick = { onDetail(provider.id, "mcp") }) { Text("MCP") }
-                        TextButton(onClick = { onDetail(provider.id, "skills") }) { Text("技能") }
+                        TextButton(onClick = { onDetail(provider.id, "skills") }) {
+                            Text(stringResource(R.string.runtime_tab_skills))
+                        }
                     }
                 }
             }
@@ -398,12 +459,13 @@ private fun HarnessTab(
     }
 }
 
+@Composable
 private fun harnessStateText(provider: HarnessProviderDto): String = when {
-    provider.comingSoon -> "尚未开放"
-    !provider.available -> "当前版本不可用"
-    !provider.installed -> "未安装：服务端缺少运行时"
-    provider.authenticated -> "已登录"
-    else -> "未登录"
+    provider.comingSoon -> stringResource(R.string.runtime_state_coming_soon)
+    !provider.available -> stringResource(R.string.runtime_state_unavailable)
+    !provider.installed -> stringResource(R.string.runtime_state_not_installed)
+    provider.authenticated -> stringResource(R.string.runtime_state_logged_in)
+    else -> stringResource(R.string.runtime_state_logged_out)
 }
 
 @Composable
@@ -422,14 +484,17 @@ private fun AcpAgentDialog(
     var buffer by remember { mutableStateOf(form.bufferMb) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    val bufferError = stringResource(R.string.runtime_error_buffer_invalid)
+    val toolModeError = stringResource(R.string.runtime_error_tool_mode_invalid)
+
     fun validateAndSubmit() {
         val mb = buffer.trim().toLongOrNull()
         if (mb == null || mb <= 0) {
-            error = "缓冲区必须是大于 0 的整数（MB）"
+            error = bufferError
             return
         }
         if (mode !in listOf("call_title", "update_detail", "call_detail")) {
-            error = "工具解析模式取值无效"
+            error = toolModeError
             return
         }
         onConfirm(
@@ -447,7 +512,7 @@ private fun AcpAgentDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("编辑 ${form.name}") },
+        title = { Text(stringResource(R.string.runtime_agent_edit_title, form.name)) },
         text = {
             Column(
                 modifier = Modifier
@@ -455,24 +520,30 @@ private fun AcpAgentDialog(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("启用", modifier = Modifier.weight(1f))
+                    Text(
+                        stringResource(R.string.runtime_label_enabled),
+                        modifier = Modifier.weight(1f),
+                    )
                     Switch(checked = enabled, onCheckedChange = { enabled = it })
                 }
                 OutlinedTextField(
                     value = command,
                     onValueChange = { command = it },
-                    label = { Text("命令") },
+                    label = { Text(stringResource(R.string.runtime_label_command)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = args,
                     onValueChange = { args = it },
-                    label = { Text("参数（每行一个）") },
+                    label = { Text(stringResource(R.string.runtime_label_args)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(6.dp))
-                Text("环境变量", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.runtime_label_env),
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 env.forEachIndexed { index, entry ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
@@ -480,7 +551,7 @@ private fun AcpAgentDialog(
                             onValueChange = { value ->
                                 env = env.toMutableList().also { it[index] = value to entry.second }
                             },
-                            label = { Text("键") },
+                            label = { Text(stringResource(R.string.runtime_label_env_key)) },
                             singleLine = true,
                             modifier = Modifier.weight(1f),
                         )
@@ -490,32 +561,40 @@ private fun AcpAgentDialog(
                             onValueChange = { value ->
                                 env = env.toMutableList().also { it[index] = entry.first to value }
                             },
-                            label = { Text("值") },
+                            label = { Text(stringResource(R.string.runtime_label_env_value)) },
                             singleLine = true,
                             modifier = Modifier.weight(1f),
                         )
                         TextButton(onClick = {
                             env = env.toMutableList().also { it.removeAt(index) }
-                        }) { Text("删除") }
+                        }) { Text(stringResource(R.string.action_delete)) }
                     }
                 }
-                TextButton(onClick = { env = env + ("" to "") }) { Text("添加环境变量") }
+                TextButton(onClick = { env = env + ("" to "") }) {
+                    Text(stringResource(R.string.runtime_action_add_env))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("信任该命令", modifier = Modifier.weight(1f))
+                    Text(
+                        stringResource(R.string.runtime_label_trust),
+                        modifier = Modifier.weight(1f),
+                    )
                     Switch(checked = trusted, onCheckedChange = { trusted = it })
                 }
                 Text(
-                    text = "关闭 trusted 会改变审批行为，仅在确认命令来源可信时开启。",
+                    text = stringResource(R.string.runtime_trust_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(6.dp))
-                Text("工具解析模式", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.runtime_label_tool_mode),
+                    style = MaterialTheme.typography.labelMedium,
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(
-                        "call_title" to "标题",
-                        "update_detail" to "更新详情",
-                        "call_detail" to "调用详情",
+                        "call_title" to stringResource(R.string.runtime_mode_title),
+                        "update_detail" to stringResource(R.string.runtime_mode_update_detail),
+                        "call_detail" to stringResource(R.string.runtime_mode_call_detail),
                     ).forEach { (code, label) ->
                         Chip(label, selected = mode == code, onClick = { mode = code })
                     }
@@ -523,7 +602,7 @@ private fun AcpAgentDialog(
                 OutlinedTextField(
                     value = buffer,
                     onValueChange = { buffer = it },
-                    label = { Text("stdio 缓冲区（MB）") },
+                    label = { Text(stringResource(R.string.runtime_label_buffer)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -537,8 +616,12 @@ private fun AcpAgentDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = !busy, onClick = { validateAndSubmit() }) { Text("保存") }
+            TextButton(enabled = !busy, onClick = { validateAndSubmit() }) {
+                Text(stringResource(R.string.action_save))
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
     )
 }

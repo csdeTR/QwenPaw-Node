@@ -42,10 +42,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.MarketProviderDto
 import io.qwenpaw.node.data.model.MarketResultDto
 import io.qwenpaw.node.data.model.PluginCatalogEntryDto
@@ -98,7 +101,11 @@ fun MarketScreen(
                 val prepared = runCatching {
                     SafZipSource.prepare(context, uri, "plugin.zip")
                 }.getOrNull()
-                if (prepared != null) onInstallPluginFile(prepared) else note = "无法读取所选文件"
+                if (prepared != null) {
+                    onInstallPluginFile(prepared)
+                } else {
+                    note = context.getString(R.string.market_error_file_unreadable)
+                }
             }
         }
     }
@@ -133,21 +140,21 @@ fun MarketScreen(
                     ) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "扩展市场",
+                        text = stringResource(R.string.market_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = "只读",
+                        text = stringResource(R.string.market_badge_readonly),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -156,8 +163,14 @@ fun MarketScreen(
                     modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TabChip("技能市场", state.tab == MarketTab.SKILLS) { onSetTab(MarketTab.SKILLS) }
-                    TabChip("插件目录", state.tab == MarketTab.PLUGINS) { onSetTab(MarketTab.PLUGINS) }
+                    TabChip(
+                        text = stringResource(R.string.market_tab_skills),
+                        selected = state.tab == MarketTab.SKILLS,
+                    ) { onSetTab(MarketTab.SKILLS) }
+                    TabChip(
+                        text = stringResource(R.string.market_tab_plugins),
+                        selected = state.tab == MarketTab.PLUGINS,
+                    ) { onSetTab(MarketTab.PLUGINS) }
                 }
                 Box(
                     modifier = Modifier
@@ -200,12 +213,12 @@ fun MarketScreen(
     if (pluginUrlDialog) {
         AlertDialog(
             onDismissRequest = { pluginUrlDialog = false },
-            title = { Text("从网址安装插件") },
+            title = { Text(stringResource(R.string.market_dialog_install_url)) },
             text = {
                 OutlinedTextField(
                     value = pluginUrl,
                     onValueChange = { pluginUrl = it },
-                    label = { Text("zip 地址") },
+                    label = { Text(stringResource(R.string.market_field_zip_url)) },
                     placeholder = { Text("https://…/plugin.zip") },
                     singleLine = true,
                 )
@@ -218,9 +231,13 @@ fun MarketScreen(
                         onInstallPluginUrl(pluginUrl)
                         pluginUrl = ""
                     },
-                ) { Text("安装") }
+                ) { Text(stringResource(R.string.market_action_install)) }
             },
-            dismissButton = { TextButton(onClick = { pluginUrlDialog = false }) { Text("取消") } },
+            dismissButton = {
+                TextButton(onClick = { pluginUrlDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
         )
     }
 
@@ -230,10 +247,11 @@ fun MarketScreen(
             title = {
                 Text(
                     when {
-                        install.conflictSource != null -> "已存在同名插件"
-                        install.stage == "done" -> "安装完成"
-                        install.stage == "failed" -> "安装失败"
-                        else -> "正在安装"
+                        install.conflictSource != null ->
+                            stringResource(R.string.market_install_conflict_title)
+                        install.stage == "done" -> stringResource(R.string.market_install_done_title)
+                        install.stage == "failed" -> stringResource(R.string.market_install_failed_title)
+                        else -> stringResource(R.string.market_install_running_title)
                     },
                 )
             },
@@ -243,14 +261,18 @@ fun MarketScreen(
                     if (install.conflictSource != null) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "服务端已有同名插件目录。覆盖会替换原有文件。",
+                            stringResource(R.string.market_install_conflict_message),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
                     if (install.total != null && install.total > 0 && install.stage != "done") {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "已上传 ${install.read}/${install.total} 字节",
+                            stringResource(
+                                R.string.market_install_uploaded,
+                                install.read,
+                                install.total,
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -263,13 +285,19 @@ fun MarketScreen(
             },
             confirmButton = {
                 when {
-                    install.conflictSource != null -> TextButton(onClick = onForcePluginInstall) { Text("覆盖") }
-                    else -> TextButton(onClick = onDismissPluginInstall) { Text("关闭") }
+                    install.conflictSource != null -> TextButton(onClick = onForcePluginInstall) {
+                        Text(stringResource(R.string.market_action_overwrite))
+                    }
+                    else -> TextButton(onClick = onDismissPluginInstall) {
+                        Text(stringResource(R.string.action_close))
+                    }
                 }
             },
             dismissButton = {
                 if (install.conflictSource != null) {
-                    TextButton(onClick = onDismissPluginInstall) { Text("取消") }
+                    TextButton(onClick = onDismissPluginInstall) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
                 }
             },
         )
@@ -278,22 +306,42 @@ fun MarketScreen(
     state.hubInstall?.let { task ->
         AlertDialog(
             onDismissRequest = onDismissHubInstall,
-            title = { Text(if (task.isTerminal) "导入结果" else "正在导入") },
+            title = {
+                Text(
+                    if (task.isTerminal) {
+                        stringResource(R.string.market_hub_result_title)
+                    } else {
+                        stringResource(R.string.market_hub_running_title)
+                    },
+                )
+            },
             text = {
                 Column {
                     Text(task.bundleUrl, style = MaterialTheme.typography.labelSmall)
                     Spacer(Modifier.height(6.dp))
-                    Text("状态：${task.status}", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = stringResource(R.string.market_hub_status, task.status),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     task.error?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                     task.result?.let { result ->
                         if (result.imported.isNotEmpty()) {
-                            Text("已导入：${result.imported.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                text = stringResource(
+                                    R.string.market_hub_imported,
+                                    result.imported.joinToString(),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
                         if (result.conflicts.isNotEmpty()) {
                             Text(
-                                "冲突：${result.conflicts.joinToString { it.skillName }}",
+                                text = stringResource(
+                                    R.string.market_hub_conflicts,
+                                    result.conflicts.joinToString { it.skillName },
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                             )
@@ -303,14 +351,20 @@ fun MarketScreen(
             },
             confirmButton = {
                 if (!task.isTerminal) {
-                    TextButton(onClick = onCancelHubInstall) { Text("取消任务") }
+                    TextButton(onClick = onCancelHubInstall) {
+                        Text(stringResource(R.string.market_action_cancel_task))
+                    }
                 } else {
-                    TextButton(onClick = onDismissHubInstall) { Text("关闭") }
+                    TextButton(onClick = onDismissHubInstall) {
+                        Text(stringResource(R.string.action_close))
+                    }
                 }
             },
             dismissButton = {
                 if (!task.isTerminal) {
-                    TextButton(onClick = onDismissHubInstall) { Text("隐藏") }
+                    TextButton(onClick = onDismissHubInstall) {
+                        Text(stringResource(R.string.market_action_hide))
+                    }
                 }
             },
         )
@@ -319,25 +373,29 @@ fun MarketScreen(
     if (state.notice != null) {
         AlertDialog(
             onDismissRequest = onDismissNotice,
-            title = { Text("提示") },
+            title = { Text(stringResource(R.string.market_notice_title)) },
             text = { Text(state.notice) },
-            confirmButton = { TextButton(onClick = onDismissNotice) { Text("知道了") } },
+            confirmButton = {
+                TextButton(onClick = onDismissNotice) {
+                    Text(stringResource(R.string.market_action_got_it))
+                }
+            },
         )
     }
 
     note?.let { text ->
         AlertDialog(
             onDismissRequest = { note = null },
-            title = { Text("无法直达详情") },
+            title = { Text(stringResource(R.string.market_note_title)) },
             text = {
                 Text(
-                    text = "$text。可在平台页面内搜索技能名，或改用其它来源。",
+                    text = stringResource(R.string.market_note_message, text),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
             confirmButton = {
                 Text(
-                    text = "知道了",
+                    text = stringResource(R.string.market_action_got_it),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.clickable { note = null }.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -367,7 +425,7 @@ private fun SkillMarket(
         OutlinedTextField(
             value = state.query,
             onValueChange = onQuery,
-            placeholder = { Text("搜索技能，例如 pdf、海报") },
+            placeholder = { Text(stringResource(R.string.market_search_placeholder)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearch() }),
@@ -375,7 +433,7 @@ private fun SkillMarket(
         )
 
         if (state.metaLoading && state.providers.isEmpty()) {
-            LoadingLine("正在读取市场来源")
+            LoadingLine(stringResource(R.string.market_loading_providers))
         } else {
             state.metaError?.let {
                 Text(
@@ -386,7 +444,7 @@ private fun SkillMarket(
             }
             if (state.providers.isNotEmpty()) {
                 Text(
-                    text = "来源",
+                    text = stringResource(R.string.market_label_sources),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -405,7 +463,11 @@ private fun SkillMarket(
                 }
                 state.providers.filter { !it.available }.forEach { provider ->
                     Text(
-                        text = "${provider.label} 不可用：${provider.reason.orEmpty()}",
+                        text = stringResource(
+                            R.string.market_provider_unavailable,
+                            provider.label,
+                            provider.reason.orEmpty(),
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -413,7 +475,7 @@ private fun SkillMarket(
             }
             if (state.categories.isNotEmpty()) {
                 Text(
-                    text = "分类",
+                    text = stringResource(R.string.market_label_categories),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -425,7 +487,10 @@ private fun SkillMarket(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TabChip("全部", state.selectedCategory == null) { onCategory(null) }
+                    TabChip(
+                        text = stringResource(R.string.market_category_all),
+                        selected = state.selectedCategory == null,
+                    ) { onCategory(null) }
                     state.categories.take(CATEGORY_PREVIEW).forEach { category ->
                         TabChip(category.label, state.selectedCategory == category.id) {
                             onCategory(category.id)
@@ -436,7 +501,11 @@ private fun SkillMarket(
         }
 
         SearchButton(
-            label = if (state.searching) "搜索中" else "搜索",
+            label = if (state.searching) {
+                stringResource(R.string.market_action_searching)
+            } else {
+                stringResource(R.string.action_search)
+            },
             enabled = !state.searching && state.searchableProviders.isNotEmpty(),
             onClick = onSearch,
         )
@@ -457,11 +526,11 @@ private fun SkillMarket(
         }
 
         when {
-            state.searching -> LoadingLine("正在搜索，多个来源并行，通常需要十几秒")
+            state.searching -> LoadingLine(stringResource(R.string.market_hint_searching))
 
             state.searched && state.results.isEmpty() && state.searchError == null ->
                 Text(
-                    text = "没有匹配的技能。可换一个更通用的关键词，或先清空分类。",
+                    text = stringResource(R.string.market_empty_search),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -482,7 +551,7 @@ private fun SkillMarket(
                 }
                 if (state.truncated) {
                     Text(
-                        text = "结果已截断，更具体的关键词能减少无关条目。",
+                        text = stringResource(R.string.market_hint_truncated),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -491,7 +560,7 @@ private fun SkillMarket(
         }
 
         Text(
-            text = "「导入」会把技能安装到当前智能体；导入结果与冲突在弹窗中显示。",
+            text = stringResource(R.string.market_hint_import),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -516,18 +585,22 @@ private fun PluginMarket(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onInstallFromFile) { Text("从文件安装") }
-            TextButton(onClick = onInstallFromUrl) { Text("从网址安装") }
+            TextButton(onClick = onInstallFromFile) {
+                Text(stringResource(R.string.market_action_install_from_file))
+            }
+            TextButton(onClick = onInstallFromUrl) {
+                Text(stringResource(R.string.market_action_install_from_url))
+            }
         }
         Text(
-            text = "官方插件目录",
+            text = stringResource(R.string.market_label_catalog),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         CardBox {
             when {
                 state.catalogLoading && state.catalog == null -> Text(
-                    text = "正在读取插件目录",
+                    text = stringResource(R.string.market_loading_catalog),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
@@ -535,14 +608,14 @@ private fun PluginMarket(
 
                 // 目录「成功但 error 非空」表示 CDN 拉不到，此时不能报成「没有插件」。
                 state.catalogError != null -> Text(
-                    text = "无法获取插件目录：${state.catalogError}",
+                    text = stringResource(R.string.market_error_catalog, state.catalogError),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
                 )
 
                 state.catalog?.plugins.isNullOrEmpty() -> Text(
-                    text = "插件目录为空",
+                    text = stringResource(R.string.market_empty_catalog),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
@@ -561,28 +634,32 @@ private fun PluginMarket(
         }
         state.catalog?.updatedAt?.let {
             Text(
-                text = "目录更新时间：$it",
+                text = stringResource(R.string.market_label_catalog_updated, it),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
         Text(
-            text = "在线插件市场",
+            text = stringResource(R.string.market_label_online_plugins),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedTextField(
             value = state.pluginQuery,
             onValueChange = onQuery,
-            placeholder = { Text("搜索平台上的插件") },
+            placeholder = { Text(stringResource(R.string.market_plugin_search_placeholder)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearch() }),
             modifier = Modifier.fillMaxWidth(),
         )
         SearchButton(
-            label = if (state.pluginSearching) "搜索中" else "搜索",
+            label = if (state.pluginSearching) {
+                stringResource(R.string.market_action_searching)
+            } else {
+                stringResource(R.string.action_search)
+            },
             enabled = !state.pluginSearching,
             onClick = onSearch,
         )
@@ -594,7 +671,7 @@ private fun PluginMarket(
             )
         }
         when {
-            state.pluginSearching -> LoadingLine("正在读取在线插件市场")
+            state.pluginSearching -> LoadingLine(stringResource(R.string.market_loading_online_plugins))
             state.pluginResults.isNotEmpty() -> CardBox {
                 state.pluginResults.forEachIndexed { index, entry ->
                     PluginMarketRow(entry = entry, onOpen = onOpen)
@@ -605,14 +682,14 @@ private fun PluginMarket(
             }
 
             state.pluginSearched && state.pluginError == null -> Text(
-                text = "没有匹配的插件",
+                text = stringResource(R.string.market_empty_plugins),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
         Text(
-            text = "安装插件请使用 Web 控制台或服务端的插件安装命令；本页不下载、不安装。",
+            text = stringResource(R.string.market_hint_install),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -645,7 +722,7 @@ private fun MarketRow(
             TextButton(
                 enabled = (result.sourceUrl.startsWith("http")) && !resolving,
                 onClick = onImport,
-            ) { Text("导入") }
+            ) { Text(stringResource(R.string.market_action_import)) }
             Text(
                 text = result.sourceLabel ?: result.source,
                 style = MaterialTheme.typography.labelSmall,
@@ -671,7 +748,7 @@ private fun MarketRow(
         }
         result.version?.takeIf { it.isNotBlank() }?.let { version ->
             Text(
-                text = "版本 $version",
+                text = stringResource(R.string.market_label_version, version),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -685,6 +762,11 @@ private fun CatalogRow(
     onOpen: (String) -> Unit,
     onInstall: () -> Unit,
 ) {
+    val installStatus = when {
+        entry.installed && entry.upgradeAvailable -> R.string.market_badge_installed_upgradable
+        entry.installed -> R.string.market_badge_installed
+        else -> R.string.market_badge_not_installed
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -702,18 +784,17 @@ private fun CatalogRow(
             )
             if (entry.installUrl.isNotBlank()) {
                 TextButton(onClick = onInstall) {
-                    Text(if (entry.installed) "升级" else "安装")
+                    Text(
+                        if (entry.installed) {
+                            stringResource(R.string.market_action_upgrade)
+                        } else {
+                            stringResource(R.string.market_action_install)
+                        },
+                    )
                 }
             }
             Text(
-                text = buildString {
-                    if (entry.installed) {
-                        append("已安装")
-                        if (entry.upgradeAvailable) append(" · 可升级")
-                    } else {
-                        append("未安装")
-                    }
-                },
+                text = stringResource(installStatus),
                 style = MaterialTheme.typography.labelSmall,
                 color = if (entry.upgradeAvailable) {
                     MaterialTheme.colorScheme.secondary
@@ -737,7 +818,7 @@ private fun CatalogRow(
                 if (entry.author.isNotBlank()) append(entry.author)
                 if (entry.version.isNotBlank()) {
                     if (isNotEmpty()) append(" · ")
-                    append("版本 ${entry.version}")
+                    append(stringResource(R.string.market_label_version, entry.version))
                 }
                 if (entry.size.isNotBlank()) {
                     if (isNotEmpty()) append(" · ")
@@ -782,11 +863,17 @@ private fun PluginMarketRow(entry: PluginMarketEntryDto, onOpen: (String) -> Uni
                 if (entry.developer.isNotBlank()) append(entry.developer)
                 if (entry.version.isNotBlank()) {
                     if (isNotEmpty()) append(" · ")
-                    append("版本 ${entry.version}")
+                    append(stringResource(R.string.market_label_version, entry.version))
                 }
                 if (entry.downloads > 0) {
                     if (isNotEmpty()) append(" · ")
-                    append("${entry.downloads} 次下载")
+                    append(
+                        pluralStringResource(
+                            R.plurals.market_downloads,
+                            entry.downloads.toInt(),
+                            entry.downloads,
+                        ),
+                    )
                 }
             },
             style = MaterialTheme.typography.labelSmall,

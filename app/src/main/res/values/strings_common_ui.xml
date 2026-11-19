@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="common_editor_saved">已保存</string>
+    <string name="common_editor_discard_title">放弃未保存的修改？</string>
+    <string name="common_editor_discard_message">当前草稿还没有保存，离开后会丢失。</string>
+    <string name="common_editor_discard_confirm">放弃修改</string>
+    <string name="common_editor_discard_keep">继续编辑</string>
+    <string name="common_impact_undoable">将影响以下内容（可撤销）</string>
+    <string name="common_impact_permanent">将影响以下内容（不可撤销）</string>
+    <string name="common_undo">撤销</string>
+    <string name="common_pick_file">选择文件</string>
+    <string name="latex_fallback_note">该公式用到了暂不支持的写法，以上为原始内容</string>
+    <string name="markdown_label_mermaid_source">mermaid（源码）</string>
+    <string name="markdown_label_code">代码</string>
+    <string name="markdown_action_copy_code">复制代码</string>
+    <string name="markdown_mermaid_hint">Mermaid 图表暂以源码展示，可复制到支持渲染的工具查看</string>
+</resources>

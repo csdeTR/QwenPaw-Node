@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 终端页 -->
+    <string name="terminal_default_title">终端</string>
+    <string name="terminal_empty_title">还没有打开终端</string>
+    <string name="terminal_choose_source">选择终端方式</string>
+    <string name="terminal_new_tab">新建终端</string>
+    <string name="terminal_connecting">正在连接…</string>
+    <string name="terminal_exited">终端已退出</string>
+    <string name="terminal_exited_with_code">终端已退出（退出码 %1$d）</string>
+    <string name="terminal_source_local">默认</string>
+    <string name="terminal_source_relay">Bridge 中继</string>
+    <string name="terminal_source_direct">SSH 直连</string>
+    <string name="terminal_source_none">未选择方式</string>
+    <string name="terminal_source_local_desc">使用 /api/terminals 端点，方式与 Web 控制台一致，需要开启「Web 登录认证」。</string>
+    <string name="terminal_source_relay_desc">经配套插件 QwenPaw Node Bridge 转发；适合手机只能访问 QwenPaw Web 端口的场景。</string>
+    <string name="terminal_source_direct_desc">从本机直接连接目标 SSH；平台与 shell 在 设置 → 服务器 → 编辑实例 → 高级选项 → SSH 直连 中配置。</string>
+    <string name="terminal_set_as_default">设为默认</string>
+    <string name="terminal_shell_section_title">默认 / Bridge 中继的登录 shell</string>
+    <string name="terminal_shell_cmd">命令提示符</string>
+    <string name="terminal_credentials_note">SSH 凭据只在本机内存中使用。Bridge 中继的公网明文地址需先在「受信任的连接」确认该地址仅你可访问；关闭安全提示不会解除这条限制。</string>
+    <string name="terminal_pinch_tip">双指缩放是临时放大；调整字号请用 A+ / A-</string>
+    <string name="terminal_git_bash_hint">请先确认目标 Windows 已安装 Bash（Git Bash 或 WSL）；未安装时命令会失败。</string>
+    <string name="terminal_key_paste">粘贴</string>
+    <string name="terminal_rename_title">重命名标签</string>
+    <string name="terminal_rename_label">标签名称</string>
+    <string name="terminal_close_title">关闭终端</string>
+    <string name="terminal_close_local_message">关闭后会终止服务端终端及其子进程，正在运行的命令会中断。</string>
+    <string name="terminal_close_ssh_message">关闭后会断开当前 SSH 会话。</string>
+    <string name="terminal_host_key_title">确认主机密钥</string>
+    <string name="terminal_host_key_message">首次连接需要确认服务器身份。请与服务器管理员核对下面的指纹。</string>
+    <string name="terminal_host_key_warning">指纹变化或与管理员给出的不一致时，请取消连接。</string>
+    <string name="terminal_host_key_trust">信任并连接</string>
+    <string name="terminal_action_clear_host_key">清除主机密钥</string>
+    <string name="terminal_action_reconnect">重连</string>
+    <string name="terminal_action_reopen">重新打开</string>
+    <string name="terminal_notice_host_key_cleared">已清除该主机的旧密钥，请重新连接</string>
+    <string name="terminal_notice_no_tabs">没有打开的终端</string>
+    <plurals name="terminal_limit_tabs">
+        <item quantity="other">最多同时打开 %1$d 个终端</item>
+    </plurals>
+
+    <!-- 终端错误与来源置灰原因 -->
+    <string name="terminal_error_not_connected">尚未连接服务器</string>
+    <string name="terminal_error_ssh_not_configured">尚未在 Web 控制台 → 插件 → SSH 设置中配置目标与凭据</string>
+    <string name="terminal_error_ssh_needs_login">SSH 需要服务端已开启 Web 登录认证</string>
+    <string name="terminal_error_no_ssh_credential">插件没有返回可用的 SSH 凭据</string>
+    <string name="terminal_error_direct_no_credential">SSH 直连凭据未配置</string>
+    <string name="terminal_error_direct_no_address">SSH 直连没有可用地址</string>
+    <string name="terminal_error_auth_unreadable">无法读取服务端 Web 登录认证状态，请检查连接</string>
+    <string name="terminal_error_auth_disabled">服务端未开启 Web 登录认证。请先在服务端开启并注册用户。</string>
+    <string name="terminal_error_no_users">服务端已开启 Web 登录认证但还没有注册用户，请先在 Web 控制台注册。</string>
+    <string name="terminal_error_terminal_status">无法读取终端状态</string>
+    <string name="terminal_error_missing_dependency">服务端缺少终端依赖：%1$s</string>
+    <string name="terminal_error_terminal_unavailable">服务端终端不可用</string>
+    <string name="terminal_reason_bridge_missing">未安装配套插件 QwenPaw Node Bridge</string>
+    <string name="terminal_reason_bridge_old">配套插件版本低于 v0.4.0（缺少 ssh 能力）</string>
+    <string name="terminal_reason_auth_unreadable">无法读取服务端 Web 登录认证状态</string>
+    <string name="terminal_reason_auth_disabled">服务端未开启 Web 登录认证，Bridge 中继不可用</string>
+    <string name="terminal_reason_no_users">服务端还没有注册用户，请先在 Web 控制台注册</string>
+    <string name="terminal_reason_ssh_not_configured">尚未配置 SSH 目标与凭据</string>
+    <string name="terminal_reason_direct_not_configured">尚未配置 SSH 直连地址</string>
+    <string name="terminal_reason_secure_storage">本机安全存储不可用，无法保存 SSH 直连凭据</string>
+    <string name="terminal_reason_direct_no_key">尚未配置 SSH 直连私钥</string>
+    <string name="terminal_reason_direct_no_password">尚未配置 SSH 直连密码</string>
+
+    <!-- 终端常驻通知 -->
+    <plurals name="terminal_sessions_title">
+        <item quantity="other">当前有 %1$d 个终端会话</item>
+    </plurals>
+    <string name="terminal_sessions_text">终端在后台继续运行；划掉 QwenPaw Node 会结束全部会话。</string>
+    <string name="terminal_stop_action">停止终端</string>
+
+    <!-- SSH 传输 -->
+    <string name="ssh_error_no_address">尚未配置 SSH 地址</string>
+    <string name="ssh_error_all_addresses_failed">所有 SSH 地址均不可用：%1$s</string>
+    <string name="ssh_error_list_separator">；</string>
+    <string name="ssh_error_relay_unauthorized">SSH 中继认证失败：请重新登录服务端</string>
+    <string name="ssh_error_relay_not_configured">插件尚未配置 SSH 目标与凭据</string>
+    <string name="ssh_error_relay_busy">SSH 中继连接数已满，请稍后重试</string>
+    <string name="ssh_error_target_unreachable">SSH 目标不可达：请检查插件里配置的主机与端口</string>
+    <string name="ssh_error_auth_failed">SSH 认证失败：请检查用户名、私钥或登录密码。凭据在 Web 控制台 → 插件 → SSH 设置中配置。若使用 Ed25519 密钥仍失败，请改用 RSA 密钥。</string>
+    <string name="ssh_error_auth_failed_local">SSH 认证失败：请检查用户名、私钥或登录密码。若使用 Ed25519 密钥仍失败，请改用 RSA 密钥。</string>
+    <string name="ssh_error_host_key_changed">主机密钥已变化或未确认，可能被中间人攻击。请清除该主机的旧密钥后重新确认</string>
+    <string name="ssh_error_algorithm">SSH 算法协商失败：服务端与当前设备没有共同支持的算法</string>
+    <string name="ssh_error_ed25519">当前 Android 版本不支持 Ed25519 密钥；请改用登录密码或 RSA 密钥（Android 13 及以上可支持 Ed25519）</string>
+    <string name="ssh_error_relay_failed">SSH 中继连接失败：请确认插件已安装、服务端已开启 Web 登录认证，且反向代理支持 WebSocket 升级</string>
+    <string name="ssh_error_connect">无法连接 %1$s：%2$s</string>
+    <string name="ssh_error_relay_closed">SSH 中继已关闭</string>
+    <string name="ssh_error_relay_connection_failed">SSH 中继连接失败</string>
+    <string name="ssh_error_relay_send_timeout">SSH 中继发送超时</string>
+    <string name="ssh_shell_default">默认</string>
+    <string name="ssh_shell_cmd">命令提示符</string>
+
+    <!-- Git 页 -->
+    <string name="git_workspace">工作区</string>
+    <string name="git_error_status">无法读取 Git 状态</string>
+    <string name="git_not_repo">当前工作区不是 Git 仓库。</string>
+    <string name="git_intro_title">首次打开 Git</string>
+    <string name="git_intro_message">打开后会检查工作区。如果它还不是独立的 Git 仓库，服务端会初始化仓库、写一份 .gitignore，并把当前全部文件做一次初始提交。这个操作会改动工作区。</string>
+    <string name="git_intro_confirm">我已了解，继续</string>
+    <string name="git_intro_dismiss">暂不检查</string>
+    <string name="git_branches_title">分支（只读）</string>
+    <string name="git_branches_empty">没有可显示的分支。</string>
+    <string name="git_branch_remote">（远程）</string>
+    <string name="git_branches_hint">本版不提供切换分支；需要换分支请使用 Web 控制台。</string>
+    <string name="git_pending_title">Git 检查尚未开始</string>
+    <string name="git_pending_dismissed">你选择了暂不检查。准备好后可以继续；首次检查可能会初始化仓库并做一次初始提交。</string>
+    <string name="git_pending_hint">首次检查可能会初始化仓库并做一次初始提交。</string>
+    <string name="git_pending_continue">继续检查</string>
+    <string name="git_tab_changes">改动</string>
+    <string name="git_tab_history">历史</string>
+    <string name="git_ahead_behind">领先 %1$d / 落后 %2$d</string>
+    <string name="git_section_staged">已暂存</string>
+    <string name="git_section_unstaged">未暂存</string>
+    <string name="git_section_untracked">未跟踪</string>
+    <plurals name="git_section_count">
+        <item quantity="other">%1$s（%2$d）</item>
+    </plurals>
+    <string name="git_changes_empty">工作区没有改动。</string>
+    <string name="git_commit_message_hint">提交信息</string>
+    <string name="git_commit">提交</string>
+    <string name="git_stage_all">全部暂存</string>
+    <string name="git_unstage_all">全部取消暂存</string>
+    <string name="git_stage">暂存</string>
+    <string name="git_unstage">取消暂存</string>
+    <string name="git_history_empty">还没有提交记录。</string>
+    <string name="git_no_commit_message">（无提交信息）</string>
+    <string name="git_diff_truncated">差异较大，已截断显示；完整内容请在 Web 控制台查看。</string>
+    <string name="git_notice_message_required">提交信息不能为空</string>
+    <string name="git_notice_nothing_staged">没有已暂存的改动</string>
+    <string name="git_notice_committed">已提交</string>
+
+    <!-- 收件箱 -->
+    <string name="inbox_title">收件箱</string>
+    <plurals name="inbox_unread_count">
+        <item quantity="other">%1$d 条未读</item>
+    </plurals>
+    <string name="inbox_mark_all_read">全部已读</string>
+    <string name="inbox_loading">正在加载</string>
+    <string name="inbox_empty_filtered">没有符合条件的记录</string>
+    <string name="inbox_empty">收件箱是空的</string>
+    <string name="inbox_empty_hint">定时任务与记忆写入的结果会出现在这里</string>
+    <string name="inbox_filter_source">来源 · %1$s</string>
+    <string name="inbox_filter_agent">智能体 · %1$s</string>
+    <string name="inbox_filter_clear">清除</string>
+    <string name="inbox_filter_all">全部</string>
+    <string name="inbox_filter_source_title">筛选来源</string>
+    <string name="inbox_filter_agent_title">筛选智能体</string>
+    <string name="inbox_agents_unavailable">未能读取智能体列表</string>
+    <string name="inbox_delete_title">删除事件</string>
+    <string name="inbox_delete_message">删除后无法恢复，确定要删除这条事件吗？</string>
+    <string name="inbox_delete_impact_event">「%1$s」这条记录</string>
+    <string name="inbox_delete_impact_runs">该事件关联的运行轨迹（若无其它引用）</string>
+    <string name="inbox_selected">已选中</string>
+    <string name="inbox_source_with_status">%1$s，%2$s</string>
+    <string name="inbox_source_cron">定时任务</string>
+    <string name="inbox_source_heartbeat">心跳</string>
+    <string name="inbox_source_memory">记忆</string>
+    <string name="inbox_source_skill_autoupdate">技能更新</string>
+    <string name="inbox_source_mail">邮件</string>
+</resources>

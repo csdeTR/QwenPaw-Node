@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.result.contract.ActivityResultContract
+import io.qwenpaw.node.R
 
 /**
  * 选择一个或多个文件，由系统列出可用的来源。
@@ -32,7 +33,7 @@ class GetMultipleContent : ActivityResultContract<Unit, List<Uri>>() {
         }
         // 包一层 chooser：部分 ROM 会对 GET_CONTENT 仍套用默认应用，
         // 显式 chooser 能把「用哪个应用选择」这一步摆到用户面前。
-        return Intent.createChooser(pick, "选择文件")
+        return Intent.createChooser(pick, context.getString(R.string.common_pick_file))
     }
 
     override fun parseResult(resultCode: Int, intent: Intent?): List<Uri> {

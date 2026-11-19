@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.chat
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -6,6 +8,11 @@ import org.junit.Test
 
 /** 工具调用倒计时的纯计算。 */
 class ToolDeadlineTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     @Test
     fun `remaining shrinks with elapsed time`() {

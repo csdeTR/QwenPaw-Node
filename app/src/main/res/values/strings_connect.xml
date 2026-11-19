@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 连接表单与首次连接页 -->
+    <string name="connect_connect">连接</string>
+    <string name="connect_title">连接到 QwenPaw</string>
+    <string name="connect_subtitle">数据始终存放在你自己的机器上</string>
+    <string name="connect_server_name">服务器名称</string>
+    <string name="connect_server_address">服务器地址</string>
+    <string name="connect_optional">可选</string>
+    <string name="connect_required">必填</string>
+    <string name="connect_name_placeholder">例如「家里的机器」，留空则使用地址</string>
+    <string name="connect_fixed_punctuation">检测到中文标点，已自动更正</string>
+    <string name="connect_address_https_hint">未写 http:// 或 https:// 时，内网地址按 http 尝试，公网域名按 https 尝试。若服务端只能通过 http 访问，请写明 http://。</string>
+    <string name="connect_advanced">高级选项</string>
+    <string name="connect_username">用户名</string>
+    <string name="connect_password">密码</string>
+    <string name="connect_login_hint">仅在服务端开启 Web 登录认证（QWENPAW_AUTH_ENABLED=true）时需要填写；本机或局域网直连一般留空。</string>
+    <string name="connect_proxy_user">反向代理账号</string>
+    <string name="connect_proxy_password">反向代理密码</string>
+    <string name="connect_proxy_hint">仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。</string>
+    <string name="connect_agent_id">智能体 ID</string>
+    <string name="connect_agent_id_hint">备用方式</string>
+    <string name="connect_ssh_title">SSH 直连</string>
+    <string name="connect_ssh_subtitle">地址、私钥或密码；仅在本机配置与连接</string>
+    <string name="connect_select_agent">选择智能体</string>
+    <string name="connect_reading">正在读取</string>
+    <string name="connect_read_list">读取列表</string>
+    <string name="connect_reload">重新读取</string>
+    <string name="connect_loading_agents">正在读取智能体列表</string>
+    <string name="connect_agents_empty_hint">填写地址后点击「读取列表」；也可先保存服务地址</string>
+    <string name="connect_saved_instances">已保存的实例</string>
+    <string name="connect_connecting">正在连接</string>
+    <string name="connect_footer_hint">连接时会检查服务端版本和智能体是否可用</string>
+    <string name="connect_agent_model">模型 %1$s</string>
+    <string name="connect_selected">已选择</string>
+    <string name="connect_saved_backups">（+%1$d 个备用）</string>
+    <string name="connect_saved_version">" 版本 %1$s"</string>
+
+    <!-- 地址验证结论 -->
+    <string name="connect_verifying">正在验证</string>
+    <string name="connect_verified">已验证</string>
+    <string name="connect_verify">验证连接</string>
+    <string name="connect_verify_attempting">正在尝试 %1$d/%2$d，%3$s</string>
+    <string name="connect_verify_url">正在验证 %1$s</string>
+    <string name="connect_verify_ok">连接正常</string>
+    <string name="connect_verify_ok_version">连接正常，服务端 %1$s，%2$s</string>
+    <string name="connect_verify_ok_bridge">连接正常，%1$s</string>
+    <string name="connect_verify_fallback">，已回退到 %1$s</string>
+    <string name="connect_proxy_protected">该地址由反向代理保护，请在高级选项里填写反向代理账号与密码</string>
+    <string name="connect_bridge_ready">QwenPaw Node Bridge v%1$s</string>
+    <string name="connect_bridge_absent">未安装配套插件</string>
+    <string name="connect_bridge_unknown">配套插件状态未能确认</string>
+
+    <!-- 引导式添加 -->
+    <string name="wizard_title_server">服务器</string>
+    <string name="wizard_title_login">登录</string>
+    <string name="wizard_title_agent">智能体</string>
+    <string name="wizard_connecting">正在连接</string>
+    <string name="wizard_skip_login_toast">该服务端未开启 Web 登录认证，已跳过</string>
+    <string name="wizard_login_failed">无法登录</string>
+    <string name="wizard_got_it">知道了</string>
+    <string name="wizard_doc">文档</string>
+    <string name="wizard_selected">已选择</string>
+    <string name="wizard_server_name">服务器名称</string>
+    <string name="wizard_server_address">服务器地址</string>
+    <string name="wizard_optional">可选</string>
+    <string name="wizard_required">必填</string>
+    <string name="wizard_name_placeholder">例如「家里的机器」</string>
+    <string name="wizard_name_hint">将在实例列表显示，可随时修改，留空则显示地址</string>
+    <string name="wizard_address_placeholder">例如 chat.example.com 或 192.168.1.10:8088</string>
+    <string name="wizard_address_https_hint">未写 http:// 或 https:// 时，内网地址按 http 尝试，公网域名按 https 尝试。若服务端只能通过 http 访问，请写明 http://。</string>
+    <string name="wizard_alias">此地址的别名</string>
+    <string name="wizard_alias_placeholder">例如「局域网」「EasyTier」</string>
+    <string name="wizard_alias_hint">只改这条地址在实例卡片上的显示名，留空则显示地址本身</string>
+    <string name="wizard_proxy_collapse">收起反向代理验证</string>
+    <string name="wizard_proxy_expand">反向代理验证（可选）</string>
+    <string name="wizard_proxy_required">该地址由反向代理保护，需要填写账号与密码才能访问服务端</string>
+    <string name="wizard_proxy_hint">仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。它与「Web 登录认证」无关。</string>
+    <string name="wizard_proxy_user">反向代理用户名</string>
+    <string name="wizard_proxy_password">反向代理密码</string>
+    <string name="wizard_proxy_both_hint">两个都填写才会生效；只填一项按未启用处理</string>
+    <string name="wizard_verifying">正在验证</string>
+    <string name="wizard_verified">已验证</string>
+    <string name="wizard_verify">验证连接</string>
+    <string name="wizard_verify_ok_version">连接正常，服务端 %1$s，%2$s</string>
+    <string name="wizard_verify_ok_bridge">连接正常，%1$s</string>
+    <string name="wizard_proxy_protected">该地址由反向代理保护，请填写反向代理账号与密码后重新验证</string>
+    <string name="wizard_checking_login">正在检查该服务器是否需要登录</string>
+    <string name="wizard_no_login">该服务器未开启 Web 登录认证，正在进入下一步。</string>
+    <string name="wizard_login_required">这台服务器开启了 Web 登录认证，需要填写账号与密码。</string>
+    <string name="wizard_username">用户名</string>
+    <string name="wizard_password">密码</string>
+    <string name="wizard_loading_agents">正在读取智能体列表</string>
+    <string name="wizard_agents_empty">没有读到可用的智能体，可以在下面手动填写 ID。</string>
+    <string name="wizard_manual_collapse">收起手动填写</string>
+    <string name="wizard_manual_expand">手动填写 ID</string>
+    <string name="wizard_security_title">这个地址可能可以从公网访问</string>
+    <string name="wizard_security_auth_body">未检测到 Web 登录认证。任何能访问到 %1$s 的人都可以操作这台机器上的智能体、读取对话记录。</string>
+    <string name="wizard_security_auth_advice">当前状态无异于将设备向全世界公开，为确保安全，请尽快开启 QwenPaw「Web 登录认证」，保护控制台免受未授权访问</string>
+    <string name="wizard_security_tls_title">通信内容未加密</string>
+    <string name="wizard_security_tls_body">QwenPaw Node 与 QwenPaw 之间的通信内容将明文传输，存在被窃听的风险。</string>
+    <string name="wizard_security_tls_advice">建议为访问地址启用HTTPS与TLS加密。你可以直接为该地址配置SSL证书，或在前方部署带证书的反向代理。</string>
+    <string name="wizard_trusted_hint">如果这个地址仅你可访问，请在「设置 → 服务器 → 受信任的连接」里添加该地址，之后不再弹出本条提示。</string>
+
+    <!-- 地址列表编辑 -->
+    <string name="address_default">默认地址</string>
+    <string name="address_backup">备用地址 %1$d</string>
+    <string name="address_alias_placeholder">别名，例如「本地」「EasyTier」</string>
+    <string name="address_usage">使用时机</string>
+    <string name="address_prefer_none">不自动切换</string>
+    <string name="address_prefer_vpn">VPN 时优先</string>
+    <string name="address_prefer_wifi">WiFi 时优先</string>
+    <string name="address_prefer_current_wifi">当前 WiFi 优先</string>
+    <string name="address_hit_now">当前网络正使用这条地址</string>
+    <string name="address_only_on_network">仅在网络「%1$s」下优先</string>
+    <string name="address_add">添加地址</string>
+    <string name="address_fallback_hint">连接失败时，QwenPaw Node依次尝试各条地址，便于外出时通过可用链路（如EasyTier）访问</string>
+
+    <!-- 设置页配置表单 ViewModel -->
+    <string name="cfgvm_saved">已保存</string>
+    <string name="cfgvm_tool_guard_on">工具防护已开启</string>
+    <string name="cfgvm_tool_guard_off">工具防护已关闭</string>
+    <string name="cfgvm_file_guard_on">文件防护已开启</string>
+    <string name="cfgvm_file_guard_off">文件防护已关闭</string>
+    <string name="cfgvm_sandbox_on">沙箱已开启</string>
+    <string name="cfgvm_sandbox_off">沙箱已关闭</string>
+    <string name="cfgvm_skill_scanner_updated">技能扫描模式已更新</string>
+</resources>

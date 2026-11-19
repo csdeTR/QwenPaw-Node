@@ -1,4 +1,6 @@
 package io.qwenpaw.node.ui.settings
+import io.qwenpaw.node.TestTexts
+import org.junit.Before
 
 import io.qwenpaw.node.data.model.CronScheduleDto
 import org.junit.Assert.assertEquals
@@ -8,6 +10,11 @@ import java.time.Instant
 
 /** 排期表达式的生成、解析与摘要。 */
 class CronScheduleTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     private val at = Instant.parse("2026-11-03T00:00:00Z")
 

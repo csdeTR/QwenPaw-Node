@@ -2,7 +2,10 @@ package io.qwenpaw.node.ui.stats
 
 import io.qwenpaw.node.data.model.LlmToolDailyDto
 import io.qwenpaw.node.data.model.TokenUsageRecordDto
+import io.qwenpaw.node.TestTexts
+import io.qwenpaw.node.ui.i18n.Texts
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
@@ -14,6 +17,11 @@ import java.time.LocalDate
  * 依赖「今天」的断言会在跨日与不同时区上飘。
  */
 class UsageAggregationTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     // ---------------- 区间换算 ----------------
 
@@ -35,7 +43,10 @@ class UsageAggregationTest {
 
     @Test
     fun `range labels are written language`() {
-        assertEquals(listOf("近 7 天", "近 30 天", "近 90 天"), UsageRange.entries.map { it.label })
+        assertEquals(
+            listOf("近 7 天", "近 30 天", "近 90 天"),
+            UsageRange.entries.map { Texts.get(it.labelRes) },
+        )
     }
 
     // ---------------- 按模型聚合 ----------------

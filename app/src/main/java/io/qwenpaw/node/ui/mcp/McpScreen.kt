@@ -1,6 +1,7 @@
 package io.qwenpaw.node.ui.mcp
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,9 +36,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.theme.qwenSwitchColors
 
@@ -45,9 +49,9 @@ import io.qwenpaw.node.ui.theme.qwenSwitchColors
 private enum class McpPage { LIST, DETAIL }
 
 /** 详情里的两段。 */
-private enum class McpTab(val title: String) {
-    TOOLS("工具白名单"),
-    POLICY("访问策略"),
+private enum class McpTab(@StringRes val title: Int) {
+    TOOLS(R.string.mcp_tab_tools),
+    POLICY(R.string.mcp_tab_policy),
 }
 
 /**
@@ -121,7 +125,7 @@ fun McpScreen(
                     ) {
                         Icon(
                             imageVector = QwenIcons.arrowLeft,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp),
                         )
@@ -179,11 +183,11 @@ fun McpScreen(
     state.notice?.let { text ->
         AlertDialog(
             onDismissRequest = onDismissNotice,
-            title = { Text("提示") },
+            title = { Text(stringResource(R.string.mcp_notice_title)) },
             text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
                 Text(
-                    text = "知道了",
+                    text = stringResource(R.string.mcp_action_got_it),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
@@ -210,7 +214,11 @@ private fun McpList(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "MCP 客户端（${state.clients.size} 个）",
+            text = pluralStringResource(
+                R.plurals.mcp_label_clients,
+                state.clients.size,
+                state.clients.size,
+            ),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -218,9 +226,10 @@ private fun McpList(
             if (state.clients.isEmpty()) {
                 Text(
                     text = when {
-                        state.loading && !state.loaded -> "正在加载"
-                        state.error != null -> "加载失败：${state.error}"
-                        else -> "服务端没有配置 MCP 客户端，可在 Web 控制台添加"
+                        state.loading && !state.loaded -> stringResource(R.string.mcp_state_loading)
+                        state.error != null ->
+                            stringResource(R.string.mcp_state_load_failed, state.error)
+                        else -> stringResource(R.string.mcp_state_empty)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (state.error != null) MaterialTheme.colorScheme.error
@@ -280,11 +289,11 @@ private fun McpList(
                                 )
                                 Text(
                                     text = buildString {
-                                        append("默认策略：")
+                                        append(stringResource(R.string.mcp_label_default_policy))
                                         append(McpPolicyEdit.effectLabel(client.accessSummary.defaultEffect))
                                         val oauth = client.oauthStatus
                                         if (oauth != null && !oauth.authorized) {
-                                            append(" · 需要 OAuth 授权")
+                                            append(stringResource(R.string.mcp_suffix_oauth_required))
                                         }
                                     },
                                     style = MaterialTheme.typography.labelSmall,
@@ -315,8 +324,7 @@ private fun McpList(
         }
         if (state.clients.isNotEmpty()) {
             Text(
-                text = "MCP 客户端的新增、连接参数与 OAuth 授权请在 Web 控制台完成；" +
-                    "这里只做启停、工具白名单与访问策略。",
+                text = stringResource(R.string.mcp_hint_console),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -347,7 +355,7 @@ private fun McpDetail(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             McpTab.entries.forEach { entry ->
                 TabChip(
-                    text = entry.title,
+                    text = stringResource(entry.title),
                     selected = entry == tab,
                     onClick = { onTab(entry) },
                 )
@@ -387,7 +395,7 @@ private fun ToolsSection(
         // 不解释这一点，用户会以为工具列表坏了。
         CardBox {
             Text(
-                text = "该客户端已停用，先启用后才能读取工具列表。",
+                text = stringResource(R.string.mcp_tools_disabled),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
@@ -399,7 +407,7 @@ private fun ToolsSection(
     CardBox {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                text = "只勾选的工具会被加载",
+                text = stringResource(R.string.mcp_tools_hint_checked),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -408,7 +416,10 @@ private fun ToolsSection(
                 state.toolsLoading -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("正在读取工具列表", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        stringResource(R.string.mcp_tools_loading),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
 
                 state.toolsError != null -> Column {
@@ -419,7 +430,7 @@ private fun ToolsSection(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "重试",
+                        text = stringResource(R.string.action_retry),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable(onClick = onRetry),
@@ -427,7 +438,7 @@ private fun ToolsSection(
                 }
 
                 state.tools.isEmpty() -> Text(
-                    text = "该 MCP 服务端没有提供工具",
+                    text = stringResource(R.string.mcp_tools_empty),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -472,12 +483,16 @@ private fun ToolsSection(
 
     if (state.tools.isNotEmpty()) {
         SaveButton(
-            label = if (state.savingTools) "保存中" else "保存白名单",
+            label = if (state.savingTools) {
+                stringResource(R.string.mcp_action_saving)
+            } else {
+                stringResource(R.string.mcp_action_save_tools)
+            },
             enabled = state.toolsDirty && !state.savingTools,
             onClick = onSave,
         )
         Text(
-            text = "全部勾选等于取消白名单、启用全部工具；一个都不勾则不加载任何工具。",
+            text = stringResource(R.string.mcp_tools_hint),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -512,12 +527,12 @@ private fun PolicySection(
     CardBox {
         Column(modifier = Modifier.padding(14.dp)) {
             Text(
-                text = "默认效果",
+                text = stringResource(R.string.mcp_label_default_effect),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "没有任何规则命中时使用的效果",
+                text = stringResource(R.string.mcp_hint_default_effect),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -538,12 +553,12 @@ private fun PolicySection(
         CardBox {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "按工具设置",
+                    text = stringResource(R.string.mcp_label_per_tool),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "不选表示跟随默认效果",
+                    text = stringResource(R.string.mcp_hint_per_tool),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -559,7 +574,7 @@ private fun PolicySection(
                         Spacer(Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TabChip(
-                                text = "跟随",
+                                text = stringResource(R.string.mcp_action_follow),
                                 selected = current.isBlank(),
                                 onClick = { onSetToolEffect(tool.name, "") },
                             )
@@ -582,7 +597,7 @@ private fun PolicySection(
         CardBox {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "其余规则",
+                    text = stringResource(R.string.mcp_label_other_rules),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -590,13 +605,20 @@ private fun PolicySection(
                 Text(
                     text = buildString {
                         if (overrideCount > 0) {
-                            append("按来源与用户的规则 $overrideCount 条、")
+                            append(
+                                stringResource(R.string.mcp_rules_override, overrideCount),
+                            )
                         }
                         if (policy.unmanagedRulesCount > 0) {
-                            append("非控制台管理的规则 ${policy.unmanagedRulesCount} 条、")
+                            append(
+                                stringResource(
+                                    R.string.mcp_rules_unmanaged,
+                                    policy.unmanagedRulesCount,
+                                ),
+                            )
                         }
-                        append("已原样保留，保存时不会改动。")
-                        append("需要修改这些规则请在 Web 控制台操作。")
+                        append(stringResource(R.string.mcp_rules_kept))
+                        append(stringResource(R.string.mcp_rules_edit_hint))
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -614,7 +636,11 @@ private fun PolicySection(
     }
 
     SaveButton(
-        label = if (state.savingPolicy) "保存中" else "保存策略",
+        label = if (state.savingPolicy) {
+            stringResource(R.string.mcp_action_saving)
+        } else {
+            stringResource(R.string.mcp_action_save_policy)
+        },
         enabled = !state.savingPolicy,
         onClick = onSave,
     )

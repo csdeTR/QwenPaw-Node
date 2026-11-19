@@ -1,8 +1,10 @@
 package io.qwenpaw.node.data.stream
 
+import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.QwenPawApi
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -54,7 +56,7 @@ class ToolStreamClient(
                 }
                 val stream = response.body?.charStream()
                 if (stream == null) {
-                    close(IOException("响应体为空"))
+                    close(IOException(Texts.get(R.string.stream_empty_body)))
                     awaitClose { }
                     return@callbackFlow
                 }

@@ -1,5 +1,7 @@
 package io.qwenpaw.node.ui.chat
 
+import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.i18n.Texts
 import kotlin.math.ceil
 
 /**
@@ -68,15 +70,22 @@ internal fun toolDeadlineLabel(
     val offloadFirst = offload != null && (kill == null || offload <= kill)
     val offloadText = when {
         offload == null -> null
-        offload == 0.0 -> "即将转入后台"
-        else -> "${remainingLabelSeconds(offload)} 秒后自动转入后台"
+        offload == 0.0 -> Texts.get(R.string.chattail_deadline_offload_soon)
+        else -> Texts.get(
+            R.string.chattail_deadline_offload,
+            remainingLabelSeconds(offload) ?: 0,
+        )
     }
     val killText = when {
         kill == null -> null
-        kill == 0.0 -> "即将中止"
-        else -> "${remainingLabelSeconds(kill)} 秒后中止"
+        kill == 0.0 -> Texts.get(R.string.chattail_deadline_kill_soon)
+        else -> Texts.get(R.string.chattail_deadline_kill, remainingLabelSeconds(kill) ?: 0)
     }
     val primary = (if (offloadFirst) offloadText else killText) ?: return null
     val secondary = if (offloadFirst) killText else offloadText
-    return if (secondary == null || shorter == null) primary else "$primary（$secondary）"
+    return if (secondary == null || shorter == null) {
+        primary
+    } else {
+        Texts.get(R.string.chattail_deadline_combined, primary, secondary)
+    }
 }
