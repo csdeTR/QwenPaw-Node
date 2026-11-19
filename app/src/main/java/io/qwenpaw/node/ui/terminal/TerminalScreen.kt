@@ -658,6 +658,7 @@ private fun TerminalSourceDialog(
                     title = stringResource(R.string.terminal_source_direct),
                     description = stringResource(R.string.terminal_source_direct_desc),
                     reason = state.directReason,
+                    hint = state.directHint,
                     enabled = state.directAvailable,
                     onClick = actions.chooseDirect,
                 )
@@ -707,6 +708,7 @@ private fun SourceRow(
     title: String,
     description: String,
     reason: String?,
+    hint: String? = null,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -745,6 +747,14 @@ private fun SourceRow(
                 text = reason,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
+            )
+        }
+        if (hint != null) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

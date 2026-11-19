@@ -600,22 +600,12 @@ fun SettingsScreen(
             }
         }
         if (showSshProfile) {
-            Dialog(
-                onDismissRequest = { showSshProfile = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
-                    SshProfileScreen(
-                        store = sshProfileStore,
-                        instanceId = instance.id,
-                        instanceName = instance.name,
-                        onBack = { showSshProfile = false },
-                    )
-                }
-            }
+            SshProfileScreen(
+                store = sshProfileStore,
+                instanceId = instance.id,
+                instanceName = instance.name,
+                onBack = { showSshProfile = false },
+            )
         }
     }
 

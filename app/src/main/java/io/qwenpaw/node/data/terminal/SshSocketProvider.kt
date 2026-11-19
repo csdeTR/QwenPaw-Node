@@ -40,13 +40,15 @@ class RelaySocketProvider(
     private val conn: Connection,
     private val host: String,
     private val port: Int,
+    /** 该地址已在「受信任的连接」中确认；插件在未开 Web 认证时据此放行。 */
+    private val trusted: Boolean = false,
 ) : SshSocketProvider {
 
     override val label: String = "Bridge $host:$port"
     override val isRelay: Boolean = true
 
     override fun open(): Socket = WebSocketSocket(
-        api.bridgeSshRequest(conn),
+        api.bridgeSshRequest(conn, trusted),
         wsClient,
         host,
         port,

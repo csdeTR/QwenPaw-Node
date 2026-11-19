@@ -26,6 +26,13 @@
     <string name="connect_cred_saving">正在验证凭据并保存</string>
     <string name="connect_agent_id">智能体 ID</string>
     <string name="connect_agent_id_hint">备用方式</string>
+    <string name="connect_proxy_title">反向代理验证</string>
+    <string name="connect_proxy_configured">已配置</string>
+    <string name="connect_proxy_unconfigured">未配置</string>
+    <string name="connect_proxy_keep_hint">密码留空表示保留原值；账号和密码都留空表示不使用反向代理验证。</string>
+    <string name="connect_proxy_need_user">填写反向代理密码时需同时填写账号。</string>
+    <string name="connect_agent_id_manual">手动填写智能体 ID</string>
+    <string name="connect_agent_id_manual_hint">无法读取列表时使用</string>
     <string name="connect_ssh_title">SSH 直连</string>
     <string name="connect_ssh_subtitle">地址、私钥或密码；仅在本机配置与连接</string>
     <string name="connect_select_agent">选择智能体</string>

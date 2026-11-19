@@ -128,39 +128,11 @@ fun SshProfileScreen(
         messageError = false
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-                title = {
-                    Column {
-                        Text(stringResource(R.string.sshprofile_title))
-                        Text(
-                            instanceName.ifBlank { instanceId },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(QwenIcons.arrowLeft, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
+    InstanceSubPage(
+        title = stringResource(R.string.sshprofile_title),
+        subtitle = instanceName.ifBlank { instanceId },
+        onBack = onBack,
+    ) {
             Text(
                 stringResource(R.string.sshprofile_intro),
                 style = MaterialTheme.typography.bodySmall,
@@ -386,7 +358,6 @@ fun SshProfileScreen(
             Button(onClick = { save() }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_save)) }
             Spacer(Modifier.height(12.dp))
         }
-    }
 
     if (adding || editing != null) {
         val initial = editing

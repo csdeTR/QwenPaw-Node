@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import java.util.UUID
 
@@ -330,6 +331,8 @@ data class ModelChoice(
     val providerName: String,
     val modelId: String,
     val modelName: String,
+    /** harness 提供的默认模型标记；qwenpaw 的模型列表不使用。 */
+    val isDefault: Boolean = false,
 ) {
     /** 稳定 key，用于菜单与去重。 */
     val key: String get() = "$providerId:$modelId"
@@ -341,22 +344,48 @@ internal fun harnessModelChoices(
 ): List<ModelChoice> {
     val models = view["models"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
     return models.mapNotNull { element ->
-        val id = when (element) {
-            is kotlinx.serialization.json.JsonPrimitive -> element.contentOrNull
-            is kotlinx.serialization.json.JsonObject ->
-                (element["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
-            else -> null
+        val id: String?
+        val name: String?
+        val isDefault: Boolean
+        when (element) {
+            is kotlinx.serialization.json.JsonPrimitive -> {
+                id = element.contentOrNull
+                name = id
+                isDefault = false
+            }
+            is kotlinx.serialization.json.JsonObject -> {
+                id = (element["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                name = (element["name"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                    ?: (element["display_name"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                isDefault = (element["is_default"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull
+                    ?: (element["default"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull
+                    ?: false
+            }
+            else -> {
+                id = null
+                name = null
+                isDefault = false
+            }
         }
         id?.takeIf { it.isNotBlank() }?.let {
             ModelChoice(
                 providerId = "backend",
                 providerName = "",
                 modelId = it,
-                modelName = it,
+                modelName = name?.takeIf { value -> value.isNotBlank() } ?: it,
+                isDefault = isDefault,
             )
         }
     }
 }
+
+/** 第三方 backend 的胶囊默认标签：保留用户已选，否则默认模型，再否则第一项。 */
+internal fun backendDefaultLabel(
+    choices: List<ModelChoice>,
+    current: String?,
+): String? = current?.takeIf { label -> choices.any { it.modelName == label } }
+    ?: choices.firstOrNull { it.isDefault }?.modelName
+    ?: choices.firstOrNull()?.modelName
 
 /**
  * 对话与聊天状态管理。
@@ -1166,7 +1195,13 @@ class ChatViewModel(
                         s.copy(
                             thinking = view,
                             contextMax = view.effectiveMaxInputLength ?: s.contextMax,
-                            currentModelLabel = view.modelName ?: view.model,
+                            // 第三方 backend 的模型标签由 harness 列表决定；
+                            // qwenpaw 的对话 thinking 视图不能把它覆盖回 null。
+                            currentModelLabel = if (s.agentBackend == "qwenpaw") {
+                                view.modelName ?: view.model
+                            } else {
+                                s.currentModelLabel
+                            },
                         )
                     }
                 }
@@ -1188,7 +1223,16 @@ class ChatViewModel(
                 runCatching {
                     withContext(Dispatchers.IO) { api.harnessModels(conn, backend) }
                 }.onSuccess { view ->
-                    _state.update { it.copy(modelChoices = harnessModelChoices(view)) }
+                    val choices = harnessModelChoices(view)
+                    _state.update {
+                        it.copy(
+                            modelChoices = choices,
+                            currentModelLabel = backendDefaultLabel(
+                                choices,
+                                it.currentModelLabel,
+                            ),
+                        )
+                    }
                 }.onFailure { e ->
                     // 不静默回落到全局模型：那些模型在第三方后端上不可用。
                     _state.update { it.copy(modelChoices = emptyList(), error = friendly(e)) }
@@ -1227,7 +1271,11 @@ class ChatViewModel(
                         api.setAgentBackendSettings(conn, agentId, target, null)
                     }
                 }.onSuccess {
-                    _state.update { it.copy(currentModelLabel = target, error = null) }
+                    val label = _state.value.modelChoices
+                        .firstOrNull { it.modelId == target }
+                        ?.modelName
+                        ?: target
+                    _state.update { it.copy(currentModelLabel = label, error = null) }
                 }.onFailure { e ->
                     _state.update { it.copy(error = friendly(e)) }
                 }

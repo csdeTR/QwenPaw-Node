@@ -14,11 +14,11 @@
     <string name="terminal_source_none">未选择方式</string>
     <string name="terminal_source_local_desc">使用 /api/terminals 端点，方式与 Web 控制台一致，需要开启「Web 登录认证」。</string>
     <string name="terminal_source_relay_desc">经配套插件 QwenPaw Node Bridge 转发；适合手机只能访问 QwenPaw Web 端口的场景。</string>
-    <string name="terminal_source_direct_desc">从本机直接连接目标 SSH；平台与 shell 在 设置 → 服务器 → 编辑实例 → 高级选项 → SSH 直连 中配置。</string>
+    <string name="terminal_source_direct_desc">从本机直接连接目标 SSH；适合服务器向公网暴露 SSH 通道的场景。</string>
     <string name="terminal_set_as_default">设为默认</string>
-    <string name="terminal_shell_section_title">默认 / Bridge 中继的登录 shell</string>
+    <string name="terminal_shell_section_title">选择登录 shell</string>
     <string name="terminal_shell_cmd">命令提示符</string>
-    <string name="terminal_credentials_note">SSH 凭据只在本机内存中使用。Bridge 中继的公网明文地址需先在「受信任的连接」确认该地址仅你可访问；关闭安全提示不会解除这条限制。</string>
+    <string name="terminal_credentials_note">Bridge 中继的 SSH 凭据由配套插件保存；未开 Web 登录认证时仅私有或受信任地址可用，公网地址仍需先确认仅你可访问。</string>
     <string name="terminal_pinch_tip">双指缩放是临时放大；调整字号请用 A+ / A-</string>
     <string name="terminal_git_bash_hint">请先确认目标 Windows 已安装 Bash（Git Bash 或 WSL）；未安装时命令会失败。</string>
     <string name="terminal_key_paste">粘贴</string>
@@ -43,7 +43,7 @@
     <!-- 终端错误与来源置灰原因 -->
     <string name="terminal_error_not_connected">尚未连接服务器</string>
     <string name="terminal_error_ssh_not_configured">尚未在 Web 控制台 → 插件 → SSH 设置中配置目标与凭据</string>
-    <string name="terminal_error_ssh_needs_login">SSH 需要服务端已开启 Web 登录认证</string>
+    <string name="terminal_error_ssh_needs_login">SSH 被配套插件拒绝，请检查插件的访问设置</string>
     <string name="terminal_error_no_ssh_credential">插件没有返回可用的 SSH 凭据</string>
     <string name="terminal_error_direct_no_credential">SSH 直连凭据未配置</string>
     <string name="terminal_error_direct_no_address">SSH 直连没有可用地址</string>
@@ -55,11 +55,9 @@
     <string name="terminal_error_terminal_unavailable">服务端终端不可用</string>
     <string name="terminal_reason_bridge_missing">未安装配套插件 QwenPaw Node Bridge</string>
     <string name="terminal_reason_bridge_old">配套插件版本低于 v0.4.0（缺少 ssh 能力）</string>
-    <string name="terminal_reason_auth_unreadable">无法读取服务端 Web 登录认证状态</string>
-    <string name="terminal_reason_auth_disabled">服务端未开启 Web 登录认证，Bridge 中继不可用</string>
-    <string name="terminal_reason_no_users">服务端还没有注册用户，请先在 Web 控制台注册</string>
     <string name="terminal_reason_ssh_not_configured">尚未配置 SSH 目标与凭据</string>
     <string name="terminal_reason_direct_not_configured">尚未配置 SSH 直连地址</string>
+    <string name="terminal_reason_direct_platform_hint">平台与 shell 在 设置 → 服务器 → 编辑实例 → 高级选项 → SSH 直连 中设置。</string>
     <string name="terminal_reason_secure_storage">本机安全存储不可用，无法保存 SSH 直连凭据</string>
     <string name="terminal_reason_direct_no_key">尚未配置 SSH 直连私钥</string>
     <string name="terminal_reason_direct_no_password">尚未配置 SSH 直连密码</string>

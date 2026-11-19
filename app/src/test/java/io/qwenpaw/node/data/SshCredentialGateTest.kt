@@ -1,8 +1,10 @@
 package io.qwenpaw.node.data
 
+import io.qwenpaw.node.TestTexts
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -12,6 +14,11 @@ import org.junit.Test
  * 关键判据是：公网 + 明文 HTTP 时，即使关闭了安全提示，也必须先确认主机属于自己。
  */
 class SshCredentialGateTest {
+
+    @Before
+    fun setUp() {
+        TestTexts.install()
+    }
 
     @Test
     fun `private address is allowed`() {
@@ -53,14 +60,26 @@ class SshCredentialGateTest {
             sshTrustedHosts = setOf("chat.example.com"),
         )
         assertTrue(gate.allowed)
+        assertTrue(gate.trusted)
     }
 
     @Test
-    fun `public without auth is blocked even if trusted`() {
+    fun `public without auth with ssh trust is allowed`() {
         val gate = assessSshCredentialGate(
             url = "http://chat.example.com:8088",
             loginRequired = false,
             sshTrustedHosts = setOf("chat.example.com"),
+        )
+        assertTrue(gate.allowed)
+        assertTrue(gate.trusted)
+    }
+
+    @Test
+    fun `public without auth without ssh trust is blocked`() {
+        val gate = assessSshCredentialGate(
+            url = "http://chat.example.com:8088",
+            loginRequired = false,
+            sshTrustedHosts = emptySet(),
         )
         assertFalse(gate.allowed)
         assertTrue(gate.reason!!.contains("Web 登录认证"))

@@ -675,11 +675,17 @@ fun ChatScreen(
             title = stringResource(R.string.chatscreen_model_title),
             items = items,
             emptyHint = stringResource(R.string.chatscreen_model_empty),
-            leading = OptionItem(
-                key = "",
-                label = stringResource(R.string.chatscreen_model_default),
-                selected = state.currentModelLabel == null,
-            ),
+            leading = if (state.agentBackend == "qwenpaw") {
+                OptionItem(
+                    key = "",
+                    label = stringResource(R.string.chatscreen_model_default),
+                    selected = state.currentModelLabel == null,
+                )
+            } else {
+                // 第三方 backend 没有「跟随 qwenpaw 全局默认」的语义；
+                // 这个选项点下去只会关闭对话框，状态不会变化。
+                null
+            },
             onPick = { key ->
                 showModelDialog = false
                 if (key.isEmpty()) {

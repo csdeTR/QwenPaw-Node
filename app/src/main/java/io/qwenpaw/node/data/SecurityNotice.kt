@@ -132,6 +132,8 @@ internal fun isTrustedHost(host: String, trustedHosts: Set<String>): Boolean {
 data class SshCredentialGate(
     val allowed: Boolean,
     val reason: String? = null,
+    /** 放行是因为 host 在 [sshTrustedHosts] 中显式确认过。 */
+    val trusted: Boolean = false,
 )
 
 /**
@@ -149,15 +151,16 @@ internal fun assessSshCredentialGate(
 ): SshCredentialGate {
     val notice = assessSecurity(url, loginRequired)
     if (!notice.any) return SshCredentialGate(allowed = true)
-    // 「公网 + 未开鉴权」时终端本身不可用，受信任也不能绕过；受信任只豁免提示与明文风险。
+    // 受信任地址是用户的显式确认，优先于「公网未开鉴权」的默认阻断。
+    // 未受信任的公网地址仍然拒绝，避免把凭据发给任意部署。
+    if (isTrustedHost(notice.host, sshTrustedHosts)) {
+        return SshCredentialGate(allowed = true, trusted = true)
+    }
     if (notice.exposed) {
         return SshCredentialGate(
             allowed = false,
             reason = Texts.get(R.string.drest_security_login_reason),
         )
-    }
-    if (isTrustedHost(notice.host, sshTrustedHosts)) {
-        return SshCredentialGate(allowed = true)
     }
     val reason = when {
         notice.noTls -> Texts.get(R.string.drest_security_plain_http_reason)

@@ -14,7 +14,7 @@
     <string name="sshprofile_address_vpn_suffix">" · VPN 优先"</string>
     <string name="sshprofile_add_address">添加地址</string>
     <string name="sshprofile_auth_title">认证方式</string>
-    <string name="sshprofile_auth_key">公钥</string>
+    <string name="sshprofile_auth_key">密钥</string>
     <string name="sshprofile_auth_password">密码</string>
     <string name="sshprofile_key_saved">已保存私钥；留空表示保留原值</string>
     <string name="sshprofile_key_missing">尚未配置私钥</string>

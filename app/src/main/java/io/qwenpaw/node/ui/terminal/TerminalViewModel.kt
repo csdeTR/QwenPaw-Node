@@ -73,6 +73,8 @@ data class TerminalUiState(
     val localReason: String? = null,
     val sshReason: String? = null,
     val directReason: String? = null,
+    /** 直连未配置时，在红字后追加的平台/shell 设置位置。 */
+    val directHint: String? = null,
     val shellOptions: List<TerminalShell> = listOf(TerminalShell.DEFAULT),
     val selectedShell: TerminalShell = TerminalShell.DEFAULT,
     val setAsDefault: Boolean = false,
@@ -152,7 +154,9 @@ class TerminalViewModel(
             )
             sshConfig = null
             var sshError: String? = null
-            if (sshCap && local?.enabled == true && gate.allowed) {
+            // Bridge 中继不依赖本地 PTY 的鉴权状态；只要插件具备 ssh 能力、
+            // 凭据闸门放行，就可以读取脱敏的 SSH 配置。
+            if (sshCap && gate.allowed) {
                 sshConfig = withContext(Dispatchers.IO) {
                     runCatching { api.bridgeSshConfig(conn) }.getOrElse { e ->
                         sshError = when ((e as? ApiException)?.code) {
@@ -183,15 +187,17 @@ class TerminalViewModel(
             val sshReason = when {
                 bridge !is BridgeStatus.Ready -> Texts.get(R.string.terminal_reason_bridge_missing)
                 !sshCap -> Texts.get(R.string.terminal_reason_bridge_old)
-                auth == null -> Texts.get(R.string.terminal_reason_auth_unreadable)
-                !auth.enabled -> Texts.get(R.string.terminal_reason_auth_disabled)
-                !auth.hasUsers -> Texts.get(R.string.terminal_reason_no_users)
                 !gate.allowed -> gate.reason
                 sshError != null -> sshError
                 sshConfig == null -> Texts.get(R.string.terminal_reason_ssh_not_configured)
                 else -> null
             }
             val directReason = directReason(inst)
+            val directHint = directHintFor(
+                directReason,
+                Texts.get(R.string.terminal_reason_direct_not_configured),
+                Texts.get(R.string.terminal_reason_direct_platform_hint),
+            )
             // 只有显式「设为默认」才自动创建；上次来源不再参与，否则用户
             // 没勾默认也永远不会看到来源选择窗口。
             val creation = store.defaultCreation(inst, conn.agentId)
@@ -205,6 +211,7 @@ class TerminalViewModel(
                     localReason = localReason,
                     sshReason = sshReason,
                     directReason = directReason,
+                    directHint = directHint,
                     shellOptions = shellOptions,
                     selectedShell = creation?.shell ?: TerminalShell.DEFAULT,
                     fontSizeSp = fontSize,
@@ -220,8 +227,14 @@ class TerminalViewModel(
     fun switchSource() {
         val inst = instanceId()
         _state.update {
+            val reason = inst?.let { id -> directReason(id) } ?: it.directReason
             it.copy(
-                directReason = inst?.let { directReason(it) } ?: it.directReason,
+                directReason = reason,
+                directHint = directHintFor(
+                    reason,
+                    Texts.get(R.string.terminal_reason_direct_not_configured),
+                    Texts.get(R.string.terminal_reason_direct_platform_hint),
+                ),
                 shellOptions = ShellBootstrap.options(instancePlatform),
                 sourceDialog = true,
                 setAsDefault = false,
@@ -565,7 +578,9 @@ class TerminalViewModel(
             _state.update { it.copy(sshReason = gate.reason, sourceDialog = true) }
             return
         }
-        val credential = withContext(Dispatchers.IO) { api.bridgeSshCredential(conn) }
+        val credential = withContext(Dispatchers.IO) {
+            api.bridgeSshCredential(conn, gate.trusted)
+        }
         val auth = when (config.auth) {
             "password" -> credential.password
                 ?.takeIf { it.isNotBlank() }
@@ -583,7 +598,7 @@ class TerminalViewModel(
                 user = config.user,
                 default = true,
             ),
-            provider = RelaySocketProvider(api, conn, config.host, config.port),
+            provider = RelaySocketProvider(api, conn, config.host, config.port, gate.trusted),
         )
         val shell = shellFor(creation.shell, TerminalSource.SSH_RELAY, null)
         val transport = SshTransport(
@@ -745,6 +760,8 @@ class TerminalViewModel(
     }
 
     private fun directReason(instanceId: String): String? {
+        // 平台/shell 的提示只在「尚未配置」时出现；其他原因（无凭据、安全存储不可用）
+        // 指向的是另一处，不叠加这条提示。
         if (!profileStore.available) {
             return Texts.get(R.string.terminal_reason_secure_storage)
         }
@@ -762,3 +779,10 @@ class TerminalViewModel(
         return null
     }
 }
+
+/** 直连未配置时才提示平台/shell 去哪里设置。 */
+internal fun directHintFor(
+    reason: String?,
+    notConfigured: String,
+    platformHint: String,
+): String? = if (reason == notConfigured) platformHint else null

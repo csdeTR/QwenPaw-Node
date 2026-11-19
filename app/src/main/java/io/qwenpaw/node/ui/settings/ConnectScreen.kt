@@ -130,6 +130,7 @@ fun InstanceForm(
     var password by remember { mutableStateOf("") }
     var agentId by remember { mutableStateOf(initialAgentId) }
     var advanced by remember { mutableStateOf(false) }
+    var showProxyAuth by remember { mutableStateOf(false) }
     var fixedPunctuation by remember { mutableStateOf(false) }
     // 反向代理的 HTTP Basic 凭据，收在「高级选项」里。
     var basicUser by remember { mutableStateOf(initialBasicUser) }
@@ -566,95 +567,18 @@ fun InstanceForm(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.connect_proxy_user),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.connect_optional),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = basicUser,
-                    onValueChange = {
-                        basicUser = it
-                        // 凭据改了，之前的验证结论作废。
-                        hostVerified = false
-                        verifyMessage = null
-                        verifyFailed = false
+                Divider()
+                NavRow(
+                    icon = QwenIcons.shieldCheck,
+                    title = stringResource(R.string.connect_proxy_title),
+                    subtitle = if (basicUser.isNotBlank()) {
+                        stringResource(R.string.connect_proxy_configured)
+                    } else {
+                        stringResource(R.string.connect_proxy_unconfigured)
                     },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.connect_proxy_password),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.connect_optional),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = basicPassword,
-                    onValueChange = {
-                        basicPassword = it
-                        hostVerified = false
-                        verifyMessage = null
-                        verifyFailed = false
-                    },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = stringResource(R.string.connect_proxy_hint),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                // 智能体同样是「读列表再挑」，手填 id 只作为读不到列表时的备用。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.connect_agent_id),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.connect_agent_id_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = agentId,
-                    onValueChange = { agentId = it },
-                    placeholder = { Text("default") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { showProxyAuth = true },
                 )
                 if (onOpenSshProfile != null) {
-                    Spacer(Modifier.height(12.dp))
                     Divider()
                     NavRow(
                         icon = QwenIcons.terminal,
@@ -755,14 +679,26 @@ fun InstanceForm(
                         .clickable { fetchAgents() }
                         .padding(horizontal = 6.dp, vertical = 3.dp),
                 )
+                Spacer(Modifier.height(8.dp))
+                ManualAgentIdField(
+                    value = agentId,
+                    onValueChange = { agentId = it },
+                )
             }
 
-            agents.isEmpty() -> Text(
-                text = stringResource(R.string.connect_agents_empty_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            agents.isEmpty() -> Column {
+                Text(
+                    text = stringResource(R.string.connect_agents_empty_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                ManualAgentIdField(
+                    value = agentId,
+                    onValueChange = { agentId = it },
+                )
+            }
 
             else -> Column {
                 agents.forEach { agent ->
@@ -873,6 +809,24 @@ fun InstanceForm(
         SecurityNoticeDialog(
             notice = notice,
             onDismiss = { securityNotice = null },
+        )
+    }
+
+    if (showProxyAuth) {
+        ProxyAuthScreen(
+            instanceName = instanceName.ifBlank {
+                addresses.firstOrNull()?.url.orEmpty()
+            },
+            initialUser = basicUser,
+            onBack = { showProxyAuth = false },
+            onSave = { user, pwd ->
+                basicUser = user
+                basicPassword = pwd
+                hostVerified = false
+                verifyMessage = null
+                verifyFailed = false
+                showProxyAuth = false
+            },
         )
     }
 
@@ -1093,6 +1047,34 @@ private fun StepLine(done: Boolean) {
                 else MaterialTheme.colorScheme.outlineVariant,
             ),
     )
+}
+
+@Composable
+private fun ManualAgentIdField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.connect_agent_id_manual),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.connect_agent_id_manual_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+        )
+        Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = { Text("default") },
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable

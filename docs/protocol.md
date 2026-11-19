@@ -1955,24 +1955,24 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 4. **访问控制的通过 / 拒绝 / 忽略 / 备注四态分开**，不共用「关闭」。
 5. **ACP 的 `command`、`args` 属于在服务端执行任意命令**，改动要有明确说明，不按普通开关处理。
 
-### 31.6 插件提供的 SSH 通道（v0.4.0）
+### 31.6 插件提供的 SSH 通道（v0.4.0 / v0.4.1）
 
 客户端终端页有三个来源：默认（服务端本地 PTY）、Bridge 中继（配套插件）与 SSH 直连。渲染仍在客户端，三种来源共用同一套 VT 模拟。
 
-**硬前置：服务端已开启Web 登录认证。** 插件 v0.4.0 的 `/ssh/credential`、`PUT /ssh/settings` 与 `WS /ssh` 都要求 `QWENPAW_AUTH_ENABLED=true`。WS 不走 `AuthMiddleware`，插件必须在 `accept()` 前用 `qwenpaw.app.auth.verify_token` 校验 `Authorization: Bearer` 或 `?token=`。
+**认证要求按来源区分。** 默认 PTY 需要服务端已开启 Web 登录认证；**Bridge 中继从插件 v0.4.1 起不再要求**，只要求 Console 里配置了 SSH 目标与凭据。插件开了 Web 认证时，`/ssh/credential`、`PUT /ssh/settings` 与 `WS /ssh` 仍要求有效 token；未开时只放行私有/回环客户端，或带 `X-QwenPaw-Trusted-Host: 1` 的请求（App 在 `sshTrustedHosts` 确认后、Console 勾选「此地址仅我可访问」后发送）。WS 不走 `AuthMiddleware`，插件在 `accept()` 前自行校验。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| WS | `/api/plugins/qwenpaw-node-bridge/ssh` | 二进制帧中继到设置里的 host:port；并发上限 4 |
-| GET | `/ssh/config` | 脱敏目标 `{host,port,user,auth,key_configured,key_source}` |
-| GET | `/ssh/credential` | 按需下发凭据，插件**自校验 token**，`Cache-Control: no-store`，不写日志 |
-| GET / PUT | `/ssh/settings` | 控制台读写；PUT 插件自校验 token，空白密钥字段保留原值 |
+| WS | `/api/plugins/qwenpaw-node-bridge/ssh` | 二进制帧中继到设置里的 host:port；并发上限 4；按上一段的访问策略校验 |
+| GET | `/ssh/config` | 脱敏目标 `{host,port,user,auth,key_configured,key_source}`；无需认证 |
+| GET | `/ssh/credential` | 按需下发凭据；按访问策略校验，`Cache-Control: no-store`，不写日志 |
+| GET / PUT | `/ssh/settings` | 控制台读写；GET 无需认证，PUT 按访问策略校验，空白密钥字段保留原值 |
 
 **只连设置里的目标。** 客户端不能指定主机；默认 `127.0.0.1:22`。主机密钥 TOFU 在客户端做（JSch），首次弹指纹，变化时拒绝并提供清除入口。
 
-**HTTP 敏感端点也自己校验 token。** 实测在服务端热切换鉴权开关后，带空 `Authorization: Bearer` 的请求仍能到达插件路由；因此 `PUT /ssh/settings` 与 `GET /ssh/credential` 在 handler 内再调一次 `verify_token`，失败回 401，不依赖核心中间件。
+**HTTP 敏感端点也自己校验访问策略。** 实测在服务端热切换鉴权开关后，带空 `Authorization: Bearer` 的请求仍能到达插件路由；因此 `PUT /ssh/settings` 与 `GET /ssh/credential` 在 handler 内按「token 或私有/受信任来源」再判一次，失败回 401，不依赖核心中间件。
 
-**客户端安全闸门。** 经插件下发凭据的 SSH 终端受现有地址校验约束：`assessSshCredentialGate(url, loginRequired, sshTrustedHosts)` 只在 `!SecurityNotice.any` 或该主机已确认进 `sshTrustedHosts` 时放行。公网明文未确认的主机不能使用 SSH 终端；`securityHintsEnabled=false` 只关闭提示，不能绕过闸门。受信任列表分两层：
+**客户端安全闸门。** 经插件下发凭据的 SSH 终端受现有地址校验约束：`assessSshCredentialGate(url, loginRequired, sshTrustedHosts)` 在私有/无风险地址、或该主机已确认进 `sshTrustedHosts` 时放行；公网未受信任地址（包括未开 Web 认证时）仍拒绝。`securityHintsEnabled=false` 只关闭提示，不能绕过闸门。受信任列表分两层：
 
 - `trustedHosts` 只豁免提示；
 - `sshTrustedHosts` 由「受信任的连接」页的「我确认该地址/域名仅我可访问」写入，才允许下发凭据。
@@ -1983,7 +1983,7 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 
 **设置目录**：`~/.qwenpaw/plugin_data/qwenpaw-node-bridge/`，目录 `0700`，`ssh_settings.json` 与内联 `ssh_key` 为 `0600`。私钥优先用服务端已有路径；粘贴方式才落盘。
 
-**控制台设置面板**：`ui/index.js` 通过 `window.QwenPaw.registerRoutes("qwenpaw-node-bridge", …)` 挂到 Settings → Plugins → 「SSH 设置」；使用宿主注入的 `React` / `antd` / `getApiUrl` / `getApiToken`。页面使用 HTTP 时显示明文传输警告。
+**控制台设置面板**：`ui/index.js` 通过 `window.QwenPaw.registerRoutes("qwenpaw-node-bridge", …)` 挂到 Settings →「扩展设置」→「QwenPaw Node Bridge」（「扩展设置」是宿主固定分组）；使用宿主注入的 `React` / `antd` / `getApiUrl` / `getApiToken`。**传给 `getApiUrl` 的路径不要带 `/api` 前缀**：宿主会自行补上，带前缀会变成 `/api/api/plugins/...` 并返回 404（v0.4.1 修过这个缺陷）。未开 Web 认证时可勾选「此地址仅我可访问」放行公网受信任地址；页面使用 HTTP 时显示明文传输警告。
 
 **四条硬约束**：
 
@@ -1992,7 +1992,7 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 3. 主机密钥不得自动接受；首次 TOFU，变化时告警。
 4. 新增 SSH 库走依赖门禁：JSch 已补 keep 规则，8 包体积见 release.md。
 
-**边界**：闸门是客户端策略，插件只负责鉴权。持有 token 的自定义客户端仍可直接请求 `/ssh/credential`；这与终端本身的权限边界一致——能拿到 token 的人本来就能在服务端执行命令。
+**边界**：闸门是客户端策略，插件负责访问策略。开了 Web 认证时，持有 token 的自定义客户端仍可直接请求 `/ssh/credential`；未开时，同网段的私有客户端或显式带受信任头的客户端也可读取。该受信任头不是密码学证明，公网部署应开启认证与 HTTPS。
 
 ---
 
