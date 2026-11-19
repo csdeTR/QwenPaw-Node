@@ -1,10 +1,8 @@
 package io.qwenpaw.node.ui.settings
 
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,7 +22,6 @@ import io.qwenpaw.node.ui.theme.LocalCaptionColor
 /** 反向代理 HTTP Basic 凭据的二级页；密码留空表示保留原值。 */
 @Composable
 fun ProxyAuthScreen(
-    instanceName: String,
     initialUser: String,
     onBack: () -> Unit,
     onSave: (user: String, password: String) -> Unit,
@@ -35,8 +32,7 @@ fun ProxyAuthScreen(
     val needUser = stringResource(R.string.connect_proxy_need_user)
 
     InstanceSubPage(
-        title = stringResource(R.string.connect_proxy_title),
-        subtitle = instanceName,
+        subtitle = stringResource(R.string.connect_proxy_title),
         onBack = onBack,
     ) {
         Text(
@@ -49,16 +45,26 @@ fun ProxyAuthScreen(
             style = MaterialTheme.typography.labelSmall,
             color = LocalCaptionColor.current,
         )
+        // 标签在框上方、框内只放占位提示，和实例表单的字段写法一致。
+        Text(
+            text = stringResource(R.string.connect_proxy_user),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
         OutlinedTextField(
             value = user,
             onValueChange = {
                 user = it
                 error = null
             },
-            label = { Text(stringResource(R.string.connect_proxy_user)) },
             singleLine = true,
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = stringResource(R.string.connect_proxy_password),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         OutlinedTextField(
             value = password,
@@ -66,7 +72,6 @@ fun ProxyAuthScreen(
                 password = it
                 error = null
             },
-            label = { Text(stringResource(R.string.connect_proxy_password)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -80,20 +85,15 @@ fun ProxyAuthScreen(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        Button(
+        PrimaryBarButton(
+            text = stringResource(R.string.action_save),
             onClick = {
                 if (user.isBlank() && password.isNotEmpty()) {
                     error = needUser
-                    return@Button
+                } else {
+                    onSave(user.trim(), password)
                 }
-                onSave(user.trim(), password)
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            shape = RoundedCornerShape(10.dp),
-        ) {
-            Text(stringResource(R.string.action_save))
-        }
+        )
     }
 }

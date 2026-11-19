@@ -128,12 +128,12 @@ fun AddressListEditor(
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    PreferChip(
+                    SelectPill(
                         text = stringResource(R.string.address_prefer_none),
                         selected = entry.preferOn == null,
                         onClick = { replace(index, entry.copy(preferOn = null)) },
                     )
-                    PreferChip(
+                    SelectPill(
                         text = stringResource(R.string.address_prefer_vpn),
                         selected = entry.preferOn?.kind == NetworkMonitor.Snapshot.KIND_VPN,
                         onClick = {
@@ -143,7 +143,7 @@ fun AddressListEditor(
                             )
                         },
                     )
-                    PreferChip(
+                    SelectPill(
                         text = if (currentSsid.isNullOrBlank()) {
                             stringResource(R.string.address_prefer_wifi)
                         } else {
@@ -202,9 +202,9 @@ fun AddressListEditor(
     }
 }
 
-/** 网络条件小标签。选中的填底色，未选中的只有描边。 */
+/** 单选小胶囊。同一屏上的多组选项共用这一种外观。 */
 @Composable
-private fun PreferChip(text: String, selected: Boolean, onClick: () -> Unit) {
+internal fun SelectPill(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))

@@ -603,7 +603,6 @@ fun SettingsScreen(
             SshProfileScreen(
                 store = sshProfileStore,
                 instanceId = instance.id,
-                instanceName = instance.name,
                 onBack = { showSshProfile = false },
             )
         }
@@ -1804,7 +1803,7 @@ private fun serverSummary(instances: List<InstanceConfig>, activeId: String?): S
 }
 
 @Composable
-private fun SettingsTopBar(onBack: () -> Unit, subtitle: String) {
+internal fun SettingsTopBar(onBack: () -> Unit, subtitle: String) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier

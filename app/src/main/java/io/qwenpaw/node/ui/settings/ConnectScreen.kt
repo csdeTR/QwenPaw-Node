@@ -814,9 +814,6 @@ fun InstanceForm(
 
     if (showProxyAuth) {
         ProxyAuthScreen(
-            instanceName = instanceName.ifBlank {
-                addresses.firstOrNull()?.url.orEmpty()
-            },
             initialUser = basicUser,
             onBack = { showProxyAuth = false },
             onSave = { user, pwd ->
