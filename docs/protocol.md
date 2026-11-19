@@ -1983,7 +1983,7 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 
 **设置目录**：`~/.qwenpaw/plugin_data/qwenpaw-node-bridge/`，目录 `0700`，`ssh_settings.json` 与内联 `ssh_key` 为 `0600`。私钥优先用服务端已有路径；粘贴方式才落盘。
 
-**控制台设置面板**：`ui/index.js` 通过 `window.QwenPaw.registerRoutes("qwenpaw-node-bridge", …)` 挂到 Settings →「扩展设置」→「QwenPaw Node Bridge」（「扩展设置」是宿主固定分组）；使用宿主注入的 `React` / `antd` / `getApiUrl` / `getApiToken`。**传给 `getApiUrl` 的路径不要带 `/api` 前缀**：宿主会自行补上，带前缀会变成 `/api/api/plugins/...` 并返回 404（v0.4.1 修过这个缺陷）。未开 Web 认证时可勾选「此地址仅我可访问」放行公网受信任地址；页面使用 HTTP 时显示明文传输警告。
+**控制台设置面板**：`ui/index.js` 通过 `window.QwenPaw.registerRoutes("qwenpaw-node-bridge", …)` 挂到 Settings →「扩展设置」→「QwenPaw Node Bridge」（「扩展设置」是宿主固定分组）；使用宿主注入的 `React` / `antd` / `getApiUrl` / `getApiToken`。**传给 `getApiUrl` 的路径不要带 `/api` 前缀**：宿主会自行补上，带前缀会变成 `/api/api/plugins/...` 并返回 404（v0.4.1 修过这个缺陷）。**菜单图标要传 React 元素**：宿主对 `icon` 先做 `isValidElement` 判断，是元素就原样渲染，否则包成 `<span style="font-size:16px">` 只显示文字（v0.4.2 起传 SVG）。**页面按功能分块**（v0.4.2）：菜单项只有一个，页内是可折叠卡片，目前只有「SSH 中继」一块，新增设置只改 `BLOCKS`、不新增路由。未开 Web 认证时可勾选「此地址仅我可访问」放行公网受信任地址；页面使用 HTTP 时显示明文传输警告。
 
 **四条硬约束**：
 
