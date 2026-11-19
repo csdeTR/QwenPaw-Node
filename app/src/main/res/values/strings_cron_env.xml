@@ -193,6 +193,14 @@
     <string name="env_validate_exists">变量 %1$s 已存在，请直接编辑原值</string>
 
     <!-- 内置环境变量的说明（EnvCatalogCopy.kt） -->
+    <string name="env_desc_auth_enabled">开启后所有 API 请求都需要登录凭据。开启前必须先注册用户，否则无法再访问。</string>
+    <string name="env_how_auth_enabled">保存后立即生效；请先注册用户并记住账号密码，再按顺序重启服务。本页会立即失去访问。</string>
+    <string name="env_header_auth">访问鉴权</string>
+    <string name="env_auth_unset">未设置</string>
+    <string name="env_auth_set">已设置</string>
+    <string name="env_auth_confirm_title">确认开启访问鉴权</string>
+    <string name="env_auth_confirm_message">保存后本页会立即失去访问，其他设备也需要重新登录。请确认已经注册用户并记住账号密码。</string>
+    <string name="env_auth_confirm">仍然开启</string>
     <string name="env_desc_stream_first_content_timeout">等待首个有效流式内容的最长时间；设为 0 可关闭检测。</string>
     <string name="env_desc_stream_idle_timeout">两个有效流式内容之间的最长等待时间；设为 0 可关闭检测。</string>
     <string name="env_desc_max_retries">模型调用遇到可重试错误时的最大重试次数；设为 0 表示不重试。</string>

@@ -39,10 +39,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -94,6 +97,8 @@ fun SettingsScreen(
     onOpenSkills: () -> Unit = {},
     /** 打开设置页下的「MCP」。 */
     onOpenMcp: () -> Unit = {},
+    /** 打开访问控制（待审批与名单增删）。 */
+    onOpenAccessControl: () -> Unit = {},
     /** 打开设置页下的「扩展市场」。 */
     onOpenMarket: () -> Unit = {},
     /** 打开用量统计。从设置进入时，返回也回设置页。 */
@@ -110,7 +115,11 @@ fun SettingsScreen(
     onOpenAppCenter: () -> Unit = {},
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
-    onEdit: (InstanceConfig) -> Unit,
+    /** 编辑实例并验证凭据；返回 null 表示已保存，否则是给界面显示的原因。 */
+    onEditWithCredentials: suspend (
+        InstanceConfig,
+        io.qwenpaw.node.data.local.InstanceDraft,
+    ) -> String? = { _, _ -> null },
     onPickAgent: (InstanceConfig) -> Unit,
     /**
      * 添加实例。第二个参数是连接结果回调，成功后表单自己收起来，
@@ -132,6 +141,8 @@ fun SettingsScreen(
         onAttempt: (VerifyAttempt) -> Unit,
         /** 已保存实例的 token；新增实例传 null。 */
         token: String?,
+        /** 已保存实例的 id；新增实例传 null。用于优先上次成功地址。 */
+        instanceId: String?,
     ) -> io.qwenpaw.node.data.VerifyResult,
     /** 引导式添加时查服务端是否要求登录。 */
     onCheckAuth: suspend (address: String) -> Boolean = { false },
@@ -268,6 +279,8 @@ fun SettingsScreen(
 
     // 一级页当前打开的分区。MAIN 是列表，其余是子页。
     var section by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
+    // 内部子页是否从「服务端配置」进入；是则返回二级页，否则回一级。
+    var serverConfigChild by remember { mutableStateOf(false) }
     // 待确认移除的实例。移除会连带清掉地址与智能体选择，点一下就走太危险。
     var pendingRemove by remember { mutableStateOf<InstanceConfig?>(null) }
 
@@ -278,6 +291,42 @@ fun SettingsScreen(
     // 表现为「滑到底点进『关于』，返回后跳回顶部」。
     var scrollOffsets by rememberSaveable {
         mutableStateOf(List(SettingsPage.entries.size) { 0 })
+    }
+
+    // 一级收藏：只存稳定 id，不存枚举序号；服务端配置组里可收藏的项在二级页加星。
+    val prefs = remember {
+        context.getSharedPreferences("qwenpaw_ui", android.content.Context.MODE_PRIVATE)
+    }
+    var favorites by remember {
+        mutableStateOf(prefs.getStringSet("settings_favorites", emptySet()) ?: emptySet())
+    }
+    fun toggleFavorite(id: String) {
+        val next = if (id in favorites) favorites - id else favorites + id
+        favorites = next
+        prefs.edit().putStringSet("settings_favorites", next).apply()
+    }
+    fun openFavorite(id: String) {
+        // 收藏在一级，返回也回一级。
+        serverConfigChild = false
+        when (id) {
+            "models" -> onOpenModels()
+            "agents" -> onOpenAgents()
+            "runtime" -> onOpenRuntime()
+            "envs" -> {
+                config?.onLoadEnvs()
+                section = SettingsPage.ENVIRONMENTS
+            }
+            "cron" -> {
+                config?.onLoadCron()
+                section = SettingsPage.CRON
+            }
+            "market" -> onOpenMarket()
+            "acl" -> onOpenAccessControl()
+            "security" -> {
+                config?.onLoadSecurity()
+                onOpenSecurity()
+            }
+        }
     }
 
     // 子页的导航状态。
@@ -307,7 +356,14 @@ fun SettingsScreen(
             SettingsPage.APPEARANCE_PREVIEW -> section = SettingsPage.APPEARANCE
             // 受信任的连接是服务器页的下一级，返回时回到服务器而不是一级列表。
             SettingsPage.TRUSTED -> section = SettingsPage.SERVER
-            else -> section = SettingsPage.MAIN
+            else -> {
+                if (serverConfigChild) {
+                    serverConfigChild = false
+                    section = SettingsPage.SERVER_CONFIG
+                } else {
+                    section = SettingsPage.MAIN
+                }
+            }
         }
     }
 
@@ -448,7 +504,7 @@ fun SettingsScreen(
                         onLoadAgents = onLoadAgents,
                         // 新增实例还没有 token：插件探测只能得到「未能确认」。
                         onVerifyHosts = { hosts, basic, attempt, _ ->
-                            onVerifyHosts(hosts, basic, attempt, null)
+                            onVerifyHosts(hosts, basic, attempt, null, null)
                         },
                         currentNetKind = currentNetKind,
                         currentSsid = currentSsid,
@@ -473,7 +529,7 @@ fun SettingsScreen(
                         onLoadAgents = onLoadAgents,
                         // 第 1 步只验地址，还没有登录，插件版本留给后面的页签确认。
                         onVerifyHosts = { hosts, basic, attempt ->
-                            onVerifyHosts(hosts, basic, attempt, null)
+                            onVerifyHosts(hosts, basic, attempt, null, null)
                         },
                         isTrustedHost = isTrustedHost,
                     )
@@ -485,6 +541,9 @@ fun SettingsScreen(
     // 编辑实例同样走这套交互，地址预填并自动读取智能体列表。
     SettingsPage.EDIT -> current.editing?.let { instance ->
         val context = LocalContext.current
+        val editScope = rememberCoroutineScope()
+        var editSaving by remember(instance.id) { mutableStateOf(false) }
+        var editError by remember(instance.id) { mutableStateOf<String?>(null) }
         var showSshProfile by remember(instance.id) { mutableStateOf(false) }
         val sshProfileStore = remember(context, instance.id) {
             io.qwenpaw.node.data.terminal.SshProfileStore(context)
@@ -501,46 +560,33 @@ fun SettingsScreen(
                 )
                 InstanceForm(
                     showHeader = false,
-                    connecting = false,
-                    error = null,
+                    connecting = editSaving,
+                    error = editError,
                     initialAddresses = instance.addresses,
                     initialName = instance.name,
+                    initialUsername = instance.username.orEmpty(),
                     initialAgentId = instance.agentId,
                     initialBasicUser = instance.basicUser.orEmpty(),
                     // 密码不回显：编辑页留空表示「不修改」，填了才覆盖。
                     // 与「留空即清空」相比，这种做法不会因为用户没注意就丢掉配置。
                     initialBasicPassword = "",
                     onConnect = { draft ->
-                        // 这里只保存本地配置，不发网络请求：地址与名称都是用户手改的，
-                        // 立即连通性验证交给设置主页的「验证」。
-                        //
-                        // 反代密码不回显，因此「留空」表示保留原值而不是清空：
-                        // 编辑页一进来密码框就是空的，若按留空即清空处理，
-                        // 用户只是想改实例名也会顺手把凭据抹掉。
-                        // 要清空凭据，把账号一起清掉即可。
-                        val typedPassword = draft.basicPassword
-                        val keptPassword = if (typedPassword.isNotBlank()) {
-                            typedPassword
-                        } else {
-                            instance.basicPassword
+                        editScope.launch {
+                            editSaving = true
+                            editError = null
+                            val failure = onEditWithCredentials(instance, draft)
+                            editSaving = false
+                            if (failure == null) {
+                                editing = null
+                            } else {
+                                editError = failure
+                            }
                         }
-                        val user = draft.basicUser.trim()
-                        val hasProxy = user.isNotBlank() && !keptPassword.isNullOrBlank()
-                        onEdit(
-                            instance.copy(
-                                name = draft.resolvedName(),
-                                addresses = draft.addresses,
-                                agentId = draft.agentId,
-                                basicUser = user.takeIf { hasProxy },
-                                basicPassword = keptPassword?.takeIf { hasProxy },
-                            ),
-                        )
-                        editing = null
                     },
                     onLoadAgents = { _, _, _, _ -> emptyList() },
                     // 编辑已有实例：带上保存的 token，验证时才能读到配套插件版本。
                     onVerifyHosts = { hosts, basic, attempt, token ->
-                        onVerifyHosts(hosts, basic, attempt, token)
+                        onVerifyHosts(hosts, basic, attempt, token, instance.id)
                     },
                     verifyToken = instance.token,
                     loadAgentsWithToken = { onLoadAgentsFor(instance) },
@@ -588,9 +634,11 @@ fun SettingsScreen(
         // 离开这一页（含 AnimatedContent 的退出动画结束）时记下位置。
         androidx.compose.runtime.DisposableEffect(page) {
             onDispose {
-                scrollOffsets = scrollOffsets.toMutableList().also {
-                    it[page.ordinal] = scrollState.value
-                }
+                // 枚举新增页后，升级前保存的列表比新枚举短，直接按下标写会越界。
+                val next = scrollOffsets.toMutableList()
+                while (next.size <= page.ordinal) next += 0
+                next[page.ordinal] = scrollState.value
+                scrollOffsets = next
             }
         }
         Column(
@@ -605,7 +653,14 @@ fun SettingsScreen(
                         SettingsPage.MAIN -> onBack()
                         SettingsPage.APPEARANCE_PREVIEW -> section = SettingsPage.APPEARANCE
                         SettingsPage.TRUSTED -> section = SettingsPage.SERVER
-                        else -> section = SettingsPage.MAIN
+                        else -> {
+                            if (serverConfigChild) {
+                                serverConfigChild = false
+                                section = SettingsPage.SERVER_CONFIG
+                            } else {
+                                section = SettingsPage.MAIN
+                            }
+                        }
                     }
                 },
                 subtitle = if (page == SettingsPage.MAIN) {
@@ -685,15 +740,78 @@ fun SettingsScreen(
                             onClick = { section = SettingsPage.LOGS },
                         )
                     }
-                    // 三张配置表单都改的是服务端状态，挂在独立的「服务端配置」下，
-                    // 避免与「此手机」里的本机偏好混在一起。
-                    if (config != null) {
-                        SectionHeader(stringResource(R.string.settings_section_server_config))
+                    val favoriteIds = FAVORITE_ORDER.filter { it in favorites }.take(6)
+                    if (favoriteIds.isNotEmpty()) {
+                        SectionHeader(stringResource(R.string.settings_section_favorites))
                         Card {
-                            // 插件行放在最前：后续所有「需要插件」的功能都以它为前提，
-                            // 用户排查功能不可用时应先看到这一行。
-                            // 开关只在「已检测到」时可点：未安装时打开一个没有后端支撑的功能
-                            // 只会让用户以为已经生效。
+                            favoriteIds.forEachIndexed { index, id ->
+                                val entry = FAVORITE_ENTRIES[id] ?: return@forEachIndexed
+                                NavRow(
+                                    icon = entry.icon,
+                                    title = stringResource(entry.titleRes),
+                                    subtitle = stringResource(entry.subtitleRes),
+                                    onClick = { openFavorite(id) },
+                                )
+                                if (index != favoriteIds.lastIndex) Divider()
+                            }
+                        }
+                    }
+                    if (config != null) {
+                        Card {
+                            NavRow(
+                                icon = QwenIcons.server,
+                                title = stringResource(R.string.settings_section_server_config),
+                                subtitle = stringResource(R.string.settings_nav_server_config_subtitle),
+                                onClick = {
+                                    serverConfigChild = false
+                                    section = SettingsPage.SERVER_CONFIG
+                                },
+                            )
+                        }
+                    }
+                    SectionHeader(stringResource(R.string.settings_nav_about))
+                    Card {
+                        NavRow(
+                            icon = QwenIcons.info,
+                            title = stringResource(R.string.settings_nav_about),
+                            subtitle = stringResource(R.string.settings_version, appVersion),
+                            onClick = { section = SettingsPage.ABOUT },
+                        )
+                    }
+                }
+
+                // 服务端配置：二级菜单，避免一级列表被二十多行占满。
+                SettingsPage.SERVER_CONFIG -> {
+                    if (config != null) {
+                        SectionHeader(stringResource(R.string.settings_group_models_agents))
+                        Card {
+                            NavRow(
+                                icon = QwenIcons.zap,
+                                title = stringResource(R.string.settings_nav_models),
+                                subtitle = stringResource(R.string.settings_nav_models_subtitle),
+                                onClick = onOpenModels,
+                                trailing = { FavoriteStar("models" in favorites) { toggleFavorite("models") } },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.sparkles,
+                                title = stringResource(R.string.settings_nav_agents),
+                                subtitle = stringResource(R.string.settings_nav_agents_subtitle),
+                                onClick = onOpenAgents,
+                                trailing = { FavoriteStar("agents" in favorites) { toggleFavorite("agents") } },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.workflow,
+                                title = stringResource(R.string.settings_nav_runtime),
+                                subtitle = stringResource(R.string.settings_nav_runtime_subtitle),
+                                onClick = onOpenRuntime,
+                                trailing = { FavoriteStar("runtime" in favorites) { toggleFavorite("runtime") } },
+                            )
+                        }
+
+                        SectionHeader(stringResource(R.string.settings_group_tools_extensions))
+                        Card {
                             androidx.compose.foundation.layout.Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -722,14 +840,9 @@ fun SettingsScreen(
                                         else -> stringResource(R.string.settings_bridge_unavailable)
                                     }
                                     Text(
-                                        // 状态另起一行：两者挤在一行时，行宽恰好落在
-                                        // 「关闭」两个字中间，换行后看起来像错字。
                                         text = bridgeStatus.label + "\n" + featureLine,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        // 不限制行数：这一行载有插件名与功能状态两段信息，
-                                        // 单行加省略号会把「功能已开启 / 已关闭」截掉，
-                                        // 而那正是用户要确认的部分。
                                         softWrap = true,
                                     )
                                 }
@@ -756,72 +869,9 @@ fun SettingsScreen(
                                 },
                                 onClick = {
                                     config.onLoadTools()
+                                    serverConfigChild = true
                                     section = SettingsPage.TOOLS
                                 },
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.zap,
-                                title = stringResource(R.string.settings_nav_envs),
-                                subtitle = if (config.envs.loaded) {
-                                    pluralStringResource(
-                                        R.plurals.settings_envs_configured_summary,
-                                        config.envs.vars.size,
-                                        config.envs.vars.size,
-                                    )
-                                } else {
-                                    stringResource(R.string.settings_nav_envs_subtitle)
-                                },
-                                onClick = {
-                                    config.onLoadEnvs()
-                                    section = SettingsPage.ENVIRONMENTS
-                                },
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.calendarClock,
-                                title = stringResource(R.string.settings_nav_cron),
-                                subtitle = if (config.cron.loaded) {
-                                    pluralStringResource(
-                                        R.plurals.settings_cron_jobs_summary,
-                                        config.cron.jobs.size,
-                                        config.cron.jobs.size,
-                                    )
-                                } else {
-                                    stringResource(R.string.settings_nav_cron_subtitle)
-                                },
-                                onClick = {
-                                    config.onLoadCron()
-                                    section = SettingsPage.CRON
-                                },
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.zap,
-                                title = stringResource(R.string.settings_nav_models),
-                                subtitle = stringResource(R.string.settings_nav_models_subtitle),
-                                onClick = onOpenModels,
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.sparkles,
-                                title = stringResource(R.string.settings_nav_agents),
-                                subtitle = stringResource(R.string.settings_nav_agents_subtitle),
-                                onClick = onOpenAgents,
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.workflow,
-                                title = stringResource(R.string.settings_nav_runtime),
-                                subtitle = stringResource(R.string.settings_nav_runtime_subtitle),
-                                onClick = onOpenRuntime,
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.blocks,
-                                title = stringResource(R.string.settings_nav_app_center),
-                                subtitle = stringResource(R.string.settings_nav_app_center_subtitle),
-                                onClick = onOpenAppCenter,
                             )
                             Divider()
                             NavRow(
@@ -843,6 +893,94 @@ fun SettingsScreen(
                                 title = stringResource(R.string.settings_nav_market),
                                 subtitle = stringResource(R.string.settings_nav_market_subtitle),
                                 onClick = onOpenMarket,
+                                trailing = { FavoriteStar("market" in favorites) { toggleFavorite("market") } },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.blocks,
+                                title = stringResource(R.string.settings_nav_app_center),
+                                subtitle = stringResource(R.string.settings_nav_app_center_subtitle),
+                                onClick = onOpenAppCenter,
+                            )
+                        }
+
+                        SectionHeader(stringResource(R.string.settings_group_access_security))
+                        Card {
+                            NavRow(
+                                icon = QwenIcons.shieldCheck,
+                                title = stringResource(R.string.acl_title),
+                                subtitle = stringResource(R.string.acl_entry_subtitle),
+                                onClick = onOpenAccessControl,
+                                trailing = { FavoriteStar("acl" in favorites) { toggleFavorite("acl") } },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.shieldCheck,
+                                title = stringResource(R.string.settings_nav_security),
+                                subtitle = stringResource(R.string.settings_nav_security_subtitle),
+                                onClick = {
+                                    config.onLoadSecurity()
+                                    onOpenSecurity()
+                                },
+                                trailing = { FavoriteStar("security" in favorites) { toggleFavorite("security") } },
+                            )
+                        }
+
+                        SectionHeader(stringResource(R.string.settings_group_data_ops))
+                        Card {
+                            NavRow(
+                                icon = QwenIcons.zap,
+                                title = stringResource(R.string.settings_nav_envs),
+                                subtitle = if (config.envs.loaded) {
+                                    pluralStringResource(
+                                        R.plurals.settings_envs_configured_summary,
+                                        config.envs.vars.size,
+                                        config.envs.vars.size,
+                                    )
+                                } else {
+                                    stringResource(R.string.settings_nav_envs_subtitle)
+                                },
+                                onClick = {
+                                    config.onLoadEnvs()
+                                    serverConfigChild = true
+                                    section = SettingsPage.ENVIRONMENTS
+                                },
+                                trailing = { FavoriteStar("envs" in favorites) { toggleFavorite("envs") } },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.calendarClock,
+                                title = stringResource(R.string.settings_nav_cron),
+                                subtitle = if (config.cron.loaded) {
+                                    pluralStringResource(
+                                        R.plurals.settings_cron_jobs_summary,
+                                        config.cron.jobs.size,
+                                        config.cron.jobs.size,
+                                    )
+                                } else {
+                                    stringResource(R.string.settings_nav_cron_subtitle)
+                                },
+                                onClick = {
+                                    config.onLoadCron()
+                                    serverConfigChild = true
+                                    section = SettingsPage.CRON
+                                },
+                                trailing = { FavoriteStar("cron" in favorites) { toggleFavorite("cron") } },
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.clock,
+                                title = stringResource(R.string.settings_nav_offload),
+                                subtitle = if (config.offload.action == OFFLOAD) {
+                                    stringResource(R.string.settings_nav_offload_subtitle_offload)
+                                } else {
+                                    stringResource(R.string.settings_nav_offload_subtitle_abort)
+                                },
+                                onClick = {
+                                    config.onLoadOffload()
+                                    serverConfigChild = true
+                                    section = SettingsPage.OFFLOAD
+                                },
                             )
                             Divider()
                             NavRow(
@@ -874,36 +1012,12 @@ fun SettingsScreen(
                             )
                             Divider()
                             NavRow(
-                                icon = QwenIcons.clock,
-                                title = stringResource(R.string.settings_nav_offload),
-                                subtitle = if (config.offload.action == OFFLOAD) {
-                                    stringResource(R.string.settings_nav_offload_subtitle_offload)
-                                } else {
-                                    stringResource(R.string.settings_nav_offload_subtitle_abort)
-                                },
-                                onClick = {
-                                    config.onLoadOffload()
-                                    section = SettingsPage.OFFLOAD
-                                },
-                            )
-                            Divider()
-                            NavRow(
                                 icon = QwenIcons.settings,
                                 title = stringResource(R.string.settings_nav_running_config),
                                 subtitle = stringResource(R.string.settings_nav_running_config_subtitle),
                                 onClick = {
                                     config.onLoadRunningConfig()
                                     onOpenRunningConfig()
-                                },
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.shieldCheck,
-                                title = stringResource(R.string.settings_nav_security),
-                                subtitle = stringResource(R.string.settings_nav_security_subtitle),
-                                onClick = {
-                                    config.onLoadSecurity()
-                                    onOpenSecurity()
                                 },
                             )
                             Divider()
@@ -935,15 +1049,6 @@ fun SettingsScreen(
                                 onClick = onOpenUsage,
                             )
                         }
-                    }
-                    SectionHeader(stringResource(R.string.settings_nav_about))
-                    Card {
-                        NavRow(
-                            icon = QwenIcons.info,
-                            title = stringResource(R.string.settings_nav_about),
-                            subtitle = stringResource(R.string.settings_version, appVersion),
-                            onClick = { section = SettingsPage.ABOUT },
-                        )
                     }
                 }
 
@@ -1365,6 +1470,7 @@ fun SettingsScreen(
                             loading = c.envs.loading,
                             error = c.envs.error,
                             onSave = c.onSaveEnvs,
+                            onSaveAuthEnabled = c.onSaveAuthEnabled,
                             onDelete = c.onDeleteEnv,
                             onReset = c.onResetEnv,
                         )
@@ -1534,6 +1640,8 @@ fun SettingsScreen(
 internal enum class SettingsPage {
     MAIN,
     SERVER,
+    /** 服务端配置的二级菜单：模型、工具、访问与运维。 */
+    SERVER_CONFIG,
     /** 受信任的连接：命中这些主机的地址不再弹安全提示。 */
     TRUSTED,
     PROFILE,
@@ -1568,9 +1676,63 @@ private data class SettingsNav(
     val editing: InstanceConfig? = null,
 )
 
+/** 一级收藏项；只收服务端配置组里的入口。 */
+private data class FavoriteEntry(
+    val titleRes: Int,
+    val subtitleRes: Int,
+    val icon: ImageVector,
+)
+
+private val FAVORITE_ORDER =
+    listOf("models", "agents", "runtime", "envs", "cron", "market", "acl", "security")
+
+private val FAVORITE_ENTRIES: Map<String, FavoriteEntry> = mapOf(
+    "models" to FavoriteEntry(
+        R.string.settings_nav_models,
+        R.string.settings_nav_models_subtitle,
+        QwenIcons.zap,
+    ),
+    "agents" to FavoriteEntry(
+        R.string.settings_nav_agents,
+        R.string.settings_nav_agents_subtitle,
+        QwenIcons.sparkles,
+    ),
+    "runtime" to FavoriteEntry(
+        R.string.settings_nav_runtime,
+        R.string.settings_nav_runtime_subtitle,
+        QwenIcons.workflow,
+    ),
+    "envs" to FavoriteEntry(
+        R.string.settings_nav_envs,
+        R.string.settings_nav_envs_subtitle,
+        QwenIcons.zap,
+    ),
+    "cron" to FavoriteEntry(
+        R.string.settings_nav_cron,
+        R.string.settings_nav_cron_subtitle,
+        QwenIcons.calendarClock,
+    ),
+    "market" to FavoriteEntry(
+        R.string.settings_nav_market,
+        R.string.settings_nav_market_subtitle,
+        QwenIcons.library,
+    ),
+    "acl" to FavoriteEntry(
+        R.string.acl_title,
+        R.string.acl_entry_subtitle,
+        QwenIcons.shieldCheck,
+    ),
+    "security" to FavoriteEntry(
+        R.string.settings_nav_security,
+        R.string.settings_nav_security_subtitle,
+        QwenIcons.shieldCheck,
+    ),
+)
+
 /** 子页标题。与一级列表的入口文案保持一致，避免同一个页有两个名字。 */
 private fun sectionTitle(section: SettingsPage): String = when (section) {
     SettingsPage.SERVER -> Texts.get(R.string.settings_nav_server)
+    SettingsPage.SERVER_CONFIG -> Texts.get(R.string.settings_section_server_config)
     SettingsPage.TRUSTED -> Texts.get(R.string.settings_nav_trusted)
     SettingsPage.PROFILE -> Texts.get(R.string.settings_nav_profile)
     SettingsPage.APPEARANCE -> Texts.get(R.string.settings_nav_appearance)
@@ -1611,6 +1773,7 @@ data class SettingsConfig(
     val onSaveToolConfig: (String, Map<String, String>) -> Unit = { _, _ -> },
     val onLoadEnvs: () -> Unit = {},
     val onSaveEnvs: (Map<String, String>) -> Unit = {},
+    val onSaveAuthEnabled: (String) -> Unit = {},
     val onDeleteEnv: (String) -> Unit = {},
     val onResetEnv: (String) -> Unit = {},
     val onLoadOffload: () -> Unit = {},
@@ -1842,6 +2005,8 @@ internal fun NavRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    /** 行尾附加控件，例如收藏按钮；不传时只显示箭头。 */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -1869,6 +2034,7 @@ internal fun NavRow(
                 )
             }
         }
+        trailing?.invoke()
         Spacer(Modifier.width(8.dp))
         // 箭头是装饰：整行都可点，读屏不需要再念一遍「进入」。
         Icon(
@@ -1876,6 +2042,20 @@ internal fun NavRow(
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun FavoriteStar(favorite: Boolean, onClick: () -> Unit) {
+    TextButton(onClick = onClick) {
+        Text(
+            text = if (favorite) {
+                stringResource(R.string.settings_fav_on)
+            } else {
+                stringResource(R.string.settings_fav_off)
+            },
+            style = MaterialTheme.typography.labelSmall,
         )
     }
 }

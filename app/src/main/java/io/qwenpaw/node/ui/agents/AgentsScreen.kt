@@ -72,9 +72,11 @@ fun AgentsScreen(
     onDismissExport: () -> Unit,
     onOpenPortability: () -> Unit,
     onDismissNotice: () -> Unit,
+    onSaveBackend: (String, String) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     var creating by remember { mutableStateOf(false) }
+    var backendTarget by remember { mutableStateOf<AgentDto?>(null) }
     var editing by remember { mutableStateOf<AgentDto?>(null) }
     var copying by remember { mutableStateOf<AgentDto?>(null) }
     var deleting by remember { mutableStateOf<AgentDto?>(null) }
@@ -233,12 +235,16 @@ fun AgentsScreen(
                     row = row,
                     current = row.agent.id == state.currentAgentId,
                     busy = state.busy,
+                    // 2.2.2 没有 agents/backends；只在本机确实有第三方后端时显示入口，
+                    // 否则旧服务端上会出现一个空对话框。
+                    showBackend = state.backends.size > 1,
                     onSetEnabled = { onSetEnabled(row.agent.id, it) },
                     onSetPinned = { onSetPinned(row.agent.id, it) },
                     onMoveUp = { onMove(row.agent.id, -1) },
                     onMoveDown = { onMove(row.agent.id, 1) },
                     onUse = { onUseAsCurrent(row.agent.id) },
                     onEdit = { editing = row.agent },
+                    onBackend = { backendTarget = row.agent },
                     onCopy = { copying = row.agent },
                     onExport = {
                         exportTarget = row.agent
@@ -296,6 +302,46 @@ fun AgentsScreen(
         )
     }
 
+    backendTarget?.let { agent ->
+        AlertDialog(
+            onDismissRequest = { backendTarget = null },
+            title = { Text(stringResource(R.string.agents_backend_title)) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(R.string.agents_backend_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    state.backends.forEach { backend ->
+                        TextButton(
+                            enabled = backend.isAvailable && !state.busy,
+                            onClick = {
+                                backendTarget = null
+                                onSaveBackend(agent.id, backend.id)
+                            },
+                        ) {
+                            val suffix = buildString {
+                                if (backend.id == agent.backend) append(" ✓")
+                                if (!backend.isAvailable) {
+                                    append(" (")
+                                    append(stringResource(R.string.agents_backend_unavailable))
+                                    append(")")
+                                }
+                            }
+                            Text(backend.label.ifBlank { backend.id } + suffix)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { backendTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
     deleting?.let { agent ->
         val workspaceDefault = stringResource(R.string.agents_workspace_default)
         DestructiveActionDialog(
@@ -327,12 +373,14 @@ private fun AgentCard(
     row: AgentRow,
     current: Boolean,
     busy: Boolean,
+    showBackend: Boolean,
     onSetEnabled: (Boolean) -> Unit,
     onSetPinned: (Boolean) -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onUse: () -> Unit,
     onEdit: () -> Unit,
+    onBackend: () -> Unit,
     onCopy: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
@@ -407,6 +455,9 @@ private fun AgentCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 SmallAction(stringResource(R.string.action_edit), onEdit)
+                if (showBackend) {
+                    SmallAction(stringResource(R.string.agents_action_backend), onBackend)
+                }
                 SmallAction(stringResource(R.string.action_copy), onCopy)
                 SmallAction(stringResource(R.string.agents_section_export), onExport)
                 SmallAction(stringResource(R.string.action_delete), onDelete, enabled = !isDefault)

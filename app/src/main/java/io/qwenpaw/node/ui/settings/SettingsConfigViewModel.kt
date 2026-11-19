@@ -36,6 +36,8 @@ data class ToolsUiState(
     val loaded: Boolean = false,
 )
 
+private const val AUTH_ENABLED_KEY = "QWENPAW_AUTH_ENABLED"
+
 /** 环境变量页状态。`catalog` 用来区分内置变量（只能重置）与只读项。 */
 data class EnvsUiState(
     val vars: List<EnvVarDto> = emptyList(),
@@ -227,6 +229,31 @@ class SettingsConfigViewModel(
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.patchEnvVars(conn, values) } }
                 .onSuccess { vars -> _envs.update { it.copy(vars = vars, error = null) } }
+                .onFailure { e -> _envs.update { it.copy(error = ErrorText.of(e)) } }
+        }
+    }
+
+    /**
+     * 保存 `QWENPAW_AUTH_ENABLED`。
+     *
+     * 该键不在 catalog 里，PUT 是实测可行的写入路径；PUT 会整体替换，
+     * 因此把当前全部变量合并后再提交。空值表示删除。
+     */
+    fun saveAuthEnabled(value: String) {
+        val conn = connection() ?: return
+        // 未加载完成时 vars 为空，PUT 会删掉其他变量；此时不保存。
+        if (!_envs.value.loaded) return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    if (value.isBlank()) {
+                        api.deleteEnvVar(conn, AUTH_ENABLED_KEY)
+                    } else {
+                        val current = _envs.value.vars.associate { it.key to it.value }
+                        api.putEnvVars(conn, current + (AUTH_ENABLED_KEY to value))
+                    }
+                }
+            }.onSuccess { vars -> _envs.update { it.copy(vars = vars, error = null) } }
                 .onFailure { e -> _envs.update { it.copy(error = ErrorText.of(e)) } }
         }
     }

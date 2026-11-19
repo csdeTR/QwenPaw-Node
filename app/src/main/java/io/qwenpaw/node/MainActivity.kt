@@ -167,9 +167,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** 配套插件的发布包地址；安装引导与 Harness 补装共用。 */
+private const val BRIDGE_ZIP_URL =
+    "https://github.com/csdeTR/QwenPaw-Node-Bridge/releases/latest/download/qwenpaw-node-bridge.zip"
+
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, TERMINAL, GIT }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, TERMINAL, GIT }
 
 @Composable
 private fun QwenPawNav(
@@ -248,6 +252,7 @@ private fun QwenPawNav(
     val modelsState by viewModel.models.state.collectAsState()
     val skillsState by viewModel.skills.state.collectAsState()
     val mcpState by viewModel.mcp.state.collectAsState()
+    val aclState by viewModel.acl.state.collectAsState()
     val marketState by viewModel.market.state.collectAsState()
     val inboxState by viewModel.inbox.state.collectAsState()
     // 全文检索状态单独一条流，与对话页状态无关。
@@ -1183,6 +1188,10 @@ private fun QwenPawNav(
                     onLoginHarness = viewModel.runtime::login,
                     onLogoutHarness = viewModel.runtime::logout,
                     onOpenHarnessDetail = viewModel.runtime::openDetail,
+                    onInstallHarness = { url ->
+                        viewModel.market.openInstallUrlDialog(url)
+                        screen = Screen.MARKET
+                    },
                     onDismissHarnessLogin = viewModel.runtime::dismissLogin,
                     onDismissHarnessDetail = viewModel.runtime::dismissDetail,
                     onDismissAcpNotice = viewModel.runtime::dismissAcpNotice,
@@ -1221,6 +1230,7 @@ private fun QwenPawNav(
                     onDismissExport = viewModel.backup::dismissAgentExport,
                     onOpenPortability = { screen = Screen.PORTABILITY },
                     onDismissNotice = viewModel.agents::dismissNotice,
+                    onSaveBackend = viewModel.agents::saveBackend,
                 )
             }
 
@@ -1333,6 +1343,31 @@ private fun QwenPawNav(
                     onDismissHubInstall = viewModel.market::dismissHubInstall,
                     onDismissNotice = viewModel.market::dismissNotice,
                     onStopHubPolling = viewModel.market::stopHubPolling,
+                    onConsumePrefill = viewModel.market::consumePrefill,
+                )
+            }
+
+            Screen.ACL -> {
+                LaunchedEffect(Unit) { viewModel.acl.refresh() }
+                io.qwenpaw.node.ui.acl.AclScreen(
+                    state = aclState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onRefresh = viewModel.acl::refresh,
+                    onSetTab = viewModel.acl::setTab,
+                    onToggleSelected = viewModel.acl::toggleSelected,
+                    onAct = viewModel.acl::act,
+                    onRemark = viewModel.acl::remark,
+                    onAddMember = { group, userId, remark, blacklist ->
+                        if (blacklist) {
+                            viewModel.acl.addBlacklist(group, userId, remark)
+                        } else {
+                            viewModel.acl.addMember(group, userId, remark)
+                        }
+                    },
+                    onRemoveMember = viewModel.acl::removeMember,
+                    onDismissNotice = viewModel.acl::dismissNotice,
+                    currentAgentId = instances.firstOrNull { it.id == activeId }?.agentId
+                        ?: "default",
                 )
             }
 
@@ -1430,6 +1465,7 @@ private fun QwenPawNav(
                     onOpenModels = { screen = Screen.MODELS },
                     onOpenSkills = { screen = Screen.SKILLS },
                     onOpenMcp = { screen = Screen.MCP },
+                    onOpenAccessControl = { screen = Screen.ACL },
                     onOpenMarket = { screen = Screen.MARKET },
                     onOpenUsage = {
                         usageOrigin = Screen.SETTINGS
@@ -1443,7 +1479,7 @@ private fun QwenPawNav(
                     onOpenAppCenter = { screen = Screen.APP_CENTER },
                     onSwitch = { id -> viewModel.switchTo(id) },
                     onRemove = viewModel::remove,
-                    onEdit = viewModel::editInstance,
+                    onEditWithCredentials = viewModel::editInstanceWithCredentials,
                     onPickAgent = { pickingAgent = it },
                     addConnecting = appState.connecting,
                     addError = appState.connectError,
@@ -1451,8 +1487,14 @@ private fun QwenPawNav(
                         viewModel.loadAgents(hosts, user, pass, basic)
                     },
                     onLoadAgentsFor = { viewModel.loadAgentsFor(it) },
-                    onVerifyHosts = { hosts, basic, onAttempt, token ->
-                        viewModel.verifyHosts(hosts, onAttempt, basicAuth = basic, token = token)
+                    onVerifyHosts = { hosts, basic, onAttempt, token, instanceId ->
+                        viewModel.verifyHosts(
+                            hosts,
+                            onAttempt,
+                            instanceId = instanceId,
+                            basicAuth = basic,
+                            token = token,
+                        )
                     },
                     onCheckAuth = { address -> viewModel.authRequired(address) },
                     onCheckLogin = { address, user, pass, basic ->
@@ -1597,6 +1639,7 @@ private fun QwenPawNav(
                         onSaveToolConfig = viewModel.settingsConfig::saveToolConfig,
                         onLoadEnvs = { viewModel.settingsConfig.loadEnvs() },
                         onSaveEnvs = viewModel.settingsConfig::saveEnvs,
+                        onSaveAuthEnabled = viewModel.settingsConfig::saveAuthEnabled,
                         onDeleteEnv = viewModel.settingsConfig::deleteEnv,
                         onResetEnv = viewModel.settingsConfig::resetEnv,
                         onLoadOffload = { viewModel.settingsConfig.loadOffload() },
@@ -1665,6 +1708,36 @@ private fun QwenPawNav(
         io.qwenpaw.node.ui.settings.SecurityNoticeDialog(
             notice = notice,
             onDismiss = viewModel::dismissSecurityNotice,
+        )
+    }
+
+    // 未装配套插件时的安装引导。跳市场并预填 URL，用户不必自己找下载地址。
+    appState.bridgeGuide?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissBridgeGuide(mute = false) },
+            title = { Text(stringResource(R.string.bridge_guide_title)) },
+            text = { Text(stringResource(R.string.bridge_guide_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.clearBridgeGuide()
+                        viewModel.market.openInstallUrlDialog(BRIDGE_ZIP_URL)
+                        screen = Screen.MARKET
+                    },
+                ) { Text(stringResource(R.string.bridge_guide_install)) }
+            },
+            dismissButton = {
+                androidx.compose.foundation.layout.Row {
+                    if (prompt.askMute) {
+                        TextButton(onClick = { viewModel.dismissBridgeGuide(mute = true) }) {
+                            Text(stringResource(R.string.bridge_guide_mute))
+                        }
+                    }
+                    TextButton(onClick = { viewModel.dismissBridgeGuide(mute = false) }) {
+                        Text(stringResource(R.string.bridge_guide_later))
+                    }
+                }
+            },
         )
     }
 
@@ -1867,7 +1940,8 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     // 工作区文件、备份、检查点、模型与提供商、技能、MCP、扩展市场都从设置页进入，返回也回设置页。
     Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS,
     Screen.SKILLS, Screen.MCP, Screen.MARKET, Screen.RUNNING_CONFIG, Screen.SECURITY,
-    Screen.AGENTS, Screen.RUNTIME, Screen.PORTABILITY, Screen.APP_CENTER -> Screen.SETTINGS
+    Screen.AGENTS, Screen.RUNTIME, Screen.PORTABILITY, Screen.APP_CENTER,
+    Screen.ACL -> Screen.SETTINGS
     Screen.TERMINAL -> Screen.SETTINGS
     // Git 从工作区文件页顶栏进入，返回也回工作区。
     Screen.GIT -> Screen.WORKSPACE

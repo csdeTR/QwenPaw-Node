@@ -56,6 +56,8 @@ internal fun EnvironmentsSection(
     loading: Boolean,
     error: String?,
     onSave: (Map<String, String>) -> Unit,
+    /** `QWENPAW_AUTH_ENABLED` 单独走 PUT 合并写入。 */
+    onSaveAuthEnabled: (String) -> Unit = {},
     onDelete: (String) -> Unit,
     onReset: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -67,6 +69,9 @@ internal fun EnvironmentsSection(
     var pendingDelete by remember { mutableStateOf<EnvVarDto?>(null) }
     var pendingReset by remember { mutableStateOf<EnvVarDto?>(null) }
     var viewingReadonly by remember { mutableStateOf<EnvCatalogDto?>(null) }
+    var pendingAuthValue by remember { mutableStateOf<String?>(null) }
+    val authKey = "QWENPAW_AUTH_ENABLED"
+    val authVar = vars.firstOrNull { it.key == authKey }
 
     val specByKey = remember(catalog) { catalog.associateBy { it.key } }
     val liveSpecs = remember(catalog) { catalog.filter { it.mutability == HOT_RUNTIME } }
@@ -77,11 +82,47 @@ internal fun EnvironmentsSection(
             .fillMaxWidth(),
     ) {
         SectionHeader(
-            stringResource(R.string.env_header_configured),
-            pluralStringResource(R.plurals.env_count, vars.size, vars.size),
+            stringResource(R.string.env_header_auth),
+            stringResource(R.string.env_desc_auth_enabled),
         )
         Card {
-            if (vars.isEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !loading) {
+                        editing = EnvVarDto(key = authKey, value = authVar?.value.orEmpty())
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(authKey, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = if (authVar == null) {
+                            stringResource(R.string.env_auth_unset)
+                        } else {
+                            stringResource(R.string.env_auth_set)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.action_edit),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+        }
+
+        // 鉴权开关在上方常驻显示；已配置列表里不再重复这一行。
+        val visibleVars = vars.filter { it.key != authKey }
+        SectionHeader(
+            stringResource(R.string.env_header_configured),
+            pluralStringResource(R.plurals.env_count, visibleVars.size, visibleVars.size),
+        )
+        Card {
+            if (visibleVars.isEmpty()) {
                 Text(
                     text = if (loading) {
                         stringResource(R.string.action_loading)
@@ -94,7 +135,7 @@ internal fun EnvironmentsSection(
                 )
                 Divider()
             } else {
-                vars.forEach { v ->
+                visibleVars.forEach { v ->
                     val spec = specByKey[v.key]
                     EnvRow(
                         envVar = v,
@@ -194,8 +235,48 @@ internal fun EnvironmentsSection(
             envVar = target,
             onDismiss = { editing = null },
             onSave = { value ->
-                onSave(mapOf(target.key to value))
+                if (target.key == authKey) {
+                    if (value.trim().equals("true", ignoreCase = true)) {
+                        // 先确认再写：写成功后本页会立刻失去访问。
+                        pendingAuthValue = value.trim()
+                    } else {
+                        onSaveAuthEnabled(value)
+                    }
+                } else {
+                    onSave(mapOf(target.key to value))
+                }
                 editing = null
+            },
+        )
+    }
+
+    pendingAuthValue?.let { value ->
+        AlertDialog(
+            onDismissRequest = { pendingAuthValue = null },
+            title = { Text(stringResource(R.string.env_auth_confirm_title)) },
+            text = { Text(stringResource(R.string.env_auth_confirm_message)) },
+            confirmButton = {
+                Text(
+                    text = stringResource(R.string.env_auth_confirm),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .clickable {
+                            pendingAuthValue = null
+                            onSaveAuthEnabled(value)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            },
+            dismissButton = {
+                Text(
+                    text = stringResource(R.string.action_cancel),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clickable { pendingAuthValue = null }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
             },
         )
     }

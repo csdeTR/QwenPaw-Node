@@ -1899,6 +1899,12 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 `PendingEntry`：`{user_id, channel, timestamp, first_message, remark, username}`。三个动作的 body 统一为 `{entries: [...]}`，支持批量。
 
+**实测请求体（2026-11-19，qp-test 2.3.0.post1 源码确认）**：
+
+- 聊天动作：`{entries:[{channel, user_id, remark, username}]}`；备注 `{channel, user_id, remark}`。
+- 邮件动作：`{entries:[{agent_id, address, remark?, display_name?}]}`；备注 `{agent_id, address, remark}`。`agent_id` 为空表示广播到全部已开启邮件访问控制的智能体。
+- 总览外层键：聊天是 `channel`，邮件是 `agent_id`；白名单/黑名单是对象映射（键为 user_id 或邮件地址），不是数组。
+
 **四个动作语义不同，不能合并成一个「关闭」：** 通过进白名单、拒绝进黑名单、忽略（dismiss）两边都不改、备注只改 `remark`。
 
 **邮件侧审批后会把该发件人的历史邮件重新投递。** 服务端先把 pending 行移走，再把这些消息 UID 放进可重放的 outbox（`mail_access_control.py` 的 approve 分支），因此界面上要说明这一点，否则用户会以为「通过」只是放行新邮件。

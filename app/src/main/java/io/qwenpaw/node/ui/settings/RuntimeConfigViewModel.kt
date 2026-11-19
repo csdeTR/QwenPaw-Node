@@ -66,6 +66,8 @@ data class HarnessDetailUi(
 
 data class HarnessUiState(
     val providers: List<HarnessProviderDto> = emptyList(),
+    /** 插件目录里存在、但服务端尚未注册的后端。 */
+    val installable: List<io.qwenpaw.node.data.model.PluginCatalogEntryDto> = emptyList(),
     val loading: Boolean = false,
     val saving: Boolean = false,
     val loaded: Boolean = false,
@@ -185,15 +187,27 @@ class RuntimeConfigViewModel(
         val conn = connection() ?: return
         _harness.update { it.copy(loading = true, error = null, notice = null) }
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { api.harnesses(conn) } }
-                .onSuccess { list ->
-                    _harness.update { it.copy(providers = list, loading = false, loaded = true) }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val providers = api.harnesses(conn)
+                    val catalog = runCatching { api.pluginCatalog(conn) }
+                        .getOrNull()?.plugins.orEmpty()
+                    providers to harnessInstallable(providers, catalog)
                 }
-                .onFailure { e ->
-                    _harness.update {
-                        it.copy(loading = false, loaded = true, error = ErrorText.of(e))
-                    }
+            }.onSuccess { (providers, installable) ->
+                _harness.update {
+                    it.copy(
+                        providers = providers,
+                        installable = installable,
+                        loading = false,
+                        loaded = true,
+                    )
                 }
+            }.onFailure { e ->
+                _harness.update {
+                    it.copy(loading = false, loaded = true, error = ErrorText.of(e))
+                }
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 package io.qwenpaw.node.ui.agents
 
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.model.AgentBackendDto
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.model.AgentStatusDto
 import io.qwenpaw.node.data.remote.Connection
@@ -32,6 +33,8 @@ data class AgentsUiState(
     val notice: String? = null,
     /** 当前实例绑定的智能体；用于列表里标出「当前」。 */
     val currentAgentId: String? = null,
+    /** 可选后端；`qwenpaw` 与插件提供的第三方后端。 */
+    val backends: List<AgentBackendDto> = emptyList(),
 )
 
 /**
@@ -69,16 +72,25 @@ class AgentsViewModel(
         _state.update { it.copy(loading = true, error = null) }
         scope.launch {
             try {
-                val rows = withContext(Dispatchers.IO) {
+                val (rows, backends) = withContext(Dispatchers.IO) {
                     val agents = api.agents(conn)
                     // 逐个取状态：数量很少，顺序请求比并发更容易读日志，
                     // 也不会在弱网下同时挂起一堆请求。
-                    agents.map { agent ->
+                    val rows = agents.map { agent ->
                         val status = runCatching { api.agentStatus(conn, agent.id) }.getOrNull()
                         AgentRow(agent, status)
                     }
+                    rows to runCatching { api.agentsBackends(conn) }.getOrDefault(emptyList())
                 }
-                _state.update { it.copy(rows = rows, loading = false, loaded = true, error = null) }
+                _state.update {
+                    it.copy(
+                        rows = rows,
+                        backends = backends,
+                        loading = false,
+                        loaded = true,
+                        error = null,
+                    )
+                }
             } catch (e: Exception) {
                 _state.update {
                     it.copy(loading = false, loaded = true, error = ErrorText.of(e))
@@ -159,6 +171,24 @@ class AgentsViewModel(
             }.onFailure { e ->
                 _state.update { it.copy(busy = false, error = ErrorText.of(e)) }
                 onResult(false)
+            }
+        }
+    }
+
+    /** 切换智能体后端；第三方后端的模型在会话页写入 backend-settings。 */
+    fun saveBackend(agentId: String, backend: String) {
+        val conn = connection() ?: return
+        _state.update { it.copy(busy = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.updateAgentBackend(conn, agentId, backend) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(busy = false, notice = Texts.get(R.string.agents_notice_saved))
+                }
+                refresh()
+            }.onFailure { e ->
+                _state.update { it.copy(busy = false, error = ErrorText.of(e)) }
             }
         }
     }

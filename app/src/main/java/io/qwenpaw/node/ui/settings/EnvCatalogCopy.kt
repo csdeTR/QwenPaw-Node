@@ -29,6 +29,10 @@ private val BOOTSTRAP_HINT = R.string.env_hint_bootstrap_only
 
 /** 键 → 说明。只收 `GET /api/envs/catalog` 会下发的内置项。 */
 internal val ENV_SPEC_COPY: Map<String, EnvSpecCopy> = mapOf(
+    "QWENPAW_AUTH_ENABLED" to EnvSpecCopy(
+        description = R.string.env_desc_auth_enabled,
+        howToModify = R.string.env_how_auth_enabled,
+    ),
     "QWENPAW_LLM_STREAM_FIRST_CONTENT_TIMEOUT" to EnvSpecCopy(
         description = R.string.env_desc_stream_first_content_timeout,
         howToModify = R.string.env_how_takes_effect_next_call,

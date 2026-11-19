@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 访问控制 -->
+    <string name="acl_title">访问控制</string>
+    <string name="acl_entry_subtitle">待审批队列与名单增删</string>
+    <string name="acl_tab_chat">聊天渠道</string>
+    <string name="acl_tab_mail">邮件</string>
+    <string name="acl_badge">%1$d</string>
+    <string name="acl_pending_title">待审批</string>
+    <string name="acl_pending_empty">没有待审批的申请。</string>
+    <string name="acl_lists_title">名单</string>
+    <string name="acl_lists_empty">该渠道还没有名单数据。</string>
+    <string name="acl_whitelist">白名单</string>
+    <string name="acl_blacklist">黑名单</string>
+    <string name="acl_action_approve">通过</string>
+    <string name="acl_action_deny">拒绝</string>
+    <string name="acl_action_dismiss">忽略</string>
+    <string name="acl_action_remark">备注</string>
+    <string name="acl_action_add">添加</string>
+    <string name="acl_action_remove">移除</string>
+    <string name="acl_selected">已选 %1$d 条</string>
+    <string name="acl_remark_title">备注</string>
+    <string name="acl_remark_field">备注内容</string>
+    <string name="acl_remark_prefix">备注：%1$s</string>
+    <string name="acl_add_title">添加名单成员</string>
+    <string name="acl_add_group">渠道或智能体 ID</string>
+    <string name="acl_add_user">用户 ID 或邮件地址</string>
+    <string name="acl_add_remark">备注（可选）</string>
+    <string name="acl_add_blacklist">加入黑名单</string>
+    <string name="acl_mail_approve_title">通过后重投历史邮件</string>
+    <string name="acl_mail_approve_message">服务端会把该发件人的历史邮件重新投递一次。确定通过吗？</string>
+    <string name="acl_remove_title">移除名单成员</string>
+    <string name="acl_remove_message">确定把 %1$s 从名单中移除吗？</string>
+    <string name="acl_unknown_group">未命名渠道</string>
+    <string name="acl_unknown_user">未知用户</string>
+    <string name="acl_time_unknown">时间未知</string>
+    <string name="acl_busy">正在提交</string>
+    <string name="acl_need_one">请选择一条待审批记录</string>
+</resources>

@@ -3,6 +3,7 @@ package io.qwenpaw.node.data
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceConfig
+import io.qwenpaw.node.data.local.InstanceIdentity
 import io.qwenpaw.node.data.local.InstanceStore
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.data.remote.ApiException
@@ -11,10 +12,21 @@ import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.ui.i18n.Texts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import java.util.UUID
+
+/** 编辑实例时重新登录的结果。 */
+data class CredentialLoginResult(
+    val instance: InstanceConfig,
+    /** 服务端确实要求登录；false 表示这组凭据未被验证，仅保留原 token。 */
+    val authRequired: Boolean,
+)
 
 /**
  * 一次地址验证的结果。
@@ -32,6 +44,10 @@ data class VerifyResult(
      * 「反向代理验证」让它填，而不是把用户送回填地址那一步。
      */
     val proxyAuthRequired: Boolean = false,
+    /** 本次验证读到的身份指纹；null 表示没有做比对。 */
+    val identity: InstanceIdentity? = null,
+    /** 与已保存指纹的比对结论；弱信号不会判成 [IdentityVerdict.DIFFERENT]。 */
+    val identityVerdict: IdentityVerdict = IdentityVerdict.INCONCLUSIVE,
     /**
      * 同一地址上配套插件（QwenPaw Node Bridge）的探测结论。
      *
@@ -300,17 +316,20 @@ class InstanceRepository(
         token: String? = null,
     ): VerifyResult {
         val normalized = normalize(baseUrls)
+        val ordered = prioritizeRuntimeHit(normalized, instanceId)
         // 反代拦下时不能按「地址不可达」处理：地址是通的，换下一个地址
         // 同样会被拦。因此这里先单独探一次，把「缺凭据」与「连不上」分开。
         val (conn, result) = try {
-            withFallback(
-                baseUrls = normalized,
-                token = token,
-                agentId = "default",
-                instanceId = instanceId,
-                basicAuth = basicAuth,
+            // 验证走并行：坏地址不再按顺序把总时长累加。普通请求仍走
+            // withFallback 串行，避免每条消息都同时打向所有地址。
+            val (hit, value) = AddressFallback.firstReachableParallel(
+                ordered,
                 onAttempt = onAttempt,
-            ) { probe -> probeVersion(probe) }
+            ) { url ->
+                probeVersion(Connection(url, token, "default", basicAuth))
+            }
+            if (instanceId != null) runtimeHit[bucketKey(instanceId)] = hit
+            Connection(hit, token, "default", basicAuth) to value
         } catch (e: ApiException) {
             if (e.code == 401 &&
                 ErrorText.classify401(e.detail ?: e.message, e.wwwAuthenticate) ==
@@ -340,40 +359,87 @@ class InstanceRepository(
             }
             throw e
         }
-        return result.copy(baseUrl = conn.baseUrl)
+        // 只有已保存实例、已有指纹且这次带了 token 才做比对：
+        // 新实例没有可比的基准，无 token 时两次请求都会 401。
+        val saved = instanceId?.let { id -> _instances.value.firstOrNull { it.id == id } }
+        val currentIdentity = if (saved?.identity != null && token != null) {
+            runCatching { fetchIdentity(conn) }.getOrNull()
+        } else {
+            null
+        }
+        return result.copy(
+            baseUrl = conn.baseUrl,
+            identity = currentIdentity,
+            identityVerdict = compareIdentity(saved?.identity, currentIdentity),
+        )
     }
 
-    /** 用短超时探一个地址的版本与登录状态。 */
-    private suspend fun probeVersion(probe: Connection): VerifyResult {
-        val version = api.versionWith(
-            probe.baseUrl,
-            QwenPawApi.probeClient(),
-            probe.basicAuth,
-        ).version
+    /** 读身份指纹：agent 的 id/workspace 是强信号，头像只作弱信号保存。 */
+    private suspend fun fetchIdentity(conn: Connection): InstanceIdentity =
+        identityOf(
+            conn = conn,
+            agents = withContext(Dispatchers.IO) { api.agents(conn) },
+        )
+
+    private suspend fun identityOf(conn: Connection, agents: List<AgentDto>): InstanceIdentity {
+        val avatarHash = runCatching {
+            withContext(Dispatchers.IO) { api.avatarProfile(conn) }
+        }.getOrNull()?.let { profile ->
+            (listOfNotNull(profile.selected) + profile.history.map { it.id })
+                .sorted()
+                .joinToString(",")
+        }
+        return InstanceIdentity(
+            agentIds = agents.map { it.id },
+            workspaces = agents.mapNotNull { agent ->
+                agent.workspaceDir.takeIf { it.isNotBlank() }?.let { agent.id to it }
+            }.toMap(),
+            avatarHash = avatarHash,
+        )
+    }
+
+    /** 用该地址所属网络档位的短超时，并行探版本、登录状态与插件。 */
+    private suspend fun probeVersion(probe: Connection): VerifyResult = coroutineScope {
+        val http = QwenPawApi.probeClient(AddressProbePlan.policyOf(probe.baseUrl))
+        val version = withContext(Dispatchers.IO) {
+            api.versionWith(probe.baseUrl, http, probe.basicAuth).version
+        }
         // 鉴权状态查不到不算失败：验证的核心结论是「地址通不通」，
         // 拿不到 status 只影响「这一步之后是否要填账号」的预判。
-        val needsLogin = runCatching {
-            loginRequired(api.authStatus(probe.baseUrl, probe.basicAuth))
-        }.getOrDefault(false)
+        val login = async(Dispatchers.IO) {
+            runCatching {
+                loginRequired(api.authStatus(probe.baseUrl, probe.basicAuth, http))
+            }.getOrDefault(false)
+        }
         // 配套插件顺带探一次：用户在同一屏就能确认「服务端通了、插件装没装」。
         // 带 token 时能读到真实版本；新增实例这一阶段还没有 token，401 只能记为「待确认」。
-        val bridge = runCatching {
-            api.pluginBridgeInfo(probe)?.let {
-                io.qwenpaw.node.data.plugin.BridgeStatus.Ready(it)
-            } ?: io.qwenpaw.node.data.plugin.BridgeStatus.Absent
-        }.getOrElse { e ->
-            if (e is ApiException && (e.code == 401 || e.code == 403)) {
-                io.qwenpaw.node.data.plugin.BridgeStatus.Unknown
-            } else {
-                io.qwenpaw.node.data.plugin.BridgeStatus.Absent
+        val bridge = async(Dispatchers.IO) {
+            runCatching {
+                api.pluginBridgeInfo(probe, http)?.let {
+                    io.qwenpaw.node.data.plugin.BridgeStatus.Ready(it)
+                } ?: io.qwenpaw.node.data.plugin.BridgeStatus.Absent
+            }.getOrElse { e ->
+                if (e is ApiException && (e.code == 401 || e.code == 403)) {
+                    io.qwenpaw.node.data.plugin.BridgeStatus.Unknown
+                } else {
+                    io.qwenpaw.node.data.plugin.BridgeStatus.Absent
+                }
             }
         }
-        return VerifyResult(
+        VerifyResult(
             baseUrl = probe.baseUrl,
             version = version,
-            needsLogin = needsLogin,
-            bridge = bridge,
+            needsLogin = login.await(),
+            bridge = bridge.await(),
         )
+    }
+
+    /** 本次运行命中的地址排到最前；它已不在列表里时保持原顺序。 */
+    private fun prioritizeRuntimeHit(urls: List<String>, instanceId: String?): List<String> {
+        if (instanceId == null) return urls
+        val hit = runtimeHit[bucketKey(instanceId)] ?: return urls
+        if (hit !in urls) return urls
+        return listOf(hit) + urls.filter { it != hit }
     }
 
     /** 只探测地址是否可用并列出智能体，不写盘。连接页选智能体时用。 */
@@ -405,6 +471,55 @@ class InstanceRepository(
             api.agents(Connection(probe.baseUrl, token, "default", probe.basicAuth))
         }
         return agents
+    }
+
+    /**
+     * 编辑实例时验证并更新登录凭据。
+     *
+     * **先登录成功再落盘**：失败时旧 token 与旧用户名保持不变，用户不会因为
+     * 打错一次密码而丢掉本来还能用的连接。服务端未要求登录时不覆盖已有 token。
+     */
+    suspend fun loginAndUpdate(
+        instance: InstanceConfig,
+        username: String,
+        password: String,
+        basicAuth: BasicAuth?,
+    ): CredentialLoginResult {
+        var token: String? = null
+        var resolvedUser: String? = null
+        var authRequired = false
+        withFallback(
+            baseUrls = resolveOrder(instance),
+            token = null,
+            agentId = instance.agentId,
+            instanceId = instance.id,
+            basicAuth = basicAuth,
+        ) { probe ->
+            val status = api.authStatus(probe.baseUrl, probe.basicAuth)
+            if (loginRequired(status)) {
+                authRequired = true
+                val auth = api.login(
+                    probe.baseUrl,
+                    username,
+                    password,
+                    permanent = true,
+                    basicAuth = probe.basicAuth,
+                )
+                token = auth.token
+                resolvedUser = auth.username ?: username
+            }
+        }
+        val updated = instance.copy(
+            token = token ?: instance.token,
+            username = resolvedUser ?: instance.username,
+            basicUser = basicAuth?.user,
+            basicPassword = basicAuth?.password,
+        )
+        val list = _instances.value.toMutableList()
+        val index = list.indexOfFirst { it.id == updated.id }
+        if (index >= 0) list[index] = updated else list += updated
+        persist(list)
+        return CredentialLoginResult(updated, authRequired)
     }
 
     /**
@@ -481,6 +596,13 @@ class InstanceRepository(
             else -> agentId
         }
 
+        // 连接成功时记录一次身份指纹，后续改地址/验证才有比对基准。
+        val identity = runCatching {
+            identityOf(
+                conn = Connection(hit.baseUrl, resolvedToken, resolvedAgent, basicAuth),
+                agents = agents,
+            )
+        }.getOrNull()
         val config = InstanceConfig(
             id = existingId ?: UUID.randomUUID().toString(),
             name = name.ifBlank { hit.baseUrl },
@@ -491,6 +613,7 @@ class InstanceRepository(
             username = resolvedUser,
             basicUser = basicAuth?.user,
             basicPassword = basicAuth?.password,
+            identity = identity,
         )
         val list = _instances.value.toMutableList()
         val index = list.indexOfFirst { it.id == config.id }
@@ -508,6 +631,8 @@ class InstanceRepository(
                     )
                 },
                 preferredBaseUrl = old.preferredBaseUrl?.takeIf { it in config.addresses.map { a -> a.url } },
+                // 新指纹读不到时保留旧指纹，避免下一次验证失去比对基准。
+                identity = config.identity ?: old.identity,
             )
         } else {
             config

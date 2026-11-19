@@ -123,7 +123,17 @@
     <string name="appcenter_error_not_connected">尚未连接服务器</string>
 
     <string name="market_title">扩展市场</string>
-    <string name="market_badge_readonly">只读</string>
+    <string name="market_badge_installable">可安装</string>
+    <!-- 配套插件安装引导 -->
+    <string name="agents_action_backend">后端</string>
+    <string name="agents_backend_title">选择后端</string>
+    <string name="agents_backend_hint">第三方后端的模型在会话页选择；切换后需重启智能体会话。</string>
+    <string name="agents_backend_unavailable">不可用</string>
+    <string name="bridge_guide_title">安装配套插件</string>
+    <string name="bridge_guide_message">QwenPaw Node Bridge 提供全文检索、事件流、SSH 与浏览器诊断等能力。当前服务器尚未安装。</string>
+    <string name="bridge_guide_install">去安装</string>
+    <string name="bridge_guide_later">暂不安装</string>
+    <string name="bridge_guide_mute">不再提示</string>
     <string name="market_tab_skills">技能市场</string>
     <string name="market_tab_plugins">插件目录</string>
     <string name="market_error_file_unreadable">无法读取所选文件</string>

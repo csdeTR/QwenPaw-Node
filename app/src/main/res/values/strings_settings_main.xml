@@ -20,6 +20,14 @@
     <string name="settings_action_confirm">确认</string>
 
     <!-- 一级列表 -->
+    <string name="settings_nav_server_config_subtitle">模型、工具、访问与运维</string>
+    <string name="settings_section_favorites">收藏</string>
+    <string name="settings_fav_on">已收藏</string>
+    <string name="settings_fav_off">收藏</string>
+    <string name="settings_group_models_agents">模型与智能体</string>
+    <string name="settings_group_tools_extensions">工具与扩展</string>
+    <string name="settings_group_access_security">访问与安全</string>
+    <string name="settings_group_data_ops">数据与运维</string>
     <string name="settings_nav_server">服务器</string>
     <string name="settings_section_profile_appearance">个人资料与外观</string>
     <string name="settings_nav_profile">我的资料</string>

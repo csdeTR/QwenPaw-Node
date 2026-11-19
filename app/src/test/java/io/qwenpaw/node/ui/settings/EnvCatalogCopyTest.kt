@@ -12,8 +12,9 @@ import org.junit.Test
 /**
  * 内置环境变量的说明文案与枚举映射。
  *
- * `catalog` 在 2.2.2.post1 上固定返回 17 个内置项（`envs/registry.py:42-160`）。
- * 只读弹窗靠这张表给出说明与修改方式，缺一条就会露出「暂无说明」，
+ * `catalog` 在 2.2.2.post1 上固定返回 17 个内置项（`envs/registry.py:42-160`）；
+ * 表里另有 `QWENPAW_AUTH_ENABLED`，它不在 catalog 里，但环境变量页常驻显示，
+ * 同样需要说明与修改方式。只读弹窗靠这张表给出文案，缺一条就会露出「暂无说明」，
  * 因此这里逐条校验。
  */
 class EnvCatalogCopyTest {
@@ -24,6 +25,7 @@ class EnvCatalogCopyTest {
     }
 
     private val builtinKeys = listOf(
+        "QWENPAW_AUTH_ENABLED",
         "QWENPAW_LLM_STREAM_FIRST_CONTENT_TIMEOUT",
         "QWENPAW_LLM_STREAM_IDLE_TIMEOUT",
         "QWENPAW_LLM_MAX_RETRIES",
@@ -44,8 +46,8 @@ class EnvCatalogCopyTest {
     )
 
     @Test
-    fun `catalog exposes seventeen built-in keys`() {
-        assertEquals(17, builtinKeys.size)
+    fun `copy table covers every known key`() {
+        assertEquals(18, builtinKeys.size)
     }
 
     @Test

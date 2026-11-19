@@ -1,10 +1,17 @@
 package io.qwenpaw.node.data.remote
 
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.model.AclActionEntryDto
+import io.qwenpaw.node.data.model.AclChannelDto
+import io.qwenpaw.node.data.model.AclPendingDto
 import io.qwenpaw.node.data.model.AcpNodeRuntimeDto
+import io.qwenpaw.node.data.model.AgentBackendDto
+import io.qwenpaw.node.data.model.AgentBackendsDto
 import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.data.model.AgentListDto
+import io.qwenpaw.node.data.model.MailAclActionEntryDto
+import io.qwenpaw.node.data.model.MailAclPendingCountDto
 import io.qwenpaw.node.data.model.AgentProfileDto
 import io.qwenpaw.node.data.model.AgentRefDto
 import io.qwenpaw.node.data.model.AgentStatsSummaryDto
@@ -117,6 +124,8 @@ import io.qwenpaw.node.data.model.WorkspaceSaveResultDto
 import io.qwenpaw.node.data.model.WorkspaceTreeDto
 import io.qwenpaw.node.data.model.WorkspaceUploadResultDto
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -125,6 +134,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -274,9 +284,19 @@ class QwenPawApi(
         }
     }
 
-    fun authStatus(baseUrl: String, basicAuth: BasicAuth? = null): AuthStatusDto =
+    fun authStatus(
+        baseUrl: String,
+        basicAuth: BasicAuth? = null,
+        /** 验证阶段传探测客户端，避免主客户端的长读超时拖住坏地址。 */
+        http: OkHttpClient? = null,
+    ): AuthStatusDto =
         decode(
-            request(Connection(baseUrl, null, basicAuth = basicAuth), "GET", "/api/auth/status"),
+            request(
+                Connection(baseUrl, null, basicAuth = basicAuth),
+                "GET",
+                "/api/auth/status",
+                http = http ?: client,
+            ),
             AuthStatusDto.serializer(),
         )
 
@@ -392,10 +412,14 @@ class QwenPawApi(
      * - 401 会抛出，调用方应记为「待重探」而不是「未安装」——插件路由不在鉴权公开
      *   路径里，验证阶段还没有 token。
      */
-    fun pluginBridgeInfo(conn: Connection): BridgeInfoDto? {
+    fun pluginBridgeInfo(
+        conn: Connection,
+        /** 验证阶段传当前地址的探测客户端；其余调用方用默认探测档位。 */
+        http: OkHttpClient = probeClient(),
+    ): BridgeInfoDto? {
         val url = connUrl(conn, BRIDGE_INFO_PATH)
         val request = baseBuilder(conn, url).get().build()
-        return probeClient().newCall(request).execute().use { response ->
+        return http.newCall(request).execute().use { response ->
             if (response.code == 404) return null
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
@@ -791,6 +815,39 @@ class QwenPawApi(
             put("description", description)
         }
         return decode(request(conn, "PUT", path, body), AgentProfileDto.serializer())
+    }
+
+    /** `GET /api/agents/backends`。 */
+    fun agentsBackends(conn: Connection): List<AgentBackendDto> = decode(
+        request(conn, "GET", "/api/agents/backends"),
+        AgentBackendsDto.serializer(),
+    ).backends
+
+    /** `PATCH /api/agents/{id}/backend-settings`，第三方后端写模型与推理档位。 */
+    fun setAgentBackendSettings(
+        conn: Connection,
+        agentId: String,
+        model: String?,
+        reasoningEffort: String?,
+    ): String = request(
+        conn,
+        "PATCH",
+        "/api/agents/${encodeSegment(agentId)}/backend-settings",
+        buildJsonObject {
+            model?.takeIf { it.isNotBlank() }?.let { put("model", it) }
+            reasoningEffort?.takeIf { it.isNotBlank() }?.let { put("reasoning_effort", it) }
+        },
+    )
+
+    /** 切换智能体后端；复用整读整写，保留未建模字段。 */
+    fun updateAgentBackend(conn: Connection, agentId: String, backend: String) {
+        val path = "/api/agents/${encodeSegment(agentId)}"
+        val obj = json.parseToJsonElement(request(conn, "GET", path)).jsonObject
+        val body = buildJsonObject {
+            obj.forEach { (key, value) -> if (key != "backend") put(key, value) }
+            put("backend", backend)
+        }
+        request(conn, "PUT", path, body)
     }
 
     // ---------- ACP ----------
@@ -1403,6 +1460,20 @@ class QwenPawApi(
         val body = buildJsonObject { values.forEach { (k, v) -> put(k, v) } }
         return decode(
             request(conn, "PATCH", "/api/envs", body),
+            kotlinx.serialization.builtins.ListSerializer(EnvVarDto.serializer()),
+        )
+    }
+
+    /**
+     * 整体替换环境变量。
+     *
+     * `QWENPAW_AUTH_ENABLED` 在 0.7.0 轮实测只能走 PUT；PUT 会删掉未提交的键，
+     * 因此调用方必须先把当前全量值合并进来。
+     */
+    fun putEnvVars(conn: Connection, values: Map<String, String>): List<EnvVarDto> {
+        val body = buildJsonObject { values.forEach { (k, v) -> put(k, v) } }
+        return decode(
+            request(conn, "PUT", "/api/envs", body),
             kotlinx.serialization.builtins.ListSerializer(EnvVarDto.serializer()),
         )
     }
@@ -2877,12 +2948,108 @@ class QwenPawApi(
         return UploadConflictException(names)
     }
 
+    // ---------- 访问控制 ----------
+
+    fun aclOverview(conn: Connection): Map<String, AclChannelDto> = decode(
+        request(conn, "GET", "/api/access-control"),
+        MapSerializer(String.serializer(), AclChannelDto.serializer()),
+    )
+
+    fun aclPending(conn: Connection): List<AclPendingDto> = decode(
+        request(conn, "GET", "/api/access-control/pending/all"),
+        ListSerializer(AclPendingDto.serializer()),
+    )
+
+    fun mailAclOverview(conn: Connection): Map<String, AclChannelDto> = decode(
+        request(conn, "GET", "/api/mail-access-control"),
+        MapSerializer(String.serializer(), AclChannelDto.serializer()),
+    )
+
+    fun mailAclPending(conn: Connection): List<AclPendingDto> = decode(
+        request(conn, "GET", "/api/mail-access-control/pending/all"),
+        ListSerializer(AclPendingDto.serializer()),
+    )
+
+    fun mailAclPendingCount(conn: Connection): Int = decode(
+        request(conn, "GET", "/api/mail-access-control/pending/count"),
+        MailAclPendingCountDto.serializer(),
+    ).count
+
+    fun aclAction(
+        conn: Connection,
+        action: String,
+        entries: List<AclActionEntryDto>,
+    ) {
+        request(conn, "POST", "/api/access-control/$action", aclBody(entries))
+    }
+
+    fun aclRemark(conn: Connection, channel: String, userId: String, remark: String) {
+        request(
+            conn,
+            "POST",
+            "/api/access-control/pending/remark",
+            buildJsonObject {
+                put("channel", channel)
+                put("user_id", userId)
+                put("remark", remark)
+            },
+        )
+    }
+
+    fun mailAclAction(
+        conn: Connection,
+        action: String,
+        entries: List<MailAclActionEntryDto>,
+    ) {
+        request(conn, "POST", "/api/mail-access-control/$action", mailAclBody(entries))
+    }
+
+    fun mailAclRemark(conn: Connection, agentId: String, address: String, remark: String) {
+        request(
+            conn,
+            "POST",
+            "/api/mail-access-control/pending/remark",
+            buildJsonObject {
+                put("agent_id", agentId)
+                put("address", address)
+                put("remark", remark)
+            },
+        )
+    }
+
+    private fun aclBody(entries: List<AclActionEntryDto>): JsonObject = buildJsonObject {
+        putJsonArray("entries") {
+            entries.forEach { entry ->
+                addJsonObject {
+                    put("channel", entry.channel)
+                    put("user_id", entry.userId)
+                    put("remark", entry.remark)
+                    put("username", entry.username)
+                }
+            }
+        }
+    }
+
+    private fun mailAclBody(entries: List<MailAclActionEntryDto>): JsonObject = buildJsonObject {
+        putJsonArray("entries") {
+            entries.forEach { entry ->
+                addJsonObject {
+                    put("agent_id", entry.agentId)
+                    put("address", entry.address)
+                    entry.remark?.let { put("remark", it) }
+                    entry.displayName?.let { put("display_name", it) }
+                }
+            }
+        }
+    }
+
     private fun request(
         conn: Connection,
         method: String,
         path: String,
         body: JsonObject? = null,
-    ): String = requestRaw(conn, method, path, body?.toString())
+        http: OkHttpClient = client,
+    ): String = requestRaw(conn, method, path, body?.toString(), http)
 
     /**
      * 发一个请求，body 是已经序列化好的 JSON 字符串。
@@ -2895,6 +3062,7 @@ class QwenPawApi(
         method: String,
         path: String,
         body: String? = null,
+        http: OkHttpClient = client,
     ): String {
         val url = connUrl(conn, path)
         val builder = baseBuilder(conn, url)
@@ -2907,7 +3075,7 @@ class QwenPawApi(
             "DELETE" -> builder.delete()
             else -> error(Texts.get(R.string.api_unsupported_method, method))
         }
-        return execute(builder.build())
+        return execute(builder.build(), http)
     }
 
     /** 用已经拼好的地址发 GET，供查询参数较多的端点使用。 */
@@ -2962,12 +3130,12 @@ class QwenPawApi(
         return builder
     }
 
-    private fun execute(request: Request): String {
+    private fun execute(request: Request, http: OkHttpClient = client): String {
         // 「带过凭据」指的是 QwenPaw 自己的凭据（Bearer 或 `token=`），
         // 反代 Basic 不算：反代放行后服务端仍可能说没登录。
         val tokenSent = request.header("Authorization")?.startsWith("Bearer ") == true ||
             request.url.queryParameter("token") != null
-        return client.newCall(request).execute().use { response ->
+        return http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 // 拦截器只看到状态码，看不出服务端为什么拒绝；这里补上 detail。
@@ -3145,10 +3313,32 @@ class QwenPawApi(
          * 而探测可能被用户反复点击。
          */
         private val probeClientShared: OkHttpClient by lazy {
+            buildProbeClient(io.qwenpaw.node.data.AddressProbePlan.DEFAULT)
+        }
+
+        private val probeClients =
+            java.util.concurrent.ConcurrentHashMap<io.qwenpaw.node.data.ProbePolicy, OkHttpClient>()
+
+        /**
+         * 按超时档位取探测客户端。
+         *
+         * 局域网与公网用不同档位，但同一档位复用同一实例：每次新建都会多一个
+         * 连接池与线程池，而验证按钮可能被反复点击。
+         */
+        fun probeClient(
+            policy: io.qwenpaw.node.data.ProbePolicy =
+                io.qwenpaw.node.data.AddressProbePlan.DEFAULT,
+        ): OkHttpClient = if (policy == io.qwenpaw.node.data.AddressProbePlan.DEFAULT) {
+            probeClientShared
+        } else {
+            probeClients.getOrPut(policy) { buildProbeClient(policy) }
+        }
+
+        private fun buildProbeClient(policy: io.qwenpaw.node.data.ProbePolicy): OkHttpClient =
             OkHttpClient.Builder()
-                .connectTimeout(4, TimeUnit.SECONDS)
-                .readTimeout(5, TimeUnit.SECONDS)
-                .callTimeout(8, TimeUnit.SECONDS)
+                .connectTimeout(policy.connectMillis, TimeUnit.MILLISECONDS)
+                .readTimeout(policy.readMillis, TimeUnit.MILLISECONDS)
+                .callTimeout(policy.callMillis, TimeUnit.MILLISECONDS)
                 // 探测要的是「这个地址现在通不通」，不要在内部重试掩盖问题。
                 .retryOnConnectionFailure(false)
                 // 也不复用连接：QwenPaw（uvicorn）的 keep-alive 只有 5 秒，
@@ -3158,9 +3348,6 @@ class QwenPawApi(
                 .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
                 .addNetworkInterceptor(io.qwenpaw.node.log.LoggingInterceptor(io.qwenpaw.node.log.LogKind.NETWORK))
                 .build()
-        }
-
-        fun probeClient(): OkHttpClient = probeClientShared
 
         /**
          * 事件流专用客户端。

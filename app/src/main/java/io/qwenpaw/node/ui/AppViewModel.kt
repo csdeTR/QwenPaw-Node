@@ -4,12 +4,17 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.CredentialPlan
 import io.qwenpaw.node.data.InstanceRepository
+import io.qwenpaw.node.data.StoredCredentials
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceDraft
 import io.qwenpaw.node.data.model.AgentDto
+import io.qwenpaw.node.data.planCredentials
 import io.qwenpaw.node.data.plugin.bridgeEventStream
+import io.qwenpaw.node.data.remote.BasicAuth
 import io.qwenpaw.node.data.remote.Connection
+import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.ui.chat.ChatViewModel
 import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.FontScaling
@@ -54,6 +59,14 @@ enum class VoiceSource {
 
 /** 用户昵称的默认值。设置里清空输入框时回落到它。 */
 val DEFAULT_USER_NAME: String get() = Texts.get(R.string.user_default_name)
+
+/** 是否展示配套插件的安装引导。 */
+data class BridgeGuidePrompt(
+    val instanceId: String,
+    val instanceName: String,
+    /** 第二次取消时同时提供「不再提示」。 */
+    val askMute: Boolean,
+)
 
 /** 应用级状态：连接、实例切换、外观偏好。 */
 data class AppState(
@@ -166,6 +179,8 @@ data class AppState(
      * 只在进程启动时填一次：把它做成持续状态会让用户每切一次页面就被弹一次。
      */
     val securityNotice: io.qwenpaw.node.data.SecurityNotice? = null,
+    /** 未安装配套插件时的安装引导；null 表示不显示。 */
+    val bridgeGuide: BridgeGuidePrompt? = null,
     /**
      * 受信任的主机名集合，命中后不再弹地址安全提示。
      *
@@ -249,6 +264,15 @@ class AppViewModel(
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    private val bridgeGuideStore =
+        appContext?.let { io.qwenpaw.node.data.plugin.BridgeGuideStore(it) }
+
+    /** 冷启动的 30% 提醒每个进程只掷一次。 */
+    private var bridgeGuideLaunched = false
+
+    /** 刚刚添加成功的实例；下一次插件探测为未安装时提示安装。 */
+    private var firstConnectInstanceId: String? = null
 
     /** 插件事件流的长连接。切实例、关开关或重探时取消，避免旧连接继续推数。 */
     private var eventsJob: kotlinx.coroutines.Job? = null
@@ -568,6 +592,7 @@ class AppViewModel(
                     )
                 }
             }.onSuccess { config ->
+                firstConnectInstanceId = config.id
                 bind(config)
                 _state.update { it.copy(connecting = false, connected = true, connectError = null) }
                 chatViewModel.refreshChats()
@@ -660,6 +685,74 @@ class AppViewModel(
         if (repository.activeId.value == instance.id) {
             bind(instance)
             chatViewModel.refreshChats()
+        }
+    }
+
+    /**
+     * 编辑实例并更新登录凭据。
+     *
+     * 返回 null 表示已保存；非 null 是给界面显示的错误原因。
+     * 需要重新登录时先验证成功再落盘，失败时本地配置保持不变。
+     */
+    suspend fun editInstanceWithCredentials(
+        instance: InstanceConfig,
+        draft: InstanceDraft,
+    ): String? {
+        val plan = planCredentials(
+            typedUsername = draft.username,
+            typedPassword = draft.password,
+            typedBasicUser = draft.basicUser,
+            typedBasicPassword = draft.basicPassword,
+            stored = StoredCredentials(
+                username = instance.username,
+                basicUser = instance.basicUser,
+                basicPassword = instance.basicPassword,
+            ),
+        )
+        val base = instance.copy(
+            name = draft.resolvedName(),
+            addresses = draft.addresses,
+            agentId = draft.agentId,
+        )
+        return when (plan) {
+            is CredentialPlan.Invalid -> Texts.get(plan.messageRes)
+
+            is CredentialPlan.UseExisting -> {
+                editInstance(
+                    base.copy(
+                        basicUser = plan.basicUser,
+                        basicPassword = plan.basicPassword,
+                    ),
+                )
+                null
+            }
+
+            is CredentialPlan.Login -> {
+                val basic = plan.basicUser?.let { BasicAuth(it, plan.basicPassword.orEmpty()) }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        repository.loginAndUpdate(base, plan.username, plan.password, basic)
+                    }
+                }
+                result.fold(
+                    onSuccess = { login ->
+                        editInstance(
+                            login.instance.copy(
+                                name = base.name,
+                                addresses = base.addresses,
+                                agentId = base.agentId,
+                                basicUser = plan.basicUser,
+                                basicPassword = plan.basicPassword,
+                            ),
+                        )
+                        if (!login.authRequired) {
+                            chatViewModel.notify(Texts.get(R.string.connect_cred_auth_not_required))
+                        }
+                        null
+                    },
+                    onFailure = { ErrorText.of(it) },
+                )
+            }
         }
     }
 
@@ -1043,7 +1136,63 @@ class AppViewModel(
             }
             _state.update { it.copy(bridgeStatus = status) }
             restartBridgeEvents(status, conn)
+            maybePromptBridgeGuide(instance)
         }
+    }
+
+    /**
+     * 未装配套插件时的安装引导。
+     *
+     * 首次添加实例一定提示；之后冷启动只有 30% 概率，且每进程只掷一次。
+     * 只对当前实例提示，多实例之间互不打扰。
+     */
+    private fun maybePromptBridgeGuide(instance: InstanceConfig) {
+        val store = bridgeGuideStore ?: return
+        if (instance.id != repository.activeId.value) return
+        val first = firstConnectInstanceId == instance.id
+        if (first) firstConnectInstanceId = null
+        val trigger = when {
+            first -> io.qwenpaw.node.data.plugin.BridgeGuideTrigger.FIRST_CONNECT
+            !bridgeGuideLaunched -> io.qwenpaw.node.data.plugin.BridgeGuideTrigger.LAUNCH
+            else -> return
+        }
+        if (trigger == io.qwenpaw.node.data.plugin.BridgeGuideTrigger.LAUNCH) {
+            bridgeGuideLaunched = true
+        }
+        val decision = io.qwenpaw.node.data.plugin.bridgeGuideDecision(
+            trigger = trigger,
+            status = _state.value.bridgeStatus,
+            cancelledCount = store.cancelledCount(instance.id),
+            muted = store.muted(instance.id),
+            random = kotlin.random.Random.nextDouble(),
+        )
+        if (decision is io.qwenpaw.node.data.plugin.BridgeGuideDecision.Show) {
+            _state.update {
+                it.copy(
+                    bridgeGuide = BridgeGuidePrompt(
+                        instanceId = instance.id,
+                        instanceName = instance.serverDisplayName.ifBlank { instance.name },
+                        askMute = decision.askMute,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** 关闭安装引导；[mute] 为 true 时按实例永久不再提示。 */
+    fun dismissBridgeGuide(mute: Boolean) {
+        val prompt = _state.value.bridgeGuide ?: return
+        if (mute) {
+            bridgeGuideStore?.mute(prompt.instanceId)
+        } else {
+            bridgeGuideStore?.markCancelled(prompt.instanceId)
+        }
+        _state.update { it.copy(bridgeGuide = null) }
+    }
+
+    /** 用户选择去安装：不计入取消次数。 */
+    fun clearBridgeGuide() {
+        _state.update { it.copy(bridgeGuide = null) }
     }
 
     /**
@@ -1526,6 +1675,15 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { mcpHolder = it }
 
+    /** 访问控制。聊天渠道按智能体隔离，邮件跨智能体聚合，仍随绑定清空。 */
+    private var aclHolder: io.qwenpaw.node.ui.acl.AclViewModel? = null
+
+    val acl: io.qwenpaw.node.ui.acl.AclViewModel
+        get() = aclHolder ?: io.qwenpaw.node.ui.acl.AclViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { aclHolder = it }
+
     /** 扩展市场。市场数据与智能体无关，但换实例后来源配置可能不同，仍然清空。 */
     private var marketHolder: io.qwenpaw.node.ui.market.MarketViewModel? = null
 
@@ -1568,6 +1726,7 @@ class AppViewModel(
             skillsHolder?.clear()
             mcpHolder?.clear()
             marketHolder?.clear()
+            aclHolder?.clear()
             agentsHolder?.clear()
             runtimeHolder?.clear()
             portabilityHolder?.clear()

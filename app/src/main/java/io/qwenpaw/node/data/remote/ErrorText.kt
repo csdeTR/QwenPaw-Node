@@ -1,6 +1,7 @@
 package io.qwenpaw.node.data.remote
 
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.MultiAddressFailure
 import io.qwenpaw.node.ui.i18n.Texts
 
 /**
@@ -31,6 +32,18 @@ object ErrorText {
             409 -> Texts.get(R.string.error_busy_409)
             503 -> Texts.get(R.string.error_console_disabled_503)
             else -> e.message
+        }
+
+        // 并行验证的汇总失败：逐地址给出原因，否则用户只知道「都连不上」，
+        // 分不清是域名解析、端口拒绝还是超时。
+        is MultiAddressFailure -> buildString {
+            append(Texts.get(R.string.drest_all_addresses_failed))
+            e.failures.forEach {
+                append("\n")
+                append(it.url)
+                append(": ")
+                append(of(it.cause))
+            }
         }
 
         else -> when {

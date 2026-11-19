@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.contentOrNull
 import java.util.UUID
 
 /** 聊天页的可变状态。 */
@@ -71,6 +72,8 @@ data class ChatUiState(
     val currentModelLabel: String? = null,
     /** 智能体名称，用于说明审批模式的作用范围。 */
     val agentName: String = "",
+    /** 智能体后端；非 qwenpaw 时模型选择写入 backend-settings。 */
+    val agentBackend: String = "qwenpaw",
     /** 智能体审批模式：STRICT / SMART / AUTO / OFF。null 表示尚未拉取。 */
     val approvalLevel: String? = null,
     /** 智能体的工作区目录；null 表示尚未拉取。 */
@@ -332,6 +335,29 @@ data class ModelChoice(
     val key: String get() = "$providerId:$modelId"
 }
 
+/** 把 `GET /api/harnesses/{id}/models` 的 `models` 数组转成菜单项。 */
+internal fun harnessModelChoices(
+    view: kotlinx.serialization.json.JsonObject,
+): List<ModelChoice> {
+    val models = view["models"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+    return models.mapNotNull { element ->
+        val id = when (element) {
+            is kotlinx.serialization.json.JsonPrimitive -> element.contentOrNull
+            is kotlinx.serialization.json.JsonObject ->
+                (element["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+            else -> null
+        }
+        id?.takeIf { it.isNotBlank() }?.let {
+            ModelChoice(
+                providerId = "backend",
+                providerName = "",
+                modelId = it,
+                modelName = it,
+            )
+        }
+    }
+}
+
 /**
  * 对话与聊天状态管理。
  *
@@ -396,6 +422,9 @@ class ChatViewModel(
     private val placeholderNames = mutableMapOf<String, String>()
 
     private var saveDebounce: Job? = null
+
+    /** 绑定代次。切换实例/智能体后自增，旧请求的迟到响应据此丢弃。 */
+    private var bindGeneration = 0
 
     /** 历史前缀与本轮流式内容拼成界面上要显示的全部消息。 */
     private fun mergedMessages(): List<ChatMessage> = mergeHistory(historyPrefix, accumulator.snapshot())
@@ -513,6 +542,17 @@ class ChatViewModel(
     ) {
         val switching = shouldClearOnBind(this.instanceId, instanceId) ||
             shouldClearOnAgentChange(this.agentId, conn.agentId)
+        bindGeneration++
+        // 每次绑定都停掉旧任务：旧实例的流、轮询与工具输出不能继续写进新状态。
+        streamJob?.cancel()
+        streamJob = null
+        pollJob?.cancel()
+        pollJob = null
+        saveDebounce?.cancel()
+        saveDebounce = null
+        searchJob?.cancel()
+        searchJob = null
+        closeToolStream()
         this.instanceId = instanceId
         this.agentId = conn.agentId
         this.currentConnection = conn
@@ -529,15 +569,39 @@ class ChatViewModel(
             // 否则发第一条消息时会看到上一个服务器或上一个智能体的残留。
             accumulator = StreamAccumulator()
             historyPrefix = emptyList()
+            placeholderNames.clear()
+            _previewStamps.clear()
             _state.update {
                 it.copy(
+                    loading = true,
                     currentChatId = null,
                     currentChatName = "",
+                    currentChatPinned = false,
+                    currentChatGroupId = null,
                     messages = emptyList(),
                     draft = "",
                     attachments = emptyList(),
                     pendingApprovals = emptyList(),
+                    running = false,
                     link = LinkState.UNKNOWN,
+                    chats = emptyList(),
+                    archivedChats = emptyList(),
+                    groups = emptyList(),
+                    previews = emptyMap(),
+                    thinking = null,
+                    modelChoices = emptyList(),
+                    currentModelLabel = null,
+                    agentName = "",
+                    approvalLevel = null,
+                    projectDir = null,
+                    slashCommands = emptyList(),
+                    toolCalls = emptyMap(),
+                    toolLive = emptyMap(),
+                    contextUsage = 0.0,
+                    contextTokens = 0,
+                    contextMax = 0,
+                    pendingScrollMessageId = null,
+                    error = null,
                 )
             }
         }
@@ -573,6 +637,7 @@ class ChatViewModel(
      */
     fun refreshChats(selectChatId: String? = null, restoreChatId: String? = null) {
         val conn = currentConnection ?: return
+        val generation = bindGeneration
         refreshGroups()
         refreshArchivedChats()
         // 下拉刷新的转圈由 loading 驱动，所以这里也要先置位；
@@ -581,6 +646,7 @@ class ChatViewModel(
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.chats(conn) } }
                 .onSuccess { chats ->
+                    if (generation != bindGeneration) return@onSuccess
                     val ordered = orderChats(chats)
                     val live = ordered.map { it.id }.toSet()
                     val target = selectChatId?.takeIf { it in live }
@@ -596,9 +662,10 @@ class ChatViewModel(
                             it.copy(loading = false, messages = emptyList(), currentChatId = null)
                         }
                     }
-                    loadPreviews(conn, ordered)
+                    loadPreviews(conn, ordered, generation)
                 }
                 .onFailure { e ->
+                    if (generation != bindGeneration) return@onFailure
                     _state.update { it.copy(loading = false, error = friendly(e)) }
                 }
         }
@@ -622,7 +689,8 @@ class ChatViewModel(
      * 有内容的消息。只做最近 [PREVIEW_LIMIT] 个，且已缓存且 `updated_at` 未变
      * 的对话会跳过，避免每次刷新都打一堆请求。
      */
-    private suspend fun loadPreviews(conn: Connection, chats: List<ChatSpecDto>) {
+    private suspend fun loadPreviews(conn: Connection, chats: List<ChatSpecDto>, generation: Int) {
+        if (generation != bindGeneration) return
         val previous = _state.value.previews
         val stampKey = _previewStamps
         val targets = chats.take(PREVIEW_LIMIT).filter { chat ->
@@ -641,6 +709,7 @@ class ChatViewModel(
             freshStamps[chat.id] = chat.updatedAt
         }
         if (fresh.isEmpty() && freshStamps.isEmpty()) return
+        if (generation != bindGeneration) return
         _previewStamps.putAll(freshStamps)
         // 清掉已被删除对话的缓存，避免 map 无限增长。
         val liveIds = chats.map { it.id }.toSet()
@@ -688,12 +757,17 @@ class ChatViewModel(
 
     fun refreshArchivedChats() {
         val conn = currentConnection ?: return
+        val generation = bindGeneration
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.chats(conn, archived = true) } }
                 .onSuccess { archived ->
+                    if (generation != bindGeneration) return@onSuccess
                     _state.update { it.copy(archivedChats = orderChats(archived)) }
                 }
-                .onFailure { e -> _state.update { it.copy(error = friendly(e)) } }
+                .onFailure { e ->
+                    if (generation != bindGeneration) return@onFailure
+                    _state.update { it.copy(error = friendly(e)) }
+                }
         }
     }
 
@@ -930,9 +1004,11 @@ class ChatViewModel(
 
     fun refreshGroups() {
         val conn = currentConnection ?: return
+        val generation = bindGeneration
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.chatGroups(conn) } }
                 .onSuccess { groups ->
+                    if (generation != bindGeneration) return@onSuccess
                     _state.update { it.copy(groups = groups) }
                 }
                 .onFailure { e ->
@@ -1106,7 +1182,19 @@ class ChatViewModel(
      */
     fun refreshModels() {
         val conn = currentConnection ?: return
+        val backend = _state.value.agentBackend
         scope.launch {
+            if (backend != "qwenpaw") {
+                runCatching {
+                    withContext(Dispatchers.IO) { api.harnessModels(conn, backend) }
+                }.onSuccess { view ->
+                    _state.update { it.copy(modelChoices = harnessModelChoices(view)) }
+                }.onFailure { e ->
+                    // 不静默回落到全局模型：那些模型在第三方后端上不可用。
+                    _state.update { it.copy(modelChoices = emptyList(), error = friendly(e)) }
+                }
+                return@launch
+            }
             runCatching { withContext(Dispatchers.IO) { api.providers(conn) } }
                 .onSuccess { providers ->
                     // 合并规则与「设置 → 模型与提供商」同源，见 modelChoicesOf 的注释。
@@ -1128,6 +1216,24 @@ class ChatViewModel(
     fun setModel(providerId: String?, model: String?) {
         val conn = currentConnection ?: return
         val chatId = _state.value.currentChatId ?: return
+        val backend = _state.value.agentBackend
+        if (backend != "qwenpaw") {
+            val target = model?.takeIf { it.isNotBlank() }
+                ?: providerId?.takeIf { it.isNotBlank() }
+                ?: return
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        api.setAgentBackendSettings(conn, agentId, target, null)
+                    }
+                }.onSuccess {
+                    _state.update { it.copy(currentModelLabel = target, error = null) }
+                }.onFailure { e ->
+                    _state.update { it.copy(error = friendly(e)) }
+                }
+            }
+            return
+        }
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -1166,8 +1272,14 @@ class ChatViewModel(
             runCatching { withContext(Dispatchers.IO) { api.agent(conn, agentId) } }
                 .onSuccess { profile ->
                     _state.update {
-                        it.copy(agentName = profile.name, approvalLevel = profile.approvalLevel)
+                        it.copy(
+                            agentName = profile.name,
+                            approvalLevel = profile.approvalLevel,
+                            agentBackend = profile.backend,
+                        )
                     }
+                    // 第三方后端的模型来自 harness，不是全局供应商列表。
+                    if (profile.backend != "qwenpaw") refreshModels()
                 }
         }
     }

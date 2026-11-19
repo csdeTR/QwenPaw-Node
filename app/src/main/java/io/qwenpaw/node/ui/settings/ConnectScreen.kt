@@ -28,11 +28,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -80,6 +82,8 @@ fun InstanceForm(
     initialAddresses: List<AddressEntry> = emptyList(),
     /** 预填实例显示名，编辑已有实例时用。 */
     initialName: String = "",
+    /** 预填登录用户名，编辑已有实例时用。密码不回显，留空表示保留原值。 */
+    initialUsername: String = "",
     initialAgentId: String = "default",
     /** 预填反向代理账号与密码，编辑已有实例时用。 */
     initialBasicUser: String = "",
@@ -122,7 +126,7 @@ fun InstanceForm(
     }
     // 实例显示名。与地址别名是两件事：前者区分「家里那台」，后者只改某条地址的显示。
     var instanceName by remember { mutableStateOf(initialName) }
-    var username by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf(initialUsername) }
     var password by remember { mutableStateOf("") }
     var agentId by remember { mutableStateOf(initialAgentId) }
     var advanced by remember { mutableStateOf(false) }
@@ -155,6 +159,8 @@ fun InstanceForm(
     var securityNotice by remember {
         mutableStateOf<io.qwenpaw.node.data.SecurityNotice?>(null)
     }
+    // 身份不一致时先让用户确认，确认前不算「已验证」。
+    var identityWarning by remember { mutableStateOf(false) }
 
     /** 有效地址：去掉空行。回退逻辑只关心这几个 URL。 */
     val effectiveUrls = addresses.map { it.url.trim() }.filter { it.isNotBlank() }
@@ -193,7 +199,9 @@ fun InstanceForm(
                 onVerifyHosts(effectiveUrls, proxyAuth(), { attempt -> verifyingAt = attempt }, verifyToken)
             }
                 .onSuccess { result ->
-                    hostVerified = !result.proxyAuthRequired
+                    identityWarning =
+                        result.identityVerdict == io.qwenpaw.node.data.IdentityVerdict.DIFFERENT
+                    hostVerified = !result.proxyAuthRequired && !identityWarning
                     verifyFailed = false
                     val version = result.version
                     if (result.proxyAuthRequired) {
@@ -865,6 +873,30 @@ fun InstanceForm(
         SecurityNoticeDialog(
             notice = notice,
             onDismiss = { securityNotice = null },
+        )
+    }
+
+    if (identityWarning) {
+        AlertDialog(
+            onDismissRequest = { identityWarning = false },
+            title = { Text(stringResource(R.string.connect_identity_title)) },
+            text = { Text(stringResource(R.string.connect_identity_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        identityWarning = false
+                        hostVerified = true
+                    },
+                ) { Text(stringResource(R.string.connect_identity_continue)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        identityWarning = false
+                        hostVerified = false
+                    },
+                ) { Text(stringResource(R.string.action_cancel)) }
+            },
         )
     }
 }

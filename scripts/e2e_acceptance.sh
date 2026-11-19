@@ -150,6 +150,44 @@ tap_text() {
   "${ADB[@]}" shell input tap $xy
 }
 
+# 按文字找到所在的可点击行，点行中心而不是文字中心。
+# 设置页的 NavRow 是整行可点，文字中心偶尔会落在动画/惯性滚动的空白处。
+tap_row_text() {
+  local xy
+  xy="$(dump_ui >/dev/null 2>&1; python3 - "$OUT/ui.xml" "$1" <<'PY'
+import re, sys
+data = open(sys.argv[1], encoding='utf-8', errors='ignore').read()
+target = sys.argv[2]
+nodes = []
+for n in re.findall(r'<node[^>]*>', data):
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+    if not b:
+        continue
+    x1, y1, x2, y2 = map(int, b.groups())
+    t = re.search(r'text="([^"]*)"', n)
+    nodes.append((x1, y1, x2, y2, 'clickable="true"' in n, t.group(1) if t else ""))
+cx = cy = None
+for x1, y1, x2, y2, c, t in nodes:
+    if t.strip() == target:
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        break
+if cx is None:
+    sys.exit(1)
+rows = [
+    (x1, y1, x2, y2)
+    for x1, y1, x2, y2, c, t in nodes
+    if c and x1 <= cx <= x2 and y1 <= cy <= y2
+]
+if rows:
+    x1, y1, x2, y2 = rows[-1]
+    print((x1 + x2) // 2, (y1 + y2) // 2)
+else:
+    print(cx, cy)
+PY
+)" || { echo "  未找到可点击行：$1"; return 1; }
+  "${ADB[@]}" shell input tap $xy
+}
+
 screen_has() {
   find_xy "$1" >/dev/null
 }
@@ -404,8 +442,29 @@ open_settings_item() {
     "${ADB[@]}" shell input swipe 360 1300 360 600 300 >/dev/null 2>&1 || true
     sleep 1
   done
+  # 0.7.1 起服务端配置收进二级页；主页面找不到时回到顶部再进二级页找。
+  # 「语音」等本机设置仍在主页面，因此保留先找主页面这一步。
+  if [ "$found" != 0 ]; then
+    for _ in 1 2 3; do
+      "${ADB[@]}" shell input swipe 360 600 360 1300 300 >/dev/null 2>&1 || true
+      sleep 1
+    done
+    if tap_row_text '服务端配置'; then
+      sleep 3
+      # 首次点击偶尔会被设置页的进入动画吞掉，页面没变就再点一次。
+      if ! screen_has 'text="模型与智能体"'; then
+        tap_row_text '服务端配置' || true
+        sleep 3
+      fi
+      for _ in 1 2 3 4 5 6; do
+        if screen_has "text=\"$name\""; then found=0; break; fi
+        "${ADB[@]}" shell input swipe 360 1300 360 600 300 >/dev/null 2>&1 || true
+        sleep 1
+      done
+    fi
+  fi
   [ "$found" = 0 ] || { echo "  设置页没有「$name」"; return 1; }
-  tap_text "text=\"$name\"" || { echo "  无法打开「$name」"; return 1; }
+  tap_row_text "$name" || { echo "  无法打开「$name」"; return 1; }
   sleep 4
 }
 
@@ -607,7 +666,25 @@ if want A7; then
       "${ADB[@]}" shell input swipe 360 1300 360 600 300 >/dev/null 2>&1 || true
       sleep 1
     done
-    if tap_text 'text="工作区文件"'; then
+    # 0.7.1 起该入口收进「服务端配置」二级页；主页面找不到就进去再找。
+    if ! screen_has 'text="工作区文件"'; then
+      for _ in 1 2 3; do
+        "${ADB[@]}" shell input swipe 360 600 360 1300 300 >/dev/null 2>&1 || true
+        sleep 1
+      done
+      tap_row_text '服务端配置' || true
+      sleep 3
+      if ! screen_has 'text="模型与智能体"'; then
+        tap_row_text '服务端配置' || true
+        sleep 3
+      fi
+      for _ in 1 2 3 4 5 6; do
+        screen_has 'text="工作区文件"' && break
+        "${ADB[@]}" shell input swipe 360 1300 360 600 300 >/dev/null 2>&1 || true
+        sleep 1
+      done
+    fi
+    if tap_row_text '工作区文件'; then
       sleep 6
       shot 13-a7-workspace-list
       if screen_has 'text="记忆"' && screen_has 'text="项目目录"'; then

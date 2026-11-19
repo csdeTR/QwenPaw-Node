@@ -85,6 +85,7 @@ fun MarketScreen(
     onDismissHubInstall: () -> Unit = {},
     onDismissNotice: () -> Unit = {},
     onStopHubPolling: () -> Unit = {},
+    onConsumePrefill: () -> Unit = {},
 ) {
     val context = LocalContext.current
     // 解析失败等一次性说明。放在 Nav 之上而不是状态里：它只描述「这一次点击」，
@@ -93,6 +94,14 @@ fun MarketScreen(
     val scope = rememberCoroutineScope()
     var pluginUrlDialog by remember { mutableStateOf(false) }
     var pluginUrl by remember { mutableStateOf("") }
+    // 其他页面（Bridge 引导、Harness 未安装）跳来时预填并打开安装框。
+    androidx.compose.runtime.LaunchedEffect(state.prefillInstallUrl) {
+        state.prefillInstallUrl?.let { url ->
+            pluginUrl = url
+            pluginUrlDialog = true
+            onConsumePrefill()
+        }
+    }
     val pluginFileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
     ) { uri ->
@@ -154,7 +163,7 @@ fun MarketScreen(
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = stringResource(R.string.market_badge_readonly),
+                        text = stringResource(R.string.market_badge_installable),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

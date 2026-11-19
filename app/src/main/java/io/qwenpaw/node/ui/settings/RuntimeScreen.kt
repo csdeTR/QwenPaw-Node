@@ -59,6 +59,8 @@ fun RuntimeScreen(
     onLoginHarness: (String) -> Unit,
     onLogoutHarness: (String) -> Unit,
     onOpenHarnessDetail: (String, String) -> Unit,
+    /** 未安装的后端：跳市场并预填安装地址。 */
+    onInstallHarness: (String) -> Unit = {},
     onDismissHarnessLogin: () -> Unit,
     onDismissHarnessDetail: () -> Unit,
     onDismissAcpNotice: () -> Unit,
@@ -110,6 +112,7 @@ fun RuntimeScreen(
                     onLogin = onLoginHarness,
                     onLogout = { logoutTarget = it },
                     onDetail = onOpenHarnessDetail,
+                    onInstall = onInstallHarness,
                     onDismissNotice = onDismissHarnessNotice,
                 )
             }
@@ -367,6 +370,7 @@ private fun HarnessTab(
     onLogin: (String) -> Unit,
     onLogout: (HarnessProviderDto) -> Unit,
     onDetail: (String, String) -> Unit,
+    onInstall: (String) -> Unit,
     onDismissNotice: () -> Unit,
 ) {
     state.error?.let { message ->
@@ -405,7 +409,7 @@ private fun HarnessTab(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = provider.name.ifBlank { provider.id },
+                            text = provider.displayName,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Medium,
                         )
@@ -413,7 +417,7 @@ private fun HarnessTab(
                             text = harnessStateText(provider),
                             style = MaterialTheme.typography.labelSmall,
                             color = when {
-                                !provider.available || !provider.installed -> MaterialTheme.colorScheme.onSurfaceVariant
+                                !provider.isAvailable || !provider.installed -> MaterialTheme.colorScheme.onSurfaceVariant
                                 provider.authenticated -> MaterialTheme.colorScheme.secondary
                                 else -> MaterialTheme.colorScheme.onSurface
                             },
@@ -430,11 +434,11 @@ private fun HarnessTab(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     TextButton(
-                        enabled = provider.available,
+                        enabled = provider.isAvailable,
                         onClick = { onProbe(provider.id) },
                     ) { Text(stringResource(R.string.runtime_action_probe)) }
                     TextButton(
-                        enabled = provider.available && provider.installed && !provider.authenticated,
+                        enabled = provider.isAvailable && provider.installed && !provider.authenticated,
                         onClick = { onLogin(provider.id) },
                     ) { Text(stringResource(R.string.runtime_action_login)) }
                     TextButton(
@@ -442,7 +446,7 @@ private fun HarnessTab(
                         onClick = { onLogout(provider) },
                     ) { Text(stringResource(R.string.runtime_action_logout)) }
                 }
-                if (provider.available && provider.installed) {
+                if (provider.isAvailable && provider.installed) {
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         TextButton(onClick = { onDetail(provider.id, "models") }) {
                             Text(stringResource(R.string.runtime_tab_models))
@@ -457,15 +461,47 @@ private fun HarnessTab(
         }
         Spacer(Modifier.height(8.dp))
     }
+
+    if (state.installable.isNotEmpty()) {
+        SectionHeader(
+            stringResource(R.string.runtime_section_installable),
+            stringResource(R.string.runtime_install_hint),
+        )
+        state.installable.forEach { entry ->
+            androidx.compose.material3.Card {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = entry.name.ifBlank { entry.pluginId },
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    if (entry.description.isNotBlank()) {
+                        Text(entry.description, style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = { onInstall(entry.installUrl) }) {
+                        Text(stringResource(R.string.runtime_action_install))
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
 }
 
 @Composable
-private fun harnessStateText(provider: HarnessProviderDto): String = when {
-    provider.comingSoon -> stringResource(R.string.runtime_state_coming_soon)
-    !provider.available -> stringResource(R.string.runtime_state_unavailable)
-    !provider.installed -> stringResource(R.string.runtime_state_not_installed)
-    provider.authenticated -> stringResource(R.string.runtime_state_logged_in)
-    else -> stringResource(R.string.runtime_state_logged_out)
+private fun harnessStateText(provider: HarnessProviderDto): String = when (provider.status) {
+    "disabled" -> stringResource(R.string.runtime_state_plugin_disabled)
+    "failed" -> stringResource(R.string.runtime_state_plugin_failed)
+    else -> when {
+        provider.comingSoon -> stringResource(R.string.runtime_state_coming_soon)
+        !provider.isAvailable -> stringResource(R.string.runtime_state_unavailable)
+        // 新形状的列表没有 installed/authenticated，探测前不能直接说「未安装」。
+        provider.status != null && !provider.installed && !provider.authenticated ->
+            stringResource(R.string.runtime_state_detect_login)
+        !provider.installed -> stringResource(R.string.runtime_state_not_installed)
+        provider.authenticated -> stringResource(R.string.runtime_state_logged_in)
+        else -> stringResource(R.string.runtime_state_logged_out)
+    }
 }
 
 @Composable

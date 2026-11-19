@@ -3,6 +3,28 @@ package io.qwenpaw.node.data
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.ui.i18n.Texts
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import java.io.IOException
+
+/** 一个地址的失败原因。保留异常本身，由 [io.qwenpaw.node.data.remote.ErrorText] 统一翻译。 */
+class AddressFailure(val url: String, val cause: Throwable)
+
+/**
+ * 所有地址都不可达。
+ *
+ * 串行回退此前只抛最后一个异常，用户看不到其余地址为什么失败；并行探测把
+ * 每个地址的原因都带上来，界面可以逐行展示。
+ */
+class MultiAddressFailure(val failures: List<AddressFailure>) : IOException(
+    failures.joinToString("\n") { "${it.url}: ${it.cause.message.orEmpty()}" },
+    failures.lastOrNull()?.cause,
+)
 
 /**
  * 多地址回退的判定逻辑。
@@ -83,5 +105,86 @@ internal object AddressFallback {
             }
         }
         throw lastError ?: IllegalStateException(Texts.get(R.string.drest_all_addresses_failed))
+    }
+
+    /**
+     * 并行探测，首个成功即返回。
+     *
+     * 只用于「验证连接」，不用于聊天等普通请求：并行会放大请求量，且普通请求
+     * 已经有运行期命中缓存，没有必要为每一次调用都并发探路。
+     *
+     * 规则与串行版一致：业务错误（401 等）说明地址是通的，立即终止并原样抛出；
+     * 连接失败才继续等其他地址。全部失败时汇总每个地址的原因。
+     */
+    suspend fun <T> firstReachableParallel(
+        urls: List<String>,
+        staggerMillis: Long = AddressProbePlan.STAGGER_MILLIS,
+        totalBudgetMillis: Long = AddressProbePlan.TOTAL_BUDGET_MILLIS,
+        /** 每次真正发起时回调（下标从 1 起），并行时顺序不固定。 */
+        onAttempt: (index: Int, total: Int, url: String) -> Unit = { _, _, _ -> },
+        block: suspend (String) -> T,
+    ): Pair<String, T> = coroutineScope {
+        val list = candidates(urls)
+        if (list.isEmpty()) {
+            throw IllegalArgumentException(Texts.get(R.string.drest_need_server_address))
+        }
+        val outcomes = Channel<ProbeOutcome<T>>(Channel.UNLIMITED)
+        val jobs = list.mapIndexed { index, url ->
+            launch {
+                if (index > 0) delay(staggerMillis * index)
+                onAttempt(index + 1, list.size, url)
+                try {
+                    val value = block(url)
+                    outcomes.send(ProbeOutcome.Success(url, value))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (isConnectionFailure(e)) {
+                        outcomes.send(ProbeOutcome.ConnectionFailed(AddressFailure(url, e)))
+                    } else {
+                        outcomes.send(ProbeOutcome.Terminal(e))
+                    }
+                }
+            }
+        }
+        var success: Pair<String, T>? = null
+        val failures = mutableListOf<AddressFailure>()
+        try {
+            withTimeout(totalBudgetMillis) {
+                while (success == null) {
+                    when (val outcome = outcomes.receive()) {
+                        is ProbeOutcome.Success<*> -> {
+                            @Suppress("UNCHECKED_CAST")
+                            success = outcome.url to (outcome.value as T)
+                        }
+                        is ProbeOutcome.Terminal -> throw outcome.error
+                        is ProbeOutcome.ConnectionFailed -> {
+                            failures += outcome.failure
+                            if (failures.size == list.size) {
+                                throw MultiAddressFailure(failures.toList())
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            // 预算耗尽时把尚未回报的地址也列出来，否则界面只剩一句「都不可达」，
+            // 用户不知道是哪几条根本没等到结果。
+            val recorded = failures.mapTo(mutableSetOf()) { it.url }
+            val pending = list.filter { it !in recorded }.map {
+                AddressFailure(it, java.net.SocketTimeoutException("probe budget exhausted"))
+            }
+            throw MultiAddressFailure(failures + pending)
+        } finally {
+            jobs.forEach { it.cancel() }
+        }
+        val result = success
+        if (result != null) result else throw MultiAddressFailure(failures.toList())
+    }
+
+    private sealed interface ProbeOutcome<out T> {
+        data class Success<T>(val url: String, val value: T) : ProbeOutcome<T>
+        data class ConnectionFailed(val failure: AddressFailure) : ProbeOutcome<Nothing>
+        data class Terminal(val error: Throwable) : ProbeOutcome<Nothing>
     }
 }

@@ -37,6 +37,12 @@
     <string name="runtime_state_not_installed">未安装：服务端缺少运行时</string>
     <string name="runtime_state_logged_in">已登录</string>
     <string name="runtime_state_logged_out">未登录</string>
+    <string name="runtime_state_plugin_disabled">插件已禁用</string>
+    <string name="runtime_state_plugin_failed">插件加载失败</string>
+    <string name="runtime_state_detect_login">可用，先检测登录状态</string>
+    <string name="runtime_section_installable">未安装的后端</string>
+    <string name="runtime_action_install">前往市场安装</string>
+    <string name="runtime_install_hint">安装后需重启服务端</string>
     <string name="runtime_error_buffer_invalid">缓冲区必须是大于 0 的整数（MB）</string>
     <string name="runtime_error_tool_mode_invalid">工具解析模式取值无效</string>
     <string name="runtime_agent_edit_title">编辑 %1$s</string>

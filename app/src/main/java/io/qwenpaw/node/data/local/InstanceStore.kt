@@ -54,6 +54,19 @@ data class NetworkHint(
     }
 }
 
+/**
+ * 服务端身份指纹，用于判断「这个地址还是不是原来那台实例」。
+ *
+ * [workspaces] 是强信号：同一实例的 workspace_dir 固定，不同安装不会相同。
+ * [agentIds] 与 [avatarHash] 只作弱信号，单独变化不足以得出结论。
+ */
+@Serializable
+data class InstanceIdentity(
+    val agentIds: List<String> = emptyList(),
+    val workspaces: Map<String, String> = emptyMap(),
+    val avatarHash: String? = null,
+)
+
 /** 一个已保存的 QwenPaw 实例配置。 */
 @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 @Serializable
@@ -105,6 +118,8 @@ data class InstanceConfig(
     val basicUser: String? = null,
     /** 反向代理的 HTTP Basic 密码。与 [token] 一样只存在于加密存储与内存。 */
     val basicPassword: String? = null,
+    /** 上次成功连接时记录的身份指纹；没有指纹时不做一致性判断。 */
+    val identity: InstanceIdentity? = null,
 ) {
     /**
      * 反代凭据；两个字段都非空才生效。

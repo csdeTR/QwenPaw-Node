@@ -89,6 +89,8 @@ data class MarketUiState(
     val resolvingSource: String? = null,
     val pluginInstall: PluginInstallUi? = null,
     val hubInstall: HubInstallUi? = null,
+    /** 从其他页面跳来时预填并自动打开的插件 URL；消费后清空。 */
+    val prefillInstallUrl: String? = null,
     val notice: String? = null,
 ) {
     /** 可参与搜索的来源。不可用的来源不能出现在 `provider_pages` 里，否则服务端回 400。 */
@@ -175,6 +177,16 @@ class MarketViewModel(
 
     fun setTab(tab: MarketTab) {
         _state.update { it.copy(tab = tab) }
+    }
+
+    /** 从设置或运行时页跳来安装：切到插件 Tab 并预填 URL。 */
+    fun openInstallUrlDialog(url: String) {
+        _state.update { it.copy(tab = MarketTab.PLUGINS, prefillInstallUrl = url) }
+    }
+
+    /** 对话框已经打开，清掉一次性预填值。 */
+    fun consumePrefill() {
+        _state.update { it.copy(prefillInstallUrl = null) }
     }
 
     fun setQuery(text: String) {

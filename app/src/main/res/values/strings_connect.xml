@@ -18,6 +18,12 @@
     <string name="connect_proxy_user">反向代理账号</string>
     <string name="connect_proxy_password">反向代理密码</string>
     <string name="connect_proxy_hint">仅当 nginx / openresty 对该地址开启了访问验证（auth_basic）时需要填写。</string>
+    <!-- 编辑实例时更新凭据 -->
+    <string name="connect_cred_username_password_required">修改用户名时需同时填写密码。</string>
+    <string name="connect_cred_proxy_user_required">填写反向代理密码时需同时填写账号。</string>
+    <string name="connect_cred_proxy_password_required">填写反向代理账号时需同时填写密码。</string>
+    <string name="connect_cred_auth_not_required">服务端未要求登录，已保留原有凭据。</string>
+    <string name="connect_cred_saving">正在验证凭据并保存</string>
     <string name="connect_agent_id">智能体 ID</string>
     <string name="connect_agent_id_hint">备用方式</string>
     <string name="connect_ssh_title">SSH 直连</string>
@@ -50,6 +56,11 @@
     <string name="connect_bridge_ready">QwenPaw Node Bridge v%1$s</string>
     <string name="connect_bridge_absent">未安装配套插件</string>
     <string name="connect_bridge_unknown">配套插件状态未能确认</string>
+
+    <!-- 实例一致性 -->
+    <string name="connect_identity_title">地址可能不是当前实例</string>
+    <string name="connect_identity_message">该地址的智能体工作区与已保存的实例不一致。请确认这不是另一台服务器；如果确认无误，可以继续。</string>
+    <string name="connect_identity_continue">继续</string>
 
     <!-- 引导式添加 -->
     <string name="wizard_title_server">服务器</string>

@@ -226,7 +226,15 @@ data class AcpNodeCandidateDto(
 @Serializable
 data class HarnessProviderDto(
     val id: String = "",
+    /** 旧形状的显示名。 */
     val name: String = "",
+    /** 新形状（2.3.0.post1）的显示名。 */
+    val label: String = "",
+    @SerialName("plugin_id") val pluginId: String = "",
+    /** 新形状的可用状态：available / disabled / failed；旧形状没有这个字段。 */
+    val status: String? = null,
+    val capabilities: JsonElement? = null,
+    @SerialName("config_fields") val configFields: List<JsonObject> = emptyList(),
     val available: Boolean = false,
     @SerialName("coming_soon") val comingSoon: Boolean = false,
     val installed: Boolean = false,
@@ -235,6 +243,32 @@ data class HarnessProviderDto(
     @SerialName("runtime_path") val runtimePath: String? = null,
     @SerialName("runtime_source") val runtimeSource: String? = null,
     val error: String? = null,
+) {
+    /** 新旧两种形状统一的显示名。 */
+    val displayName: String
+        get() = label.ifBlank { name }.ifBlank { id }
+
+    /** 新形状按 status 判定，旧形状沿用 available。 */
+    val isAvailable: Boolean
+        get() = status?.let { it == "available" } ?: available
+}
+
+/** 智能体可选后端，对应 `GET /api/agents/backends`。 */
+@Serializable
+data class AgentBackendDto(
+    val id: String = "",
+    val label: String = "",
+    @SerialName("plugin_id") val pluginId: String? = null,
+    val status: String = "",
+    val capabilities: JsonElement? = null,
+    @SerialName("config_fields") val configFields: List<JsonObject> = emptyList(),
+) {
+    val isAvailable: Boolean get() = status == "available"
+}
+
+@Serializable
+data class AgentBackendsDto(
+    val backends: List<AgentBackendDto> = emptyList(),
 )
 
 @Serializable
@@ -641,6 +675,8 @@ data class AgentProfileDto(
     val name: String = "",
     /** 审批模式：STRICT / SMART / AUTO / OFF。 */
     @SerialName("approval_level") val approvalLevel: String = "AUTO",
+    /** 后端类型；`qwenpaw` 之外的值由 harness 插件提供。 */
+    val backend: String = "qwenpaw",
 )
 
 /**
@@ -1947,4 +1983,80 @@ data class PluginMarketResponseDto(
 data class PluginMarketDataDto(
     val total: Int = 0,
     val plugins: List<PluginMarketEntryDto> = emptyList(),
+)
+
+// ---------- 访问控制 ----------
+
+/** 白/黑名单中的一项。聊天渠道用 username，邮件用 display_name。 */
+@Serializable
+data class AclUserInfoDto(
+    val remark: String = "",
+    val username: String = "",
+    @SerialName("display_name") val displayName: String = "",
+)
+
+/** 一条待审批记录。聊天渠道用 user_id/channel，邮件用 agent_id/address。 */
+@Serializable
+data class AclPendingDto(
+    @SerialName("user_id") val userId: String = "",
+    val channel: String = "",
+    /** 服务端给浮点秒。 */
+    val timestamp: Double = 0.0,
+    @SerialName("first_message") val firstMessage: String = "",
+    val remark: String = "",
+    val username: String = "",
+    @SerialName("agent_id") val agentId: String = "",
+    /** 聊天渠道为空；邮件用 sender_address。 */
+    val address: String = "",
+    @SerialName("sender_address") val senderAddress: String = "",
+    /** 邮件 pending 的主题与正文预览，聊天为空。 */
+    val subject: String = "",
+    @SerialName("body_preview") val bodyPreview: String = "",
+    @SerialName("display_name") val displayName: String = "",
+) {
+    /** 统一后的用户标识：聊天是 user_id，邮件是地址。 */
+    val effectiveAddress: String get() = address.ifBlank { senderAddress }
+
+    /** 统一后的首条内容：聊天是 first_message，邮件是主题 + 正文预览。 */
+    val effectiveFirstMessage: String
+        get() = firstMessage.ifBlank {
+            listOf(subject, bodyPreview).filter { it.isNotBlank() }.joinToString("\n")
+        }
+
+    /** 当前 tab 下这一条的唯一键。 */
+    val key: String get() = "$agentId|$channel|${userId.ifBlank { effectiveAddress }}"
+
+    /** 界面上的人名：优先用户名/显示名，最后退回 user_id 或地址。 */
+    val label: String
+        get() = username.ifBlank { displayName }.ifBlank { userId }.ifBlank { effectiveAddress }
+}
+
+/** 一个渠道（聊天）或一个智能体（邮件）下的三份名单。 */
+@Serializable
+data class AclChannelDto(
+    val whitelist: Map<String, AclUserInfoDto> = emptyMap(),
+    val blacklist: Map<String, AclUserInfoDto> = emptyMap(),
+    val pending: List<AclPendingDto> = emptyList(),
+)
+
+/** 聊天渠道的批量动作条目。 */
+data class AclActionEntryDto(
+    val channel: String,
+    val userId: String,
+    val remark: String = "",
+    val username: String = "",
+)
+
+/** 邮件的批量动作条目。 */
+data class MailAclActionEntryDto(
+    val agentId: String,
+    val address: String,
+    val remark: String? = null,
+    val displayName: String? = null,
+)
+
+/** 邮件待批角标。 */
+@Serializable
+data class MailAclPendingCountDto(
+    val count: Int = 0,
 )
