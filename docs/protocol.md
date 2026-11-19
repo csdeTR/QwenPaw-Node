@@ -656,18 +656,22 @@ MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**
 
 ---
 
-## 17、跨版本适配：2.2.2.post1 与 2.3.0b2
+## 17、跨版本适配：2.2.2.post1 与 2.3.0
 
 服务端没有能力发现端口。`/api/capabilities`、`/api/features`、`/healthz` 一类路径在两个版本上都不存在，`/api/status` 与 `/api/health` 返回 404。唯一的版本信息来自 `GET /api/version`：
 
 ```json
 {"version": "2.2.2.post1"}
 {"version": "2.3.0b2"}
+{"version": "2.3.0"}
+{"version": "2.3.0.post1"}
 ```
+
+本节先保留 2026-11-01 对预发布 `2.3.0b2` 的比对，再记录 2026-11-19 对正式版 `2.3.0.post1` 的复测。
 
 因此适配只有两条可用路径：**按版本号分支**，或**按状态码兜底**。本节记录两个版本的实际差异，以及客户端据此定下的规则。
 
-### 版本差了多少
+### 版本差了多少（2026-11-01，2.3.0b2）
 
 以 `QWENPAW_OPENAPI_DOCS=1` 在临时 HOME 下起独立进程导出 `app.openapi()` 得到两份完整规格：
 
@@ -677,7 +681,7 @@ MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**
 | 新增路径 | — | 33 |
 | 移除路径 | — | 5 |
 
-客户端实际使用 **33 条路径**，逐条比对两份规格：
+2026-11-01 比对时客户端实际使用 **33 条路径**，逐条比对两份规格：
 
 - 33 条的路径与 HTTP 方法在两版**完全一致**；
 - 8 个关键端点的 `200` 响应 schema 完全相同；
@@ -707,11 +711,11 @@ MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**
 
 **不做运行时版本分支。** 理由有三条：
 
-1. 客户端当前**没有**任何调用落在被删的 5 条上，分支没有作用对象。
-2. 版本号不是稳定的能力标识：`2.3.0b2` 是预发布版的写法，正式版会是 `2.3.0`，靠字符串前缀比较迟早出错；而服务端不提供「这个版本有哪些端点」的接口。
-3. 分支一旦引入就必须为每条分支维护一条回归路径，而两版共用的 33 条路径目前完全一致，分支只会增加未被覆盖的代码。
+1. 客户端当前**没有**任何调用落在被删的 12 条上，分支没有作用对象。Harness 的 7 条静态路由虽被移除，但 `2.3.0.post1` 会在插件注册后重新挂载同名路径；差异在 provider 形状，用同一 DTO 归一化即可。
+2. 版本号不是稳定的能力标识：`2.3.0b2`、`2.3.0`、`2.3.0.post1` 是同一系列的三种写法，能力边界并不按版本号整齐划分；服务端也不提供「这个版本有哪些端点」的接口。
+3. 分支一旦引入就必须为每条分支维护一条回归路径，而两版共用的 156 组核心调用目前没有方法或必填字段差异，分支只会增加未被覆盖的代码。
 
-**遇到 404 时按上下文给出说明，而不是按版本猜测。** 现有做法已经符合这一条：登录接口的 404 单独映射成「请求未落到登录端点」（见第 1 节），其余 404 统一为「会话不存在或已被删除」。若将来接入某个只在 2.3.0b2 存在的能力，调用方应就近给出「当前服务端版本不支持该功能」的文案，而不是让用户看到 404 原文。
+**遇到 404 时按上下文给出说明，而不是按版本猜测。** 现有做法已经符合这一条：登录接口的 404 单独映射成「请求未落到登录端点」（见第 1 节），其余 404 统一为「会话不存在或已被删除」。若将来接入某个只在 2.3.0 系列存在的能力，调用方应就近给出「当前服务端版本不支持该功能」的文案，而不是让用户看到 404 原文。
 
 ### 字段层面的两处实际差异
 
@@ -725,6 +729,30 @@ MiSans 许可协议允许免费商用，但**明确禁止再分发字体本体**
 `cache_hit_rate` 一项要紧：OpenAPI 把它声明为 `number | null`，两版一致，但 2.2.2 在有调用时恰好总是有值，此前把 DTO 写成非空 `Double` 一直没暴露。在干净实例（2.3.0b2 容器首次启动）上拿到 `null` 后，整个响应解析失败，界面报「加载用量失败」。这类「同一字段在空数据时才为 null」的形状只能靠干净实例覆盖，用有数据的实例回归是测不出来的。
 
 同理，`GET /api/agents/{agentId}` 的响应在 2.3.0b2 上多出 `advisor_mode` 整块、少了 `tools.builtin_tools.ast_search` 条目；客户端只读 `approval_level`，多余字段由 `ignoreUnknownKeys` 吸收，不需要处理。
+
+### 2.3.0.post1 复测（2026-11-19）
+
+`2.3.0` 与 `2.3.0.post1` 并不等价：前者仍保留静态 harness 路由，后者把第三方 agent 抽成插件（PR #8426），接口变化集中在这一点。
+
+**路径总量。** 2.2.2.post1 为 517 条，2.3.0.post1 为 562 条，新增 57、移除 12。移除项除 4 条 workspace 整包上传/下载与 `/api/desktop/shutdown` 外，还有 7 条静态 harness 路由；新增项按组为 community 23、agents 13、plugins 6、ChatGPT OAuth 6、runtime 3、advisor-mode 2、skills 2、chats 1、workspace 1。
+
+**客户端调用。** `QwenPawApi.kt` 中 156 组 `/api` 方法+路径调用，除 harness 系列外全部在 2.3.0.post1 上存在。逐条比对参数与 schema：
+
+- 参数只有一处新增：`POST /api/console/chat/stop` 多出可选 `initiator`。
+- 客户端用到的组件 schema 无删除字段、无新增必填；新增项均为可选，包括 `default_models`、`advisor_mode`、`decision_model`、`model_type`、`MarkInboxReadRequest.agent_id/source_types`、`InstallPluginRequest.interrupt_tasks` 与技能池 `installation_origin`。
+- `ModelConfigRequest.thinking_budget` 新增最小值 1。客户端不发送该字段（会话侧键名为 `budget_tokens`），不受影响。
+
+**Harness 改为插件提供。** `2.3.0.post1` 移除静态 `/api/harnesses` 路由，由 `plugins/_harness_http.py` 的动态网关在插件注册后挂载：
+
+- 未安装 harness 插件时 `GET /api/harnesses` 仍返回 200 与空 `providers`；对未注册后端调用 status/login 等返回 404 `{"detail":{"code":"backend_unavailable","backend_id":"codex"}}`。
+- provider 形状改为 `{id, label, plugin_id, status, capabilities, config_fields}`，`status` 为 `available` / `disabled` / `failed`；旧字段 `name/available/installed/authenticated` 不再出现在列表里。
+- 探测与登录的请求体仍是 `{settings, device_code}`；status 响应仍带 `installed/authenticated/account`，并补 `available/id/name/capabilities`。详情接口的返回键仍是 `models/servers/skills`。
+- 插件目录上架 `qwenpaw-harness-codex` 与 `qwenpaw-harness-qoder`（kind 为 `harness`），可用现有 `POST /api/plugins/install` 按 install_url 安装。
+- 新增 `GET /api/agents/backends` 与 `PATCH /api/agents/{agentId}/backend-settings`（`model`、`reasoning_effort`）。智能体的 `backend` 字段并未新增，2.2.2 已存在，客户端从未提供修改入口。
+
+**客户端影响。** 现有页面除 Runtime 页外无需改动。Runtime 页当前只解旧 provider 字段；在 2.3.0.post1 上，未装插件时列表为空，装了插件后每行因缺 `available/name` 被显示为不可用，探测按钮也被禁用。修复不引入版本分支：同一 DTO 同时接受新旧字段，`status` 存在时用它映射可用状态；未安装的后端从插件目录的 `kind=harness` 条目补齐。
+
+**实测边界。** `/api/providers/chatgpt/session` 在远程访问时返回 403「ChatGPT sign-in is only available locally」，移动端不可用；`/api/runtime/clients|connect|shutdown` 在 `qwenpaw app` 服务模式返回 404，属于桌面共享运行时；`/api/community/posts` 未登录即可读取，发帖与同步需要 `/api/community/connection` 的账号连接；`/api/workspace/transcription-model` 返回 `{"transcription_model":"whisper-1"}`，为 2.3.0.post1 新增；`qwenpaw-node-bridge` 0.4.0 在 2.3.0.post1 上正常加载，`/info` 的 capabilities 未变。
 
 ---
 
@@ -2065,3 +2093,36 @@ POST /api/plugins/qwenpaw-node-bridge/portability/jobs/{job_id}/cancel
 **离线推送 channel**：插件注册 `qwenpaw_node_push`，把收件箱未读数与待审批数的上升推到 ntfy / Bark / Telegram。事件源与 `/events` 相同；启动时取一次基线，不补推历史。配置项：provider、target、token、server_url、notify_inbox、notify_approval、min_interval_seconds。令牌只写不读，日志不打印 URL 与 token。
 
 **协议版本保持 1**：新增能力只追加 `capabilities`；旧客户端只按能力名开关功能。只有既有端点形状发生不兼容变化时才递增。
+
+---
+
+## 36、浏览器控制链路诊断
+
+**核心端点**（2.3.0.post1，2026-11-19 从局域网实测 200，非 localhost-only，受核心鉴权保护）：
+
+| 方法 | 路径 | 返回 |
+|---|---|---|
+| GET | `/api/browser/chrome/status` | `connected`、`extension_version`、`bridge_lifecycle`、`contract_health`、`last_self_test`、`readiness_state` |
+| POST | `/api/browser/chrome/self-test` | `status`、`checked_at`、`duration_ms`、`checks[]`（`passed` / `status` / `code` / `message` / `repair_action` / `metadata`） |
+| GET | `/api/browser/chrome/traces` | 目前是空壳：`events: []`、`status: pending`、`code: semantic_control_not_integrated` |
+
+`self-test` 的检查项包括 `extension_bridge`、`nm_host`、`extension_assets`、`bridge_lifecycle`、
+`contract_drift`。qp-test 上实测为 NM host 缺失、桥未连接、`readiness_state: blocked`；
+这是无头容器的预期结果，不是客户端缺陷。`traces` 尚未实现采集，客户端不要显示假数据。
+
+**硬限制**：Chrome 扩展依赖 Native Messaging，官方文档要求 QwenPaw 与 Chrome 在同一台机器、
+服务监听本机地址（`127.0.0.1`、`localhost`、`::1`）。远程服务器、Docker、云端不能用；
+这类部署诊断会一直 blocked，修复也会失败。
+
+**安装与修复由官方 Chrome 插件负责。** 官方目录里的 `chrome` bundle（0.1.1）提供
+`GET /api/chrome/install-status`、`POST /api/chrome/setup`、
+`POST /api/chrome/open-chrome-extensions`、`POST /api/chrome/open-extension-folder`，
+负责扩展资产与 NM host 的安装。`setup` 同样受同机、本机监听限制。
+这些插件路由由源码确认（qp-test 未安装该插件，最终前缀以安装后为准）。
+Bridge 不应重写安装逻辑。
+
+**Bridge v0.5.0 的 `browser` capability**：只补核心没有的能力。
+`GET /browser/logs?lines=200` 读取 NM host 日志并按行数上限脱敏；
+`POST /browser/repair` 转发官方 Chrome 插件的 `setup`，Chrome 插件未安装时返回安装提示。
+状态与自测仍走核心端点；修复端点要求插件侧校验 token、客户端二次确认，
+日志不得包含 token、密钥或完整请求头。

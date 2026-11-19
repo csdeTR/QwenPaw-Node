@@ -1,0 +1,118 @@
+# QwenPaw Node
+
+[简体中文](README.md) | **English**
+
+> I have no development experience; the entire repository is written and maintained by DeepSeek V4.1 Flash, and issues and pull requests can only be handled by the LLM. If you have ideas for improvements or fixes, please create an issue with a brief description instead of preparing a pull request, and I will forward them to the Qoder Agent.
+
+> ~~AgentScope also planned an official mobile client for QwenPaw. QwenPaw Node will reach end-of-life once the official client is available. Developers interested in contributing should look at the official QwenPaw repository first; contributions there will be seen and handled more effectively and will help more people.~~
+
+> The official client never shipped. According to [#8793](https://github.com/agentscope-ai/QwenPaw/pull/8793), it will arrive as a web app in the future, so QwenPaw Node may not reach end-of-life after all. I do not know what happened (most likely cross-platform adaptation issues), but thanks to the AgentScope team and community contributors for their work.
+
+A third-party Android client for QwenPaw. The app runs on your phone and connects directly to the QwenPaw instance on your own machine; data does not pass through any third-party service. Built with Kotlin and Jetpack Compose.
+
+This is an unofficial project, independently developed by a third party and not affiliated with the QwenPaw team. The QwenPaw name and logo belong to their respective owners and are used here only for identification.
+
+## Project status
+
+The QwenPaw team once stated in [issue #7519](https://github.com/agentscope-ai/QwenPaw/issues/7519) that the mobile client would ship with v2.3.0, but v2.3.0 (2026-11-11) did not include one. The native client [PR #7378](https://github.com/agentscope-ai/QwenPaw/pull/7378) (Expo / React Native) was closed without merging on 2026-11-17; the maintainers said the web app would be used as the mobile client instead, with an alternative in [PR #8793](https://github.com/agentscope-ai/QwenPaw/pull/8793), still a draft as of 2026-11-18. There is therefore no released official Android client.
+
+This project continues to be maintained normally. The original condition for end-of-life ("stop maintenance once the official Android client is released") no longer applies. If the official mobile plan is released later and meets users' needs, the maintenance status will be reassessed; server API changes will be followed up.
+
+## Quick start
+
+**Prerequisites**: a machine already running QwenPaw that your phone can reach. The server must listen on an address reachable from the phone (`--host 0.0.0.0` or a LAN IP); alternatively, it can listen on `127.0.0.1` and be exposed through a reverse proxy or tunnel. If it only listens on loopback and no forwarding is configured, the phone cannot connect.
+
+**Download**: installers are on [Releases](https://github.com/csdeTR/QwenPaw-Node/releases). Each release has two voice variants, each split into four CPU architectures, for eight APKs in total:
+
+- **Standard**: choose between on-device recognition and server-side transcription; on-device recognition is the default (the model is about 150 MB and downloaded on demand).
+- **`-no-sherpa`**: server-side transcription only, about 3.3 MB.
+
+The two variants share a package name, so they can replace each other on upgrade but cannot be installed side by side. `arm64-v8a` covers most phones released since 2019; `x86_64` is for emulators. The app requires Android 8.0 or later. See [section 4 of the user guide](docs/guide.md) for the differences between variants, and section 7 for what happens when the wrong architecture is installed.
+
+**First connection**: the app opens with a three-step wizard: enter and verify the server address, enter credentials (skipped automatically when login is disabled on the server), and select an agent. The main screen opens after all three steps are complete.
+
+See [section 1 of the user guide](docs/guide.md) for the full connection flow, multiple addresses and reverse proxy configuration.
+
+## Features
+
+- **Conversations**: list, create, rename, delete, pin, archive, and batch operations; sort by time, source, or no grouping; filter by channel, create custom groups, and set an icon for each conversation.
+- **Messages and rendering**: SSE streaming, Markdown, code block copying, LaTeX formulas and sub/superscripts; thinking, tool calls, and intermediate replies can be collapsed at three levels. Every message can be copied or viewed as raw Markdown.
+- **Input**: multi-select attachments, `/` slash commands, voice input, model switching, thinking effort, and full-screen input.
+- **Agent collaboration**: tool-call approvals, unread inbox summary, scheduled task run history, and full-text chat search (requires the companion plugin).
+- **Server management**: usage statistics, models and providers, skills, MCP, extension marketplace, environment variables, tool execution mode, workspace directories, and run logs.
+- **Workspace and development**: browse, preview, download, upload, and edit files; local terminal, Bridge relay (requires companion plugin v0.4.0), and direct SSH, reachable from the top of the chat list, with multiple tabs, tab renaming, shell selection, zoom, and a key bar; the session stays in the notification bar when backgrounded and can be stopped there; switching server instances asks for confirmation; Git changes, staging, commits, and history.
+- **Multiple instances**: save multiple servers; a single instance can also have multiple addresses and switch between them automatically based on the network.
+
+See the [user guide](docs/guide.md) for per-feature instructions, UI structure, and interaction details.
+
+## Version roadmap
+
+The goal is for the phone app to replace the web console wherever possible, so QwenPaw is usable anywhere. Features that work well on a phone are implemented directly. Operations that are better suited to the web console keep an entry point in the app with an advisory before opening; dangerous actions still require confirmation. The plan below may change. See [Releases](https://github.com/csdeTR/QwenPaw-Node/releases) and [Changelog](CHANGELOG.md) for shipped versions.
+
+| Version | Theme | Highlights |
+|---|---|---|
+| 0.7.0-i | Internationalization framework | All UI copy moved into resource files; app language picker; Simplified Chinese only for now |
+| 0.7.1 | Access control and connection reliability | Pending queues for channel and email access control; faster connection checks, cache clearing on instance switch, editable instance credentials, settings refactor; Codex, Qoder and other third-party agents switch to plugin installation, with updated discovery, login and selection flows |
+| 0.7.2 | Channels and local models | Channel QR authorization; local model download progress |
+| 0.7.3 | Browser diagnostics and web guidance | Browser connection diagnostics (extension and local connection state, checks and repair); advisories before web-oriented operations; MCP server management, plugin configuration and uninstall, addresses allowed without authentication, local model file management |
+| 0.7.4 | Full management and Git writes | Model and provider add/edit/remove and authorization, channel configuration, skill pool management and automation, complete access-control lists, skill configuration; Git branch switching, discarding changes and reverting commits, each with impact preview and confirmation |
+| 1.0.0 | UI rewrite | Three switchable interface styles; HyperOS Super Island |
+| 1.0.1 | English language support | Full English UI; Simplified Chinese or English selectable on first launch and in Settings; no layout changes |
+
+The companion Bridge plugin is versioned separately and provides search, event streaming, push, SSH and browser diagnostics; version 0.7.3 adds browser diagnostic logs and repair.
+
+**Browser diagnostics limitation**: the Chrome extension requires QwenPaw and Chrome on the same machine, with the service listening on a loopback address. A remote or cloud server can show diagnostic status only; it cannot install or repair the extension.
+
+## Limitations
+
+The following limitations apply to the current release; later versions will move some of them into the app — see "Version roadmap" above.
+
+- **Part of server management stays in the web console**: provider keys, server logs, skill-pool distribution, MCP connection parameters and OAuth authorization, and marketplace installation and downloads. The "Run logs" in Settings records client-side events on the phone, not server logs.
+- **No automatic resend when offline**: drafts are kept while offline; after the network recovers, tap "Retry" manually.
+- **Approvals rely on polling**: once every 2.5 seconds; there is no push channel.
+- **Mermaid is not supported**: diagrams in code blocks are shown as source.
+- **Platform and ModelScope Spaces instances cannot be connected directly**: the platforms do not expose endpoints, and forwarding through a tunnel violates their terms, so such addresses are rejected during entry. Official-client Platform support uses the platform's own OAuth authorization and is not the same as connecting directly to a self-hosted instance.
+- **Only Xiaomi/Redmi HyperOS Super Island is supported; no adaptation is provided for Live Window, Atom Island, Fluid Cloud, or similar OEM equivalents.**
+
+## Internationalization
+
+The client supports a UI language picker, and all UI text lives in resource files. The earlier statement that the app would not support internationalization no longer applies.
+
+Only Simplified Chinese is available in the current release. English is planned for 1.0.1 (see "Version roadmap"). Simplified Chinese is maintained by the author; other languages, once added, are translated and maintained by an LLM, with no guarantee that terminology and wording are fully consistent.
+
+The picker is under Settings → Profile & Appearance → Appearance → App Language. A fresh install also asks for the language on first launch.
+
+## FAQ
+
+**Cannot connect.** Check the port, then confirm that the server listens on an address reachable from the phone or is exposed through a reverse proxy or tunnel. When multiple addresses are configured, "Verify connection" tries them in order and reports which one was used.
+
+**Scrolling is not smooth.** Use the release build; the debug build is not optimized and its scrolling cost is more than twice that of the release build.
+
+**The microphone asks to download a model.** The standard build uses on-device recognition by default; download the model under Settings → Voice first. You can also switch transcription to the server or use the `-no-sherpa` build.
+
+**Cannot install on an emulator.** Download the `x86_64` build; `arm64-v8a` only runs on ARM devices.
+
+See the [FAQ section of the user guide](docs/guide.md) for more.
+
+## Development
+
+```bash
+./gradlew :app:installFullDebug          # build and install the standard build on a connected device
+./gradlew :app:testFullDebugUnitTest     # run JVM unit tests
+```
+
+Read [AGENTS.md](AGENTS.md) before changing code; it documents the machine's hard resource limits, server and device rules, and the pre-commit gates.
+
+### Documentation
+
+- [User guide](docs/guide.md): for users; how each feature works.
+- [Architecture](docs/architecture.md): layers, directory responsibilities, state flow.
+- [Protocol and known pitfalls](docs/protocol.md): measured notes on server APIs.
+- [UI conventions](docs/ui-guidelines.md): edge-to-edge adaptation, recomposition scope, performance measurement.
+- [Changelog](CHANGELOG.md): what changed in each release.
+
+## License and third-party assets
+
+The code in this repository is released under the [MIT License](LICENSE). You may use, modify, and distribute it freely, provided the copyright and license notices are retained.
+
+Third-party assets keep their original licenses: **MiSans** belongs to Xiaomi Technology; its license allows free commercial use but prohibits redistributing the font itself, so it is not bundled and is downloaded when the user explicitly requests it in the app. **sherpa-onnx** is Apache-2.0 and is shipped only in the standard build. **Speech recognition models** are downloaded on demand and are not included in the APK. **lucide** is ISC-licensed; UI icons come from version 0.400.0.
