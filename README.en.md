@@ -25,7 +25,7 @@ This project continues to be maintained normally. The original condition for end
 **Download**: installers are on [Releases](https://github.com/csdeTR/QwenPaw-Node/releases). Each release has two voice variants, each split into four CPU architectures, for eight APKs in total:
 
 - **Standard**: choose between on-device recognition and server-side transcription; on-device recognition is the default (the model is about 150 MB and downloaded on demand).
-- **`-no-sherpa`**: server-side transcription only, about 3.3 MB.
+- **`-no-sherpa`**: server-side transcription only, about 7–8 MB.
 
 The two variants share a package name, so they can replace each other on upgrade but cannot be installed side by side. `arm64-v8a` covers most phones released since 2019; `x86_64` is for emulators. The app requires Android 8.0 or later. See [section 4 of the user guide](docs/guide.md) for the differences between variants, and section 7 for what happens when the wrong architecture is installed.
 
@@ -47,11 +47,10 @@ See the [user guide](docs/guide.md) for per-feature instructions, UI structure, 
 
 ## Version roadmap
 
-The goal is for the phone app to replace the web console wherever possible, so QwenPaw is usable anywhere. Features that work well on a phone are implemented directly. Operations that are better suited to the web console keep an entry point in the app with an advisory before opening; dangerous actions still require confirmation. The plan below may change. See [Releases](https://github.com/csdeTR/QwenPaw-Node/releases) and [Changelog](CHANGELOG.md) for shipped versions.
+The goal is for the phone app to replace the web console wherever possible, so QwenPaw is usable anywhere. Features that work well on a phone are implemented directly. Operations that are better suited to the web console keep an entry point in the app with an advisory before opening; dangerous actions still require confirmation. Version 0.7.0-i has been released; see [Releases](https://github.com/csdeTR/QwenPaw-Node/releases) and [Changelog](CHANGELOG.md). The plan below covers later versions and may change.
 
 | Version | Theme | Highlights |
 |---|---|---|
-| 0.7.0-i | Internationalization framework | All UI copy moved into resource files; app language picker; Simplified Chinese only for now |
 | 0.7.1 | Access control and connection reliability | Pending queues for channel and email access control; faster connection checks, cache clearing on instance switch, editable instance credentials, settings refactor; Codex, Qoder and other third-party agents switch to plugin installation, with updated discovery, login and selection flows |
 | 0.7.2 | Channels and local models | Channel QR authorization; local model download progress |
 | 0.7.3 | Browser diagnostics and web guidance | Browser connection diagnostics (extension and local connection state, checks and repair); advisories before web-oriented operations; MCP server management, plugin configuration and uninstall, addresses allowed without authentication, local model file management |
