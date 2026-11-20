@@ -25,6 +25,7 @@
     <!-- 登录与插件探测 -->
     <string name="drest_login_not_reached">登录接口返回 404。若服务端只接受 https，http 上的登录请求会被跳转改写成 GET 并丢失请求体；请把服务器地址改为 https:// 开头</string>
     <string name="drest_bad_credentials">用户名或密码不正确</string>
+    <string name="drest_bad_token">访问令牌无效或已过期，请在 Web 控制台重新生成。</string>
     <string name="drest_bridge_unknown">尚未检测</string>
     <string name="drest_bridge_ready">已检测到 QwenPaw Node Bridge v%1$s</string>
     <string name="drest_bridge_absent">未检测到配套插件</string>

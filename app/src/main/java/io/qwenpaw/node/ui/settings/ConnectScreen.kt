@@ -119,6 +119,14 @@ fun InstanceForm(
     /** 编辑已有实例时提供；新增实例为 null。 */
     onOpenSshProfile: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
+    /** 预填的登录方式。编辑实例时取它上次用过的方式。 */
+    initialMode: io.qwenpaw.node.data.CredentialMode = io.qwenpaw.node.data.CredentialMode.PASSWORD,
+    /** 扫码得到的配对码；非空时自动填入地址与令牌。 */
+    scannedPair: io.qwenpaw.node.data.qr.TokenPair? = null,
+    /** 表单已消费扫码结果。 */
+    onConsumeScannedPair: () -> Unit = {},
+    /** 打开扫码页；为 null 时不显示扫描按钮。 */
+    onOpenScanner: (() -> Unit)? = null,
 ) {
     // 至少保留一行输入框，否则用户没有地方填地址。
     var addresses by remember {
@@ -128,6 +136,11 @@ fun InstanceForm(
     var instanceName by remember { mutableStateOf(initialName) }
     var username by remember { mutableStateOf(initialUsername) }
     var password by remember { mutableStateOf("") }
+    // 登录方式与令牌。令牌与密码分开存：切换方式时不要把已经输入的密码当令牌用。
+    var mode by remember { mutableStateOf(initialMode) }
+    var token by remember { mutableStateOf("") }
+    // 令牌是否由本次扫码填入；编辑页据此提示「留空保留原值」的时机。
+    var tokenFromScan by remember { mutableStateOf(false) }
     var agentId by remember { mutableStateOf(initialAgentId) }
     var advanced by remember { mutableStateOf(false) }
     var showProxyAuth by remember { mutableStateOf(false) }
@@ -146,6 +159,12 @@ fun InstanceForm(
     var agentError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    /** 令牌模式下本次要用的令牌：新填的优先，编辑时留空则回落到已保存的。 */
+    fun activeToken(): String? = when {
+        mode != io.qwenpaw.node.data.CredentialMode.TOKEN -> verifyToken
+        token.isNotBlank() -> token.trim()
+        else -> verifyToken
+    }
 
     // 地址是否已验证通过。步骤 1 的勾只在验证成功后出现——
     // 只看「地址非空」会让用户以为这一步已经完成。
@@ -197,7 +216,7 @@ fun InstanceForm(
         verifyingAt = null
         scope.launch {
             runCatching {
-                onVerifyHosts(effectiveUrls, proxyAuth(), { attempt -> verifyingAt = attempt }, verifyToken)
+                onVerifyHosts(effectiveUrls, proxyAuth(), { attempt -> verifyingAt = attempt }, activeToken())
             }
                 .onSuccess { result ->
                     identityWarning =
@@ -296,6 +315,24 @@ fun InstanceForm(
     // 地址已预填时自动读一次，编辑已有实例就不用再多点一下。
     LaunchedEffect(Unit) {
         if (initialAddresses.any { it.url.isNotBlank() }) fetchAgents()
+    }
+
+    /**
+     * 扫码结果。
+     *
+     * 新实例直接换成扫到的地址（二维码里的第一条），编辑实例只换令牌——
+     * 用户正在改的地址是他刚选的，不该被二维码覆盖。
+     */
+    LaunchedEffect(scannedPair) {
+        val pair = scannedPair ?: return@LaunchedEffect
+        mode = io.qwenpaw.node.data.CredentialMode.TOKEN
+        token = pair.token
+        tokenFromScan = true
+        advanced = true
+        if (initialAddresses.none { it.url.isNotBlank() }) {
+            onAddressesChange(pair.addresses.map { AddressEntry(url = it) })
+        }
+        onConsumeScannedPair()
     }
 
     Column(
@@ -514,54 +551,89 @@ fun InstanceForm(
         }
         AnimatedVisibility(visible = advanced) {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.connect_username),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                // 登录方式：两种身份证明，服务端只认其中之一。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Chip(
+                        text = stringResource(R.string.connect_auth_mode_password),
+                        selected = mode == io.qwenpaw.node.data.CredentialMode.PASSWORD,
+                        onClick = { mode = io.qwenpaw.node.data.CredentialMode.PASSWORD },
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.connect_optional),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                    Chip(
+                        text = stringResource(R.string.connect_auth_mode_token),
+                        selected = mode == io.qwenpaw.node.data.CredentialMode.TOKEN,
+                        onClick = { mode = io.qwenpaw.node.data.CredentialMode.TOKEN },
                     )
                 }
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.connect_password),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                Spacer(Modifier.height(12.dp))
+
+                if (mode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+                    TokenCredentialFields(
+                        token = token,
+                        onTokenChange = {
+                            token = it
+                            tokenFromScan = false
+                        },
+                        scanned = tokenFromScan,
+                        canScan = onOpenScanner != null,
+                        onScan = onOpenScanner,
                     )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.connect_optional),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.connect_username),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.connect_optional),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.connect_password),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.connect_optional),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = stringResource(R.string.connect_login_hint),
+                    text = if (mode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+                        stringResource(R.string.connect_token_help)
+                    } else {
+                        stringResource(R.string.connect_login_hint)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
                     modifier = Modifier.fillMaxWidth(),
@@ -757,6 +829,8 @@ fun InstanceForm(
                             agentId = agentId.ifBlank { "default" },
                             basicUser = basicUser.trim(),
                             basicPassword = basicPassword,
+                            mode = mode,
+                            token = token.trim(),
                         ),
                     )
                 }
@@ -888,6 +962,16 @@ fun ConnectScreen(
     onUseSaved: (InstanceConfig) -> Unit,
     /** 该主机已在「受信任的连接」里时返回 true，此时不弹安全提示。 */
     isTrustedHost: (String) -> Boolean = { false },
+    /** 扫码得到的配对码；非空时引导第 2 步填入令牌。 */
+    scannedPair: io.qwenpaw.node.data.qr.TokenPair? = null,
+    onConsumeScannedPair: () -> Unit = {},
+    onOpenScanner: (() -> Unit)? = null,
+    /** 扫码登录时用令牌读一次智能体列表。 */
+    onLoadAgentsWithToken: suspend (
+        hosts: List<String>,
+        token: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<AgentDto> = { _, _, _ -> emptyList() },
 ) {
     // 连接页是裸页面（没有 Scaffold 帮忙处理系统栏），自己让开状态栏与手势条。
     // 引导组件也被设置页复用，那边包在 Scaffold 里、已由 Scaffold 注入留白，
@@ -940,6 +1024,10 @@ fun ConnectScreen(
             onVerifyHosts = onVerifyHosts,
             scrollable = false,
             isTrustedHost = isTrustedHost,
+            scannedPair = scannedPair,
+            onConsumeScannedPair = onConsumeScannedPair,
+            onOpenScanner = onOpenScanner,
+            onLoadAgentsWithToken = onLoadAgentsWithToken,
         )
 
         if (saved.isNotEmpty()) {
@@ -1044,6 +1132,100 @@ private fun StepLine(done: Boolean) {
                 else MaterialTheme.colorScheme.outlineVariant,
             ),
     )
+}
+
+/**
+ * 令牌输入。占位横条里放「扫描 / 粘贴」两个动作，避免再多一行按钮。
+ *
+ * [scanned] 为 true 时令牌来自本次扫码，界面可以据此提供「有效期至」的提示；
+ * 手填的内容不做过期判断——它可能来自任意签发方式。
+ */
+@Composable
+private fun TokenCredentialFields(
+    token: String,
+    onTokenChange: (String) -> Unit,
+    scanned: Boolean,
+    canScan: Boolean,
+    onScan: (() -> Unit)?,
+) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = stringResource(R.string.connect_token),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = stringResource(R.string.connect_optional),
+            style = MaterialTheme.typography.labelSmall,
+            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+        )
+    }
+    Spacer(Modifier.height(4.dp))
+    OutlinedTextField(
+        value = token,
+        onValueChange = onTokenChange,
+        singleLine = true,
+        placeholder = { Text(stringResource(R.string.connect_token_hint)) },
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (canScan) {
+            Text(
+                text = stringResource(R.string.connect_token_scan),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                    .clickable { onScan?.invoke() }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        }
+        Text(
+            text = stringResource(R.string.connect_token_paste),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                .clickable {
+                    val text = clipboard.getText()?.text?.trim().orEmpty()
+                    if (text.isNotEmpty()) onTokenChange(text)
+                    else android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.connect_token_paste_empty),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        )
+    }
+    if (scanned) {
+        Spacer(Modifier.height(6.dp))
+        io.qwenpaw.node.data.qr.TokenClaimsCodec.decodeUnverified(token)?.expiresAt?.let { epoch ->
+            Text(
+                text = stringResource(
+                    R.string.connect_token_expiry,
+                    java.time.Instant.ofEpochSecond(epoch)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")),
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+            )
+        }
+    }
 }
 
 @Composable

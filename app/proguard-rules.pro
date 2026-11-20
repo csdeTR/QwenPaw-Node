@@ -51,3 +51,15 @@
 # termlib 的 JNI 入口；AAR 自带 consumer rules，这里再显式保留一层。
 -keep class org.connectbot.terminal.TerminalNative { *; }
 -dontwarn org.slf4j.**
+
+# ZXing 核心库：解码器按符号类型实例化各 Reader，类名出现在字符串里，
+# 必须保留构造与入口方法，否则 release 包扫码永远解不出来。
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**
+
+# CameraX 通过运行时反射查找相机实现（camera-camera2 的 Provider 由
+# ServiceLoader 风格的名称匹配装载），保留实现类与 Provider 入口。
+-keep class androidx.camera.camera2.** { *; }
+-keep class androidx.camera.core.** { *; }
+-keep interface androidx.camera.core.CameraProvider { *; }
+-dontwarn androidx.camera.**

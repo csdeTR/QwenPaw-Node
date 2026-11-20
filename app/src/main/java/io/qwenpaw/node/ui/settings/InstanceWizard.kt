@@ -102,6 +102,18 @@ fun InstanceWizard(
     scrollable: Boolean = true,
     /** 该主机已在「受信任的连接」里时返回 true，此时不弹安全提示。 */
     isTrustedHost: (String) -> Boolean = { false },
+    /** 扫码得到的配对码；非空时填入令牌并切到扫码登录。 */
+    scannedPair: io.qwenpaw.node.data.qr.TokenPair? = null,
+    /** 表单已消费扫码结果。 */
+    onConsumeScannedPair: () -> Unit = {},
+    /** 打开扫码页；为 null 时不显示扫描按钮。 */
+    onOpenScanner: (() -> Unit)? = null,
+    /** 用访问令牌读一次智能体列表，用于扫码登录的下一步。 */
+    onLoadAgentsWithToken: suspend (
+        hosts: List<String>,
+        token: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<AgentDto> = { _, _, _ -> emptyList() },
 ) {
     var step by remember { mutableStateOf(1) }
 
@@ -126,6 +138,11 @@ fun InstanceWizard(
     var needsLogin by remember { mutableStateOf<Boolean?>(null) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    // 登录方式：扫码优先，账号密码作为原有路径保留。
+    var loginMode by remember {
+        mutableStateOf(io.qwenpaw.node.data.CredentialMode.TOKEN)
+    }
+    var accessToken by remember { mutableStateOf("") }
     // 点「下一步」时正在试登录。与 checkingAuth 分开：前者是进这一步的自动判定，
     // 后者是用户主动触发的校验，两者都可能阻塞按钮。
     var checkingLogin by remember { mutableStateOf(false) }
@@ -150,6 +167,8 @@ fun InstanceWizard(
         agentId = agentId.ifBlank { "default" },
         basicUser = basicUser.trim(),
         basicPassword = basicPassword,
+        mode = loginMode,
+        token = accessToken,
     )
 
     /** 反代凭据；两个都非空才生效。 */
@@ -226,7 +245,11 @@ fun InstanceWizard(
         agentError = null
         scope.launch {
             runCatching {
-                onLoadAgents(listOf(url.trim()), username, password, proxyAuth())
+                if (loginMode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+                    onLoadAgentsWithToken(listOf(url.trim()), accessToken, proxyAuth())
+                } else {
+                    onLoadAgents(listOf(url.trim()), username, password, proxyAuth())
+                }
             }
                 .onSuccess { list ->
                     agents = list
@@ -235,6 +258,19 @@ fun InstanceWizard(
                 .onFailure { e -> agentError = io.qwenpaw.node.data.remote.ErrorText.of(e) }
             loadingAgents = false
         }
+    }
+
+    // 扫码结果：填入令牌、切到扫码登录；第 1 步还没有地址时用二维码里的第一条。
+    LaunchedEffect(scannedPair) {
+        val pair = scannedPair ?: return@LaunchedEffect
+        loginMode = io.qwenpaw.node.data.CredentialMode.TOKEN
+        accessToken = pair.token
+        if (url.isBlank() && pair.addresses.isNotEmpty()) {
+            url = pair.addresses.first()
+            verified = false
+            needsLogin = null
+        }
+        onConsumeScannedPair()
     }
 
     // 进入第 2 步时先问服务端要不要登录；不需要就直接推到第 3 步。
@@ -251,7 +287,7 @@ fun InstanceWizard(
             needsLogin = runCatching { onCheckAuth(url.trim()) }.getOrDefault(false)
             checkingAuth = false
         }
-        if (needsLogin == false) {
+        if (needsLogin == false && loginMode == io.qwenpaw.node.data.CredentialMode.PASSWORD) {
             // 只在首次判定时提示；从第 3 步返回时不再重复弹，避免每次返回都被打断。
             if (fresh) {
                 Toast.makeText(
@@ -338,10 +374,19 @@ fun InstanceWizard(
             2 -> StepLogin(
                 checking = checkingAuth || checkingLogin,
                 needsLogin = needsLogin == true,
+                mode = loginMode,
+                onMode = {
+                    loginMode = it
+                    loginIssue = null
+                },
                 username = username,
                 onUsername = { username = it },
                 password = password,
                 onPassword = { password = it },
+                token = accessToken,
+                onToken = { accessToken = it },
+                canScan = onOpenScanner != null,
+                onScan = { onOpenScanner?.invoke() },
             )
 
             else -> StepAgent(
@@ -378,9 +423,16 @@ fun InstanceWizard(
             // 检测到安全风险时先要求读完提示（对话框未确认前这一步不可点），
             // 否则「下一步」会被用户直接点掉，提示等于没出现过。
             1 -> verified && !verifying && securityNotice == null
-            2 -> needsLogin == true &&
-                username.isNotBlank() && password.isNotBlank() &&
-                !checkingAuth && !checkingLogin
+            2 -> when (loginMode) {
+                io.qwenpaw.node.data.CredentialMode.TOKEN ->
+                    accessToken.isNotBlank() && !checkingAuth && !checkingLogin
+
+                io.qwenpaw.node.data.CredentialMode.PASSWORD ->
+                    needsLogin == true &&
+                        username.isNotBlank() && password.isNotBlank() &&
+                        !checkingAuth && !checkingLogin
+            }
+
             else -> agentId.isNotBlank() && !connecting
         }
         WizardButton(
@@ -398,9 +450,12 @@ fun InstanceWizard(
             onClick = {
                 when (step) {
                     1 -> step = 2
-                    // 先把账号发给服务端核对。写错账号的人应当停在这一步，
-                    // 而不是进到第 3 步才发现拉不到智能体。
-                    2 -> if (!checkingLogin) {
+                    // 扫码登录没有账号可核对：令牌的有效性留到第 3 步读列表时暴露。
+                    2 -> if (checkingLogin) {
+                        return@WizardButton
+                    } else if (loginMode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+                        step = 3
+                    } else {
                         checkingLogin = true
                         loginIssue = null
                         scope.launch {
@@ -431,7 +486,14 @@ fun InstanceWizard(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .clickable(enabled = !connecting && !checkingLogin) {
-                        step = wizardBackStep(step, needsLogin)
+                        step = wizardBackStep(
+                            step,
+                            if (loginMode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+                                null
+                            } else {
+                                needsLogin
+                            },
+                        )
                     }
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             )
@@ -791,16 +853,130 @@ private fun StepServer(
     }
 }
 
-/** 第 2 步：只在服务端开启登录时才出现。 */
+/**
+ * 第 2 步：扫码登录优先，账号密码作为原有方式保留。
+ *
+ * 扫码一次即取得地址与令牌，不需要在手机上输入密码；令牌由 Web 控制台的
+ * 「设备配对」签发，依赖配套插件 0.4.3 及以上。
+ */
 @Composable
 private fun StepLogin(
     checking: Boolean,
     needsLogin: Boolean,
+    mode: io.qwenpaw.node.data.CredentialMode,
+    onMode: (io.qwenpaw.node.data.CredentialMode) -> Unit,
     username: String,
     onUsername: (String) -> Unit,
     password: String,
     onPassword: (String) -> Unit,
+    token: String,
+    onToken: (String) -> Unit,
+    canScan: Boolean,
+    onScan: () -> Unit,
 ) {
+    Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+        Chip(
+            text = stringResource(R.string.wizard_login_mode_scan),
+            selected = mode == io.qwenpaw.node.data.CredentialMode.TOKEN,
+            onClick = { onMode(io.qwenpaw.node.data.CredentialMode.TOKEN) },
+        )
+        Chip(
+            text = stringResource(R.string.wizard_login_mode_password),
+            selected = mode == io.qwenpaw.node.data.CredentialMode.PASSWORD,
+            onClick = { onMode(io.qwenpaw.node.data.CredentialMode.PASSWORD) },
+        )
+    }
+    Spacer(Modifier.height(14.dp))
+
+    if (mode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+        // 首次使用的人容易以为 QwenPaw 本身就能发这枚令牌；把依赖放在最前面、
+        // 用带底色与边框的提示卡，不依赖用户去读文档。
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.secondaryContainer)
+                .border(
+                    1.dp,
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                    RoundedCornerShape(10.dp),
+                )
+                .padding(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = QwenIcons.info,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.wizard_scan_bridge_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.wizard_scan_bridge_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        if (canScan) {
+            OutlinedTextField(
+                value = token,
+                onValueChange = onToken,
+                singleLine = true,
+                placeholder = { Text(stringResource(R.string.wizard_scan_placeholder)) },
+                visualTransformation = PasswordVisualTransformation(),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.wizard_token_manual),
+                style = MaterialTheme.typography.labelSmall,
+                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = stringResource(
+                    if (token.isBlank()) R.string.wizard_scan_button else R.string.wizard_scan_again,
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                    .clickable(onClick = onScan)
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            )
+        } else {
+            Text(
+                text = stringResource(R.string.wizard_scan_unavailable),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        if (checking) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.wizard_checking_login),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        return
+    }
+
     if (checking) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)

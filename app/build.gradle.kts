@@ -33,8 +33,8 @@ android {
         applicationId = "io.qwenpaw.node"
         minSdk = 26
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.7.1-b"
+        versionCode = 23
+        versionName = "0.7.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 「关于」页里展示的仓库地址，单独抽成 BuildConfig 字段，
@@ -178,6 +178,15 @@ dependencies {
     // 头像可能是 GIF。coil-gif 提供逐帧播放的解码器，静态位图只能显示首帧。
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-gif:2.7.0")
+
+    // 扫描配对二维码。只用 CameraX 取帧、自己把 Y 平面喂给 ZXing 核心库，
+    // 不用 zxing-android-embedded：那条路把解码绑在 Android 视图上，
+    // 解码函数就无法在 JVM 单测里跑。
+    implementation("androidx.camera:camera-core:1.5.3")
+    implementation("androidx.camera:camera-camera2:1.5.3")
+    implementation("androidx.camera:camera-lifecycle:1.5.3")
+    implementation("androidx.camera:camera-view:1.5.3")
+    implementation("com.google.zxing:core:3.5.4")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")

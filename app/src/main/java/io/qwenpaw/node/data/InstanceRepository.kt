@@ -28,6 +28,30 @@ data class CredentialLoginResult(
     val authRequired: Boolean,
 )
 
+/** 用现成令牌建立实例的结果。 */
+data class TokenConnectResult(
+    val instance: InstanceConfig,
+    /** 服务端承认的令牌所属用户；反代分支或未启用登录时为 null。 */
+    val username: String?,
+    /** 服务端未启用登录认证，这枚令牌不会被执行链校验。 */
+    val authDisabled: Boolean,
+)
+
+/** 令牌试探的结论。 */
+sealed interface TokenCheck {
+    /** 服务端承认这枚令牌；[username] 取服务端响应，可能为 null。 */
+    data class Valid(val username: String?) : TokenCheck
+
+    /** 服务端未启用登录认证，令牌无从校验。 */
+    data object AuthDisabled : TokenCheck
+
+    /** 令牌不可用，[reason] 是给用户看的原因。 */
+    data class Invalid(val reason: String) : TokenCheck
+
+    /** 地址前面挡着反向代理的 HTTP Basic，先填那一层凭据。 */
+    data object ProxyAuthRequired : TokenCheck
+}
+
 /**
  * 一次地址验证的结果。
  *
@@ -98,7 +122,7 @@ internal fun hostedPlatformOf(host: String): HostedPlatform? {
  * 所有网络操作都在 IO 线程执行，token 只保存在加密偏好与内存配置中。
  */
 class InstanceRepository(
-    private val store: InstanceStore,
+    private val store: io.qwenpaw.node.data.local.InstanceStorage,
     private val api: QwenPawApi,
     private val network: NetworkMonitor? = null,
 ) {
@@ -474,6 +498,26 @@ class InstanceRepository(
     }
 
     /**
+     * 用访问令牌探测地址并列出智能体，不写盘。
+     *
+     * 扫码登录在首连引导第 3 步要用它：此时还没有实例，也没有账号密码。
+     * 令牌是否有效由服务端回答（反代实例经业务端点校验）。
+     */
+    suspend fun probeAgentsWithToken(
+        baseUrls: List<String>,
+        token: String,
+        basicAuth: BasicAuth? = null,
+    ): List<AgentDto> {
+        val normalized = normalize(baseUrls)
+        val (_, agents) = withFallback(normalized, null, "default", basicAuth = basicAuth) { probe ->
+            val conn = Connection(probe.baseUrl, token, "default", probe.basicAuth)
+            api.verifyTokenDetail(conn)
+            api.agents(conn)
+        }
+        return agents
+    }
+
+    /**
      * 编辑实例时验证并更新登录凭据。
      *
      * **先登录成功再落盘**：失败时旧 token 与旧用户名保持不变，用户不会因为
@@ -603,17 +647,109 @@ class InstanceRepository(
                 agents = agents,
             )
         }.getOrNull()
-        val config = InstanceConfig(
-            id = existingId ?: UUID.randomUUID().toString(),
-            name = name.ifBlank { hit.baseUrl },
-            addresses = entries,
+        return persistConnection(
+            existingId = existingId,
+            name = name,
+            entries = entries,
             agentId = resolvedAgent,
-            serverVersion = version,
+            hitUrl = hit.baseUrl,
             token = resolvedToken,
             username = resolvedUser,
+            version = version,
+            basicAuth = basicAuth,
+            identity = identity,
+            credentialMode = InstanceConfig.CREDENTIAL_MODE_PASSWORD,
+        )
+    }
+
+    /**
+     * 直接用一枚现成的访问令牌建立实例。
+     *
+     * 与 [connect] 的差别只有一处：令牌不是换来的，而是用户粘贴或扫码得到的，
+     * 因此没有 `login` 那一步。令牌本身仍需由服务端校验，校验不通过就不落盘——
+     * 否则用户会带着一枚假令牌进主界面，每一条消息都 401。
+     *
+     * 服务端未启用登录时令牌不会被执行链校验，这里照样保存并返回
+     * [authDisabled] 为 true，由界面说明这一点；直接拒绝会让「先存实例再开登录」
+     * 这种顺序变得无法操作。
+     */
+    suspend fun connectWithToken(
+        name: String,
+        addresses: List<AddressEntry>,
+        token: String,
+        agentId: String,
+        existingId: String? = null,
+        basicAuth: BasicAuth? = null,
+    ): TokenConnectResult {
+        val entries = normalizeEntries(addresses)
+        val normalized = entries.map { it.url }
+        var version: String? = null
+        var username: String? = null
+        var authDisabled = false
+
+        val (hit, agents) = withFallback(normalized, null, agentId, basicAuth = basicAuth) { probe ->
+            val status = api.authStatus(probe.baseUrl, probe.basicAuth)
+            if (!loginRequired(status)) authDisabled = true
+            val conn = Connection(probe.baseUrl, token, agentId, probe.basicAuth)
+            // 反代开启时 `/api/auth/verify` 读不到 `?token=`，校验改由业务端点完成。
+            val check = api.verifyTokenDetail(conn)
+            username = check.username?.takeIf { it.isNotBlank() }
+            version = runCatching { api.version(probe.baseUrl, probe.basicAuth).version }.getOrNull()
+            api.agents(conn)
+        }
+        val resolvedAgent = when {
+            agents.any { it.id == agentId } -> agentId
+            agents.isNotEmpty() -> agents.first().id
+            else -> agentId
+        }
+        val identity = runCatching {
+            identityOf(
+                conn = Connection(hit.baseUrl, token, resolvedAgent, basicAuth),
+                agents = agents,
+            )
+        }.getOrNull()
+        val config = persistConnection(
+            existingId = existingId,
+            name = name,
+            entries = entries,
+            agentId = resolvedAgent,
+            hitUrl = hit.baseUrl,
+            token = token,
+            username = username,
+            version = version,
+            basicAuth = basicAuth,
+            identity = identity,
+            credentialMode = InstanceConfig.CREDENTIAL_MODE_TOKEN,
+        )
+        return TokenConnectResult(config, username, authDisabled)
+    }
+
+    /** 连接成功后的落盘与旧值合并。两种登录方式只在上游取令牌那一步不同。 */
+    private fun persistConnection(
+        existingId: String?,
+        name: String,
+        entries: List<AddressEntry>,
+        agentId: String,
+        hitUrl: String,
+        token: String?,
+        username: String?,
+        version: String?,
+        basicAuth: BasicAuth?,
+        identity: InstanceIdentity?,
+        credentialMode: String,
+    ): InstanceConfig {
+        val config = InstanceConfig(
+            id = existingId ?: UUID.randomUUID().toString(),
+            name = name.ifBlank { hitUrl },
+            addresses = entries,
+            agentId = agentId,
+            serverVersion = version,
+            token = token,
+            username = username,
             basicUser = basicAuth?.user,
             basicPassword = basicAuth?.password,
             identity = identity,
+            credentialMode = credentialMode,
         )
         val list = _instances.value.toMutableList()
         val index = list.indexOfFirst { it.id == config.id }
@@ -639,10 +775,53 @@ class InstanceRepository(
         }
         if (index >= 0) list[index] = merged else list += merged
         // 记住本次运行实际命中的地址（仅内存），后续请求直接用这条，避免每条消息都重试坏地址。
-        runtimeHit[bucketKey(merged.id)] = hit.baseUrl
+        runtimeHit[bucketKey(merged.id)] = hitUrl
         persist(list)
         setActive(merged.id)
         return merged
+    }
+
+    /**
+     * 试探一枚令牌在这组地址上是否可用，不写盘。
+     *
+     * 编辑实例时表单要回答「这枚令牌能不能用」，但用户还没点保存，
+     * 不能动已有配置。
+     */
+    suspend fun checkToken(
+        baseUrls: List<String>,
+        token: String,
+        basicAuth: BasicAuth? = null,
+    ): TokenCheck {
+        val normalized = runCatching { normalize(baseUrls) }.getOrElse { return TokenCheck.Invalid(ErrorText.of(it)) }
+        return try {
+            val (_, result) = withFallback(normalized, null, "default", basicAuth = basicAuth) { probe ->
+                val status = api.authStatus(probe.baseUrl, probe.basicAuth)
+                if (!loginRequired(status)) {
+                    TokenCheck.AuthDisabled
+                } else {
+                    val check = api.verifyTokenDetail(
+                        Connection(probe.baseUrl, token, "default", probe.basicAuth),
+                    )
+                    TokenCheck.Valid(check.username?.takeIf { it.isNotBlank() })
+                }
+            }
+            result
+        } catch (e: ApiException) {
+            if (e.code == 401 &&
+                ErrorText.classify401(e.detail ?: e.message, e.wwwAuthenticate, true) ==
+                ErrorText.AuthFailure.PROXY_BASIC
+            ) {
+                TokenCheck.ProxyAuthRequired
+            } else if (e.code == 401) {
+                // 这里的 401 与「登录已失效」不是一回事：用户手里这枚令牌可能从未生效。
+                // 通用文案会把他引去「退出登录」，那个动作在令牌模式下没有意义。
+                TokenCheck.Invalid(Texts.get(R.string.drest_bad_token))
+            } else {
+                TokenCheck.Invalid(ErrorText.of(e))
+            }
+        } catch (e: Exception) {
+            TokenCheck.Invalid(ErrorText.of(e))
+        }
     }
 
     /**

@@ -276,4 +276,30 @@ class InstanceConfigTest {
         )
         assertEquals("http://a:8088", config.labelOf("http://a:8088"))
     }
+
+    /** 旧配置没有 `credentialMode` 键，读到默认值即按密码方式处理。 */
+    @Test
+    fun `missing credential mode reads as password`() {
+        val config = json.decodeFromString<InstanceConfig>(
+            """{"id":"1","name":"n","agentId":"default","addresses":[{"url":"http://a:8088"}]}""",
+        )
+        assertEquals(InstanceConfig.CREDENTIAL_MODE_PASSWORD, config.credentialMode)
+        assertTrue(!config.usesTokenCredential)
+    }
+
+    @Test
+    fun `token credential mode round trips`() {
+        val config = InstanceConfig(
+            id = "1",
+            name = "n",
+            agentId = "default",
+            addresses = listOf(AddressEntry(url = "http://a:8088")),
+            credentialMode = InstanceConfig.CREDENTIAL_MODE_TOKEN,
+        )
+        val encoded = json.encodeToString(config)
+        val decoded = json.decodeFromString<InstanceConfig>(encoded)
+        assertEquals(InstanceConfig.CREDENTIAL_MODE_TOKEN, decoded.credentialMode)
+        assertTrue(decoded.usesTokenCredential)
+        assertTrue(encoded.contains("\"credentialMode\""))
+    }
 }

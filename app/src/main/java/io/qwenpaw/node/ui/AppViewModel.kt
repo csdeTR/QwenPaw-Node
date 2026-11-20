@@ -232,7 +232,29 @@ data class AppState(
      * 非空即弹确认窗；确认或取消后清空。只拦服务器实例，智能体切换不受影响。
      */
     val pendingInstanceSwitch: InstanceConfig? = null,
+    /** 扫码得到的配对码；表单消费后清空。null 表示没有待处理的扫码结果。 */
+    val scannedPair: io.qwenpaw.node.data.qr.TokenPair? = null,
+    /**
+     * 令牌模式下检测到配套插件不可用时的提示；null 表示不显示。
+     *
+     * 不阻断保存：令牌也可能来自其它途径，只是拿不到网页端的设备配对。
+     */
+    val pairingNotice: PairingNotice? = null,
 )
+
+/**
+ * 「拿不到配对码」的说明。
+ *
+ * [NO_BRIDGE] 与 [BRIDGE_TOO_OLD] 给用户的下一步不同：前者要装插件，
+ * 后者要升级插件，但两者都还可以从别的途径取令牌。
+ */
+data class PairingNotice(
+    val reason: Reason,
+    /** 旧插件时探测到的版本号，用于说明「差在哪」。 */
+    val pluginVersion: String = "",
+) {
+    enum class Reason { NO_BRIDGE, BRIDGE_TOO_OLD }
+}
 
 class AppViewModel(
     private val repository: InstanceRepository,
@@ -548,6 +570,8 @@ class AppViewModel(
             basicUser = draft.basicUser,
             basicPassword = draft.basicPassword,
             onResult = onResult,
+            mode = draft.mode,
+            token = draft.token,
         )
     }
 
@@ -569,6 +593,9 @@ class AppViewModel(
         /** 反向代理的 HTTP Basic 凭据；两个都非空才生效。 */
         basicUser: String = "",
         basicPassword: String = "",
+        /** 连接方式。TOKEN 时 [password] 位置放的是令牌，[token] 与之等价。 */
+        mode: io.qwenpaw.node.data.CredentialMode = io.qwenpaw.node.data.CredentialMode.PASSWORD,
+        token: String = "",
     ) {
         if (_state.value.connecting) return
         _state.update { it.copy(connecting = true, connectError = null) }
@@ -576,20 +603,32 @@ class AppViewModel(
             basicUser.trim(),
             basicPassword,
         ).takeIf { basicUser.isNotBlank() && basicPassword.isNotBlank() }
+        val resolvedName = InstanceDraft(
+            addresses = addresses,
+            instanceName = instanceName,
+        ).resolvedName()
+        val useToken = mode == io.qwenpaw.node.data.CredentialMode.TOKEN
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    repository.connect(
-                        name = InstanceDraft(
+                    if (useToken) {
+                        repository.connectWithToken(
+                            name = resolvedName,
                             addresses = addresses,
-                            instanceName = instanceName,
-                        ).resolvedName(),
-                        addresses = addresses,
-                        username = username.takeIf { it.isNotBlank() },
-                        password = password.takeIf { it.isNotBlank() },
-                        agentId = agentId.ifBlank { "default" },
-                        basicAuth = basicAuth,
-                    )
+                            token = token.trim(),
+                            agentId = agentId.ifBlank { "default" },
+                            basicAuth = basicAuth,
+                        ).instance
+                    } else {
+                        repository.connect(
+                            name = resolvedName,
+                            addresses = addresses,
+                            username = username.takeIf { it.isNotBlank() },
+                            password = password.takeIf { it.isNotBlank() },
+                            agentId = agentId.ifBlank { "default" },
+                            basicAuth = basicAuth,
+                        )
+                    }
                 }
             }.onSuccess { config ->
                 firstConnectInstanceId = config.id
@@ -606,6 +645,7 @@ class AppViewModel(
                 )
                 // 401 且成因是「token 失效」时补一句去处：光说「登录已失效」，
                 // 用户在连接页上找不到任何可以「重新登录」的入口。
+                // 令牌模式下那个入口根本不存在，文案要指向网页控制台。
                 //
                 // 失败原因不是 401（例如半开连接、DNS 抖动）时再向 `/auth/verify`
                 // 问一次：token 真的被吊销了要引导重新登录，网络问题只需重试，
@@ -621,16 +661,62 @@ class AppViewModel(
                 _state.update {
                     it.copy(
                         connecting = false,
-                        connectError = if (expired || revoked) {
-                            Texts.get(R.string.app_connect_error_logout_hint, hint)
-                        } else {
-                            hint
+                        connectError = when {
+                            expired || revoked -> if (useToken) {
+                                Texts.get(R.string.app_connect_error_token_hint, hint)
+                            } else {
+                                Texts.get(R.string.app_connect_error_logout_hint, hint)
+                            }
+
+                            else -> hint
                         },
                     )
                 }
                 onResult(false)
             }
         }
+    }
+
+    /**
+     * 令牌模式下检测配套插件能否生成配对码。
+     *
+     * 判据是能力名 `pairing` 而不是版本号：客户端只认 `capabilities`，
+     * 版本号只给界面显示。`Ready` 但缺这个能力即插件低于 0.4.3。
+     * [BridgeStatus.Unknown]（401、连不上）不提示——那说明问不出来，
+     * 说成「没有插件」会把用户引去装一个已经装好的东西。
+     */
+    fun notePairingCapability(status: io.qwenpaw.node.data.plugin.BridgeStatus) {
+        val notice = when (status) {
+            is io.qwenpaw.node.data.plugin.BridgeStatus.Absent ->
+                PairingNotice(PairingNotice.Reason.NO_BRIDGE)
+
+            is io.qwenpaw.node.data.plugin.BridgeStatus.Ready ->
+                if (status.info.supports(io.qwenpaw.node.data.qr.PairQr.CAPABILITY)) {
+                    null
+                } else {
+                    PairingNotice(
+                        PairingNotice.Reason.BRIDGE_TOO_OLD,
+                        status.info.pluginVersion,
+                    )
+                }
+
+            io.qwenpaw.node.data.plugin.BridgeStatus.Unknown -> null
+        }
+        if (notice != null) _state.update { it.copy(pairingNotice = notice) }
+    }
+
+    fun dismissPairingNotice() {
+        _state.update { it.copy(pairingNotice = null) }
+    }
+
+    /** 扫码/相册识别得到配对码后交给表单。 */
+    fun applyScannedPair(pair: io.qwenpaw.node.data.qr.TokenPair) {
+        _state.update { it.copy(scannedPair = pair) }
+    }
+
+    /** 表单已消费扫码结果。 */
+    fun consumeScannedPair() {
+        _state.update { it.copy(scannedPair = null) }
     }
 
     fun useSaved(instance: InstanceConfig) {
@@ -707,7 +793,10 @@ class AppViewModel(
                 username = instance.username,
                 basicUser = instance.basicUser,
                 basicPassword = instance.basicPassword,
+                token = instance.token,
             ),
+            mode = draft.mode,
+            storedToken = instance.token,
         )
         val base = instance.copy(
             name = draft.resolvedName(),
@@ -747,6 +836,37 @@ class AppViewModel(
                         )
                         if (!login.authRequired) {
                             chatViewModel.notify(Texts.get(R.string.connect_cred_auth_not_required))
+                        }
+                        null
+                    },
+                    onFailure = { ErrorText.of(it) },
+                )
+            }
+
+            is CredentialPlan.UseToken -> {
+                val basic = plan.basicUser?.let { BasicAuth(it, plan.basicPassword.orEmpty()) }
+                val result = withContext(Dispatchers.IO) {
+                    runCatching {
+                        repository.connectWithToken(
+                            name = base.name,
+                            addresses = base.addresses,
+                            token = plan.token,
+                            agentId = base.agentId,
+                            existingId = base.id,
+                            basicAuth = basic,
+                        )
+                    }
+                }
+                result.fold(
+                    onSuccess = { connected ->
+                        editInstance(
+                            connected.instance.copy(
+                                basicUser = plan.basicUser,
+                                basicPassword = plan.basicPassword,
+                            ),
+                        )
+                        if (connected.authDisabled) {
+                            chatViewModel.notify(Texts.get(R.string.connect_token_auth_disabled))
                         }
                         null
                     },
@@ -877,9 +997,22 @@ class AppViewModel(
         /** 已保存实例的 token；带它才能读到配套插件版本。 */
         token: String? = null,
     ): io.qwenpaw.node.data.VerifyResult = withContext(Dispatchers.IO) {
-        repository.verify(hosts, { index, total, url ->
+        val result = repository.verify(hosts, { index, total, url ->
             onAttempt(io.qwenpaw.node.ui.settings.VerifyAttempt(index, total, url))
         }, instanceId, basicAuth, token)
+        // 令牌模式点「验证连接」时顺带给出插件结论：真的能拿到令牌却拿不到配对码，
+        // 用户才知道是插件问题，而不是自己令牌填错了。判据走 capabilities。
+        if (!token.isNullOrBlank()) notePairingCapability(result.bridge)
+        result
+    }
+
+    /** 用访问令牌读智能体列表（扫码登录的下一步）。 */
+    suspend fun loadAgentsWithToken(
+        hosts: List<String>,
+        token: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth? = null,
+    ): List<io.qwenpaw.node.data.model.AgentDto> = withContext(Dispatchers.IO) {
+        repository.probeAgentsWithToken(hosts, token, basicAuth)
     }
 
     /** 服务端是否要求登录。用于引导页第 2 步判断要不要填账号。 */
@@ -1527,6 +1660,24 @@ class AppViewModel(
     fun activeBaseUrl(): String? =
         repository.active()?.let { repository.resolvedBaseUrl(it) }
 
+    /** 频道列表与扫码授权。 */
+    private var channelHolder: io.qwenpaw.node.ui.channels.ChannelViewModel? = null
+
+    val channels: io.qwenpaw.node.ui.channels.ChannelViewModel
+        get() = channelHolder ?: io.qwenpaw.node.ui.channels.ChannelViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { channelHolder = it }
+
+    /** 本地模型：运行时状态、清单与下载进度。 */
+    private var localModelsHolder: io.qwenpaw.node.ui.localmodels.LocalModelsViewModel? = null
+
+    val localModels: io.qwenpaw.node.ui.localmodels.LocalModelsViewModel
+        get() = localModelsHolder ?: io.qwenpaw.node.ui.localmodels.LocalModelsViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { localModelsHolder = it }
+
     /** 从其他客户端导入。 */
     private var portabilityHolder: io.qwenpaw.node.ui.agents.PortabilityViewModel? = null
 
@@ -1731,6 +1882,8 @@ class AppViewModel(
             runtimeHolder?.clear()
             portabilityHolder?.clear()
             appCenterHolder?.clear()
+            channelHolder?.clear()
+            localModelsHolder?.clear()
             // 同一实例换智能体是允许的：终端会话保留，收尾仍按各标签自己的分组。
             val sameInstance = previous.substringBefore('|') == instance.id
             if (!sameInstance) {

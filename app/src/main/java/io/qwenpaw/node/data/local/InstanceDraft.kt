@@ -29,6 +29,13 @@ data class InstanceDraft(
      */
     val basicUser: String = "",
     val basicPassword: String = "",
+    /**
+     * 连接方式。PASSWORD 用 [username] / [password] 换令牌；
+     * TOKEN 直接把 [token] 当登录凭据。
+     */
+    val mode: io.qwenpaw.node.data.CredentialMode = io.qwenpaw.node.data.CredentialMode.PASSWORD,
+    /** 访问令牌。只在 [mode] 为 TOKEN 时生效；编辑时留空表示保留已保存的令牌。 */
+    val token: String = "",
 ) {
     /**
      * 落库用的名称。

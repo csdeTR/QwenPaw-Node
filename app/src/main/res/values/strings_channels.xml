@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 频道页 -->
+    <string name="channels_title">频道</string>
+    <string name="channels_status_enabled">已启用</string>
+    <string name="channels_status_disabled">未启用</string>
+    <string name="channels_no_qr">不支持扫码授权</string>
+    <string name="channels_plugin_missing">频道插件未安装</string>
+    <string name="channels_unavailable">频道不可用</string>
+    <string name="channels_refresh">刷新</string>
+    <string name="channels_install_title">频道插件未安装</string>
+    <string name="channels_install_message">「%1$s」的频道插件尚未安装。安装后即可扫码授权，是否现在安装？</string>
+    <string name="channels_install">安装频道插件</string>
+    <string name="channels_install_started">已开始安装频道插件，稍后会自动刷新</string>
+    <string name="channels_unavailable_title">频道不可用</string>
+    <string name="channels_unavailable_message">服务端报告该频道不可用：%1$s</string>
+    <string name="channels_unavailable_unknown">未提供原因</string>
+    <string name="channels_empty">服务端没有可用的频道</string>
+    <string name="channels_load_failed">读取频道列表失败：%1$s</string>
+
+    <!-- 频道名称 -->
+    <string name="channels_name_wechat">微信</string>
+    <string name="channels_name_wecom">企业微信</string>
+    <string name="channels_name_dingtalk">钉钉</string>
+    <string name="channels_name_feishu">飞书</string>
+    <string name="channels_name_qq">QQ</string>
+    <string name="channels_name_telegram">Telegram</string>
+    <string name="channels_name_discord">Discord</string>
+    <string name="channels_name_slack">Slack</string>
+    <string name="channels_name_mattermost">Mattermost</string>
+    <string name="channels_name_mqtt">MQTT</string>
+    <string name="channels_name_console">控制台</string>
+    <string name="channels_name_matrix">Matrix</string>
+    <string name="channels_name_voice">语音</string>
+    <string name="channels_name_sip">SIP</string>
+    <string name="channels_name_xiaoyi">小艺</string>
+    <string name="channels_name_yuanbao">元宝</string>
+    <string name="channels_name_imessage">iMessage</string>
+    <string name="channels_name_onebot">OneBot</string>
+
+    <!-- 二维码面板 -->
+    <string name="channel_qr_title">扫码授权</string>
+    <string name="channel_qr_getting">正在获取二维码</string>
+    <string name="channel_qr_saving">正在保存授权信息</string>
+    <string name="channel_qr_waiting">请使用对应应用扫描二维码</string>
+    <string name="channel_qr_scanned">已扫码，请在手机上确认授权</string>
+    <string name="channel_qr_raw_status">当前状态：%1$s</string>
+    <string name="channel_qr_expired">二维码已过期，请重新获取</string>
+    <string name="channel_qr_failed">授权失败：%1$s</string>
+    <string name="channel_qr_failed_unknown">授权失败，请在服务端查看日志</string>
+    <string name="channel_qr_refresh">重新获取</string>
+    <string name="channel_qr_close">关闭</string>
+    <string name="channel_qr_load_failed">获取二维码失败：%1$s</string>
+    <string name="channel_qr_save_failed">授权已通过，但保存凭据失败：%1$s</string>
+    <string name="channel_qr_enabled">已启用「%1$s」</string>
+
+    <!-- 不支持的频道 -->
+    <string name="channel_qr_unsupported_title">暂不支持扫码授权</string>
+    <string name="channel_qr_unsupported_message">「%1$s」暂不支持在手机上扫码授权，完整配置表单将在 0.7.4 提供。</string>
+    <string name="channel_qr_dismiss">知道了</string>
+</resources>

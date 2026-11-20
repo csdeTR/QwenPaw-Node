@@ -43,6 +43,7 @@
     <!-- AppViewModel 的运行与登出提示 -->
     <string name="app_log_address_switch">地址从 %1$s 切换到 %2$s</string>
     <string name="app_connect_error_logout_hint">%1$s\n在「设置 → 服务器」里找到该实例，点「退出登录」，再重新输入账号密码</string>
+    <string name="app_connect_error_token_hint">%1$s\n该实例使用访问令牌登录。请在 Web 控制台的「设备配对」里重新生成令牌，再回到实例编辑页填入新的令牌</string>
     <string name="app_auth_disabled_local_cleared">该实例未启用 Web 登录认证，本地凭据已清除</string>
     <string name="app_revoke_failed">吊销凭据失败：%1$s；本地凭据已清除</string>
     <string name="app_logged_out">已退出登录，重新连接需再次输入账号密码</string>

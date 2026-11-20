@@ -3,12 +3,23 @@ package io.qwenpaw.node.data
 import androidx.annotation.StringRes
 import io.qwenpaw.node.R
 
-/** 编辑实例时界面上已有的凭据。密码不回显，因此只能用于「留空保留」。 */
+/** 编辑实例时界面上已有的凭据。密码与令牌都不回显，因此只能用于「留空保留」。 */
 data class StoredCredentials(
     val username: String?,
     val basicUser: String?,
     val basicPassword: String?,
+    /** 已保存的访问令牌；令牌模式下留空表示保留它。 */
+    val token: String? = null,
 )
+
+/** 连接时用哪一套凭据。 */
+enum class CredentialMode {
+    /** 用户名与密码，向 `/api/auth/login` 换取令牌（原有方式）。 */
+    PASSWORD,
+
+    /** 直接用令牌（从网页控制台设备配对、扫码或其他方式取得）。 */
+    TOKEN,
+}
 
 /** 编辑实例时对登录凭据与反代凭据的处理计划。 */
 sealed interface CredentialPlan {
@@ -26,6 +37,13 @@ sealed interface CredentialPlan {
         val basicPassword: String?,
     ) : CredentialPlan
 
+    /** 用一枚现成的令牌校验后落盘。 */
+    data class UseToken(
+        val token: String,
+        val basicUser: String?,
+        val basicPassword: String?,
+    ) : CredentialPlan
+
     /** 输入不完整，界面直接显示原因，不发网络请求、不改配置。 */
     data class Invalid(@StringRes val messageRes: Int) : CredentialPlan
 }
@@ -33,9 +51,11 @@ sealed interface CredentialPlan {
 /**
  * 决定编辑实例时要不要重新登录。
  *
- * 两条与直觉相反的规则：
- * 1. **密码留空表示保留原值**，只在已有值生效；没有旧密码时留空是输入不完整。
+ * 三条与直觉相反的规则：
+ * 1. **密码与令牌留空都表示保留原值**，只在已有值生效；没有旧值时留空是输入不完整。
  * 2. **只改用户名不足以重新登录**，必须同时填密码，否则无法验证新账号。
+ * 3. **换登录方式本身就是一次重新认证**：从密码改成令牌而令牌留空，不能静默保留
+ *    密码换来的旧令牌——那样用户以为换了方式，实际什么都没变。
  */
 internal fun planCredentials(
     typedUsername: String,
@@ -43,8 +63,10 @@ internal fun planCredentials(
     typedBasicUser: String,
     typedBasicPassword: String,
     stored: StoredCredentials,
+    mode: CredentialMode = CredentialMode.PASSWORD,
+    /** 已保存的令牌；为 null 表示该实例还没有令牌。 */
+    storedToken: String? = null,
 ): CredentialPlan {
-    val username = typedUsername.trim()
     val basicUser = typedBasicUser.trim()
 
     val resolvedBasic: Pair<String?, String?> = when {
@@ -57,6 +79,24 @@ internal fun planCredentials(
         else -> basicUser to typedBasicPassword
     }
 
+    if (mode == CredentialMode.TOKEN) {
+        val token = typedPassword.trim()
+        return when {
+            token.isNotEmpty() -> CredentialPlan.UseToken(
+                token = token,
+                basicUser = resolvedBasic.first,
+                basicPassword = resolvedBasic.second,
+            )
+
+            !storedToken.isNullOrBlank() && stored.username.isNullOrBlank() ->
+                // 该实例本来就是令牌方式，留空即保留。
+                CredentialPlan.UseExisting(resolvedBasic.first, resolvedBasic.second)
+
+            else -> CredentialPlan.Invalid(R.string.connect_cred_token_required)
+        }
+    }
+
+    val username = typedUsername.trim()
     return when {
         username.isBlank() && typedPassword.isBlank() ->
             CredentialPlan.UseExisting(resolvedBasic.first, resolvedBasic.second)

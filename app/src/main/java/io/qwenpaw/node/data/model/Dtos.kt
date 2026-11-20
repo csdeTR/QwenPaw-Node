@@ -467,6 +467,18 @@ data class AuthStatusDto(
     @SerialName("has_users") val hasUsers: Boolean = false,
 )
 
+/**
+ * 令牌校验结果，对应 `GET /api/auth/verify`。
+ *
+ * 服务端返回 `{"valid": true, "username": "…"}`；未启用登录时 `username` 是空串。
+ * `username` 是**唯一可信的身份来源**，令牌载荷里解出的 subject 只用于展示。
+ */
+@Serializable
+data class VerifyTokenDto(
+    val valid: Boolean = false,
+    val username: String? = null,
+)
+
 /** 版本信息，对应 `GET /api/version`。 */
 @Serializable
 data class VersionDto(
@@ -2059,4 +2071,74 @@ data class MailAclActionEntryDto(
 @Serializable
 data class MailAclPendingCountDto(
     val count: Int = 0,
+)
+
+/**
+ * 频道二维码，对应 `GET /api/config/channels/{channel}/qrcode`。
+ *
+ * [qrcodeImg] 是**不带 `data:` 前缀**的 base64 PNG，渲染前要自己拼前缀或直接解码字节。
+ * [pollToken] 是轮询状态时唯一的凭据，有时效，离开页面即作废。
+ */
+@Serializable
+data class ChannelQrDto(
+    @SerialName("qrcode_img") val qrcodeImg: String = "",
+    @SerialName("poll_token") val pollToken: String = "",
+)
+
+/**
+ * 扫码状态，对应 `GET …/qrcode/status?token=`。
+ *
+ * 成功值因频道而异（微信 `confirmed`，其余 `success`），判定集中在
+ * [io.qwenpaw.node.data.channel.qrOutcome]，不要在界面里各写一份。
+ */
+@Serializable
+data class ChannelQrStatusDto(
+    val status: String = "",
+    val credentials: JsonObject = JsonObject(emptyMap()),
+)
+
+/** 本地模型运行时状态，对应 `GET /api/local-models/server`。 */
+@Serializable
+data class LocalModelServerDto(
+    val available: Boolean = false,
+    val installable: Boolean = false,
+    val installed: Boolean = false,
+    val port: Int? = null,
+    @SerialName("model_name") val modelName: String? = null,
+    val message: String? = null,
+)
+
+/**
+ * 可下载的本地模型，对应 `GET /api/local-models/models` 的元素。
+ *
+ * 服务端返回的是完整模型目录条目，这里只取界面用得到的四项；其余字段由
+ * `ignoreUnknownKeys` 丢弃。
+ */
+@Serializable
+data class LocalModelDto(
+    val id: String = "",
+    val name: String = "",
+    @SerialName("size_bytes") val sizeBytes: Long = 0,
+    val downloaded: Boolean = false,
+    /** 下载来源：`huggingface` / `modelscope` / `auto`。同一模型可能两个来源各一条。 */
+    val source: String? = null,
+)
+
+/**
+ * 下载进度，对应 `GET /api/local-models/models/download` 与
+ * `GET /api/local-models/server/download`。
+ *
+ * 服务端**没有百分比字段**，[totalBytes] 还可能为 null（大小未探明），
+ * 两种进度条形态由 [io.qwenpaw.node.data.localmodel.progressFraction] 决定。
+ */
+@Serializable
+data class LocalModelProgressDto(
+    val status: String = "",
+    @SerialName("model_name") val modelName: String? = null,
+    @SerialName("downloaded_bytes") val downloadedBytes: Long = 0,
+    @SerialName("total_bytes") val totalBytes: Long? = null,
+    @SerialName("speed_bytes_per_sec") val speedBytesPerSec: Double = 0.0,
+    val source: String? = null,
+    val error: String? = null,
+    @SerialName("local_path") val localPath: String? = null,
 )

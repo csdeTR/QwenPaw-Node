@@ -120,6 +120,14 @@ data class InstanceConfig(
     val basicPassword: String? = null,
     /** 上次成功连接时记录的身份指纹；没有指纹时不做一致性判断。 */
     val identity: InstanceIdentity? = null,
+    /**
+     * 上一次是用哪套凭据登录的：`"password"` 或 `"token"`。
+     *
+     * 只影响界面与提示语：令牌过期时要引导用户去网页控制台重新生成，
+     * 而不是「重新输入账号密码」——那个入口在令牌模式下根本不存在。
+     * 旧版本写入的 JSON 没有这个键，读到默认值即按密码方式处理。
+     */
+    val credentialMode: String = CREDENTIAL_MODE_PASSWORD,
 ) {
     /**
      * 反代凭据；两个字段都非空才生效。
@@ -197,6 +205,28 @@ data class InstanceConfig(
         }
         return this
     }
+
+    /** 是否用令牌登录。未知值按密码处理，与旧配置的默认一致。 */
+    val usesTokenCredential: Boolean
+        get() = credentialMode == CREDENTIAL_MODE_TOKEN
+
+    companion object {
+        const val CREDENTIAL_MODE_PASSWORD = "password"
+        const val CREDENTIAL_MODE_TOKEN = "token"
+    }
+}
+
+/**
+ * 实例配置的持久化接缝。
+ *
+ * 抽成接口只为可测：真正的实现要 Android Keystore，JVM 单测里造不出来，
+ * 而仓库的登录路径必须能断言「保存了什么」。
+ */
+interface InstanceStorage {
+    fun load(): List<InstanceConfig>
+    fun save(instances: List<InstanceConfig>)
+    fun activeId(): String?
+    fun setActiveId(id: String?)
 }
 
 /**
@@ -205,7 +235,7 @@ data class InstanceConfig(
  * token 写入 EncryptedSharedPreferences（由 Android Keystore 派生主密钥），
  * 明文只存在于内存中的 [InstanceConfig]。
  */
-class InstanceStore(context: Context) {
+class InstanceStore(context: Context) : InstanceStorage {
 
     private val prefs: SharedPreferences = runCatching {
         val masterKey = MasterKey.Builder(context)
@@ -225,7 +255,7 @@ class InstanceStore(context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    fun load(): List<InstanceConfig> {
+    override fun load(): List<InstanceConfig> {
         val raw = prefs.getString(KEY_INSTANCES, null) ?: return emptyList()
         val parsed = runCatching { json.decodeFromString<List<InstanceConfig>>(raw) }
             .getOrDefault(emptyList())
@@ -235,15 +265,15 @@ class InstanceStore(context: Context) {
         return migrated
     }
 
-    fun save(instances: List<InstanceConfig>) {
+    override fun save(instances: List<InstanceConfig>) {
         // 落盘前统一清掉旧字段：新版本只写 baseUrls。
         val clean = instances.map { it.migrated() }
         prefs.edit().putString(KEY_INSTANCES, json.encodeToString(clean)).apply()
     }
 
-    fun activeId(): String? = prefs.getString(KEY_ACTIVE, null)
+    override fun activeId(): String? = prefs.getString(KEY_ACTIVE, null)
 
-    fun setActiveId(id: String?) {
+    override fun setActiveId(id: String?) {
         prefs.edit().apply { if (id == null) remove(KEY_ACTIVE) else putString(KEY_ACTIVE, id) }.apply()
     }
 

@@ -173,7 +173,7 @@ private const val BRIDGE_ZIP_URL =
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, TERMINAL, GIT }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, LOCAL_MODELS, TERMINAL, GIT }
 
 @Composable
 private fun QwenPawNav(
@@ -255,6 +255,8 @@ private fun QwenPawNav(
     val aclState by viewModel.acl.state.collectAsState()
     val marketState by viewModel.market.state.collectAsState()
     val inboxState by viewModel.inbox.state.collectAsState()
+    val channelState by viewModel.channels.state.collectAsState()
+    val localModelsState by viewModel.localModels.state.collectAsState()
     // 全文检索状态单独一条流，与对话页状态无关。
     val searchState by chatVm.search.collectAsState()
     val inboxUnread = inboxState.unreadCount
@@ -431,6 +433,8 @@ private fun QwenPawNav(
         }
     }
     var showVoiceIntro by remember { mutableStateOf(false) }
+    // 扫码页是全屏覆盖层，与头像裁剪同层：扫完回到原表单，输入不会丢。
+    var scanningPair by remember { mutableStateOf(false) }
     // 归档提示按自然日抑制。用 state 而非每次直接读 prefs，
     // 勾选后当次就能立刻生效，不必等下一次重组。
     var archiveTipVisible by remember { mutableStateOf(viewModel.shouldShowArchiveTip()) }
@@ -625,6 +629,26 @@ private fun QwenPawNav(
         }
     }
 
+    // 扫码页是覆盖层，但**不能让下层退出组合**：早期用早返回渲染，打开扫码后
+    // 连接页被整个销毁，取消回来时引导进度与已填内容全丢。改用全屏 Dialog 叠在上面。
+    if (scanningPair) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { scanningPair = false },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            io.qwenpaw.node.ui.settings.QrScanScreen(
+                onBack = { scanningPair = false },
+                onDecoded = { pair ->
+                    scanningPair = false
+                    viewModel.applyScannedPair(pair)
+                },
+            )
+        }
+    }
+
     if (!appState.connected) {
         ConnectScreen(
             connecting = appState.connecting,
@@ -646,6 +670,12 @@ private fun QwenPawNav(
             onUseSaved = { viewModel.useSaved(it) },
             // 受信任的主机不再弹地址安全提示。
             isTrustedHost = viewModel::isTrustedHost,
+            scannedPair = appState.scannedPair,
+            onConsumeScannedPair = viewModel::consumeScannedPair,
+            onOpenScanner = { scanningPair = true },
+            onLoadAgentsWithToken = { hosts, token, basic ->
+                viewModel.loadAgentsWithToken(hosts, token, basic)
+            },
         )
         return
     }
@@ -1172,6 +1202,35 @@ private fun QwenPawNav(
                 )
             }
 
+            Screen.CHANNEL -> {
+                io.qwenpaw.node.ui.channels.ChannelScreen(
+                    state = channelState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = { viewModel.channels.refresh() },
+                    onRefresh = { viewModel.channels.refresh(force = true) },
+                    onOpenChannel = viewModel.channels::openChannel,
+                    onInstallChannel = viewModel.channels::installChannel,
+                    onRetry = viewModel.channels::retry,
+                    onCloseAuth = viewModel.channels::closeAuth,
+                    onStopPolling = viewModel.channels::stopPolling,
+                    onConsumeEnabled = viewModel.channels::consumeEnabledChannel,
+                    onConsumeNotice = viewModel.channels::consumeNotice,
+                )
+            }
+
+            Screen.LOCAL_MODELS -> {
+                io.qwenpaw.node.ui.localmodels.LocalModelsScreen(
+                    state = localModelsState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = { viewModel.localModels.refresh() },
+                    onStopPolling = viewModel.localModels::stopPolling,
+                    onInstallRuntime = viewModel.localModels::installRuntime,
+                    onDownloadModel = viewModel.localModels::downloadModel,
+                    onCancel = viewModel.localModels::cancelActive,
+                    onConsumeMessage = viewModel.localModels::consumeMessage,
+                )
+            }
+
             Screen.RUNTIME -> {
                 LaunchedEffect(Unit) {
                     viewModel.runtime.loadAcp()
@@ -1477,6 +1536,8 @@ private fun QwenPawNav(
                     onOpenAgents = { screen = Screen.AGENTS },
                     onOpenRuntime = { screen = Screen.RUNTIME },
                     onOpenAppCenter = { screen = Screen.APP_CENTER },
+                    onOpenChannels = { screen = Screen.CHANNEL },
+                    onOpenLocalModels = { screen = Screen.LOCAL_MODELS },
                     onSwitch = { id -> viewModel.switchTo(id) },
                     onRemove = viewModel::remove,
                     onEditWithCredentials = viewModel::editInstanceWithCredentials,
@@ -1487,6 +1548,12 @@ private fun QwenPawNav(
                         viewModel.loadAgents(hosts, user, pass, basic)
                     },
                     onLoadAgentsFor = { viewModel.loadAgentsFor(it) },
+                    scannedPair = appState.scannedPair,
+                    onConsumeScannedPair = viewModel::consumeScannedPair,
+                    onOpenScanner = { scanningPair = true },
+                    onLoadAgentsWithToken = { hosts, token, basic ->
+                        viewModel.loadAgentsWithToken(hosts, token, basic)
+                    },
                     onVerifyHosts = { hosts, basic, onAttempt, token, instanceId ->
                         viewModel.verifyHosts(
                             hosts,
@@ -1708,6 +1775,39 @@ private fun QwenPawNav(
         io.qwenpaw.node.ui.settings.SecurityNoticeDialog(
             notice = notice,
             onDismiss = viewModel::dismissSecurityNotice,
+        )
+    }
+
+    // 令牌模式下拿不到配对码：说明装什么、升级到什么版本，以及另一种取令牌的途径。
+    appState.pairingNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissPairingNotice,
+            title = { Text(stringResource(R.string.pairing_notice_title)) },
+            text = {
+                Text(
+                    when (notice.reason) {
+                        io.qwenpaw.node.ui.PairingNotice.Reason.NO_BRIDGE ->
+                            stringResource(R.string.pairing_notice_no_bridge)
+
+                        io.qwenpaw.node.ui.PairingNotice.Reason.BRIDGE_TOO_OLD ->
+                            stringResource(R.string.pairing_notice_too_old, notice.pluginVersion)
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.dismissPairingNotice()
+                        viewModel.market.openInstallUrlDialog(BRIDGE_ZIP_URL)
+                        screen = Screen.MARKET
+                    },
+                ) { Text(stringResource(R.string.pairing_notice_update)) }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissPairingNotice) {
+                    Text(stringResource(R.string.pairing_notice_dismiss))
+                }
+            },
         )
     }
 
@@ -1941,6 +2041,7 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS,
     Screen.SKILLS, Screen.MCP, Screen.MARKET, Screen.RUNNING_CONFIG, Screen.SECURITY,
     Screen.AGENTS, Screen.RUNTIME, Screen.PORTABILITY, Screen.APP_CENTER,
+    Screen.CHANNEL, Screen.LOCAL_MODELS,
     Screen.ACL -> Screen.SETTINGS
     Screen.TERMINAL -> Screen.SETTINGS
     // Git 从工作区文件页顶栏进入，返回也回工作区。

@@ -113,6 +113,10 @@ fun SettingsScreen(
     onOpenRuntime: () -> Unit = {},
     /** 打开 App 中心。 */
     onOpenAppCenter: () -> Unit = {},
+    /** 打开频道页（扫码授权）。 */
+    onOpenChannels: () -> Unit = {},
+    /** 打开本地模型页（运行时状态与下载进度）。 */
+    onOpenLocalModels: () -> Unit = {},
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
     /** 编辑实例并验证凭据；返回 null 表示已保存，否则是给界面显示的原因。 */
@@ -154,6 +158,17 @@ fun SettingsScreen(
         basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
     ) -> String? = { _, _, _, _ -> null },
     onLoadAgentsFor: suspend (InstanceConfig) -> List<io.qwenpaw.node.data.model.AgentDto> = { emptyList() },
+    /** 扫码页得到的配对码；非空时表单自动填入。 */
+    scannedPair: io.qwenpaw.node.data.qr.TokenPair? = null,
+    onConsumeScannedPair: () -> Unit = {},
+    /** 打开扫码页；为 null 时不显示扫描按钮。 */
+    onOpenScanner: (() -> Unit)? = null,
+    /** 扫码登录时用令牌读智能体列表。 */
+    onLoadAgentsWithToken: suspend (
+        hosts: List<String>,
+        token: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<io.qwenpaw.node.data.model.AgentDto> = { _, _, _ -> emptyList() },
     /** 手动指定实例优先使用的地址；传 null 表示恢复「按列表顺序」。写配置，长期有效。 */
     onChooseAddress: (instanceId: String, url: String?) -> Unit = { _, _ -> },
     /** 只在本次运行生效的地址选择；不写配置，重启后回到自动。 */
@@ -511,6 +526,9 @@ fun SettingsScreen(
                         submitLabel = stringResource(R.string.action_add),
                         isTrustedHost = isTrustedHost,
                         onCancel = { addMode = null },
+                        scannedPair = scannedPair,
+                        onConsumeScannedPair = onConsumeScannedPair,
+                        onOpenScanner = onOpenScanner,
                     )
 
                     AddMode.WIZARD -> InstanceWizard(
@@ -532,6 +550,10 @@ fun SettingsScreen(
                             onVerifyHosts(hosts, basic, attempt, null, null)
                         },
                         isTrustedHost = isTrustedHost,
+                        scannedPair = scannedPair,
+                        onConsumeScannedPair = onConsumeScannedPair,
+                        onOpenScanner = onOpenScanner,
+                        onLoadAgentsWithToken = onLoadAgentsWithToken,
                     )
                 }
             }
@@ -590,6 +612,14 @@ fun SettingsScreen(
                     },
                     verifyToken = instance.token,
                     loadAgentsWithToken = { onLoadAgentsFor(instance) },
+                    initialMode = if (instance.usesTokenCredential) {
+                        io.qwenpaw.node.data.CredentialMode.TOKEN
+                    } else {
+                        io.qwenpaw.node.data.CredentialMode.PASSWORD
+                    },
+                    scannedPair = scannedPair,
+                    onConsumeScannedPair = onConsumeScannedPair,
+                    onOpenScanner = onOpenScanner,
                     currentNetKind = currentNetKind,
                     currentSsid = currentSsid,
                     submitLabel = stringResource(R.string.action_save),
@@ -783,6 +813,13 @@ fun SettingsScreen(
                             )
                             Divider()
                             NavRow(
+                                icon = QwenIcons.download,
+                                title = stringResource(R.string.settings_nav_local_models),
+                                subtitle = stringResource(R.string.settings_nav_local_models_subtitle),
+                                onClick = onOpenLocalModels,
+                            )
+                            Divider()
+                            NavRow(
                                 icon = QwenIcons.sparkles,
                                 title = stringResource(R.string.settings_nav_agents),
                                 subtitle = stringResource(R.string.settings_nav_agents_subtitle),
@@ -842,6 +879,13 @@ fun SettingsScreen(
                                     enabled = bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready,
                                 )
                             }
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.globe,
+                                title = stringResource(R.string.settings_nav_channels),
+                                subtitle = stringResource(R.string.settings_nav_channels_subtitle),
+                                onClick = onOpenChannels,
+                            )
                             Divider()
                             NavRow(
                                 icon = QwenIcons.wrench,

@@ -2132,3 +2132,161 @@ Bridge 不应重写安装逻辑。
 `POST /browser/repair` 转发官方 Chrome 插件的 `setup`，Chrome 插件未安装时返回安装提示。
 状态与自测仍走核心端点；修复端点要求插件侧校验 token、客户端二次确认，
 日志不得包含 token、密钥或完整请求头。
+
+---
+
+## 37、设备配对与访问令牌登录（插件 v0.4.3）
+
+客户端除了账号密码，还可以直接用一枚访问令牌登录。令牌由**已登录的网页控制台**签发：
+插件在设置页提供「设备配对」，签一枚专用令牌并画成二维码，手机扫码或粘贴后即可建立实例。
+核心服务端没有签发设备令牌的端点，因此这一步只能落在插件上。
+
+### 端点
+
+前缀 `/api/plugins/qwenpaw-node-bridge`，capability 名 `pairing`（客户端只认这个名字）。
+
+| 方法 | 路径 | 请求 | 响应 |
+| --- | --- | --- | --- |
+| POST | `/pairing/tokens` | `{expires_in_days: 7/30/90/0, label?, addresses: [str]}` | `{token, jti, username, issued_at, expires_at, payload, qrcode_img}` |
+| GET | `/pairing/tokens` | — | `{items: [{jti, label, username, issued_at, expires_at, revoked}]}` |
+| POST | `/pairing/tokens/{jti}/revoke` | — | `{revoked: true, immediate: bool}` |
+| PATCH | `/pairing/tokens/{jti}` | `{label: str}` | `{renamed: true, label}`；已吊销的条目回 409 |
+| DELETE | `/pairing/tokens/{jti}` | — | `{deleted: true}`；未吊销的条目回 409 |
+
+- `expires_in_days` 只接受 `7`、`30`、`90`、`0`；`0` 表示长期，到期日由插件固定（不是核心的一百年默认值）。其余取值回 400。
+- `addresses` 至少一条、至多 8 条，必须以 `http://` 或 `https://` 开头，尾斜杠会被去掉。
+- 签发与列表都带 `Cache-Control: no-store`。**`token` 只在签发响应里出现一次**，列表与登记文件都不含令牌原文。
+- 服务端未启用 Web 登录（`auth_status.enabled=false` 或无用户）时，签发回 **409**，列表返回空数组——
+  这时令牌不会被执行链校验，签了也没有意义。
+- 三个端点都自行校验访问策略（与第 31 节的 SSH 端点同一套）：开了鉴权只认有效 token，
+  没开只放行私有/回环来源或受信任标记。不能只靠核心中间件，原因见第 31.6 节的热切换记录。
+
+### 按 jti 吊销
+
+核心只公开 `revoke_token(token)`，它需要令牌原文；把原文存进插件数据目录等于多一处凭据存储。
+插件改用核心吊销表内部使用的 `_add_to_revocation_list(jti, exp)`，`verify_token` 用同一个
+`_is_token_revoked` 检查。这是私有符号：核心升级后若改名，插件把 `immediate` 置为 `false`，
+本地记录仍标记吊销，界面说明「该令牌将在到期时间失效」。插件依赖核心 ≥ 2.2.2。
+
+### 登记文件
+
+`~/.qwenpaw/plugin_data/qwenpaw-node-bridge/pairing_tokens.json`，目录 0700、文件 0600，
+原子替换写入。结构 `{"version":1,"items":{jti:{label,username,issued_at,expires_at,revoked}}}`，
+读取时清掉已过期条目。
+
+### 配对码格式
+
+```
+qwenpaw-node://pair?v=1&addr=<pct>&addr=<pct>&token=<pct>
+```
+
+- `v` 必填；大于 1 时客户端提示「二维码由更新版本的客户端生成」。
+- `addr` 一条以上，顺序即回退优先级；`token` 必填。未知参数忽略。
+- 百分号编码按 RFC3986 只保留 unreserved（`A-Z a-z 0-9 - . _ ~`）；`+` **不**当作空格。
+- 客户端解析前去掉首尾空白与成对引号（聊天软件复制常见）；长度上限 4096 字符。
+- 样例（与两端单测共用）：
+
+```
+qwenpaw-node://pair?v=1&addr=http%3A%2F%2F10.10.0.211%3A8088&addr=https%3A%2F%2Fa.example.com%3A8443&token=eyJzdWIiOiJkZW1vIn0.c2ln
+```
+
+插件侧拼装见 `_pair_payload`，客户端见 `PairQr`；二维码 PNG 由插件用 `segno` 生成（`qrcode_img`，
+base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
+
+### 客户端校验与反代
+
+令牌是否有效由服务端回答：`GET /api/auth/verify` 返回 `{"valid":true,"username":"…"}`，401 即无效。
+**这条端点只从 `Authorization` 头取 token**（第 1 节），反向代理开启 `auth_basic` 时令牌走 `?token=`，
+该端点读不到，因此反代实例改用一个业务端点（`GET /api/agents`）校验。
+旧实现把反代实例上的有效令牌一律判成「已失效」，0.7.2 一并修掉。
+
+令牌载荷是 `base64url(payload).signature`，客户端可以读出 `sub` / `iat` / `exp` / `jti`，
+但**只用于显示**（「有效期至…」），不验签，身份一律以 verify 响应体为准。
+
+### 客户端提示
+
+- 验证连接时若没检测到插件，或插件版本低于 0.4.3（`Ready` 但缺 `pairing` capability），
+  弹窗提示更新插件，并说明另一种取得令牌的途径（在服务器上对登录接口发起请求）。**不阻断保存**。
+- 令牌过期后普通请求 401，提示指向网页控制台重新生成，而不是「重新输入账号密码」。
+- 开启反向代理时令牌会出现在 `?token=`，可能落进访问日志；配对页已写明，客户端 `RunLog` 已脱敏。
+
+---
+
+## 38、频道二维码授权与本地模型（2.3.0 起频道插件化）
+
+### 频道列表与能力
+
+`GET /api/config/channels` 返回**以频道名为键的对象**。未保存过配置的频道给
+`{"enabled":false,"bot_prefix":"","isBuiltin":true}`；这是**配置**，不含能力信息。
+
+`GET /api/config/channels/schemas` 才是能力来源。2.3.0.post1 实测每行包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `label` | 界面显示名，插件频道同样有 |
+| `plugin_id` | 提供该频道的插件 |
+| `qrcode_available` | 是否可扫码授权（由插件声明的管理能力决定） |
+| `availability` | `missing_code` / `failed` / `validated` / `running` |
+| `repair` | 修复建议；未安装时为 `{"action":"install","plugin_id":"…","source":"bundled:dingtalk"}` |
+| `defaults` | 该频道的默认配置 |
+| `config_fields` | 配置表单元数据（0.7.4 的配置表单使用） |
+
+**2.3.0 起内置频道也是插件**：qp-test 初始所有频道 `availability=missing_code`、
+`qrcode_available=false`。硬编码「微信/企业微信/钉钉/飞书/QQ 可扫码」在 2.3.0 上会全部失效。
+客户端的判定顺序是：`schemas` 里有 `qrcode_available` 就按它；没有（2.2.2）才回落到上述五频道名单。
+
+### 二维码
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/config/channels/{channel}/qrcode` | `{qrcode_img, poll_token}`；图片是不带 `data:` 前缀的 base64 PNG |
+| GET | `/api/config/channels/{channel}/qrcode/status?token=` | `{status, credentials}`；`token` 必填，缺失 422 |
+| DELETE | `/api/config/channels/{channel}/qrcode?token=` | 回收会话，204；2.2.2 无此路由 |
+
+- 2.3.0 起按会话托管，**TTL 300 秒**；关闭页面应主动 `DELETE`，否则上游 worker 要等到期。
+- 未安装插件时取码回 **404** `{"detail":"PLUGIN_NOT_INSTALLED"}`；界面应在插件未装时不发起请求。
+- 成功值：微信 `confirmed`，企业微信 / 钉钉 / 飞书 / QQ `success`；终态失败 `fail` 或 `expired`。
+  `fail` 时 `credentials.fail_reason` 带原因。未知状态按未完成处理，界面显示原始值。
+- 凭据键随频道不同：微信 `bot_token` / `base_url`；企业微信 `bot_id` / `secret`；
+  钉钉 `client_id` / `client_secret`；飞书 `app_id` / `app_secret` / `open_id` / `tenant_brand`；
+  QQ `app_id` / `client_secret` / `user_openid`。
+- 写回走 `PUT /api/config/channels/{channel}`，**整段替换**：服务端用频道配置模型重建对象，
+  缺省字段回落默认值。必须先 `GET` 当前配置、合并凭据并置 `enabled=true` 再 `PUT`，
+  否则 `bot_prefix`、`dm_policy` 等会被冲掉。写入成功即触发热加载。
+- 这些路由不在鉴权公开路径里，开启 Web 登录后必须带 token。
+
+频道插件安装复用既有插件接口：`POST /api/plugins/install` body `{"source":"bundled:dingtalk","force":false}`。
+实测安装会下载官方频道代码并探测 worker，耗时约一分钟；完成后 `availability` 变 `validated`、
+`qrcode_available` 变 true。安装成功不等于立即可用，客户端应稍后重查 `schemas`。
+
+### 本地模型
+
+本版只接 7 个端点（其余 7 个属于配置、删除与运行时启停，留给后续版本）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/local-models/server` | `{available, installable, installed, port, model_name, message}` |
+| POST | `/api/local-models/server/download` | 安装 llama.cpp 运行时，立即返回；进行中 409 |
+| GET | `/api/local-models/server/download` | 运行时下载进度 |
+| DELETE | `/api/local-models/server/download` | 取消运行时下载 |
+| GET | `/api/local-models/models` | 可下载模型数组，元素含 `id`、`name`、`size_bytes`、`downloaded` 等 |
+| POST | `/api/local-models/models/download` | body `{"model_name":"…","source":"auto"}`；进行中 409；参数不支持 400 |
+| GET | `/api/local-models/models/download` | 模型下载进度 |
+| DELETE | `/api/local-models/models/download` | 取消模型下载 |
+
+进度形状：
+
+```json
+{"status":"idle|pending|downloading|canceling|completed|failed|cancelled",
+ "model_name":null,"downloaded_bytes":0,"total_bytes":null,
+ "speed_bytes_per_sec":0.0,"source":null,"error":null,"local_path":null}
+```
+
+- **没有百分比字段**，客户端自己算 `downloaded/total`；`total_bytes` 可能为 null，此时用不确定进度条。
+- `canceling` 仍是进行中，要轮询到 `cancelled` 才结束。
+- 磁盘满没有独立状态码，只体现为 `status=failed` 且 `error` 含系统错误。
+- 已下载模型再次触发会**静默覆盖**，界面按 `downloaded` 禁用按钮。
+- 服务端按内存推荐模型，内存不足时 `/models` 返回空数组；空列表应写「未推荐」，不是加载失败。
+- **同一模型会按来源各返回一条**（`huggingface` 与 `modelscope`），`id` 不同、名称与体积相同。
+  界面要标出来源，否则看起来是重复项。
+- 同样不在鉴权公开路径里，需要 token。

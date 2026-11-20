@@ -31,6 +31,8 @@ import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.data.model.ChatStatusDto
+import io.qwenpaw.node.data.model.ChannelQrDto
+import io.qwenpaw.node.data.model.ChannelQrStatusDto
 import io.qwenpaw.node.data.model.CheckpointGraphDto
 import io.qwenpaw.node.data.model.CheckpointStatusDto
 import io.qwenpaw.node.data.model.CreateBackupRequestDto
@@ -55,6 +57,9 @@ import io.qwenpaw.node.data.model.HarnessesDto
 import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.data.model.InboxPageDto
 import io.qwenpaw.node.data.model.InboxTraceDto
+import io.qwenpaw.node.data.model.LocalModelDto
+import io.qwenpaw.node.data.model.LocalModelProgressDto
+import io.qwenpaw.node.data.model.LocalModelServerDto
 import io.qwenpaw.node.data.model.LocalWhisperStatusDto
 import io.qwenpaw.node.data.model.LlmToolDailyDto
 import io.qwenpaw.node.data.model.MarketCategoryDto
@@ -116,6 +121,7 @@ import io.qwenpaw.node.data.model.TranscriptionProviderTypeDto
 import io.qwenpaw.node.data.model.UploadLimitDto
 import io.qwenpaw.node.data.model.UploadResultDto
 import io.qwenpaw.node.data.model.UserTimezoneDto
+import io.qwenpaw.node.data.model.VerifyTokenDto
 import io.qwenpaw.node.data.model.VersionDto
 import io.qwenpaw.node.data.model.WorkspaceFileContentDto
 import io.qwenpaw.node.data.model.WorkspaceMemoryContentDto
@@ -364,18 +370,44 @@ class QwenPawApi(
      * 校验当前 token 是否仍有效。
      *
      * 用途是区分「token 失效」与「网络不通」：前者要重新登录，后者只需重试。
-     * 只发一个短超时的 `GET /api/auth/verify`，不碰业务端点。
+     * 只发一个短超时的校验请求，不碰业务端点。
      *
      * 返回 true 表示 token 有效；false 表示服务端明确拒绝（401）。
      * 连不上时抛异常，由调用方按网络问题处理。
      */
-    fun verifyToken(conn: Connection): Boolean {
-        val url = connUrl(conn, "/api/auth/verify")
-        val request = baseBuilder(conn, url).get().build()
-        return probeClient().newCall(request).execute().use { response ->
-            // 200 = 有效；401 = 失效。其余状态码（例如服务端未启用登录时的 403）
-            // 说明「这个断言无法回答」，按有效处理，避免把用户赶去重填密码。
-            response.code != 401
+    fun verifyToken(conn: Connection): Boolean =
+        runCatching { verifyTokenDetail(conn).valid }.getOrElse { e ->
+            // 只有明确 401 才是「失效」；其余异常（含连不上）交给调用方按网络问题处理。
+            if (e is ApiException && e.code == 401) false else throw e
+        }
+
+    /**
+     * 校验 token 并读出令牌所属用户。
+     *
+     * **反代分支**：`/api/auth/verify` 只从 `Authorization` 头里取 token，看不到
+     * `?token=`。反向代理开启 `auth_basic` 时 `Authorization` 让给了 Basic，
+     * 这条端点便永远读不到 token，于是返回 401——旧实现据此把反代实例上的
+     * 有效令牌一律判成「失效」。这种连接改打一个业务端点（`GET /api/agents`），
+     * 由服务端鉴权中间件按 `?token=` 判定，同样能回答「令牌还可用吗」。
+     *
+     * 返回的 `username` 以服务端响应体为准；拿不到时（反代分支、服务端未启用
+     * 登录）为 null，界面只能显示令牌自身的载荷，不能当身份依据。
+     */
+    fun verifyTokenDetail(conn: Connection, http: OkHttpClient = probeClient()): VerifyTokenDto {
+        if (conn.basicAuth != null) {
+            agents(conn)
+            return VerifyTokenDto(valid = true, username = null)
+        }
+        val request = baseBuilder(conn, connUrl(conn, "/api/auth/verify")).get().build()
+        return http.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.code == 401) {
+                throw failureOf(401, text, response.header("WWW-Authenticate"), conn.token != null)
+            }
+            // 403/404：服务端未启用登录或没有该端点，这个断言无法回答，按有效处理，
+            // 避免把用户赶去重填一遍本来就对的凭据。
+            if (!response.isSuccessful) return VerifyTokenDto(valid = true, username = null)
+            decode(text, VerifyTokenDto.serializer())
         }
     }
 
@@ -2850,6 +2882,144 @@ class QwenPawApi(
             ),
             GcResultDto.serializer(),
         )
+    }
+
+    // ---------- 频道 ----------
+
+    /**
+     * 频道相关的地址。
+     *
+     * 频道名逐段交给 [HttpUrl.Builder.addPathSegment]，不要先 `encodeSegment`：
+     * 那会把 `%` 再编码一次（见过 `plugin%3Ademo` 变成 `plugin%253Ademo`）。
+     */
+    private fun channelUrl(
+        conn: Connection,
+        channel: String,
+        vararg suffix: String,
+    ): HttpUrl {
+        val builder = resolve(conn.baseUrl, "/api/config/channels").newBuilder()
+        builder.addPathSegment(channel)
+        suffix.forEach { builder.addPathSegment(it) }
+        return applyToken(conn, builder.build())
+    }
+
+    /**
+     * `GET /api/config/channels`。
+     *
+     * 返回**以频道名为键的对象**，未保存过配置的频道给 `{enabled:false, bot_prefix:"", isBuiltin:true}`。
+     * 保留原始 JsonObject：整份频道配置有几十个字段，本版只读 `enabled` 与 `isBuiltin`，
+     * 其余字段留给写回时原样带回。
+     */
+    fun channels(conn: Connection): Map<String, JsonObject> =
+        json.parseToJsonElement(request(conn, "GET", "/api/config/channels"))
+            .jsonObject
+            .mapValues { (_, value) -> value.jsonObject }
+
+    /** `GET /api/config/channels/{channel}`。写回前读当前配置，避免整段替换冲掉其它字段。 */
+    fun channel(conn: Connection, name: String): JsonObject =
+        json.parseToJsonElement(getUrl(conn, channelUrl(conn, name))).jsonObject
+
+    /**
+     * `GET /api/config/channels/schemas`。
+     *
+     * 2.3.0 起频道实现是插件，这一层才有 `label`、`qrcode_available`、`availability`
+     * 与 `repair`；2.2.2 的同名端点只返回插件频道的字段说明，缺这些键。
+     * 保留原始对象由 [io.qwenpaw.node.data.channel.channelCapability] 解析。
+     */
+    fun channelSchemas(conn: Connection): Map<String, JsonObject> =
+        json.parseToJsonElement(request(conn, "GET", "/api/config/channels/schemas"))
+            .jsonObject
+            .mapValues { (_, value) -> value.jsonObject }
+
+    /** `GET …/qrcode`。不支持的频道服务端回 404。 */
+    fun channelQrcode(conn: Connection, name: String): ChannelQrDto = decode(
+        getUrl(conn, channelUrl(conn, name, "qrcode")),
+        ChannelQrDto.serializer(),
+    )
+
+    /** `GET …/qrcode/status?token=`。`token` 必填，缺失时服务端回 422。 */
+    fun channelQrStatus(conn: Connection, name: String, pollToken: String): ChannelQrStatusDto {
+        val url = channelUrl(conn, name, "qrcode", "status").newBuilder()
+            .addQueryParameter("token", pollToken)
+            .build()
+        return decode(getUrl(conn, url), ChannelQrStatusDto.serializer())
+    }
+
+    /**
+     * `PUT /api/config/channels/{channel}`。
+     *
+     * **整段替换**：服务端用 `config_class(**body)` 重建该频道的配置，缺省字段回落默认值。
+     * 调用方必须先把当前配置读出来合并，否则 `enabled` 与策略字段会被冲掉。
+     */
+    fun updateChannel(conn: Connection, name: String, body: JsonObject): String =
+        execute(
+            baseBuilder(conn, channelUrl(conn, name))
+                .put(body.toString().toRequestBody(JSON_MEDIA))
+                .build(),
+        )
+
+    /**
+     * `DELETE …/qrcode?token=`。
+     *
+     * 2.3.0 起二维码按会话托管（TTL 300 秒），主动回收能立刻释放上游 worker。
+     * 2.2.2 没有这条路由，调用方按尽力而为处理。
+     */
+    fun closeChannelQrcode(conn: Connection, name: String, pollToken: String) {
+        val url = channelUrl(conn, name, "qrcode").newBuilder()
+            .addQueryParameter("token", pollToken)
+            .build()
+        execute(baseBuilder(conn, url).delete().build())
+    }
+
+    // ---------- 本地模型 ----------
+
+    /** `GET /api/local-models/server`。未安装 llama.cpp 时仍是 200，看 `installed` 与 `message`。 */
+    fun localModelServer(conn: Connection): LocalModelServerDto = decode(
+        request(conn, "GET", "/api/local-models/server"),
+        LocalModelServerDto.serializer(),
+    )
+
+    /** `GET /api/local-models/models`。服务端按内存推荐，内存不足时返回空数组。 */
+    fun localModels(conn: Connection): List<LocalModelDto> = decode(
+        request(conn, "GET", "/api/local-models/models"),
+        ListSerializer(LocalModelDto.serializer()),
+    )
+
+    /** `POST /api/local-models/models/download`。立即返回，进度靠轮询；进行中再触发是 409。 */
+    fun startLocalModelDownload(conn: Connection, modelName: String) {
+        request(
+            conn,
+            "POST",
+            "/api/local-models/models/download",
+            buildJsonObject {
+                put("model_name", modelName)
+                put("source", "auto")
+            },
+        )
+    }
+
+    fun localModelDownloadProgress(conn: Connection): LocalModelProgressDto = decode(
+        request(conn, "GET", "/api/local-models/models/download"),
+        LocalModelProgressDto.serializer(),
+    )
+
+    /** `DELETE …/models/download`。只把状态置为 `canceling`，要轮询到 `cancelled` 才算结束。 */
+    fun cancelLocalModelDownload(conn: Connection) {
+        request(conn, "DELETE", "/api/local-models/models/download")
+    }
+
+    /** `POST /api/local-models/server/download`。安装 llama.cpp 自身，不可安装时回 409/400。 */
+    fun startServerDownload(conn: Connection) {
+        request(conn, "POST", "/api/local-models/server/download")
+    }
+
+    fun serverDownloadProgress(conn: Connection): LocalModelProgressDto = decode(
+        request(conn, "GET", "/api/local-models/server/download"),
+        LocalModelProgressDto.serializer(),
+    )
+
+    fun cancelServerDownload(conn: Connection) {
+        request(conn, "DELETE", "/api/local-models/server/download")
     }
 
     // ---------- 内部实现 ----------

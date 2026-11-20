@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 本地模型页 -->
+    <string name="local_models_title">本地模型</string>
+    <string name="local_models_section_server">运行状态</string>
+    <string name="local_models_section_models">可下载模型</string>
+    <string name="local_models_section_progress">当前下载</string>
+    <string name="local_models_not_installed">本地模型运行时尚未安装</string>
+    <string name="local_models_not_installable">当前服务端环境无法安装本地模型运行时</string>
+    <string name="local_models_install_runtime">安装 llama.cpp</string>
+    <string name="local_models_running">运行中，端口 %1$d</string>
+    <string name="local_models_installed_not_running">已安装，未运行</string>
+    <string name="local_models_downloaded">已下载</string>
+    <string name="local_models_download">下载</string>
+    <string name="local_models_cancel">取消下载</string>
+    <string name="local_models_empty">服务端未推荐可下载模型</string>
+    <string name="local_models_load_failed">读取本地模型信息失败：%1$s</string>
+    <string name="local_models_action_failed">操作失败：%1$s</string>
+    <string name="local_models_busy">已有下载任务在进行</string>
+    <string name="local_models_model_name">模型：%1$s</string>
+    <string name="local_models_download_started">已开始下载模型</string>
+    <string name="local_models_install_started">已开始下载运行时</string>
+
+    <!-- 下载状态 -->
+    <string name="local_models_status_idle">空闲</string>
+    <string name="local_models_status_pending">准备中</string>
+    <string name="local_models_status_downloading">正在下载</string>
+    <string name="local_models_status_canceling">正在取消</string>
+    <string name="local_models_status_completed">已完成</string>
+    <string name="local_models_status_failed">下载失败</string>
+    <string name="local_models_status_cancelled">已取消</string>
+    <string name="local_models_status_unknown">未知状态</string>
+
+    <!-- 进度 -->
+    <string name="local_models_progress_percent">%1$d%%</string>
+    <string name="local_models_progress_bytes">%1$s / %2$s</string>
+    <string name="local_models_progress_downloaded">已下载 %1$s</string>
+    <string name="local_models_source_server">运行时</string>
+    <string name="local_models_source_model">模型</string>
+    <string name="local_models_source_huggingface">HuggingFace</string>
+    <string name="local_models_source_modelscope">ModelScope</string>
+    <string name="local_models_progress_speed">%1$s/s</string>
+</resources>

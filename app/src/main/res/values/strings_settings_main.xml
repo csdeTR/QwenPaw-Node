@@ -71,6 +71,10 @@
     <string name="settings_nav_runtime_subtitle">ACP 命令、Node 运行时与外部智能体登录</string>
     <string name="settings_nav_app_center">App 中心</string>
     <string name="settings_nav_app_center_subtitle">查看已安装的 PawApp 并在浏览器打开</string>
+    <string name="settings_nav_channels">频道</string>
+    <string name="settings_nav_channels_subtitle">为微信、钉钉等频道扫码授权</string>
+    <string name="settings_nav_local_models">本地模型</string>
+    <string name="settings_nav_local_models_subtitle">运行时状态、模型下载与进度</string>
     <string name="settings_nav_skills">技能</string>
     <string name="settings_nav_skills_subtitle">浏览、启停与编辑 SKILL.md</string>
     <string name="settings_nav_mcp">MCP</string>

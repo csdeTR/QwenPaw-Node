@@ -83,4 +83,78 @@ class CredentialPlanTest {
         assertEquals(null, plan.basicUser)
         assertEquals(null, plan.basicPassword)
     }
+
+    // ---- 访问令牌 ----
+
+    @Test
+    fun `filled token is used as is`() {
+        val plan = planCredentials(
+            "", "abc.def", "", "", stored,
+            mode = CredentialMode.TOKEN,
+        )
+        plan as CredentialPlan.UseToken
+        assertEquals("abc.def", plan.token)
+    }
+
+    @Test
+    fun `token mode reads the token from the password field`() {
+        // 表单在令牌模式下把令牌放在密码框的位置，避免多一个字段；
+        // 这里固定住这条约定，免得以后两边各改一半。
+        val plan = planCredentials(
+            "ignored", "tok123", "", "", stored,
+            mode = CredentialMode.TOKEN,
+        )
+        plan as CredentialPlan.UseToken
+        assertEquals("tok123", plan.token)
+    }
+
+    @Test
+    fun `blank token in token mode keeps the saved token`() {
+        val plan = planCredentials(
+            "", "", "", "",
+            StoredCredentials(
+                username = null,
+                basicUser = null,
+                basicPassword = null,
+                token = "saved",
+            ),
+            mode = CredentialMode.TOKEN,
+            storedToken = "saved",
+        )
+        assertTrue(plan is CredentialPlan.UseExisting)
+    }
+
+    @Test
+    fun `blank token in token mode without saved token is rejected`() {
+        val plan = planCredentials(
+            "", "", "", "", stored,
+            mode = CredentialMode.TOKEN,
+        )
+        plan as CredentialPlan.Invalid
+        assertEquals(R.string.connect_cred_token_required, plan.messageRes)
+    }
+
+    @Test
+    fun `switching to token mode does not reuse the password login token`() {
+        // 用户从密码改成令牌却没填令牌：这时静默保留密码换来的旧令牌会让
+        // 「换了登录方式」变成一句空话。
+        val plan = planCredentials(
+            "alice", "", "", "", stored,
+            mode = CredentialMode.TOKEN,
+            storedToken = "old",
+        )
+        plan as CredentialPlan.Invalid
+        assertEquals(R.string.connect_cred_token_required, plan.messageRes)
+    }
+
+    @Test
+    fun `token mode still resolves proxy credentials`() {
+        val plan = planCredentials(
+            "", "tok", "new-proxy", "new-pass", stored,
+            mode = CredentialMode.TOKEN,
+        )
+        plan as CredentialPlan.UseToken
+        assertEquals("new-proxy", plan.basicUser)
+        assertEquals("new-pass", plan.basicPassword)
+    }
 }
