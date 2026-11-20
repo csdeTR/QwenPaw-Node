@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 列表与页内动作 -->
+    <string name="mcp_admin_action_new">新增</string>
+    <string name="mcp_admin_action_edit">编辑</string>
+    <string name="mcp_admin_action_delete">删除</string>
+    <string name="mcp_admin_action_save">保存</string>
+    <string name="mcp_admin_hint_list">新增、编辑、删除与 OAuth 授权已可在本页完成；按来源与用户的细粒度规则仍在 Web 控制台配置。</string>
+    <string name="mcp_admin_count_headers">请求头 %1$d 项</string>
+    <string name="mcp_admin_count_env">环境变量 %1$d 项</string>
+
+    <!-- 编辑器外壳 -->
+    <string name="mcp_admin_title_new">新增 MCP 客户端</string>
+    <string name="mcp_admin_title_edit">编辑 MCP 客户端</string>
+    <string name="mcp_admin_hint_edit_scope">只提交改动过的字段，工具白名单与访问策略保持不变。</string>
+    <string name="mcp_admin_discard_title">放弃未保存的更改</string>
+    <string name="mcp_admin_discard_message">已填写的内容不会被保存。</string>
+    <string name="mcp_admin_discard_confirm">放弃</string>
+    <string name="mcp_admin_discard_keep">继续编辑</string>
+
+    <!-- 表单字段 -->
+    <string name="mcp_admin_label_identity">基本信息</string>
+    <string name="mcp_admin_label_key">标识</string>
+    <string name="mcp_admin_hint_key">服务端用这个标识引用客户端，创建后不能修改</string>
+    <string name="mcp_admin_label_name">名称</string>
+    <string name="mcp_admin_label_description">说明（可选）</string>
+    <string name="mcp_admin_label_enabled">创建后立即启用</string>
+    <string name="mcp_admin_label_transport">传输方式</string>
+    <string name="mcp_admin_label_connection">连接参数</string>
+    <string name="mcp_admin_label_command">命令</string>
+    <string name="mcp_admin_hint_command">本机可执行文件，例如 npx</string>
+    <string name="mcp_admin_label_args">参数</string>
+    <string name="mcp_admin_hint_args">每行一个参数，空行忽略</string>
+    <string name="mcp_admin_label_env">环境变量</string>
+    <string name="mcp_admin_hint_env">每行一个 KEY=VALUE，空行忽略</string>
+    <string name="mcp_admin_label_cwd">工作目录（可选）</string>
+    <string name="mcp_admin_label_url">服务端地址</string>
+    <string name="mcp_admin_hint_url">以 http:// 或 https:// 开头</string>
+    <string name="mcp_admin_label_headers">请求头</string>
+    <string name="mcp_admin_hint_headers">每行一个 KEY: VALUE，空行忽略</string>
+    <string name="mcp_admin_label_timeout">请求超时（秒）</string>
+    <string name="mcp_admin_hint_timeout">留空使用服务端默认值</string>
+    <string name="mcp_admin_hint_secrets">请求头与环境变量的值可能包含凭据，仅在可信设备上编辑；列表与详情只显示条数。</string>
+
+    <!-- 表单校验 -->
+    <string name="mcp_admin_error_key_required">标识不能为空</string>
+    <string name="mcp_admin_error_key_reserved">标识不能以「%1$s」开头，该前缀由服务端内部使用</string>
+    <string name="mcp_admin_error_name_required">名称不能为空</string>
+    <string name="mcp_admin_error_command_required">本机进程需要填写命令</string>
+    <string name="mcp_admin_error_url_required">远端传输需要填写服务端地址</string>
+    <string name="mcp_admin_error_url_scheme">地址必须以 http:// 或 https:// 开头</string>
+    <string name="mcp_admin_error_timeout_number">请求超时必须是大于零的秒数</string>
+    <string name="mcp_admin_error_env_line">环境变量第 %1$d 行格式不对，应为 KEY=VALUE</string>
+    <string name="mcp_admin_error_header_line">请求头第 %1$d 行格式不对，应为 KEY: VALUE</string>
+
+    <!-- 服务端错误 -->
+    <string name="mcp_admin_error_bad_request">请求被拒绝：%1$s</string>
+    <string name="mcp_admin_error_bad_request_plain">请求被拒绝，请检查填写的内容</string>
+    <string name="mcp_admin_error_unauthorized">当前访问令牌无权修改服务端配置，请重新登录或换用管理员令牌</string>
+    <string name="mcp_admin_error_not_found">该客户端不存在，可能已被其他设备删除</string>
+    <string name="mcp_admin_error_conflict">与服务端当前状态冲突：%1$s</string>
+    <string name="mcp_admin_error_not_connected">尚未连接服务器</string>
+
+    <!-- 结果提示 -->
+    <string name="mcp_admin_notice_created">已新增「%1$s」</string>
+    <string name="mcp_admin_notice_updated">已保存「%1$s」</string>
+    <string name="mcp_admin_notice_deleted">已删除「%1$s」</string>
+    <string name="mcp_admin_notice_unchanged">没有需要保存的改动</string>
+
+    <!-- 删除确认 -->
+    <string name="mcp_admin_delete_title">删除 MCP 客户端</string>
+    <string name="mcp_admin_delete_message">将删除「%1$s」。删除后需要重新填写连接参数并重新授权。</string>
+    <string name="mcp_admin_delete_impact_client">客户端配置与保存在服务端的连接凭据</string>
+    <string name="mcp_admin_delete_impact_oauth">已保存的 OAuth 授权与令牌</string>
+    <string name="mcp_admin_delete_impact_rules">工具白名单与访问策略</string>
+    <string name="mcp_admin_delete_failed">删除失败：%1$s</string>
+
+    <!-- OAuth -->
+    <string name="mcp_admin_oauth_title">OAuth 授权</string>
+    <string name="mcp_admin_oauth_hint">远端服务端需要先完成 OAuth 授权才能加载工具。</string>
+    <string name="mcp_admin_oauth_state_authorized">已授权</string>
+    <string name="mcp_admin_oauth_state_unauthorized">未授权</string>
+    <string name="mcp_admin_oauth_label_expires">有效期至 %1$s</string>
+    <string name="mcp_admin_oauth_expires_unknown">服务端未给出有效期</string>
+    <string name="mcp_admin_oauth_label_scope">授权范围：%1$s</string>
+    <string name="mcp_admin_oauth_label_client_id">客户端标识：%1$s</string>
+    <string name="mcp_admin_oauth_action_authorize">开始授权</string>
+    <string name="mcp_admin_oauth_action_reauth">重新授权</string>
+    <string name="mcp_admin_oauth_action_revoke">撤销授权</string>
+    <string name="mcp_admin_oauth_action_check">检查授权状态</string>
+    <string name="mcp_admin_oauth_polling">正在等待授权完成，回到本页后自动检查结果</string>
+    <string name="mcp_admin_oauth_revoke_title">撤销 OAuth 授权</string>
+    <string name="mcp_admin_oauth_revoke_message">撤销后该客户端的工具将无法加载，需要重新完成授权。</string>
+    <string name="mcp_admin_oauth_revoke_confirm">撤销</string>
+    <string name="mcp_admin_oauth_notice_authorized">授权成功，令牌已保存在服务端</string>
+    <string name="mcp_admin_oauth_notice_revoked">已撤销授权</string>
+    <string name="mcp_admin_oauth_error_stdio">本机进程不需要 OAuth 授权</string>
+    <string name="mcp_admin_oauth_error_url">请先在编辑页填写服务端地址</string>
+    <string name="mcp_admin_oauth_error_start">无法启动授权：%1$s</string>
+    <string name="mcp_admin_oauth_error_status">无法读取授权状态：%1$s</string>
+    <string name="mcp_admin_oauth_error_revoke">无法撤销授权：%1$s</string>
+</resources>

@@ -104,9 +104,9 @@ private val CLEAR_SCREEN = "\u001b[H\u001b[2J\u001b[3J".toByteArray(Charsets.UTF
  */
 class TerminalViewModel(
     private val api: QwenPawApi,
-    private val connection: () -> Connection?,
-    private val appState: () -> AppState,
-    private val instanceId: () -> String?,
+    private var connection: () -> Connection?,
+    private var appState: () -> AppState,
+    private var instanceId: () -> String?,
     private val store: TerminalStore,
     private val hostKeys: SshHostKeys,
     private val profileStore: SshProfileStore,
@@ -115,6 +115,21 @@ class TerminalViewModel(
     /** 会话数量变化；用于前台服务与常驻通知。 */
     private val onSessionCountChanged: (Int) -> Unit = {},
 ) {
+    /**
+     * Activity 重建后把环境指向新的 AppViewModel。
+     *
+     * 会话本身与轮询协程挂在应用级 scope 上，不随 Activity 的 ViewModel 清理；
+     * 只有进程死亡或用户明确结束会话才会丢失。
+     */
+    fun bind(
+        connection: () -> Connection?,
+        appState: () -> AppState,
+        instanceId: () -> String?,
+    ) {
+        this.connection = connection
+        this.appState = appState
+        this.instanceId = instanceId
+    }
     private val _state = MutableStateFlow(TerminalUiState())
     val state = _state.asStateFlow()
 
@@ -125,6 +140,10 @@ class TerminalViewModel(
     private var workspacePath: String? = null
     private var instancePlatform = TerminalPlatform.POSIX
     private var pinchTipShown = false
+    /** 每次 [shutdown] 递增；创建中的终端跨过了实例切换就不再挂回界面。 */
+    private var sessionGeneration = 0
+    /** 创建序号；旧创建失败时不能覆盖新一轮创建的界面状态。 */
+    private var activeCreationSeq = 0
 
     fun open() {
         if (_state.value.busy || _state.value.tabs.isNotEmpty()) return
@@ -276,6 +295,7 @@ class TerminalViewModel(
     }
 
     fun newTab() {
+        if (_state.value.busy) return
         if (!_state.value.canAdd) {
             _state.update {
                 it.copy(
@@ -313,6 +333,8 @@ class TerminalViewModel(
 
     private fun closeTab(id: String) {
         val tab = _state.value.tabs.firstOrNull { it.id == id } ?: return
+        // 占位标签对应的创建还在等 /api/terminals；关掉后不能一直锁着 busy。
+        val wasPlaceholder = tab.transport == null && tab.emulator == null
         hostKeyJobs.remove(id)?.cancel()
         tab.jobs.forEach { it.cancel() }
         (sshTransports.remove(id) ?: tab.transport)?.stop()
@@ -327,6 +349,7 @@ class TerminalViewModel(
             current.copy(
                 tabs = remaining,
                 activeTabId = next,
+                busy = if (wasPlaceholder) false else current.busy,
                 sourceDialog = remaining.isEmpty(),
                 notice = if (remaining.isEmpty()) {
                     Texts.get(R.string.terminal_notice_no_tabs)
@@ -358,8 +381,11 @@ class TerminalViewModel(
 
     /** 结束全部会话并关闭服务端 PTY；供前台服务与实例切换调用。 */
     fun shutdown() {
+        sessionGeneration++
         val tabs = _state.value.tabs
         if (tabs.isEmpty() && sshTransports.isEmpty()) {
+            // 可能只剩一个还在等待凭据的中继/直连创建，busy 也要一起放开。
+            _state.update { it.copy(busy = false) }
             onSessionCountChanged(0)
             return
         }
@@ -392,9 +418,13 @@ class TerminalViewModel(
             val inst = instanceId() ?: return
             store.group(inst, conn.agentId)
         }
+        closeServerTerminal(conn, group, tab.terminalId)
+    }
+
+    private fun closeServerTerminal(conn: Connection, group: String, terminalId: String) {
         scope.launch {
             withContext(Dispatchers.IO) {
-                runCatching { api.closeTerminal(conn, group, tab.terminalId) }
+                runCatching { api.closeTerminal(conn, group, terminalId) }
             }
         }
     }
@@ -459,6 +489,8 @@ class TerminalViewModel(
         setDefault: Boolean = false,
         forceNewLocal: Boolean = false,
     ) {
+        // 上一次本地终端还在等待 /api/terminals 时，重复点击不再叠 tab。
+        if (_state.value.busy) return
         if (!_state.value.canAdd) {
             _state.update {
                 it.copy(
@@ -487,25 +519,34 @@ class TerminalViewModel(
             }
             return
         }
+        val generation = sessionGeneration
+        val creationSeq = ++activeCreationSeq
         scope.launch {
             _state.update { it.copy(busy = true, sourceDialog = false, error = null, notice = null) }
             try {
                 when (creation.source) {
                     TerminalSource.LOCAL ->
-                        addLocalTab(conn, inst, creation, fromDialog || forceNewLocal)
-                    TerminalSource.SSH_RELAY -> addRelayTab(conn, inst, creation)
-                    TerminalSource.SSH_DIRECT -> addDirectTab(conn, inst, creation)
+                        addLocalTab(conn, inst, creation, fromDialog || forceNewLocal, generation)
+                    TerminalSource.SSH_RELAY -> addRelayTab(conn, inst, creation, generation)
+                    TerminalSource.SSH_DIRECT -> addDirectTab(conn, inst, creation, generation)
                 }
                 if (setDefault) store.setDefaultCreation(inst, conn.agentId, creation)
                 store.setSource(inst, conn.agentId, creation.source)
                 _state.update { it.copy(setAsDefault = false) }
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        busy = false,
-                        error = ErrorText.of(e),
-                        sourceDialog = true,
-                    )
+                // 用户已关闭占位标签或开始了新一轮创建时，这里不能再改界面状态。
+                if (creationSeq == activeCreationSeq) {
+                    _state.update {
+                        it.copy(
+                            tabs = it.tabs.filterNot { tab ->
+                                tab.transport == null && tab.emulator == null
+                            },
+                            busy = false,
+                            error = ErrorText.of(e),
+                            sourceDialog = true,
+                        )
+                    }
+                    onSessionCountChanged(_state.value.tabs.size)
                 }
             }
         }
@@ -516,49 +557,106 @@ class TerminalViewModel(
         inst: String,
         creation: TerminalCreation,
         forceNew: Boolean,
+        generation: Int,
     ) {
         val group = store.group(inst, conn.agentId)
+        // 本地 PTY 的 create 在 Windows 上可能要等数秒；先把标签与“正在连接”
+        // 显示出来，避免用户以为没点上而反复点击。
+        val placeholderId = UUID.randomUUID().toString()
+        val requestedShell = shellFor(creation.shell, TerminalSource.LOCAL, null)
+        val placeholderTitle = if (requestedShell == TerminalShell.DEFAULT) {
+            Texts.get(R.string.terminal_source_local)
+        } else {
+            "${Texts.get(R.string.terminal_source_local)} · ${ShellBootstrap.label(requestedShell)}"
+        }
+        _state.update {
+            it.copy(
+                tabs = it.tabs + TerminalTab(
+                    id = placeholderId,
+                    source = TerminalSource.LOCAL,
+                    title = placeholderTitle,
+                    shell = requestedShell,
+                    group = group,
+                    conn = conn,
+                    connection = TerminalConnection.Connecting,
+                ),
+                activeTabId = placeholderId,
+            )
+        }
+        onSessionCountChanged(_state.value.tabs.size)
+
         var list = withContext(Dispatchers.IO) { api.terminals(conn, group) }
         val target: TerminalDto
+        var created = false
         if (forceNew || list.isEmpty()) {
             target = withContext(Dispatchers.IO) { api.createTerminal(conn, group) }
             list = list + target
+            created = true
         } else {
             val last = store.lastTerminal(group)
             target = list.firstOrNull { it.id == last } ?: list.first()
         }
-        if (!forceNew && _state.value.tabs.any { it.terminalId == target.id }) {
+        if (generation != sessionGeneration ||
+            _state.value.tabs.none { it.id == placeholderId }
+        ) {
+            // 等待期间实例已切换、会话已停止或占位标签已关闭：
+            // 新开出来的 PTY 直接收尾，复用已有 PTY 时不动它。
+            if (created) closeServerTerminal(conn, group, target.id)
+            return
+        }
+        val existing = if (!forceNew) {
+            _state.value.tabs.firstOrNull { it.terminalId == target.id }
+        } else {
+            null
+        }
+        if (existing != null) {
             _state.update {
-                it.copy(activeTabId = it.tabs.first { t -> t.terminalId == target.id }.id, busy = false)
+                it.copy(
+                    tabs = it.tabs.filterNot { t -> t.id == placeholderId },
+                    activeTabId = existing.id,
+                    busy = false,
+                )
             }
+            onSessionCountChanged(_state.value.tabs.size)
             return
         }
         val shell = shellFor(creation.shell, TerminalSource.LOCAL, null)
+        val effectiveShell = if (
+            shell != TerminalShell.DEFAULT &&
+            ShellBootstrap.matchesDefault(shell, target.title)
+        ) {
+            // 服务端默认已经是目标 shell 时不再嵌套启动；见 matchesDefault 注释。
+            TerminalShell.DEFAULT
+        } else {
+            shell
+        }
         val transport = LocalPtyTransport(
             api = api,
             conn = conn,
             group = group,
             terminalId = target.id,
             scope = scope,
-            initialInput = ShellBootstrap.switchCommand(shell, instancePlatform),
+            initialInput = ShellBootstrap.switchCommand(effectiveShell, instancePlatform),
         )
         val defaultTitle = Texts.get(R.string.terminal_source_local)
-        val title = if (shell == TerminalShell.DEFAULT) {
+        val title = if (effectiveShell == TerminalShell.DEFAULT) {
             target.title.ifBlank { defaultTitle }
         } else {
-            "${target.title.ifBlank { defaultTitle }} · ${ShellBootstrap.label(shell)}"
+            "${target.title.ifBlank { defaultTitle }} · ${ShellBootstrap.label(effectiveShell)}"
         }
         addTab(
             TerminalTab(
-                id = UUID.randomUUID().toString(),
+                id = placeholderId,
                 source = TerminalSource.LOCAL,
                 title = title,
-                shell = shell,
+                shell = effectiveShell,
                 terminalId = target.id,
                 group = group,
                 conn = conn,
                 transport = transport,
             ),
+            replaceId = placeholderId,
+            generation = generation,
         )
         store.setLastTerminal(group, target.id)
     }
@@ -567,6 +665,7 @@ class TerminalViewModel(
         conn: Connection,
         inst: String,
         creation: TerminalCreation,
+        generation: Int,
     ) {
         val config = sshConfig ?: error(Texts.get(R.string.terminal_reason_ssh_not_configured))
         val gate = assessSshCredentialGate(
@@ -575,7 +674,7 @@ class TerminalViewModel(
             appState().sshTrustedHosts,
         )
         if (!gate.allowed) {
-            _state.update { it.copy(sshReason = gate.reason, sourceDialog = true) }
+            _state.update { it.copy(sshReason = gate.reason, sourceDialog = true, busy = false) }
             return
         }
         val credential = withContext(Dispatchers.IO) {
@@ -605,6 +704,7 @@ class TerminalViewModel(
             endpoints = listOf(endpoint),
             auth = auth,
             hostKeys = hostKeys,
+            hostKeyScope = inst,
             scope = scope,
             workspacePath = workspacePath,
             shell = shell,
@@ -620,6 +720,7 @@ class TerminalViewModel(
                 transport = transport,
             ),
             transport,
+            generation,
         )
     }
 
@@ -627,6 +728,7 @@ class TerminalViewModel(
         conn: Connection,
         inst: String,
         creation: TerminalCreation,
+        generation: Int,
     ) {
         val profile = profileStore.load(inst)
             ?: error(Texts.get(R.string.terminal_reason_direct_not_configured))
@@ -659,6 +761,7 @@ class TerminalViewModel(
             endpoints = endpoints,
             auth = auth,
             hostKeys = hostKeys,
+            hostKeyScope = inst,
             scope = scope,
             workspacePath = workspacePath,
             shell = shell,
@@ -674,21 +777,39 @@ class TerminalViewModel(
                 transport = transport,
             ),
             transport,
+            generation,
         )
     }
 
-    private fun addSshTab(tab: TerminalTab, transport: SshTransport) {
+    private fun addSshTab(tab: TerminalTab, transport: SshTransport, generation: Int) {
+        if (generation != sessionGeneration) {
+            // 实例切换后旧凭据/旧主机建出的连接不能挂到新实例的标签栏。
+            runCatching { transport.stop() }
+            return
+        }
         sshTransports[tab.id] = transport
         hostKeyJobs[tab.id] = scope.launch {
             transport.hostKeyPrompt.collect { prompt ->
                 updateTab(tab.id) { it.copy(hostKeyPrompt = prompt) }
             }
         }
-        addTab(tab)
+        addTab(tab, generation = generation)
     }
 
-    private fun addTab(tab: TerminalTab) {
+    private fun addTab(
+        tab: TerminalTab,
+        replaceId: String? = null,
+        generation: Int,
+    ) {
         val transport = tab.transport ?: return
+        val placeholderAlive = replaceId != null && _state.value.tabs.any { it.id == replaceId }
+        if (generation != sessionGeneration || (replaceId != null && !placeholderAlive)) {
+            // 创建期间关闭了占位标签或切换了实例：服务端 PTY 可能已建好，
+            // 这里收尾后不再挂回界面。
+            runCatching { transport.stop() }
+            closeServerTerminal(tab)
+            return
+        }
         val emulator = TerminalEmulatorFactory.create(
             onKeyboardInput = { bytes -> transport.write(bytes) },
             onResize = { dims ->
@@ -714,10 +835,16 @@ class TerminalViewModel(
         val complete = tab.copy(
             emulator = emulator,
             jobs = listOf(outputJob, stateJob),
+            connection = TerminalConnection.Connecting,
         )
         _state.update {
+            val tabs = if (replaceId != null && it.tabs.any { t -> t.id == replaceId }) {
+                it.tabs.map { t -> if (t.id == replaceId) complete else t }
+            } else {
+                it.tabs + complete
+            }
             it.copy(
-                tabs = it.tabs + complete,
+                tabs = tabs,
                 activeTabId = complete.id,
                 busy = false,
                 sourceDialog = false,

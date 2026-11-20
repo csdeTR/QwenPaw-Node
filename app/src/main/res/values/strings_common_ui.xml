@@ -9,6 +9,8 @@
     <string name="common_impact_permanent">将影响以下内容（不可撤销）</string>
     <string name="common_undo">撤销</string>
     <string name="common_pick_file">选择文件</string>
+    <string name="secret_show">显示明文</string>
+    <string name="secret_hide">隐藏明文</string>
     <string name="latex_fallback_note">该公式用到了暂不支持的写法，以上为原始内容</string>
     <string name="markdown_label_mermaid_source">mermaid（源码）</string>
     <string name="markdown_label_code">代码</string>

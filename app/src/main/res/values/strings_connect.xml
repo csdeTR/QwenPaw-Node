@@ -140,6 +140,7 @@
     <string name="wizard_login_mode_password">账号密码</string>
     <string name="wizard_scan_bridge_title">扫码登录需要配套插件</string>
     <string name="wizard_scan_bridge_body">二维码由 Web 控制台的「设备配对」生成，依赖 QwenPaw Node Bridge 0.4.3 及以上。QwenPaw 本身不提供这枚令牌；未安装插件时请先用账号密码登录，或先在 Web 控制台的插件页安装。</string>
+    <string name="wizard_scan_bridge_repo">查看 Bridge 仓库与安装说明</string>
     <string name="wizard_scan_placeholder">粘贴访问令牌，或点下方扫描</string>
     <string name="wizard_token_manual">也可以手动粘贴访问令牌；令牌由 Web 控制台的「设备配对」生成。</string>
     <string name="wizard_scan_button">扫描二维码</string>

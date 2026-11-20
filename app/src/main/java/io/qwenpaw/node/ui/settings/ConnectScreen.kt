@@ -51,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
@@ -59,6 +60,8 @@ import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.data.local.InstanceDraft
 import io.qwenpaw.node.data.model.AgentDto
+import io.qwenpaw.node.ui.common.SecretVisibilityTrailingIcon
+import io.qwenpaw.node.ui.common.rememberSecretVisibility
 import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.launch
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -148,6 +151,7 @@ fun InstanceForm(
     // 反向代理的 HTTP Basic 凭据，收在「高级选项」里。
     var basicUser by remember { mutableStateOf(initialBasicUser) }
     var basicPassword by remember { mutableStateOf(initialBasicPassword) }
+    val passwordVisibility = rememberSecretVisibility()
 
     /** 反代凭据；两个都非空才生效。 */
     fun proxyAuth(): io.qwenpaw.node.data.remote.BasicAuth? =
@@ -621,7 +625,17 @@ fun InstanceForm(
                         value = password,
                         onValueChange = { password = it },
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (passwordVisibility.visible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        trailingIcon = {
+                            SecretVisibilityTrailingIcon(
+                                visible = passwordVisibility.visible,
+                                onToggle = passwordVisibility.toggle,
+                            )
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -1150,6 +1164,7 @@ private fun TokenCredentialFields(
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
+    val tokenVisibility = rememberSecretVisibility()
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = stringResource(R.string.connect_token),
@@ -1169,7 +1184,17 @@ private fun TokenCredentialFields(
         onValueChange = onTokenChange,
         singleLine = true,
         placeholder = { Text(stringResource(R.string.connect_token_hint)) },
-        visualTransformation = PasswordVisualTransformation(),
+        visualTransformation = if (tokenVisibility.visible) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation()
+        },
+        trailingIcon = {
+            SecretVisibilityTrailingIcon(
+                visible = tokenVisibility.visible,
+                onToggle = tokenVisibility.toggle,
+            )
+        },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),

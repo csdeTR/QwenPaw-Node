@@ -41,6 +41,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
@@ -48,6 +49,8 @@ import io.qwenpaw.node.data.VerifyResult
 import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceDraft
 import io.qwenpaw.node.data.model.AgentDto
+import io.qwenpaw.node.ui.common.SecretVisibilityTrailingIcon
+import io.qwenpaw.node.ui.common.rememberSecretVisibility
 import kotlinx.coroutines.launch
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -671,6 +674,7 @@ private fun StepServer(
     verifyFailed: Boolean,
     onVerify: () -> Unit,
 ) {
+    val proxyPasswordVisibility = rememberSecretVisibility()
     // 名称在上、地址与别名收在同一个灰框里：与填表添加的步骤 1 同构，
     // 两处填的是同一批字段，排版不同会让人以为其中一个少填了什么。
     FieldLabel(
@@ -786,7 +790,17 @@ private fun StepServer(
             onValueChange = onBasicPassword,
             placeholder = { Text(stringResource(R.string.wizard_proxy_password)) },
             singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (proxyPasswordVisibility.visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            trailingIcon = {
+                SecretVisibilityTrailingIcon(
+                    visible = proxyPasswordVisibility.visible,
+                    onToggle = proxyPasswordVisibility.toggle,
+                )
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -874,6 +888,9 @@ private fun StepLogin(
     canScan: Boolean,
     onScan: () -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
+    val tokenVisibility = rememberSecretVisibility()
+    val passwordVisibility = rememberSecretVisibility()
     Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
         Chip(
             text = stringResource(R.string.wizard_login_mode_scan),
@@ -924,6 +941,16 @@ private fun StepLogin(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.wizard_scan_bridge_repo),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { uriHandler.openUri(BRIDGE_REPO_URL) }
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+            )
         }
         Spacer(Modifier.height(12.dp))
         if (canScan) {
@@ -932,7 +959,17 @@ private fun StepLogin(
                 onValueChange = onToken,
                 singleLine = true,
                 placeholder = { Text(stringResource(R.string.wizard_scan_placeholder)) },
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (tokenVisibility.visible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    SecretVisibilityTrailingIcon(
+                        visible = tokenVisibility.visible,
+                        onToggle = tokenVisibility.toggle,
+                    )
+                },
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -1023,7 +1060,17 @@ private fun StepLogin(
         value = password,
         onValueChange = onPassword,
         singleLine = true,
-        visualTransformation = PasswordVisualTransformation(),
+        visualTransformation = if (passwordVisibility.visible) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation()
+        },
+        trailingIcon = {
+            SecretVisibilityTrailingIcon(
+                visible = passwordVisibility.visible,
+                onToggle = passwordVisibility.toggle,
+            )
+        },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
@@ -1242,3 +1289,5 @@ private fun WizardButton(
         }
     }
 }
+
+private const val BRIDGE_REPO_URL = "https://github.com/csdeTR/QwenPaw-Node-Bridge"

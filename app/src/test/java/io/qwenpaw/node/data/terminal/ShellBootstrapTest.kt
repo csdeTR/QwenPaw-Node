@@ -41,6 +41,65 @@ class ShellBootstrapTest {
     }
 
     @Test
+    fun `default shell match avoids nested powershell or cmd`() {
+        assertTrue(ShellBootstrap.matchesDefault(TerminalShell.POWERSHELL, "pwsh"))
+        assertTrue(ShellBootstrap.matchesDefault(TerminalShell.POWERSHELL, "powershell.exe"))
+        assertTrue(ShellBootstrap.matchesDefault(TerminalShell.POWERSHELL, "C:\\Windows\\powershell.exe"))
+        assertTrue(ShellBootstrap.matchesDefault(TerminalShell.CMD, "cmd.exe"))
+        assertTrue(ShellBootstrap.matchesDefault(TerminalShell.BASH, "bash"))
+        assertTrue(!ShellBootstrap.matchesDefault(TerminalShell.CMD, "pwsh"))
+        assertTrue(!ShellBootstrap.matchesDefault(TerminalShell.POWERSHELL, "cmd"))
+    }
+
+    @Test
+    fun `prompt detection avoids nested shell over ssh`() {
+        assertTrue(
+            ShellBootstrap.promptMatchesShell(
+                TerminalShell.POWERSHELL,
+                "PS C:\\Users\\Administrator> ",
+            ),
+        )
+        assertTrue(
+            ShellBootstrap.promptMatchesShell(
+                TerminalShell.CMD,
+                "C:\\Users\\Administrator>",
+            ),
+        )
+        assertTrue(
+            ShellBootstrap.promptMatchesShell(TerminalShell.BASH, "user@host:~$ "),
+        )
+        assertTrue(
+            !ShellBootstrap.promptMatchesShell(
+                TerminalShell.POWERSHELL,
+                "C:\\Users\\Administrator>",
+            ),
+        )
+        assertTrue(
+            !ShellBootstrap.promptMatchesShell(
+                TerminalShell.CMD,
+                "PS C:\\Users\\Administrator>",
+            ),
+        )
+    }
+
+    @Test
+    fun `exec commands start the selected shell directly`() {
+        assertEquals(
+            "powershell -NoLogo",
+            ShellBootstrap.execCommand(TerminalShell.POWERSHELL, TerminalPlatform.WINDOWS),
+        )
+        assertEquals(
+            "cmd.exe",
+            ShellBootstrap.execCommand(TerminalShell.CMD, TerminalPlatform.WINDOWS),
+        )
+        assertEquals(
+            "bash -i",
+            ShellBootstrap.execCommand(TerminalShell.BASH, TerminalPlatform.POSIX),
+        )
+        assertNull(ShellBootstrap.execCommand(TerminalShell.DEFAULT, TerminalPlatform.WINDOWS))
+    }
+
+    @Test
     fun `switch commands cover posix and windows`() {
         assertNull(ShellBootstrap.switchCommand(TerminalShell.DEFAULT, TerminalPlatform.POSIX))
         assertTrue(

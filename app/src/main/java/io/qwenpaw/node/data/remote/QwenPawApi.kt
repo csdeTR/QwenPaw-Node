@@ -4,6 +4,8 @@ import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AclActionEntryDto
 import io.qwenpaw.node.data.model.AclChannelDto
 import io.qwenpaw.node.data.model.AclPendingDto
+import io.qwenpaw.node.data.model.AllowNoAuthHostsDto
+import io.qwenpaw.node.data.model.ApiErrorDetailDto
 import io.qwenpaw.node.data.model.AcpNodeRuntimeDto
 import io.qwenpaw.node.data.model.AgentBackendDto
 import io.qwenpaw.node.data.model.AgentBackendsDto
@@ -26,6 +28,11 @@ import io.qwenpaw.node.data.model.BackupJobSnapshotDto
 import io.qwenpaw.node.data.model.BackupMetaDto
 import io.qwenpaw.node.data.model.BatchChatResultDto
 import io.qwenpaw.node.data.model.BridgeInfoDto
+import io.qwenpaw.node.data.model.BridgeBrowserLogsDto
+import io.qwenpaw.node.data.model.BridgeUpdateStatusDto
+import io.qwenpaw.node.data.model.BrowserCheckDto
+import io.qwenpaw.node.data.model.BrowserChromeStatusDto
+import io.qwenpaw.node.data.model.BrowserSelfTestDto
 import io.qwenpaw.node.data.model.BrowseDirsDto
 import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
@@ -57,15 +64,21 @@ import io.qwenpaw.node.data.model.HarnessesDto
 import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.data.model.InboxPageDto
 import io.qwenpaw.node.data.model.InboxTraceDto
+import io.qwenpaw.node.data.model.LocalModelConfigDto
 import io.qwenpaw.node.data.model.LocalModelDto
 import io.qwenpaw.node.data.model.LocalModelProgressDto
 import io.qwenpaw.node.data.model.LocalModelServerDto
+import io.qwenpaw.node.data.model.LocalModelServerUpdateDto
 import io.qwenpaw.node.data.model.LocalWhisperStatusDto
 import io.qwenpaw.node.data.model.LlmToolDailyDto
 import io.qwenpaw.node.data.model.MarketCategoryDto
 import io.qwenpaw.node.data.model.MarketProviderDto
 import io.qwenpaw.node.data.model.MarketSearchResponseDto
 import io.qwenpaw.node.data.model.McpClientDto
+import io.qwenpaw.node.data.model.McpClientWriteDto
+import io.qwenpaw.node.data.model.McpOAuthStartDto
+import io.qwenpaw.node.data.model.McpOAuthStartResultDto
+import io.qwenpaw.node.data.model.McpOAuthStatusDto
 import io.qwenpaw.node.data.model.McpPolicyDto
 import io.qwenpaw.node.data.model.McpToolDto
 import io.qwenpaw.node.data.model.SandboxStatusDto
@@ -78,7 +91,10 @@ import io.qwenpaw.node.data.model.HubInstallTaskDto
 import io.qwenpaw.node.data.model.PawAppDto
 import io.qwenpaw.node.data.model.PawAppsDto
 import io.qwenpaw.node.data.model.PluginCatalogDto
+import io.qwenpaw.node.data.model.PluginConfigWriteDto
+import io.qwenpaw.node.data.model.PluginEnabledWriteDto
 import io.qwenpaw.node.data.model.PluginInstallResultDto
+import io.qwenpaw.node.data.model.PluginListItemDto
 import io.qwenpaw.node.data.model.PluginMarketResponseDto
 import io.qwenpaw.node.data.model.PoolSkillDetailDto
 import io.qwenpaw.node.data.model.PoolSkillDto
@@ -459,6 +475,31 @@ class QwenPawApi(
             }
             val info = decode(text, BridgeInfoDto.serializer())
             info.takeIf { it.protocolVersion == BridgeInfoDto.PROTOCOL }
+        }
+    }
+
+    /**
+     * 问一次插件自己有没有新版本。
+     *
+     * 返回 `null` 表示**该插件没有这条端点**（404）：旧版本插件没有更新检查，
+     * 这不是错误，客户端只是不提示。其余失败照常抛出，由调用方决定是否静默。
+     *
+     * 路径放在 `/update/` 下而不是 `/status`：核心 `plugins.py` 注册了
+     * `/api/plugins/{id}/status` 且先于插件 router 匹配，写在 `/status` 下会被核心接走。
+     */
+    fun bridgeUpdateStatus(
+        conn: Connection,
+        http: OkHttpClient = probeClient(),
+    ): BridgeUpdateStatusDto? {
+        val url = connUrl(conn, BRIDGE_UPDATE_STATUS_PATH)
+        val request = baseBuilder(conn, url).get().build()
+        return http.newCall(request).execute().use { response ->
+            if (response.code == 404) return null
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw failureOf(response.code, text, response.header("WWW-Authenticate"), conn.token != null)
+            }
+            decode(text, BridgeUpdateStatusDto.serializer())
         }
     }
 
@@ -1667,6 +1708,20 @@ class QwenPawApi(
         }.getOrNull()?.takeIf { it.suggestedName.isNotBlank() }
     }
 
+    /**
+     * 把 409/404 的结构化 `detail` 解析成保守模型。
+     *
+     * 服务端不同端点在同一状态码下回不同形状；解析失败返回 null，调用方展示
+     * 服务端原文，不把「没读懂」当成「没有冲突」。
+     */
+    fun apiErrorDetailOf(e: ApiException): ApiErrorDetailDto? {
+        val raw = e.detail ?: return null
+        if (!raw.trimStart().startsWith("{")) return null
+        return runCatching {
+            json.decodeFromString(ApiErrorDetailDto.serializer(), raw)
+        }.getOrNull()
+    }
+
     // ---------- MCP ----------
 
     fun mcpClients(conn: Connection): List<McpClientDto> =
@@ -1725,6 +1780,77 @@ class QwenPawApi(
             McpPolicyDto.serializer(),
         )
 
+    /** 单个 MCP 客户端详情。key 走 `{client_key:path}`，允许包含 `/`，不能再编码一层。 */
+    fun mcpClient(conn: Connection, key: String): McpClientDto =
+        decode(
+            request(conn, "GET", "/api/mcp/$key"),
+            McpClientDto.serializer(),
+        )
+
+    /** 新建 MCP 客户端。端点的 body 是双层结构 `{client_key, client}`。 */
+    fun createMcpClient(conn: Connection, key: String, client: McpClientWriteDto): McpClientDto {
+        val body = buildJsonObject {
+            put("client_key", key)
+            put(
+                "client",
+                json.parseToJsonElement(
+                    json.encodeToString(McpClientWriteDto.serializer(), client),
+                ),
+            )
+        }
+        return decode(
+            request(conn, "POST", "/api/mcp", body),
+            McpClientDto.serializer(),
+        )
+    }
+
+    /** 部分更新；未写的字段由服务端保持原值。 */
+    fun updateMcpClient(conn: Connection, key: String, updates: McpClientWriteDto): McpClientDto =
+        decode(
+            requestRaw(
+                conn,
+                "PUT",
+                "/api/mcp/$key",
+                json.encodeToString(McpClientWriteDto.serializer(), updates),
+            ),
+            McpClientDto.serializer(),
+        )
+
+    /** 删除客户端，同时删除它的凭据与 OAuth 令牌。 */
+    fun deleteMcpClient(conn: Connection, key: String) {
+        request(conn, "DELETE", "/api/mcp/$key")
+    }
+
+    /** 启动 MCP OAuth 2.1 PKCE 流程；`url` 必须是客户端的 MCP 服务端地址。 */
+    fun mcpOAuthStart(
+        conn: Connection,
+        key: String,
+        requestDto: McpOAuthStartDto,
+    ): McpOAuthStartResultDto {
+        val body = buildJsonObject {
+            put("url", requestDto.url)
+            if (requestDto.scope.isNotBlank()) put("scope", requestDto.scope)
+            if (requestDto.clientId.isNotBlank()) put("client_id", requestDto.clientId)
+            if (requestDto.authEndpoint.isNotBlank()) put("auth_endpoint", requestDto.authEndpoint)
+            if (requestDto.tokenEndpoint.isNotBlank()) put("token_endpoint", requestDto.tokenEndpoint)
+        }
+        return decode(
+            request(conn, "POST", "/api/mcp/oauth/start/$key", body),
+            McpOAuthStartResultDto.serializer(),
+        )
+    }
+
+    fun mcpOAuthStatus(conn: Connection, key: String): McpOAuthStatusDto =
+        decode(
+            request(conn, "GET", "/api/mcp/oauth/status/$key"),
+            McpOAuthStatusDto.serializer(),
+        )
+
+    /** 撤销 OAuth 授权并清掉本地令牌。 */
+    fun mcpOAuthRevoke(conn: Connection, key: String) {
+        request(conn, "DELETE", "/api/mcp/oauth/$key")
+    }
+
     // ---------- 市场与插件目录 ----------
 
     fun marketProviders(conn: Connection): List<MarketProviderDto> =
@@ -1780,6 +1906,93 @@ class QwenPawApi(
             request(conn, "GET", "/api/plugins/catalog"),
             PluginCatalogDto.serializer(),
         )
+
+    // ---------- 插件管理 ----------
+
+    /** 已安装插件列表。2.3.0 起元素多 `status` 与 `diagnostics`。 */
+    fun plugins(conn: Connection): List<PluginListItemDto> =
+        decode(
+            request(conn, "GET", "/api/plugins"),
+            kotlinx.serialization.builtins.ListSerializer(PluginListItemDto.serializer()),
+        )
+
+    /** 单个插件详情；2.3.0.post1 才有独立详情路由，旧版本回 404。 */
+    fun pluginDetail(conn: Connection, pluginId: String): PluginListItemDto =
+        decode(
+            request(conn, "GET", "/api/plugins/$pluginId"),
+            PluginListItemDto.serializer(),
+        )
+
+    /**
+     * 整段写入插件配置。
+     *
+     * **服务端没有读取端点**，这里提交的 `config` 会替换 `config.plugins.<id>`，
+     * 因此界面必须先给出「会整段覆盖」的确认。`confirmLegacy` 用于确认
+     * legacy 卸载钩子，`interruptTasks` 用于允许中断运行中的任务。
+     */
+    fun updatePluginConfig(
+        conn: Connection,
+        pluginId: String,
+        config: JsonObject,
+        confirmLegacy: Boolean = false,
+        interruptTasks: Boolean = false,
+    ) {
+        val body = buildJsonObject {
+            put("config", config)
+            put("confirm_legacy", confirmLegacy)
+            put("interrupt_tasks", interruptTasks)
+        }
+        request(conn, "PUT", "/api/plugins/$pluginId/config", body)
+    }
+
+    /** 启停插件。停用会卸载当前进程里的实例，但不删除文件。 */
+    fun setPluginEnabled(
+        conn: Connection,
+        pluginId: String,
+        enabled: Boolean,
+        interruptTasks: Boolean = false,
+    ) {
+        val body = buildJsonObject {
+            put("enabled", enabled)
+            put("interrupt_tasks", interruptTasks)
+        }
+        request(conn, "POST", "/api/plugins/$pluginId/enabled", body)
+    }
+
+    /** 仅从当前进程卸载，不删除文件。 */
+    fun unloadPlugin(conn: Connection, pluginId: String, interruptTasks: Boolean = false) {
+        val suffix = if (interruptTasks) "?interrupt_tasks=true" else ""
+        request(conn, "POST", "/api/plugins/$pluginId/unload$suffix")
+    }
+
+    /** 修复插件依赖；需要依赖升级时服务端回 409，detail 里带 operation。 */
+    fun repairPluginDependencies(conn: Connection, pluginId: String) {
+        request(conn, "POST", "/api/plugins/$pluginId/repair-dependencies")
+    }
+
+    /** 卸载插件并删除文件。 */
+    fun deletePlugin(conn: Connection, pluginId: String, interruptTasks: Boolean = false) {
+        val suffix = if (interruptTasks) "?interrupt_tasks=true" else ""
+        request(conn, "DELETE", "/api/plugins/$pluginId$suffix")
+    }
+
+    // ---------- 插件依赖升级 ----------
+
+    /** 依赖升级操作状态。形状由服务端决定，界面按已知键读取，未知键忽略。 */
+    fun dependencyUpgrade(conn: Connection, operationId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/plugins/dependency-upgrades/$operationId"),
+        ).jsonObject
+
+    fun applyDependencyUpgrade(conn: Connection, operationId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "POST", "/api/plugins/dependency-upgrades/$operationId/apply"),
+        ).jsonObject
+
+    fun cancelDependencyUpgrade(conn: Connection, operationId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "DELETE", "/api/plugins/dependency-upgrades/$operationId"),
+        ).jsonObject
 
     /** 在线插件市场。服务端代理上游，失败时回 502。 */
     fun pluginMarketSearch(
@@ -2614,6 +2827,23 @@ class QwenPawApi(
             request(conn, "PUT", "/api/config/security/skill-scanner", config),
         ).jsonObject
 
+    /** `GET /api/config/security/allow-no-auth-hosts`。 */
+    fun allowNoAuthHosts(conn: Connection): AllowNoAuthHostsDto = decode(
+        request(conn, "GET", "/api/config/security/allow-no-auth-hosts"),
+        AllowNoAuthHostsDto.serializer(),
+    )
+
+    /** `PUT …/allow-no-auth-hosts`，body 是整个名单，服务端负责规范化与去重。 */
+    fun setAllowNoAuthHosts(conn: Connection, hosts: List<String>): AllowNoAuthHostsDto {
+        val body = buildJsonObject {
+            put("hosts", buildJsonArray { hosts.forEach { add(it) } })
+        }
+        return decode(
+            request(conn, "PUT", "/api/config/security/allow-no-auth-hosts", body),
+            AllowNoAuthHostsDto.serializer(),
+        )
+    }
+
     /** `GET /api/settings/language`。这是服务端 Web 控制台的语言，不是客户端语言。 */
     fun serverLanguage(conn: Connection): String = decode(
         request(conn, "GET", "/api/settings/language"),
@@ -3020,6 +3250,83 @@ class QwenPawApi(
 
     fun cancelServerDownload(conn: Connection) {
         request(conn, "DELETE", "/api/local-models/server/download")
+    }
+
+    /** `GET /api/local-models/config`。 */
+    fun localModelConfig(conn: Connection): LocalModelConfigDto = decode(
+        request(conn, "GET", "/api/local-models/config"),
+        LocalModelConfigDto.serializer(),
+    )
+
+    /**
+     * `PUT /api/local-models/config`，省略字段表示不改。
+     *
+     * `port` 有两种特殊语义：不传=保持原值，传 `null`=改回自动端口。
+     * 因此单独用 [clearPort] 表达后者，不能靠 `port = null` 兼作「未改」。
+     */
+    fun setLocalModelConfig(
+        conn: Connection,
+        config: LocalModelConfigDto,
+        clearPort: Boolean = false,
+    ) {
+        val body = buildJsonObject {
+            config.maxContextLength?.let { put("max_context_length", it) }
+            if (clearPort) put("port", JsonNull) else config.port?.let { put("port", it) }
+            config.generateKwargs?.let { put("generate_kwargs", it) }
+        }
+        request(conn, "PUT", "/api/local-models/config", body)
+    }
+
+    /** `DELETE /api/local-models/models/{model_id:path}`。运行中的模型回 409。 */
+    fun deleteLocalModel(conn: Connection, modelId: String) {
+        request(conn, "DELETE", "/api/local-models/models/$modelId")
+    }
+
+    /** `GET /api/local-models/server/update`。 */
+    fun localModelServerUpdate(conn: Connection): LocalModelServerUpdateDto = decode(
+        request(conn, "GET", "/api/local-models/server/update"),
+        LocalModelServerUpdateDto.serializer(),
+    )
+
+    /** `POST /api/local-models/server`，用已下载的模型启动运行时。 */
+    fun startLocalModelServer(conn: Connection, modelId: String) {
+        val body = buildJsonObject { put("model_id", modelId) }
+        request(conn, "POST", "/api/local-models/server", body)
+    }
+
+    /** `DELETE /api/local-models/server`，停止运行时。 */
+    fun stopLocalModelServer(conn: Connection) {
+        request(conn, "DELETE", "/api/local-models/server")
+    }
+
+    // ---------- 浏览器诊断 ----------
+
+    /** `GET /api/browser/chrome/status`。服务端低于 2.3.0 时回 404。 */
+    fun browserChromeStatus(conn: Connection): BrowserChromeStatusDto = decode(
+        request(conn, "GET", "/api/browser/chrome/status"),
+        BrowserChromeStatusDto.serializer(),
+    )
+
+    /** `POST /api/browser/chrome/self-test`；结果同时写进服务端的 last_self_test。 */
+    fun browserSelfTest(conn: Connection): BrowserSelfTestDto = decode(
+        request(conn, "POST", "/api/browser/chrome/self-test"),
+        BrowserSelfTestDto.serializer(),
+    )
+
+    /** Bridge 0.5.0 的 NM host 日志（插件侧已脱敏）。 */
+    fun bridgeBrowserLogs(conn: Connection, lines: Int = 200): BridgeBrowserLogsDto {
+        val url = workspaceUrl(
+            conn,
+            "/api/plugins/qwenpaw-node-bridge/browser/logs",
+            mapOf("lines" to lines.toString()),
+        )
+        return decode(getUrl(conn, url), BridgeBrowserLogsDto.serializer())
+    }
+
+    /** Bridge 0.5.0 的修复端点；当前只接受 `setup`。 */
+    fun bridgeBrowserRepair(conn: Connection) {
+        val body = buildJsonObject { put("action", "setup") }
+        request(conn, "POST", "/api/plugins/qwenpaw-node-bridge/browser/repair", body)
     }
 
     // ---------- 内部实现 ----------
@@ -3436,6 +3743,10 @@ class QwenPawApi(
          * `/info`、`/search`、`/events` 是核心没有的子路径，可以安全使用。
          */
         const val BRIDGE_INFO_PATH = "/api/plugins/qwenpaw-node-bridge/info"
+
+        /** 插件更新状态端点。核心没有注册该子路径，不会被 `plugins.py` 抢先匹配。 */
+        const val BRIDGE_UPDATE_STATUS_PATH =
+            "/api/plugins/qwenpaw-node-bridge/update/status"
 
         /** 插件全文检索端点。中文查询由插件侧走 `LIKE`，英文走 FTS5。 */
         const val BRIDGE_SEARCH_PATH = "/api/plugins/qwenpaw-node-bridge/search"

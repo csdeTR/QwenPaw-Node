@@ -89,6 +89,8 @@ data class AppState(
     val compactList: Boolean = false,
     /** 生成回复时保持屏幕常亮。 */
     val keepScreenOn: Boolean = false,
+    /** 是否把界面固定在竖屏；默认跟随系统方向。 */
+    val lockPortrait: Boolean = false,
     /** 输入框是否显示语音按钮。默认开启；服务端转写不可用时点击会给说明。 */
     val voiceEnabled: Boolean = true,
     /** 语音触发方式，默认点一下。 */
@@ -211,6 +213,18 @@ data class AppState(
      * 因此这里的值可能为 true 但实际不生效——以 [bridgeStatus] 为准。
      */
     val bridgeFeaturesEnabled: Boolean = false,
+    /** 是否每天首次启动时静默检查 APK 新版本。默认开启。 */
+    val autoUpdateCheck: Boolean = true,
+    /** 已跳过的 APK 版本；与最新版相同时静默检查不再提示。 */
+    val skippedUpdateVersion: String? = null,
+    /** 最近一次检查更新的日期（`yyyy-MM-dd`），每日判定的比较值。 */
+    val lastUpdateCheckDate: String? = null,
+    /** 发现有新版本时的对话框；null 表示不显示。 */
+    val updatePrompt: UpdatePrompt? = null,
+    /** 手动检查的一次性结论（已是最新 / 失败原因）；Toast 显示后清空。 */
+    val updateNotice: String? = null,
+    /** 配套插件有新版本时的对话框；null 表示不显示。 */
+    val pluginUpdatePrompt: PluginUpdatePrompt? = null,
     /**
      * 服务端语音转写的可用性。
      *
@@ -240,6 +254,26 @@ data class AppState(
      * 不阻断保存：令牌也可能来自其它途径，只是拿不到网页端的设备配对。
      */
     val pairingNotice: PairingNotice? = null,
+)
+
+/** APK 新版本对话框的数据。 */
+data class UpdatePrompt(
+    /** 新版本号，已去掉 `v` 前缀。 */
+    val version: String,
+    /** 「去下载」的目标地址。 */
+    val url: String,
+    /** 发布说明原文；可能为空。 */
+    val notes: String,
+    /** 当前版本，用于说明从哪一版升到哪一版。 */
+    val currentVersion: String,
+)
+
+/** 配套插件新版本对话框的数据。 */
+data class PluginUpdatePrompt(
+    val version: String,
+    val url: String,
+    /** 当前插件版本，用于对比。 */
+    val currentVersion: String,
 )
 
 /**
@@ -283,6 +317,11 @@ class AppViewModel(
      * 测试与预览可以为 null；此时不要访问 [terminal] / [git]。
      */
     private val appContext: android.content.Context? = null,
+    /** GitHub 更新检查。测试与预览可以注入桩。 */
+    private val updateChecker: io.qwenpaw.node.data.update.UpdateChecker =
+        io.qwenpaw.node.data.update.UpdateChecker(),
+    /** 应用级终端会话；生产环境由 QwenPawApp 持有，测试可为 null。 */
+    private val terminalHost: io.qwenpaw.node.ui.terminal.TerminalViewModel? = null,
 ) : ViewModel() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -298,6 +337,9 @@ class AppViewModel(
 
     /** 插件事件流的长连接。切实例、关开关或重探时取消，避免旧连接继续推数。 */
     private var eventsJob: kotlinx.coroutines.Job? = null
+
+    /** 正在进行的一次 APK 更新检查；手动连点与启动检查撞上时只留一个。 */
+    private var updateJob: kotlinx.coroutines.Job? = null
     private val _state = MutableStateFlow(
         AppState(
             connected = repository.active() != null,
@@ -318,6 +360,7 @@ class AppViewModel(
             useMiSans = prefs.getBoolean(KEY_MISANS, false),
             compactList = prefs.getBoolean(KEY_COMPACT, false),
             keepScreenOn = prefs.getBoolean(KEY_KEEP_ON, false),
+            lockPortrait = prefs.getBoolean(KEY_LOCK_PORTRAIT, false),
             // 语音按钮默认开启。老用户若已显式关闭过，保存的 false 会继续生效。
             voiceEnabled = prefs.getBoolean(KEY_VOICE, true),
             voiceTrigger = runCatching {
@@ -372,6 +415,9 @@ class AppViewModel(
             trustedHosts = readTrustedHosts(),
             sshTrustedHosts = readSshTrustedHosts(),
             bridgeFeaturesEnabled = prefs.getBoolean(KEY_BRIDGE_FEATURES, false),
+            autoUpdateCheck = prefs.getBoolean(KEY_AUTO_UPDATE_CHECK, true),
+            skippedUpdateVersion = prefs.getString(KEY_SKIPPED_UPDATE_VERSION, null),
+            lastUpdateCheckDate = prefs.getString(KEY_LAST_UPDATE_CHECK_DATE, null),
         ),
     )
     val state: StateFlow<AppState> = _state.asStateFlow()
@@ -750,7 +796,7 @@ class AppViewModel(
     fun confirmInstanceSwitch() {
         val target = _state.value.pendingInstanceSwitch ?: return
         _state.update { it.copy(pendingInstanceSwitch = null) }
-        terminalHolder?.shutdown()
+        shutdownTerminalSessions()
         repository.setActive(target.id)
         useSaved(target)
     }
@@ -1107,6 +1153,169 @@ class AppViewModel(
         _state.update { it.copy(bridgeFeaturesEnabled = enabled) }
         // 开启时先连上事件流；关闭时立即断开，不等下一次重探。
         if (enabled) refreshBridgeStatus() else stopBridgeEvents()
+    }
+
+    /** 锁定/解锁竖屏；Activity 的方向由 MainActivity 读取该状态后设置。 */
+    fun setLockPortrait(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LOCK_PORTRAIT, enabled).apply()
+        _state.update { it.copy(lockPortrait = enabled) }
+    }
+
+    // ---------------- 更新检查 ----------------
+
+    /**
+     * 查一次 APK 新版本。
+     *
+     * [silent] 为 true 时只在「有新版本且该版本没被跳过」时弹窗，失败与「已是最新」
+     * 都不出声；手动检查一定给出结论，用 [AppState.updateNotice] 交给界面以 Toast 呈现。
+     *
+     * 日期在请求之前落盘：请求失败也算「今天查过」，否则每次启动都会重试一遍，
+     * 断网的用户会看到反复的请求。静默检查是否该跑由调用方按
+     * [io.qwenpaw.node.data.update.shouldCheckDaily] 判断。
+     */
+    fun checkForUpdates(silent: Boolean) {
+        if (updateJob?.isActive == true) return
+        val today = io.qwenpaw.node.data.update.todayStamp(java.time.ZoneId.systemDefault())
+        prefs.edit().putString(KEY_LAST_UPDATE_CHECK_DATE, today).apply()
+        _state.update { it.copy(lastUpdateCheckDate = today) }
+        updateJob = scope.launch {
+            val current = io.qwenpaw.node.BuildConfig.VERSION_NAME
+            val result = withContext(Dispatchers.IO) { updateChecker.check(current) }
+            when (result) {
+                io.qwenpaw.node.data.update.UpdateResult.UpToDate -> if (!silent) {
+                    _state.update {
+                        it.copy(updateNotice = Texts.get(R.string.update_notice_up_to_date))
+                    }
+                }
+
+                is io.qwenpaw.node.data.update.UpdateResult.Available -> {
+                    if (result.version == _state.value.skippedUpdateVersion) {
+                        // 用户已明确跳过这一版：静默检查保持安静，手动检查说明跳过状态，
+                        // 否则「检查更新」会看起来毫无反应。
+                        if (!silent) {
+                            _state.update {
+                                it.copy(
+                                    updateNotice = Texts.get(
+                                        R.string.update_notice_skipped,
+                                        result.version,
+                                    ),
+                                )
+                            }
+                        }
+                        return@launch
+                    }
+                    _state.update {
+                        it.copy(
+                            updatePrompt = UpdatePrompt(
+                                version = result.version,
+                                url = result.url,
+                                notes = result.notes,
+                                currentVersion = current,
+                            ),
+                            updateNotice = null,
+                        )
+                    }
+                }
+
+                is io.qwenpaw.node.data.update.UpdateResult.Failed -> if (!silent) {
+                    _state.update { it.copy(updateNotice = result.message) }
+                }
+            }
+        }
+    }
+
+    /** 关掉更新对话框（稍后 / 返回键）。 */
+    fun dismissUpdatePrompt() {
+        _state.update { it.copy(updatePrompt = null) }
+    }
+
+    /** 跳过当前提示的版本：同一版本不再提示，出现更新的一版再提示。 */
+    fun skipUpdateVersion() {
+        val prompt = _state.value.updatePrompt ?: return
+        prefs.edit().putString(KEY_SKIPPED_UPDATE_VERSION, prompt.version).apply()
+        _state.update { it.copy(skippedUpdateVersion = prompt.version, updatePrompt = null) }
+    }
+
+    /** 手动检查的结论已经显示过。 */
+    fun consumeUpdateNotice() {
+        _state.update { it.copy(updateNotice = null) }
+    }
+
+    /** 开关每日自动检查；关闭的二次确认由设置页负责。 */
+    fun setAutoUpdateCheck(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_UPDATE_CHECK, enabled).apply()
+        _state.update { it.copy(autoUpdateCheck = enabled) }
+    }
+
+    /**
+     * 最多每 6 小时问一次配套插件有没有新版本。
+     *
+     * 由进入对话列表或聊天页触发。冷却在请求之前落盘：网络不通时也不该每次切页都重试。
+     * 是否提示以插件返回的 `notify_client` 与 `update_available` 为准——插件可能选择
+     * 只在服务端提示，客户端不越过它的判断。
+     */
+    fun checkPluginUpdateIfDue() {
+        val ready = _state.value.bridgeStatus as? io.qwenpaw.node.data.plugin.BridgeStatus.Ready
+            ?: return
+        if (!ready.info.supports(BRIDGE_UPDATE_CAPABILITY)) return
+        if (_state.value.pluginUpdatePrompt != null) return
+        val now = System.currentTimeMillis()
+        if (!io.qwenpaw.node.data.update.isPluginUpdateCheckDue(
+                prefs.getLong(KEY_PLUGIN_UPDATE_CHECK_AT, 0L),
+                now,
+            )
+        ) {
+            return
+        }
+        val instance = repository.active() ?: return
+        val conn = repository.connection(instance) ?: return
+        prefs.edit().putLong(KEY_PLUGIN_UPDATE_CHECK_AT, now).apply()
+        scope.launch {
+            val status = withContext(Dispatchers.IO) {
+                // 404 表示插件没有这条端点，属正常情况；其余失败也不打扰用户。
+                runCatching { api.bridgeUpdateStatus(conn) }.getOrNull()
+            } ?: return@launch
+            if (!status.updateAvailable || !status.notifyClient) return@launch
+            val latest = status.latestVersion.trim()
+            if (latest.isEmpty()) return@launch
+            // 插件自己的判定优先，但仍要挡一次「与当前版本相同」的过期缓存。
+            val newer = io.qwenpaw.node.data.update.UpdateChecker
+                .compareVersions(ready.info.pluginVersion, latest) < 0
+            if (!newer) return@launch
+            if (latest == prefs.getString(KEY_PLUGIN_UPDATE_SKIPPED_VERSION, null)) return@launch
+            val url = status.latestUrl.trim()
+                .ifBlank { io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL + "/releases/latest" }
+            _state.update {
+                it.copy(
+                    pluginUpdatePrompt = PluginUpdatePrompt(
+                        version = latest,
+                        url = url,
+                        currentVersion = ready.info.pluginVersion,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** 关掉插件更新对话框（已打开更新地址）。 */
+    fun dismissPluginUpdatePrompt() {
+        _state.update { it.copy(pluginUpdatePrompt = null) }
+    }
+
+    /** 稍后：重置冷却，不记住版本。 */
+    fun snoozePluginUpdate() {
+        prefs.edit().putLong(KEY_PLUGIN_UPDATE_CHECK_AT, System.currentTimeMillis()).apply()
+        _state.update { it.copy(pluginUpdatePrompt = null) }
+    }
+
+    /** 跳过这个插件版本：同一版本不再提示。 */
+    fun skipPluginUpdateVersion() {
+        val prompt = _state.value.pluginUpdatePrompt ?: return
+        prefs.edit()
+            .putString(KEY_PLUGIN_UPDATE_SKIPPED_VERSION, prompt.version)
+            .putLong(KEY_PLUGIN_UPDATE_CHECK_AT, System.currentTimeMillis())
+            .apply()
+        _state.update { it.copy(pluginUpdatePrompt = null) }
     }
 
     /**
@@ -1678,6 +1887,42 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { localModelsHolder = it }
 
+    /** 浏览器控制链路诊断。 */
+    private var browserDiagnosticsHolder: io.qwenpaw.node.ui.browser.BrowserDiagnosticsViewModel? = null
+
+    val browserDiagnostics: io.qwenpaw.node.ui.browser.BrowserDiagnosticsViewModel
+        get() = browserDiagnosticsHolder ?: io.qwenpaw.node.ui.browser.BrowserDiagnosticsViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { browserDiagnosticsHolder = it }
+
+    /** 单个插件的配置、启停与卸载。 */
+    private var pluginManageHolder: io.qwenpaw.node.ui.plugins.PluginManageViewModel? = null
+
+    val pluginManage: io.qwenpaw.node.ui.plugins.PluginManageViewModel
+        get() = pluginManageHolder ?: io.qwenpaw.node.ui.plugins.PluginManageViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { pluginManageHolder = it }
+
+    /** 插件依赖升级。 */
+    private var dependencyUpgradeHolder: io.qwenpaw.node.ui.plugins.DependencyUpgradeViewModel? = null
+
+    val dependencyUpgrade: io.qwenpaw.node.ui.plugins.DependencyUpgradeViewModel
+        get() = dependencyUpgradeHolder ?: io.qwenpaw.node.ui.plugins.DependencyUpgradeViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { dependencyUpgradeHolder = it }
+
+    /** 免鉴权地址名单。 */
+    private var allowNoAuthHostsHolder: io.qwenpaw.node.ui.settings.AllowNoAuthHostsViewModel? = null
+
+    val allowNoAuthHosts: io.qwenpaw.node.ui.settings.AllowNoAuthHostsViewModel
+        get() = allowNoAuthHostsHolder ?: io.qwenpaw.node.ui.settings.AllowNoAuthHostsViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { allowNoAuthHostsHolder = it }
+
     /** 从其他客户端导入。 */
     private var portabilityHolder: io.qwenpaw.node.ui.agents.PortabilityViewModel? = null
 
@@ -1714,7 +1959,13 @@ class AppViewModel(
     private var terminalHolder: io.qwenpaw.node.ui.terminal.TerminalViewModel? = null
 
     val terminal: io.qwenpaw.node.ui.terminal.TerminalViewModel
-        get() = terminalHolder ?: io.qwenpaw.node.ui.terminal.TerminalViewModel(
+        get() = terminalHost?.also {
+            it.bind(
+                connection = ::activeConnection,
+                appState = { _state.value },
+                instanceId = { repository.active()?.id },
+            )
+        } ?: terminalHolder ?: io.qwenpaw.node.ui.terminal.TerminalViewModel(
             api = api,
             connection = ::activeConnection,
             appState = { _state.value },
@@ -1884,12 +2135,14 @@ class AppViewModel(
             appCenterHolder?.clear()
             channelHolder?.clear()
             localModelsHolder?.clear()
+            browserDiagnosticsHolder?.clear()
+            pluginManageHolder?.clear()
+            dependencyUpgradeHolder?.clear()
+            allowNoAuthHostsHolder?.clear()
             // 同一实例换智能体是允许的：终端会话保留，收尾仍按各标签自己的分组。
             val sameInstance = previous.substringBefore('|') == instance.id
             if (!sameInstance) {
-                terminalHolder?.shutdown()
-                terminalHolder = null
-                io.qwenpaw.node.notify.TerminalSessionNotifier.stopAll = null
+                shutdownTerminalSessions()
             }
             gitHolder?.clear()
             gitHolder = null
@@ -1908,10 +2161,18 @@ class AppViewModel(
 
     private var inboxKey: String? = null
 
+    private fun shutdownTerminalSessions() {
+        (terminalHost ?: terminalHolder)?.shutdown()
+        terminalHolder = null
+        if (terminalHost == null) {
+            io.qwenpaw.node.notify.TerminalSessionNotifier.stopAll = null
+        }
+    }
+
     override fun onCleared() {
         chatViewModel.detach()
-        terminalHolder?.shutdown()
-        io.qwenpaw.node.notify.TerminalSessionNotifier.stopAll = null
+        // 应用级终端由 QwenPawApp 持有；Activity 被回收时不能连带关掉前台终端。
+        if (terminalHost == null) shutdownTerminalSessions()
     }
 
     companion object {
@@ -1921,6 +2182,7 @@ class AppViewModel(
         private const val KEY_MISANS = "use_misans"
         private const val KEY_COMPACT = "compact_list"
         private const val KEY_KEEP_ON = "keep_screen_on"
+        private const val KEY_LOCK_PORTRAIT = "lock_portrait"
         private const val KEY_VOICE = "voice_enabled"
         private const val KEY_VOICE_TRIGGER = "voice_trigger"
         private const val KEY_VOICE_SOURCE = "voice_source"
@@ -1934,6 +2196,18 @@ class AppViewModel(
         private const val KEY_SSH_TRUSTED_HOSTS = "ssh_trusted_hosts"
         /** 是否启用依赖配套插件的功能。默认关闭。 */
         private const val KEY_BRIDGE_FEATURES = "bridge_features_enabled"
+        /** 插件更新检查所需的能力名。 */
+        private const val BRIDGE_UPDATE_CAPABILITY = "update"
+        /** 是否每天首次启动检查 APK 新版本。默认开启。 */
+        private const val KEY_AUTO_UPDATE_CHECK = "auto_update_check"
+        /** 已跳过的 APK 版本号。 */
+        private const val KEY_SKIPPED_UPDATE_VERSION = "skipped_update_version"
+        /** 最近一次检查更新的日期（`yyyy-MM-dd`）。 */
+        private const val KEY_LAST_UPDATE_CHECK_DATE = "last_update_check_date"
+        /** 上次问插件有没有新版本的时间戳（毫秒）；冷却用。 */
+        private const val KEY_PLUGIN_UPDATE_CHECK_AT = "plugin_update_check_at"
+        /** 已跳过的插件版本号。 */
+        private const val KEY_PLUGIN_UPDATE_SKIPPED_VERSION = "plugin_update_skipped_version"
         private const val KEY_ASSISTANT_COLLAPSE = "assistant_collapse"
         private const val KEY_LAST_CHAT = "last_chat_id"
         /** 是否记录本次运行日志。默认关闭。 */
@@ -1956,6 +2230,11 @@ class AppViewModel(
         private const val KEY_GROUP_MODE = "group_mode"
         /** 已折叠的分区 key 集合。 */
         private const val KEY_COLLAPSED_GROUPS = "collapsed_groups"
+
+        /** MainActivity 在 setContent 之前预读；键与 [AppViewModel] 共用一处。 */
+        fun readLockPortrait(context: Context): Boolean =
+            context.getSharedPreferences("qwenpaw_ui", Context.MODE_PRIVATE)
+                .getBoolean(KEY_LOCK_PORTRAIT, false)
 
         fun factory(context: Context, app: io.qwenpaw.node.QwenPawApp): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
@@ -1986,6 +2265,7 @@ class AppViewModel(
                         localAsr = app.localAsr,
                         downloadClient = app.downloadClient,
                         appContext = appContext,
+                        terminalHost = app.terminal,
                     ) as T
                 }
             }

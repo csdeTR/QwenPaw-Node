@@ -47,7 +47,11 @@
     <string name="settings_bridge_title">配套插件</string>
     <string name="settings_bridge_feature_on">功能已开启</string>
     <string name="settings_bridge_feature_off">功能已关闭</string>
-    <string name="settings_bridge_unavailable">未安装时不可开启</string>
+    <string name="settings_bridge_unavailable">未安装，点击开关可前往安装</string>
+    <string name="settings_lock_portrait_title">锁定竖屏</string>
+    <string name="settings_lock_portrait_subtitle">开启后界面固定在竖屏；关闭后跟随系统方向。</string>
+    <string name="settings_nav_browser_title">浏览器控制链路</string>
+    <string name="settings_nav_browser_subtitle">诊断 Chrome 扩展与配套插件的连接状态</string>
     <string name="settings_nav_tools">工具</string>
     <string name="settings_nav_tools_subtitle">开关与异步执行</string>
     <plurals name="settings_tools_enabled_summary">
@@ -80,7 +84,7 @@
     <string name="settings_nav_mcp">MCP</string>
     <string name="settings_nav_mcp_subtitle">客户端开关、工具白名单与策略</string>
     <string name="settings_nav_market">扩展市场</string>
-    <string name="settings_nav_market_subtitle">技能市场与插件目录，只读</string>
+    <string name="settings_nav_market_subtitle">技能市场、插件安装与已装插件管理</string>
     <string name="settings_nav_workspace">工作区文件</string>
     <string name="settings_nav_workspace_subtitle">浏览、预览与下载服务端文件</string>
     <string name="settings_nav_terminal">终端</string>
@@ -226,6 +230,7 @@
     <string name="settings_about_credits_title">第三方资源</string>
     <string name="settings_about_credit_qwenpaw">本项目连接的服务端。QwenPaw Node 是它的第三方 Android 客户端，全部功能通过它的 HTTP 接口实现</string>
     <string name="settings_about_credit_openclaw">部分交互与节点能力的设计参考了它的 Android 客户端</string>
+    <string name="settings_about_credit_termux">终端键盘抬升与后台会话保活方式的参考实现</string>
     <string name="settings_about_credit_sherpa">端上流式识别引擎（Apache-2.0），仅标准包内置；识别模型按需从该仓库下载</string>
     <string name="settings_about_credit_misans">可选字体，版权归小米科技有限责任公司；遵循 MiSans 字体许可协议，按需从该仓库下载</string>
     <string name="settings_about_credit_coil">头像图片加载与 GIF 逐帧解码（Apache-2.0）</string>

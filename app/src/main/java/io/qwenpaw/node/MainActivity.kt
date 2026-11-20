@@ -3,6 +3,7 @@ package io.qwenpaw.node
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -22,6 +23,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -85,12 +87,18 @@ class MainActivity : ComponentActivity() {
         // 进程可能从旧语言启动，Activity 重建时这里刷新一次，存活的 ViewModel 才能取到新语言。
         Texts.install(this)
         handleTerminalIntent(intent)
+        // 先按持久化偏好定方向，避免首帧先横屏再转竖屏。
+        applyLockPortrait(AppViewModel.readLockPortrait(this))
         val app = application as QwenPawApp
         setContent {
             val viewModel: AppViewModel = viewModel(
                 factory = AppViewModel.factory(this, app),
             )
             val appState by viewModel.state.collectAsState()
+            // 用户在外观设置里切换「锁定竖屏」后立即生效。
+            LaunchedEffect(appState.lockPortrait) {
+                applyLockPortrait(appState.lockPortrait)
+            }
             val instances by viewModel.instances.collectAsState()
             val activeId by viewModel.activeId.collectAsState()
             val chatVm = viewModel.chat()
@@ -162,6 +170,14 @@ class MainActivity : ComponentActivity() {
         intent.action = null
     }
 
+    private fun applyLockPortrait(locked: Boolean) {
+        requestedOrientation = if (locked) {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
     companion object {
         const val ACTION_OPEN_TERMINAL = "io.qwenpaw.node.action.OPEN_TERMINAL"
     }
@@ -173,7 +189,7 @@ private const val BRIDGE_ZIP_URL =
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, LOCAL_MODELS, TERMINAL, GIT }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, LOCAL_MODELS, TERMINAL, GIT, BROWSER_DIAGNOSTICS, PLUGIN_MANAGE, DEPENDENCY_UPGRADE, ALLOW_NO_AUTH }
 
 @Composable
 private fun QwenPawNav(
@@ -191,10 +207,29 @@ private fun QwenPawNav(
     // 用量统计有两个入口（对话列表顶栏、设置页）。记住是谁打开的，
     // 返回时才回到进入前那一层——固定回列表会让「设置 → 用量 → 返回」跳过设置页。
     var usageOrigin by remember { mutableStateOf(Screen.LIST) }
+    // 插件管理从扩展市场进入；依赖升级可能从插件管理或市场安装冲突进入。
+    var managedPluginId by remember { mutableStateOf<String?>(null) }
+    var dependencyOrigin by remember { mutableStateOf(Screen.MARKET) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Web 进入提示与「去 Web 控制台」共用一个打开动作；地址不可用时不给无效按钮。
+    val openConsole: (() -> Unit)? = viewModel.activeBaseUrl()?.let { base ->
+        {
+            context.startActivity(
+                android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(base),
+                ),
+            )
+        }
+    }
+    val bridgeSupportsBrowser = (appState.bridgeStatus as? io.qwenpaw.node.data.plugin.BridgeStatus.Ready)
+        ?.info?.supports("browser") == true
     val chatVmState = chatState
     var pickingAgent by remember { mutableStateOf<io.qwenpaw.node.data.local.InstanceConfig?>(null) }
+    // 「关闭检查更新」的两步跳转：先落到设置-关于，再在那里弹二次确认。
+    var openAboutOnEnter by remember { mutableStateOf(false) }
+    var pendingDisableUpdateCheck by remember { mutableStateOf(false) }
     // 原文页要显示的那条消息。与 Screen 一起构成页面状态，
     // 单独存一份而不是塞进 Screen 枚举的参数里，是为了让枚举本身保持无载荷。
     var sourceText by remember { mutableStateOf<String?>(null) }
@@ -210,6 +245,34 @@ private fun QwenPawNav(
     // 对话切换后记下来，下次启动恢复到这个对话。
     LaunchedEffect(chatVmState.currentChatId) {
         viewModel.rememberLastChat(chatVmState.currentChatId)
+    }
+
+    // 从扩展市场装完插件回到设置页时，立即重探一次，开关不必等下次前台恢复。
+    // 插件更新检查跟在 bridgeStatus 之后：冷启动时探测可能还没回来，
+    // 只看 screen 会让第一次进入聊天页白跑一次判定。
+    LaunchedEffect(screen, appState.bridgeStatus) {
+        if (screen == Screen.SETTINGS) viewModel.refreshBridgeStatus()
+        // 进入对话列表或聊天页时问一次插件更新；6 小时冷却由 ViewModel 判定。
+        if (screen == Screen.LIST || screen == Screen.CHAT) viewModel.checkPluginUpdateIfDue()
+    }
+
+    // 每日首次启动静默查一次 APK 新版本。判定读的是已落盘的检查日期，
+    // 因此同一天内反复冷启动只发一次请求。
+    LaunchedEffect(Unit) {
+        val today = io.qwenpaw.node.data.update.todayStamp(java.time.ZoneId.systemDefault())
+        if (appState.autoUpdateCheck &&
+            io.qwenpaw.node.data.update.shouldCheckDaily(appState.lastUpdateCheckDate, today)
+        ) {
+            viewModel.checkForUpdates(silent = true)
+        }
+    }
+
+    // 手动检查的结论（已是最新 / 失败原因）用 Toast 说一次，读走即清空。
+    LaunchedEffect(appState.updateNotice) {
+        appState.updateNotice?.let { message ->
+            toast(context, message)
+            viewModel.consumeUpdateNotice()
+        }
     }
 
     // ChatViewModel 的轻量提示（归档 / 删除 / 批量操作 / 新审批）。
@@ -257,6 +320,10 @@ private fun QwenPawNav(
     val inboxState by viewModel.inbox.state.collectAsState()
     val channelState by viewModel.channels.state.collectAsState()
     val localModelsState by viewModel.localModels.state.collectAsState()
+    val browserState by viewModel.browserDiagnostics.state.collectAsState()
+    val pluginManageState by viewModel.pluginManage.state.collectAsState()
+    val dependencyUpgradeState by viewModel.dependencyUpgrade.state.collectAsState()
+    val allowNoAuthHostsState by viewModel.allowNoAuthHosts.state.collectAsState()
     // 全文检索状态单独一条流，与对话页状态无关。
     val searchState by chatVm.search.collectAsState()
     val inboxUnread = inboxState.unreadCount
@@ -1228,8 +1295,56 @@ private fun QwenPawNav(
                     onDownloadModel = viewModel.localModels::downloadModel,
                     onCancel = viewModel.localModels::cancelActive,
                     onConsumeMessage = viewModel.localModels::consumeMessage,
+                    onOpenConsole = openConsole,
+                    onDeleteModel = viewModel.localModels::deleteModel,
+                    onStartServer = viewModel.localModels::startServer,
+                    onStopServer = viewModel.localModels::stopServer,
+                    onCheckUpdate = viewModel.localModels::checkUpdate,
+                    onUpdateRuntime = viewModel.localModels::updateRuntime,
+                    onSaveConfig = viewModel.localModels::saveConfig,
+                    onConfigDraftChange = viewModel.localModels::updateConfigDraft,
+                    onReloadConfig = { viewModel.localModels.loadConfig(force = true) },
                 )
             }
+
+            Screen.BROWSER_DIAGNOSTICS -> BrowserDiagnosticsPage(
+                viewModel = viewModel,
+                state = browserState,
+                bridgeSupported = bridgeSupportsBrowser,
+                onBack = { screen = Screen.SETTINGS },
+                onOpenMarket = {
+                    viewModel.market.openInstallUrlDialog(BRIDGE_ZIP_URL)
+                    screen = Screen.MARKET
+                },
+                onOpenConsole = openConsole,
+            )
+
+            Screen.PLUGIN_MANAGE -> PluginManagePage(
+                viewModel = viewModel,
+                state = pluginManageState,
+                pluginId = managedPluginId,
+                onBack = { screen = Screen.MARKET },
+                onOpenDependency = { operationId ->
+                    dependencyOrigin = Screen.PLUGIN_MANAGE
+                    viewModel.dependencyUpgrade.open(operationId)
+                    screen = Screen.DEPENDENCY_UPGRADE
+                },
+                onOpenConsole = openConsole,
+            )
+
+            Screen.DEPENDENCY_UPGRADE -> DependencyUpgradePage(
+                viewModel = viewModel,
+                state = dependencyUpgradeState,
+                onBack = { screen = dependencyOrigin },
+                onOpenConsole = openConsole,
+            )
+
+            Screen.ALLOW_NO_AUTH -> AllowNoAuthPage(
+                viewModel = viewModel,
+                state = allowNoAuthHostsState,
+                onBack = { screen = Screen.SECURITY },
+                onOpenConsole = openConsole,
+            )
 
             Screen.RUNTIME -> {
                 LaunchedEffect(Unit) {
@@ -1313,6 +1428,10 @@ private fun QwenPawNav(
                     onSandbox = viewModel.settingsConfig::saveSandboxEnabled,
                     onSkillScanner = viewModel.settingsConfig::saveSkillScannerMode,
                     onDismissNotice = viewModel.settingsConfig::dismissSecurityNotice,
+                    onOpenAllowNoAuthHosts = {
+                        viewModel.allowNoAuthHosts.ensureLoaded()
+                        screen = Screen.ALLOW_NO_AUTH
+                    },
                 )
             }
 
@@ -1360,26 +1479,12 @@ private fun QwenPawNav(
                 )
             }
 
-            Screen.MCP -> {
-                LaunchedEffect(Unit) { viewModel.mcp.refresh() }
-                io.qwenpaw.node.ui.mcp.McpScreen(
-                    state = mcpState,
-                    onBack = { screen = Screen.SETTINGS },
-                    onRefresh = viewModel.mcp::refresh,
-                    onSelect = viewModel.mcp::select,
-                    onCloseDetail = viewModel.mcp::closeDetail,
-                    onToggle = viewModel.mcp::toggle,
-                    onToggleTool = viewModel.mcp::toggleTool,
-                    onSaveTools = viewModel.mcp::saveTools,
-                    onSetDefaultEffect = viewModel.mcp::setDefaultEffect,
-                    onSetToolEffect = viewModel.mcp::setToolEffect,
-                    onSavePolicy = viewModel.mcp::savePolicy,
-                    onRetryDetail = {
-                        mcpState.selectedKey?.let(viewModel.mcp::select)
-                    },
-                    onDismissNotice = viewModel.mcp::dismissNotice,
-                )
-            }
+            Screen.MCP -> McpAdminPage(
+                viewModel = viewModel,
+                state = mcpState,
+                onBack = { screen = Screen.SETTINGS },
+                onOpenConsole = openConsole,
+            )
 
             Screen.MARKET -> {
                 io.qwenpaw.node.ui.market.MarketScreen(
@@ -1403,6 +1508,18 @@ private fun QwenPawNav(
                     onDismissNotice = viewModel.market::dismissNotice,
                     onStopHubPolling = viewModel.market::stopHubPolling,
                     onConsumePrefill = viewModel.market::consumePrefill,
+                    onManagePlugin = { pluginId ->
+                        managedPluginId = pluginId
+                        viewModel.pluginManage.open(pluginId)
+                        screen = Screen.PLUGIN_MANAGE
+                    },
+                    onOpenDependency = { operationId ->
+                        dependencyOrigin = Screen.MARKET
+                        viewModel.dependencyUpgrade.open(operationId)
+                        screen = Screen.DEPENDENCY_UPGRADE
+                    },
+                    onDismissDependency = viewModel.market::dismissDependencyConflict,
+                    onRefreshPlugins = viewModel.market::refreshPlugins,
                 )
             }
 
@@ -1514,6 +1631,13 @@ private fun QwenPawNav(
                     keepScreenOn = appState.keepScreenOn,
                     appVersion = BuildConfig.VERSION_NAME,
                     onBack = { screen = Screen.LIST },
+                    autoUpdateCheck = appState.autoUpdateCheck,
+                    onAutoUpdateCheck = viewModel::setAutoUpdateCheck,
+                    onCheckUpdate = { viewModel.checkForUpdates(silent = false) },
+                    openAboutOnEnter = openAboutOnEnter,
+                    onConsumeOpenAboutOnEnter = { openAboutOnEnter = false },
+                    pendingDisableUpdateCheck = pendingDisableUpdateCheck,
+                    onConsumePendingDisableUpdateCheck = { pendingDisableUpdateCheck = false },
                     onOpenWorkspace = { screen = Screen.WORKSPACE },
                     onOpenTerminal = {
                         terminalOrigin = Screen.SETTINGS
@@ -1538,6 +1662,7 @@ private fun QwenPawNav(
                     onOpenAppCenter = { screen = Screen.APP_CENTER },
                     onOpenChannels = { screen = Screen.CHANNEL },
                     onOpenLocalModels = { screen = Screen.LOCAL_MODELS },
+                    onOpenBrowserDiagnostics = { screen = Screen.BROWSER_DIAGNOSTICS },
                     onSwitch = { id -> viewModel.switchTo(id) },
                     onRemove = viewModel::remove,
                     onEditWithCredentials = viewModel::editInstanceWithCredentials,
@@ -1606,6 +1731,8 @@ private fun QwenPawNav(
                     onUseMiSans = viewModel::setUseMiSans,
                     onCompactList = viewModel::setCompactList,
                     onKeepScreenOn = viewModel::setKeepScreenOn,
+                    lockPortrait = appState.lockPortrait,
+                    onLockPortrait = viewModel::setLockPortrait,
                     appLanguage = appState.appLanguage ?: AppLanguage.ZH_CN,
                     onAppLanguage = { language ->
                         val changed = appState.appLanguage != language
@@ -1628,6 +1755,10 @@ private fun QwenPawNav(
                     onRefreshBridge = viewModel::refreshBridgeStatus,
                     bridgeFeaturesEnabled = appState.bridgeFeaturesEnabled,
                     onBridgeFeaturesEnabled = viewModel::setBridgeFeaturesEnabled,
+                    onInstallBridge = {
+                        viewModel.market.openInstallUrlDialog(BRIDGE_ZIP_URL)
+                        screen = Screen.MARKET
+                    },
                     onLogout = viewModel::logout,
                     voiceEnabled = appState.voiceEnabled,
                     onVoiceEnabled = { on ->
@@ -1841,6 +1972,78 @@ private fun QwenPawNav(
         )
     }
 
+    // 发现 APK 新版本。四个动作各自说明后果：稍后只关这一屏，跳过该版本记住版本号，
+    // 关闭检查更新跳到关于页再确认一次——一次性关掉自动检查不该由对话框直接决定。
+    appState.updatePrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissUpdatePrompt,
+            title = { Text(stringResource(R.string.update_available_title, prompt.version)) },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(
+                        stringResource(R.string.update_available_message, prompt.currentVersion),
+                    )
+                    if (prompt.notes.isNotBlank()) {
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = prompt.notes.take(400),
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dismissUpdatePrompt()
+                    openExternal(context, prompt.url)
+                }) { Text(stringResource(R.string.update_action_download)) }
+            },
+            dismissButton = {
+                androidx.compose.foundation.layout.Row {
+                    TextButton(onClick = viewModel::skipUpdateVersion) {
+                        Text(stringResource(R.string.update_action_skip_version))
+                    }
+                    TextButton(onClick = {
+                        viewModel.dismissUpdatePrompt()
+                        openAboutOnEnter = true
+                        pendingDisableUpdateCheck = true
+                        screen = Screen.SETTINGS
+                    }) { Text(stringResource(R.string.update_action_disable_check)) }
+                    TextButton(onClick = viewModel::dismissUpdatePrompt) {
+                        Text(stringResource(R.string.update_action_later))
+                    }
+                }
+            },
+        )
+    }
+
+    // 配套插件有新版本。是否提示由插件返回的 notify_client 决定，客户端只负责呈现。
+    appState.pluginUpdatePrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissPluginUpdatePrompt,
+            title = { Text(stringResource(R.string.plugin_update_title, prompt.version)) },
+            text = {
+                Text(stringResource(R.string.plugin_update_message, prompt.currentVersion))
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dismissPluginUpdatePrompt()
+                    openExternal(context, prompt.url)
+                }) { Text(stringResource(R.string.plugin_update_download)) }
+            },
+            dismissButton = {
+                androidx.compose.foundation.layout.Row {
+                    TextButton(onClick = viewModel::skipPluginUpdateVersion) {
+                        Text(stringResource(R.string.update_action_skip_version))
+                    }
+                    TextButton(onClick = viewModel::snoozePluginUpdate) {
+                        Text(stringResource(R.string.update_action_later))
+                    }
+                }
+            },
+        )
+    }
+
     pickingAgent?.let { instance ->
         AgentPickerDialog(
             currentAgentId = instance.agentId,
@@ -1941,6 +2144,13 @@ private fun toast(context: android.content.Context, text: String) {
     android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
 }
 
+/** 用系统浏览器打开网址。地址无效时静默失败：调用方已经关掉了对话框，没有回滚的余地。 */
+private fun openExternal(context: android.content.Context, url: String) {
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+}
+
 /**
  * 检查点的只读对话页。
  *
@@ -2025,6 +2235,151 @@ private fun shareText(context: android.content.Context, subject: String, text: S
     )
 }
 
+@Composable
+private fun BrowserDiagnosticsPage(
+    viewModel: AppViewModel,
+    state: io.qwenpaw.node.ui.browser.BrowserDiagnosticsUiState,
+    bridgeSupported: Boolean,
+    onBack: () -> Unit,
+    onOpenMarket: () -> Unit,
+    onOpenConsole: (() -> Unit)?,
+) {
+    io.qwenpaw.node.ui.browser.BrowserDiagnosticsScreen(
+        state = state,
+        bridgeSupported = bridgeSupported,
+        onBack = onBack,
+        onEnsureLoaded = viewModel.browserDiagnostics::ensureLoaded,
+        onSelfTest = viewModel.browserDiagnostics::selfTest,
+        onReadLogs = viewModel.browserDiagnostics::readLogs,
+        onRepair = viewModel.browserDiagnostics::repair,
+        onOpenMarket = onOpenMarket,
+        onConsumeMessage = viewModel.browserDiagnostics::consumeMessage,
+        onOpenConsole = onOpenConsole,
+    )
+}
+
+@Composable
+private fun PluginManagePage(
+    viewModel: AppViewModel,
+    state: io.qwenpaw.node.ui.plugins.PluginManageUiState,
+    pluginId: String?,
+    onBack: () -> Unit,
+    onOpenDependency: (String) -> Unit,
+    onOpenConsole: (() -> Unit)?,
+) {
+    LaunchedEffect(pluginId) { pluginId?.let(viewModel.pluginManage::open) }
+    io.qwenpaw.node.ui.plugins.PluginManageScreen(
+        state = state,
+        onBack = onBack,
+        onRefresh = viewModel.pluginManage::refresh,
+        onSetEnabled = viewModel.pluginManage::setEnabled,
+        onUnload = viewModel.pluginManage::unload,
+        onDelete = viewModel.pluginManage::delete,
+        onRepairDependencies = viewModel.pluginManage::repairDependencies,
+        onBeginConfigEdit = viewModel.pluginManage::beginConfigEdit,
+        onUpdateConfigDraft = viewModel.pluginManage::updateConfigDraft,
+        onSaveConfig = { viewModel.pluginManage.saveConfig() },
+        onCancelConfigEdit = viewModel.pluginManage::cancelConfigEdit,
+        onConfirmInterrupt = viewModel.pluginManage::confirmInterrupt,
+        onDismissInterrupt = viewModel.pluginManage::dismissInterrupt,
+        onConfirmLegacy = viewModel.pluginManage::confirmLegacyHooks,
+        onDismissLegacy = viewModel.pluginManage::dismissLegacyHooks,
+        onDismissNotice = viewModel.pluginManage::dismissNotice,
+        onEnsureLoaded = viewModel.pluginManage::ensureLoaded,
+        onOpenDependency = onOpenDependency,
+        onConsumeOpenDependency = viewModel.pluginManage::consumeOpenDependency,
+        onOpenConsole = onOpenConsole,
+    )
+}
+
+@Composable
+private fun DependencyUpgradePage(
+    viewModel: AppViewModel,
+    state: io.qwenpaw.node.ui.plugins.DependencyUpgradeUiState,
+    onBack: () -> Unit,
+    onOpenConsole: (() -> Unit)?,
+) {
+    io.qwenpaw.node.ui.plugins.DependencyUpgradeScreen(
+        state = state,
+        onBack = onBack,
+        onRefresh = viewModel.dependencyUpgrade::refresh,
+        onApply = viewModel.dependencyUpgrade::apply,
+        onCancel = viewModel.dependencyUpgrade::cancel,
+        onEnsureStarted = viewModel.dependencyUpgrade::ensureStarted,
+        onStopPolling = viewModel.dependencyUpgrade::stopPolling,
+        onOpenConsole = onOpenConsole,
+    )
+}
+
+@Composable
+private fun AllowNoAuthPage(
+    viewModel: AppViewModel,
+    state: io.qwenpaw.node.ui.settings.AllowNoAuthHostsUiState,
+    onBack: () -> Unit,
+    onOpenConsole: (() -> Unit)?,
+) {
+    io.qwenpaw.node.ui.settings.AllowNoAuthHostsScreen(
+        state = state,
+        onBack = onBack,
+        onEnsureLoaded = viewModel.allowNoAuthHosts::ensureLoaded,
+        onDraftChange = viewModel.allowNoAuthHosts::onDraftChange,
+        onAdd = viewModel.allowNoAuthHosts::add,
+        onRemove = viewModel.allowNoAuthHosts::remove,
+        onRequestSave = viewModel.allowNoAuthHosts::requestSave,
+        onConfirmSave = viewModel.allowNoAuthHosts::confirmSave,
+        onDismissSave = viewModel.allowNoAuthHosts::dismissSave,
+        onDismissNotice = viewModel.allowNoAuthHosts::dismissNotice,
+        onOpenConsole = onOpenConsole,
+    )
+}
+
+@Composable
+private fun McpAdminPage(
+    viewModel: AppViewModel,
+    state: io.qwenpaw.node.ui.mcp.McpUiState,
+    onBack: () -> Unit,
+    onOpenConsole: (() -> Unit)?,
+) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { viewModel.mcp.refresh() }
+    io.qwenpaw.node.ui.mcp.McpScreen(
+        state = state,
+        actions = io.qwenpaw.node.ui.mcp.McpActions(
+            onRefresh = viewModel.mcp::refresh,
+            onSelect = viewModel.mcp::select,
+            onCloseDetail = viewModel.mcp::closeDetail,
+            onToggle = viewModel.mcp::toggle,
+            onToggleTool = viewModel.mcp::toggleTool,
+            onSaveTools = viewModel.mcp::saveTools,
+            onSetDefaultEffect = viewModel.mcp::setDefaultEffect,
+            onSetToolEffect = viewModel.mcp::setToolEffect,
+            onSavePolicy = viewModel.mcp::savePolicy,
+            onRetryDetail = { state.selectedKey?.let(viewModel.mcp::select) },
+            onDismissNotice = viewModel.mcp::dismissNotice,
+            onStartCreate = viewModel.mcp::startCreate,
+            onStartEdit = viewModel.mcp::startEdit,
+            onUpdateDraft = viewModel.mcp::updateDraft,
+            onSaveDraft = viewModel.mcp::saveDraft,
+            onCancelEdit = viewModel.mcp::cancelEdit,
+            onConfirmDelete = viewModel.mcp::deleteSelected,
+            onStartOAuth = viewModel.mcp::startOAuth,
+            onRefreshOAuth = viewModel.mcp::refreshOAuth,
+            onRevokeOAuth = viewModel.mcp::revokeOAuth,
+            onConsumeOAuthUrl = viewModel.mcp::consumeOAuthUrl,
+        ),
+        onBack = onBack,
+        onOpenConsole = onOpenConsole,
+        onOpenUrl = { url ->
+            context.startActivity(
+                android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse(url),
+                ),
+            )
+        },
+    )
+}
+
 /**
  * 页面的上一层。
  *
@@ -2041,8 +2396,12 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.WORKSPACE, Screen.BACKUP, Screen.CHECKPOINT, Screen.MODELS,
     Screen.SKILLS, Screen.MCP, Screen.MARKET, Screen.RUNNING_CONFIG, Screen.SECURITY,
     Screen.AGENTS, Screen.RUNTIME, Screen.PORTABILITY, Screen.APP_CENTER,
-    Screen.CHANNEL, Screen.LOCAL_MODELS,
+    Screen.CHANNEL, Screen.LOCAL_MODELS, Screen.BROWSER_DIAGNOSTICS, Screen.PLUGIN_MANAGE,
     Screen.ACL -> Screen.SETTINGS
+    // 依赖升级从插件管理或市场进入，显式返回由页面回调处理；系统返回回插件管理。
+    Screen.DEPENDENCY_UPGRADE -> Screen.PLUGIN_MANAGE
+    // 免鉴权地址是安全页的下一层。
+    Screen.ALLOW_NO_AUTH -> Screen.SECURITY
     Screen.TERMINAL -> Screen.SETTINGS
     // Git 从工作区文件页顶栏进入，返回也回工作区。
     Screen.GIT -> Screen.WORKSPACE

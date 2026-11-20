@@ -1744,6 +1744,21 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 **策略是整读整写。** 服务端按提交的 payload 重建全部「控制台托管」规则，少的字段就等于删掉一批规则，而界面上完全看不出来。0.5.0 的可编辑面只有`default_effect` 与 `tool_defaults`，`client_overrides` / `tool_overrides` 原样带回。
 
+**0.7.3 补充：MCP 增删改与 OAuth（2.3.0.post1 源码确认）**
+
+| 方法 | 路径 | 请求与响应 |
+| --- | --- | --- |
+| POST | `/api/mcp` | body 是**双层**结构 `{client_key, client}`；`client` 为 `MCPClientCreateRequest`，`name` 必填，其余字段可选；回 `MCPClientInfo` |
+| GET | `/api/mcp/{client_key:path}` | 单个客户端；key 允许 `/` |
+| PUT | `/api/mcp/{client_key:path}` | **部分更新**，字段全部可选；省略=不改，显式 `tools:null`=取消白名单；`http_timeout` 设过之后无法改回 `null` |
+| DELETE | `/api/mcp/{client_key:path}` | 同时删除客户端凭据与 OAuth 凭据 |
+| POST | `/api/mcp/oauth/start/{client_key:path}` | body 必须含 `url`，可带 `scope` / `client_id` / `auth_endpoint` / `token_endpoint`；回 `{auth_url, session_id}` |
+| GET | `/api/mcp/oauth/status/{client_key:path}` | `{authorized, expires_at, scope}`，`expires_at` 是 epoch 秒 |
+| DELETE | `/api/mcp/oauth/{client_key:path}` | 撤销授权并清本地令牌 |
+
+- `POST /api/mcp` 的 key 不能以 `access-principals/`、`tools/`、`toggle/`、`oauth/`、`policy/` 开头，否则会被静态路由抢先匹配。
+- `GET /api/mcp/access-principals` 返回最近会话里的主体候选，只服务于五维规则编辑；0.7.3 的规则表仍留 Web，客户端不接此端点。
+
 ### 30.3 市场与插件目录
 
 | 方法 | 路径 | 说明 |
@@ -1753,6 +1768,26 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | POST | `/api/market/search` | body `{query, provider_pages, limit, lang, category}` |
 | GET | `/api/plugins/catalog` | `{updated_at, plugins[], error}` |
 | GET | `/api/plugins/market/search` | 代理 `platform.agentscope.io`，原样透传上游 JSON |
+
+**0.7.3 补充：插件配置、启停、卸载与依赖升级（2.3.0.post1 源码确认）**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/plugins` | 已安装插件数组；元素含 `id/name/version/enabled/loaded/status/diagnostics/plugin_type/market_id/installation_origin` |
+| GET | `/api/plugins/{id}` | 单插件状态；2.2.2.post1 没有此路由 |
+| PUT | `/api/plugins/{id}/config` | body `{config, confirm_legacy, interrupt_tasks}`；**整段替换** `config.plugins.<id>`；**没有 GET 读取端点** |
+| POST | `/api/plugins/{id}/enabled` | body `{enabled, interrupt_tasks}`；停用只卸载当前进程，不删文件 |
+| POST | `/api/plugins/{id}/unload` | `interrupt_tasks` 在 **query** |
+| DELETE | `/api/plugins/{id}` | `interrupt_tasks` 在 **query**；删除文件 |
+| POST | `/api/plugins/{id}/repair-dependencies` | 需要升级时回 409，detail 里带 `operation` |
+| GET | `/api/plugins/dependency-upgrades/{operation_id}` | 依赖升级状态 |
+| POST | `/api/plugins/dependency-upgrades/{operation_id}/apply` | 应用 |
+| DELETE | `/api/plugins/dependency-upgrades/{operation_id}` | 取消 |
+
+- 配置未变化时 PUT 回 **404** 且 detail 含 `{unchanged: true}`；这不是「插件不存在」。
+- legacy 卸载钩子回 409 `{code:"legacy_uninstall_hook", legacy_hooks}`，确认后带 `confirm_legacy=true` 重试。
+- 启停/卸载有运行中任务时回 409，detail 含 `{id, loaded, clean, quiescent, needs_restart, errors, message}`；确认中断后带 `interrupt_tasks=true` 重试。
+- 依赖升级**没有列表端点**，operation 只能从 install/repair/enable 的 409 `DEPENDENCY_UPGRADE_REQUIRED` 中取得；状态可能停在 `waiting_restart`，需要服务端执行维护命令，手机端只展示命令与「重新检查」。
 
 实测：
 
@@ -2008,8 +2043,11 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 | GET / PUT | `/api/config/security/file-guard` | PUT 允许只提交 `enabled`，响应含 `paths` 与 `allow_preview_outside_workspace` |
 | GET / PUT | `/api/config/security/sandbox` | PUT body `{"enabled":...}`；响应含 `effective` / `reason` |
 | GET / PUT | `/api/config/security/skill-scanner` | 完整配置；`mode` 取 `block` / `warn` / `off` |
+| GET / PUT | `/api/config/security/allow-no-auth-hosts` | body 与响应都是 `{hosts:[...]}`；服务端只接受 IPv4/IPv6 字面量并规范化、去重，非法回 400；默认 `["127.0.0.1","::1"]` |
 | GET / PUT | `/api/settings/language` | 7 个合法值：`en` / `zh` / `ja` / `ru` / `pt-BR` / `id` / `vi` |
 | GET | `/api/settings/upload-limit` | `null` 表示不限制 |
+
+**免鉴权地址是安全敏感项。** 加入名单的地址可以跳过登录鉴权；保存前必须逐条列出名单并二次确认。服务端未开启登录时该名单不生效，界面要说明这一点。客户端只做 trim、去重与空值过滤，IPv4/IPv6 规范化交给服务端。
 
 运行配置里客户端实际暴露的字段：`max_iters`、`max_input_length`、`history_max_length`、`shell_command_timeout`、`llm_retry_enabled`、`llm_max_retries`、`approval_level`（STRICT / SMART / AUTO / OFF）、`light_context_config.context_compact_config.compact_threshold_ratio`。
 
@@ -2132,6 +2170,14 @@ Bridge 不应重写安装逻辑。
 `POST /browser/repair` 转发官方 Chrome 插件的 `setup`，Chrome 插件未安装时返回安装提示。
 状态与自测仍走核心端点；修复端点要求插件侧校验 token、客户端二次确认，
 日志不得包含 token、密钥或完整请求头。
+
+**0.7.3 实测补充（qp-test 2.3.0.post1）**
+
+- `status` 里的 `bridge_lifecycle`、`contract_health`、`last_self_test`、`last_extension_disconnect`、`backend` 都是**对象**，不是字符串；`readiness_state` 实测为 `ready` / `blocked`。客户端按对象解析，缺字段时按空值处理。
+- `self-test` 的 `status` 实测为 `pending`；检查项用 `passed` / `pending` / `failed`，`repair_action` 可能是 `none` 或 `reload_extension`；`contract_drift` 另可能带 `severity` 与 `detail`。
+- `traces` 固定为 `{events: [], status: "pending", code: "semantic_control_not_integrated"}`，客户端不应把它当成错误，也不展示假事件。
+- Bridge 0.5.0 已在 qp-test 安装验证：`/info` 回 `plugin_version: 0.5.0` 且 capabilities 含 `browser`；NM host 日志不存在时 `/browser/logs` 回 404 `{code:"log_not_found"}`。
+- **核心对未匹配的 POST 回 405 而不是 404**（实测 `POST /api/chrome/setup` 与任意不存在的 POST 都是 405）。Bridge 判断「Chrome 插件未安装」时同时接受 404/405，再用 `/api/plugins` 列表确认插件是否存在；客户端不要把 405 直接显示成「方法不允许」。
 
 ---
 
@@ -2290,3 +2336,38 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
 - **同一模型会按来源各返回一条**（`huggingface` 与 `modelscope`），`id` 不同、名称与体积相同。
   界面要标出来源，否则看起来是重复项。
 - 同样不在鉴权公开路径里，需要 token。
+
+**0.7.3 补充：配置、运行时启停、删除与更新（2.3.0.post1 源码确认）**
+
+| 方法 | 路径 | 请求与响应 |
+| --- | --- | --- |
+| GET / PUT | `/api/local-models/config` | `{max_context_length, port, generate_kwargs}`；`max_context_length` ≥32768，`port` 为 null 表示自动；PUT 省略字段=不改 |
+| DELETE | `/api/local-models/models/{model_id:path}` | 删除模型文件；运行中的模型回 409，需先停止运行时 |
+| GET | `/api/local-models/server/update` | `{has_update}`；更新仍走 `POST /server/download` |
+| POST | `/api/local-models/server` | body `{model_id}`，用已下载模型启动 llama.cpp |
+| DELETE | `/api/local-models/server` | 停止运行时 |
+
+- `model_id` 走 path 转换器，可能包含 `/`；客户端按原值拼接。
+- 配置 PUT 里 `port: null` 表示「改回自动端口」，与「省略不改」是两种语义，客户端必须显式区分。
+- 更新运行时会停止正在运行的服务；确认文案要写明这一点。
+
+---
+
+## 39、配套插件更新状态（插件 v0.5.0，客户端使用）
+
+客户端只使用 `GET /api/plugins/qwenpaw-node-bridge/update/status`，capability 名 `update`。
+它返回插件自己的设置与最近一次 GitHub release 检查结果，供 QP Node 在进入对话列表/聊天页时提示更新；插件未装或低于 0.5.0 时该路径回 404，客户端按「无更新能力」跳过，不报错。
+
+```json
+{"enabled":true,"check_time":"09:00","notify_console":true,"notify_client":true,
+ "update_available":true,"latest_version":"0.5.1","latest_url":"https://…",
+ "checked_at":1795208530,"last_check_date":"2026-11-21","error":"",
+ "plugin_version":"0.5.0","protocol_version":1,"server_version":"2.3.0.post1",
+ "repo_url":"https://github.com/csdeTR/QwenPaw-Node-Bridge"}
+```
+
+- `notify_client` 由插件设置决定，客户端不得越过它自行提示；`latest_version` 为空或与当前插件版本相同则不提示。
+- `checked_at` 是 epoch 秒；客户端目前不展示时间，只做提示判断。
+- 该端点受插件访问策略保护：开了 Web 登录时需带 token，未开时只放行私有/回环或受信任标记。
+- **`GET/PUT /update/settings` 与 `POST /update/check` 是 Console 专用**，不在客户端契约内；客户端不调用，也不依赖其形状。
+- 客户端本地最多每 6 小时查询一次，并记录已跳过版本；插件端每天在 `check_time` 检查一次，服务端在该时间之后启动且当天未检查时会补查。

@@ -61,6 +61,7 @@ fun LanguageGateScreen(onConfirm: (AppLanguage) -> Unit) {
             text = stringResource(R.string.language_gate_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
         )
         Spacer(Modifier.height(8.dp))
         Text(

@@ -14,11 +14,12 @@
     <string name="terminal_source_none">未选择方式</string>
     <string name="terminal_source_local_desc">使用 /api/terminals 端点，方式与 Web 控制台一致，需要开启「Web 登录认证」。</string>
     <string name="terminal_source_relay_desc">经配套插件 QwenPaw Node Bridge 转发；适合手机只能访问 QwenPaw Web 端口的场景。</string>
-    <string name="terminal_source_direct_desc">从本机直接连接目标 SSH；适合服务器向公网暴露 SSH 通道的场景。</string>
+    <string name="terminal_source_direct_desc">从本机直接连接目标 SSH；适合本机可直达目标通道的场景（如局域网或 SSH 向公网开放）。</string>
     <string name="terminal_set_as_default">设为默认</string>
     <string name="terminal_shell_section_title">选择登录 shell</string>
     <string name="terminal_shell_cmd">命令提示符</string>
     <string name="terminal_credentials_note">Bridge 中继的 SSH 凭据由配套插件保存；未开 Web 登录认证时仅私有或受信任地址可用，公网地址仍需先确认仅你可访问。</string>
+    <string name="terminal_credentials_note_direct">SSH 直连的凭据由 QwenPaw Node 客户端加密保存在本机。</string>
     <string name="terminal_pinch_tip">双指缩放是临时放大；调整字号请用 A+ / A-</string>
     <string name="terminal_git_bash_hint">请先确认目标 Windows 已安装 Bash（Git Bash 或 WSL）；未安装时命令会失败。</string>
     <string name="terminal_key_paste">粘贴</string>

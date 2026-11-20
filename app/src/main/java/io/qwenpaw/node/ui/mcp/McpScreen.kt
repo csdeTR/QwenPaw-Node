@@ -29,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,11 +43,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.model.McpClientDto
+import io.qwenpaw.node.ui.common.ConsoleHint
+import io.qwenpaw.node.ui.common.DestructiveActionDialog
+import io.qwenpaw.node.ui.common.WebEntryDialog
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.theme.qwenSwitchColors
 
-/** 页内层级：列表 → 详情（白名单 / 策略）。 */
-private enum class McpPage { LIST, DETAIL }
+/** 页内层级：列表 → 详情（白名单 / 策略），以及编辑页。 */
+private enum class McpPage { LIST, DETAIL, EDIT }
 
 /** 详情里的两段。 */
 private enum class McpTab(@StringRes val title: Int) {
@@ -55,44 +60,100 @@ private enum class McpTab(@StringRes val title: Int) {
 }
 
 /**
- * MCP：客户端开关、工具白名单与访问策略。
+ * 页面动作。
  *
- * 三件事都是「看一眼状态、必要时停用」。编辑面刻意收窄：
- * 白名单只勾选，策略只改默认效果与逐工具默认效果；
+ * 原有的散回调一并收进来：接线处只构造一次，编辑与授权后续再加动作也不动函数签名。
+ * 默认实现为空，缺项不会让页面崩溃，只是按钮点了没反应。
+ */
+data class McpActions(
+    val onRefresh: () -> Unit = {},
+    val onSelect: (String) -> Unit = {},
+    val onCloseDetail: () -> Unit = {},
+    val onToggle: (String) -> Unit = {},
+    val onToggleTool: (String) -> Unit = {},
+    val onSaveTools: () -> Unit = {},
+    val onSetDefaultEffect: (String) -> Unit = {},
+    val onSetToolEffect: (String, String) -> Unit = { _, _ -> },
+    val onSavePolicy: () -> Unit = {},
+    val onRetryDetail: () -> Unit = {},
+    val onDismissNotice: () -> Unit = {},
+    val onStartCreate: () -> Unit = {},
+    val onStartEdit: () -> Unit = {},
+    val onUpdateDraft: (McpDraftState) -> Unit = {},
+    val onSaveDraft: () -> Unit = {},
+    val onCancelEdit: () -> Unit = {},
+    val onConfirmDelete: () -> Unit = {},
+    val onStartOAuth: () -> Unit = {},
+    val onRefreshOAuth: () -> Unit = {},
+    val onRevokeOAuth: () -> Unit = {},
+    val onConsumeOAuthUrl: () -> Unit = {},
+)
+
+/**
+ * MCP：客户端开关、工具白名单与访问策略，以及新增、编辑、删除与 OAuth 授权。
+ *
+ * 编辑面刻意收窄：白名单只勾选，策略只改默认效果与逐工具默认效果；
  * 按来源与用户的五维规则表在手机上无法审阅，因此只显示条数并让用户去 Web 控制台。
+ * 连接参数的表单在编辑页，列表与详情只显示「连到哪个地址」与凭据条数，不打印值。
  */
 @Composable
 fun McpScreen(
     state: McpUiState,
+    actions: McpActions,
     onBack: () -> Unit,
-    onRefresh: () -> Unit,
-    onSelect: (String) -> Unit,
-    onCloseDetail: () -> Unit,
-    onToggle: (String) -> Unit,
-    onToggleTool: (String) -> Unit,
-    onSaveTools: () -> Unit,
-    onSetDefaultEffect: (String) -> Unit,
-    onSetToolEffect: (String, String) -> Unit,
-    onSavePolicy: () -> Unit,
-    onRetryDetail: () -> Unit,
-    onDismissNotice: () -> Unit,
+    onOpenConsole: (() -> Unit)? = null,
+    onOpenUrl: (String) -> Unit = {},
 ) {
-    var page by remember { mutableStateOf(McpPage.LIST) }
+    // 授权地址只打开一次：交出去之后立刻清掉，否则返回本页或重组时会再弹一次浏览器。
+    LaunchedEffect(state.oauth.authUrl) {
+        val url = state.oauth.authUrl
+        if (!url.isNullOrBlank()) {
+            onOpenUrl(url)
+            actions.onConsumeOAuthUrl()
+        }
+    }
+
+    var nav by remember { mutableStateOf(McpPage.LIST) }
     var tab by remember { mutableStateOf(McpTab.TOOLS) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var confirmRevoke by remember { mutableStateOf(false) }
 
     // 客户端被删除或列表刷新后选中项会消失，此时按列表渲染。
     // 派生判定而不是组合期写状态，理由同技能页。
     val selected = state.selected
-    val showDetail = page == McpPage.DETAIL && selected != null
+    val page = when {
+        // 编辑态由 ViewModel 持有草稿：保存成功或取消后置空，页面自然回到出发处。
+        state.editor != null -> McpPage.EDIT
+        nav == McpPage.DETAIL && selected != null -> McpPage.DETAIL
+        else -> McpPage.LIST
+    }
+    val showDetail = page == McpPage.DETAIL
 
     BackHandler {
-        if (page == McpPage.DETAIL) {
-            page = McpPage.LIST
-            onCloseDetail()
-        } else {
-            onBack()
+        when (page) {
+            McpPage.EDIT -> actions.onCancelEdit()
+            McpPage.DETAIL -> {
+                nav = McpPage.LIST
+                actions.onCloseDetail()
+            }
+
+            McpPage.LIST -> onBack()
         }
     }
+
+    // 编辑页有自己的顶栏与未保存确认，整页替换而不是套在列表外壳里。
+    if (page == McpPage.EDIT) {
+        val editor = state.editor ?: return
+        McpEditorScreen(
+            editor = editor,
+            onDraftChange = actions.onUpdateDraft,
+            onSave = actions.onSaveDraft,
+            onExit = actions.onCancelEdit,
+        )
+        return
+    }
+
+    WebEntryDialog(pageKey = "mcp", onOpenConsole = onOpenConsole)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -114,11 +175,14 @@ fun McpScreen(
                             .size(38.dp)
                             .clip(CircleShape)
                             .clickable {
-                                if (page == McpPage.DETAIL) {
-                                    page = McpPage.LIST
-                                    onCloseDetail()
-                                } else {
-                                    onBack()
+                                when (page) {
+                                    McpPage.EDIT -> actions.onCancelEdit()
+                                    McpPage.DETAIL -> {
+                                        nav = McpPage.LIST
+                                        actions.onCloseDetail()
+                                    }
+
+                                    McpPage.LIST -> onBack()
                                 }
                             },
                         contentAlignment = Alignment.Center,
@@ -154,13 +218,13 @@ fun McpScreen(
             when {
                 !showDetail -> McpList(
                     state = state,
-                    onRefresh = onRefresh,
-                    onToggle = onToggle,
+                    actions = actions,
                     onSelect = { key ->
-                        onSelect(key)
+                        actions.onSelect(key)
                         tab = McpTab.TOOLS
-                        page = McpPage.DETAIL
+                        nav = McpPage.DETAIL
                     },
+                    onOpenConsole = onOpenConsole,
                 )
 
                 selected == null -> CenterBox { CircularProgressIndicator() }
@@ -169,12 +233,9 @@ fun McpScreen(
                     state = state,
                     tab = tab,
                     onTab = { tab = it },
-                    onToggleTool = onToggleTool,
-                    onSaveTools = onSaveTools,
-                    onSetDefaultEffect = onSetDefaultEffect,
-                    onSetToolEffect = onSetToolEffect,
-                    onSavePolicy = onSavePolicy,
-                    onRetryDetail = onRetryDetail,
+                    actions = actions,
+                    onRequestDelete = { confirmDelete = true },
+                    onRequestRevoke = { confirmRevoke = true },
                 )
             }
         }
@@ -182,7 +243,7 @@ fun McpScreen(
 
     state.notice?.let { text ->
         AlertDialog(
-            onDismissRequest = onDismissNotice,
+            onDismissRequest = actions.onDismissNotice,
             title = { Text(stringResource(R.string.mcp_notice_title)) },
             text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
             confirmButton = {
@@ -191,10 +252,46 @@ fun McpScreen(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier
-                        .clickable(onClick = onDismissNotice)
+                        .clickable(onClick = actions.onDismissNotice)
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 )
             },
+        )
+    }
+
+    if (confirmDelete && selected != null) {
+        DestructiveActionDialog(
+            title = stringResource(R.string.mcp_admin_delete_title),
+            message = stringResource(
+                R.string.mcp_admin_delete_message,
+                selected.name.ifBlank { selected.key },
+            ),
+            impacts = listOf(
+                stringResource(R.string.mcp_admin_delete_impact_client),
+                stringResource(R.string.mcp_admin_delete_impact_oauth),
+                stringResource(R.string.mcp_admin_delete_impact_rules),
+            ),
+            confirmLabel = stringResource(R.string.mcp_admin_action_delete),
+            onConfirm = {
+                confirmDelete = false
+                actions.onConfirmDelete()
+            },
+            onDismiss = { confirmDelete = false },
+        )
+    }
+
+    if (confirmRevoke) {
+        // 撤销只让工具暂时加载不出来，可以重新授权恢复，因此用常规强调色而不是红色。
+        DestructiveActionDialog(
+            title = stringResource(R.string.mcp_admin_oauth_revoke_title),
+            message = stringResource(R.string.mcp_admin_oauth_revoke_message),
+            confirmLabel = stringResource(R.string.mcp_admin_oauth_revoke_confirm),
+            confirmDanger = false,
+            onConfirm = {
+                confirmRevoke = false
+                actions.onRevokeOAuth()
+            },
+            onDismiss = { confirmRevoke = false },
         )
     }
 }
@@ -202,9 +299,9 @@ fun McpScreen(
 @Composable
 private fun McpList(
     state: McpUiState,
-    onRefresh: () -> Unit,
-    onToggle: (String) -> Unit,
+    actions: McpActions,
     onSelect: (String) -> Unit,
+    onOpenConsole: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -213,15 +310,26 @@ private fun McpList(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = pluralStringResource(
-                R.plurals.mcp_label_clients,
-                state.clients.size,
-                state.clients.size,
-            ),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = pluralStringResource(
+                    R.plurals.mcp_label_clients,
+                    state.clients.size,
+                    state.clients.size,
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            ActionChip(
+                text = stringResource(R.string.mcp_admin_action_new),
+                onClick = actions.onStartCreate,
+            )
+        }
+        ConsoleHint(onOpenConsole = onOpenConsole)
         CardBox {
             if (state.clients.isEmpty()) {
                 Text(
@@ -236,7 +344,7 @@ private fun McpList(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = onRefresh)
+                        .clickable(onClick = actions.onRefresh)
                         .padding(horizontal = 14.dp, vertical = 16.dp),
                 )
             } else {
@@ -299,11 +407,12 @@ private fun McpList(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                CredentialCounts(client)
                             }
                             Spacer(Modifier.width(8.dp))
                             Switch(
                                 checked = client.enabled,
-                                onCheckedChange = { onToggle(client.key) },
+                                onCheckedChange = { actions.onToggle(client.key) },
                                 colors = qwenSwitchColors(),
                             )
                         }
@@ -324,7 +433,7 @@ private fun McpList(
         }
         if (state.clients.isNotEmpty()) {
             Text(
-                text = stringResource(R.string.mcp_hint_console),
+                text = stringResource(R.string.mcp_admin_hint_list),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -337,12 +446,9 @@ private fun McpDetail(
     state: McpUiState,
     tab: McpTab,
     onTab: (McpTab) -> Unit,
-    onToggleTool: (String) -> Unit,
-    onSaveTools: () -> Unit,
-    onSetDefaultEffect: (String) -> Unit,
-    onSetToolEffect: (String, String) -> Unit,
-    onSavePolicy: () -> Unit,
-    onRetryDetail: () -> Unit,
+    actions: McpActions,
+    onRequestDelete: () -> Unit,
+    onRequestRevoke: () -> Unit,
 ) {
     val client = state.selected ?: return
     Column(
@@ -352,6 +458,45 @@ private fun McpDetail(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ActionChip(
+                text = stringResource(R.string.mcp_admin_action_edit),
+                onClick = actions.onStartEdit,
+            )
+            ActionChip(
+                text = stringResource(R.string.mcp_admin_action_delete),
+                onClick = onRequestDelete,
+                danger = true,
+                enabled = !state.deleting,
+            )
+            if (state.deleting) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
+        state.deleteError?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        DetailSummary(client)
+        if (McpEditDraft.isRemote(client.transport)) {
+            OAuthSection(
+                client = client,
+                oauth = state.oauth,
+                onStart = actions.onStartOAuth,
+                onCheck = actions.onRefreshOAuth,
+                onRevoke = onRequestRevoke,
+            )
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             McpTab.entries.forEach { entry ->
                 TabChip(
@@ -366,16 +511,16 @@ private fun McpDetail(
             McpTab.TOOLS -> ToolsSection(
                 state = state,
                 clientEnabled = client.enabled,
-                onToggleTool = onToggleTool,
-                onSave = onSaveTools,
-                onRetry = onRetryDetail,
+                onToggleTool = actions.onToggleTool,
+                onSave = actions.onSaveTools,
+                onRetry = actions.onRetryDetail,
             )
 
             McpTab.POLICY -> PolicySection(
                 state = state,
-                onSetDefaultEffect = onSetDefaultEffect,
-                onSetToolEffect = onSetToolEffect,
-                onSave = onSavePolicy,
+                onSetDefaultEffect = actions.onSetDefaultEffect,
+                onSetToolEffect = actions.onSetToolEffect,
+                onSave = actions.onSavePolicy,
             )
         }
         Spacer(Modifier.height(8.dp))
@@ -646,8 +791,205 @@ private fun PolicySection(
     )
 }
 
+/** 凭据条数。只给数量不打印值：请求头与环境变量里通常是密钥或令牌。 */
 @Composable
-private fun TabChip(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun CredentialCounts(client: McpClientDto) {
+    val headerCount = client.headers?.size ?: 0
+    val envCount = client.env?.size ?: 0
+    if (headerCount == 0 && envCount == 0) return
+    Text(
+        text = buildString {
+            if (headerCount > 0) {
+                append(stringResource(R.string.mcp_admin_count_headers, headerCount))
+            }
+            if (headerCount > 0 && envCount > 0) append(" · ")
+            if (envCount > 0) append(stringResource(R.string.mcp_admin_count_env, envCount))
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** 详情顶部的连接摘要：传输方式、地址或命令，以及凭据条数。 */
+@Composable
+private fun DetailSummary(client: McpClientDto) {
+    CardBox {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = McpPolicyEdit.transportLabel(client.transport) + " · " +
+                    McpPolicyEdit.endpointLabel(client.transport, client.url, client.command),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            CredentialCounts(client)
+        }
+    }
+}
+
+/**
+ * OAuth 授权。
+ *
+ * 只给远端传输方式：本机进程没有可授权的服务端。状态优先用页面刚读到的，
+ * 卡片上的 `oauth_status` 是列表快照，轮询拿到新结果前它可能已经过时。
+ */
+@Composable
+private fun OAuthSection(
+    client: McpClientDto,
+    oauth: McpOAuthUi,
+    onStart: () -> Unit,
+    onCheck: () -> Unit,
+    onRevoke: () -> Unit,
+) {
+    val status = oauth.status ?: client.oauthStatus
+    val authorized = status?.authorized == true
+    CardBox {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = stringResource(R.string.mcp_admin_oauth_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.mcp_admin_oauth_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = if (authorized) {
+                    stringResource(R.string.mcp_admin_oauth_state_authorized)
+                } else {
+                    stringResource(R.string.mcp_admin_oauth_state_unauthorized)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (authorized) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+            if (authorized) {
+                val expires = status?.expiresAt?.takeIf { it > 0.0 }
+                Text(
+                    text = expires?.let {
+                        stringResource(
+                            R.string.mcp_admin_oauth_label_expires,
+                            // 时区显式传入，不依赖格式化器的默认值。
+                            McpEditDraft.expiryLabel(it, java.time.ZoneId.systemDefault()),
+                        )
+                    } ?: stringResource(R.string.mcp_admin_oauth_expires_unknown),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val scope = status?.scope.orEmpty()
+                if (scope.isNotBlank()) {
+                    Text(
+                        text = stringResource(R.string.mcp_admin_oauth_label_scope, scope),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val clientId = status?.clientId.orEmpty()
+                if (clientId.isNotBlank()) {
+                    Text(
+                        text = stringResource(R.string.mcp_admin_oauth_label_client_id, clientId),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (oauth.polling) {
+                Text(
+                    text = stringResource(R.string.mcp_admin_oauth_polling),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+            oauth.error?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (oauth.starting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    ActionChip(
+                        text = stringResource(
+                            if (authorized) {
+                                R.string.mcp_admin_oauth_action_reauth
+                            } else {
+                                R.string.mcp_admin_oauth_action_authorize
+                            },
+                        ),
+                        onClick = onStart,
+                    )
+                }
+                if (status != null) {
+                    ActionChip(
+                        text = stringResource(R.string.mcp_admin_oauth_action_check),
+                        onClick = onCheck,
+                    )
+                }
+                if (authorized) {
+                    ActionChip(
+                        text = stringResource(R.string.mcp_admin_oauth_action_revoke),
+                        onClick = onRevoke,
+                        danger = true,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 小号动作按钮。危险动作用 error 容器色，避免和「编辑」混成一片。 */
+@Composable
+internal fun ActionChip(
+    text: String,
+    onClick: () -> Unit,
+    danger: Boolean = false,
+    enabled: Boolean = true,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                when {
+                    !enabled -> MaterialTheme.colorScheme.surface
+                    danger -> MaterialTheme.colorScheme.errorContainer
+                    else -> MaterialTheme.colorScheme.secondaryContainer
+                },
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                danger -> MaterialTheme.colorScheme.onErrorContainer
+                else -> MaterialTheme.colorScheme.onSecondaryContainer
+            },
+        )
+    }
+}
+
+@Composable
+internal fun TabChip(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))

@@ -52,6 +52,7 @@ import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.MarketProviderDto
 import io.qwenpaw.node.data.model.MarketResultDto
 import io.qwenpaw.node.data.model.PluginCatalogEntryDto
+import io.qwenpaw.node.data.model.PluginListItemDto
 import io.qwenpaw.node.data.model.PluginMarketEntryDto
 import io.qwenpaw.node.data.remote.SafZipSource
 import kotlinx.coroutines.launch
@@ -86,6 +87,13 @@ fun MarketScreen(
     onDismissNotice: () -> Unit = {},
     onStopHubPolling: () -> Unit = {},
     onConsumePrefill: () -> Unit = {},
+    /** 打开某个插件的管理页。目录里已安装的行与「已安装插件」段共用。 */
+    onManagePlugin: (String) -> Unit = {},
+    /** 安装被依赖升级拦住时打开依赖升级页。 */
+    onOpenDependency: (String) -> Unit = {},
+    onDismissDependency: () -> Unit = {},
+    /** 重拉已安装列表与目录。管理页里改过启停后用。 */
+    onRefreshPlugins: () -> Unit = {},
 ) {
     val context = LocalContext.current
     // 解析失败等一次性说明。放在 Nav 之上而不是状态里：它只描述「这一次点击」，
@@ -214,6 +222,8 @@ fun MarketScreen(
                     onInstallFromFile = { pluginFileLauncher.launch("application/zip") },
                     onInstallFromUrl = { pluginUrlDialog = true },
                     onInstallCatalog = { entry -> onInstallPluginUrl(entry.installUrl) },
+                    onManagePlugin = onManagePlugin,
+                    onRefreshPlugins = onRefreshPlugins,
                 )
             }
         }
@@ -307,6 +317,34 @@ fun MarketScreen(
                     TextButton(onClick = onDismissPluginInstall) {
                         Text(stringResource(R.string.action_cancel))
                     }
+                }
+            },
+        )
+    }
+
+    // 安装被依赖升级拦住：出口是依赖升级页，不能给「覆盖」。
+    state.dependencyOperationId?.let { operationId ->
+        AlertDialog(
+            onDismissRequest = onDismissDependency,
+            title = { Text(stringResource(R.string.plugin_admin_market_dependency_title)) },
+            text = {
+                Text(
+                    text = state.dependencyMessage
+                        ?: stringResource(R.string.plugin_admin_market_dependency_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDismissDependency()
+                        onOpenDependency(operationId)
+                    },
+                ) { Text(stringResource(R.string.plugin_admin_market_dependency_action_open)) }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissDependency) {
+                    Text(stringResource(R.string.plugin_admin_market_dependency_action_later))
                 }
             },
         )
@@ -585,6 +623,8 @@ private fun PluginMarket(
     onInstallFromFile: () -> Unit,
     onInstallFromUrl: () -> Unit,
     onInstallCatalog: (PluginCatalogEntryDto) -> Unit,
+    onManagePlugin: (String) -> Unit,
+    onRefreshPlugins: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -601,6 +641,50 @@ private fun PluginMarket(
                 Text(stringResource(R.string.market_action_install_from_url))
             }
         }
+
+        // 已安装段放在目录之前：装完之后用户回到这一页，先要看的是「现在有什么、怎么管」，
+        // 而不是再翻一遍目录找同一行。
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.plugin_admin_market_section_installed),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onRefreshPlugins) {
+                Text(stringResource(R.string.action_refresh))
+            }
+        }
+        CardBox {
+            when {
+                state.installedPlugins.isNotEmpty() -> {
+                    state.installedPlugins.forEachIndexed { index, plugin ->
+                        InstalledPluginRow(plugin = plugin, onManage = { onManagePlugin(plugin.id) })
+                        if (index != state.installedPlugins.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                        }
+                    }
+                }
+
+                state.installedLoading -> InlineHint(
+                    text = stringResource(R.string.plugin_admin_market_loading_installed),
+                )
+
+                state.installedError != null -> InlineHint(
+                    text = stringResource(
+                        R.string.plugin_admin_market_error_installed,
+                        state.installedError,
+                    ),
+                    error = true,
+                )
+
+                else -> InlineHint(stringResource(R.string.plugin_admin_market_empty_installed))
+            }
+        }
+
         Text(
             text = stringResource(R.string.market_label_catalog),
             style = MaterialTheme.typography.labelLarge,
@@ -633,7 +717,12 @@ private fun PluginMarket(
                 else -> {
                     val entries = state.catalog?.plugins.orEmpty()
                     entries.forEachIndexed { index, entry ->
-                        CatalogRow(entry = entry, onOpen = onOpen, onInstall = { onInstallCatalog(entry) })
+                        CatalogRow(
+                            entry = entry,
+                            onOpen = onOpen,
+                            onInstall = { onInstallCatalog(entry) },
+                            onManage = { onManagePlugin(entry.pluginId) },
+                        )
                         if (index != entries.lastIndex) {
                             HorizontalDivider(Modifier.padding(horizontal = 14.dp))
                         }
@@ -698,7 +787,7 @@ private fun PluginMarket(
         }
 
         Text(
-            text = stringResource(R.string.market_hint_install),
+            text = stringResource(R.string.plugin_admin_market_hint_install),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -765,11 +854,99 @@ private fun MarketRow(
     }
 }
 
+/**
+ * 已安装插件的一行。
+ *
+ * 只展示「现在是什么状态」与一个入口，不在这里放开关：启停属于管理页，
+ * 两处都能改会让用户分不清哪一次生效。
+ */
+@Composable
+private fun InstalledPluginRow(
+    plugin: PluginListItemDto,
+    onManage: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = plugin.name.ifBlank { plugin.id },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = buildString {
+                    append(plugin.id)
+                    if (plugin.version.isNotBlank()) {
+                        append(" · ")
+                        append(stringResource(R.string.market_label_version, plugin.version))
+                    }
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = buildString {
+                append(
+                    stringResource(
+                        if (plugin.enabled) {
+                            R.string.plugin_admin_market_state_enabled
+                        } else {
+                            R.string.plugin_admin_market_state_disabled
+                        },
+                    ),
+                )
+                if (plugin.enabled) {
+                    append(" · ")
+                    append(
+                        stringResource(
+                            if (plugin.loaded) {
+                                R.string.plugin_admin_market_state_loaded
+                            } else {
+                                R.string.plugin_admin_market_state_unloaded
+                            },
+                        ),
+                    )
+                }
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onManage) {
+            Text(stringResource(R.string.plugin_admin_market_action_manage))
+        }
+    }
+}
+
+/** 卡片里的单行说明。与空态、加载态、错误态共用，避免三处各写一套间距。 */
+@Composable
+private fun InlineHint(text: String, error: Boolean = false) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (error) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 16.dp),
+    )
+}
+
 @Composable
 private fun CatalogRow(
     entry: PluginCatalogEntryDto,
     onOpen: (String) -> Unit,
     onInstall: () -> Unit,
+    onManage: () -> Unit,
 ) {
     val installStatus = when {
         entry.installed && entry.upgradeAvailable -> R.string.market_badge_installed_upgradable
@@ -791,6 +968,12 @@ private fun CatalogRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (entry.installed) {
+                // 已安装的行给「管理」：目录是发现入口，改配置与启停都在管理页。
+                TextButton(onClick = onManage) {
+                    Text(stringResource(R.string.plugin_admin_market_action_manage))
+                }
+            }
             if (entry.installUrl.isNotBlank()) {
                 TextButton(onClick = onInstall) {
                     Text(

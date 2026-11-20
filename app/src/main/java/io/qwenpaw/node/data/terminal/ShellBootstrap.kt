@@ -48,6 +48,41 @@ object ShellBootstrap {
     fun isWindowsPath(path: String): Boolean =
         WINDOWS_DRIVE.matches(path)
 
+    /**
+     * 服务端默认 shell 是否已经是用户选择的那个。
+     *
+     * 本地 PTY 的 `title` 是服务端启动命令的文件名（如 `pwsh`、`cmd`）。
+     * 默认已是 PowerShell 时再发 `powershell -NoLogo` 会嵌套一层 PS：
+     * 启动更慢，且 PSReadLine 在 ConPTY 里会因初始光标位置报
+     * `top = -1`。匹配时按 DEFAULT 处理，不切换。
+     */
+    fun matchesDefault(shell: TerminalShell, title: String): Boolean {
+        val name = title.substringAfterLast('\\').substringAfterLast('/').lowercase()
+        return when (shell) {
+            TerminalShell.POWERSHELL -> name in setOf("pwsh", "powershell", "powershell.exe")
+            TerminalShell.CMD -> name in setOf("cmd", "cmd.exe")
+            TerminalShell.BASH -> name == "bash" || name == "bash.exe"
+            TerminalShell.GIT_BASH -> name == "bash" || name == "bash.exe"
+            TerminalShell.DASH -> name == "dash"
+            TerminalShell.DEFAULT -> true
+        }
+    }
+
+    /**
+     * SSH 直连无法预知远端默认 shell，只能看第一条输出里的提示符。
+     *
+     * 典型提示符：PowerShell `PS C:\Users\x>`、cmd `C:\Users\x>`、bash `x@y:~$`。
+     * 只做保守匹配；认不出就照旧发送切换命令，不要因为误判让用户没有 shell 可用。
+     */
+    fun promptMatchesShell(shell: TerminalShell, output: String): Boolean = when (shell) {
+        TerminalShell.POWERSHELL -> POWERSHELL_PROMPT.containsMatchIn(output)
+        TerminalShell.CMD -> CMD_PROMPT.containsMatchIn(output)
+        TerminalShell.BASH, TerminalShell.GIT_BASH, TerminalShell.DASH ->
+            POSIX_PROMPT.containsMatchIn(output)
+
+        TerminalShell.DEFAULT -> true
+    }
+
     /** 在默认 PTY/SSH shell 建立后发送；null 表示保持服务端默认 shell。 */
     fun switchCommand(shell: TerminalShell, platform: TerminalPlatform): String? =
         when (resolve(platform, null)) {
@@ -61,6 +96,30 @@ object ShellBootstrap {
                 TerminalShell.DEFAULT -> null
                 TerminalShell.POWERSHELL -> "powershell -NoLogo"
                 TerminalShell.CMD -> "cmd.exe /K"
+                TerminalShell.GIT_BASH -> "bash.exe -i"
+                else -> null
+            }
+            TerminalPlatform.AUTO -> null
+        }
+
+    /**
+     * SSH 直连时直接以目标 shell 作为远程命令启动，避免「默认 shell 再嵌套一层」。
+     *
+     * Windows 的默认 shell 常是 cmd；在 cmd 里再执行 `powershell -NoLogo` 会创建
+     * 嵌套 PS，旧版 PSReadLine 在 80×24 缓冲区上会报 `top = -1`。直接开 exec
+     * 通道把 PS 作为子进程，既不经过 cmd，也省掉默认 shell 的启动时间。
+     * 返回 null 表示沿用默认 shell 通道。
+     */
+    fun execCommand(shell: TerminalShell, platform: TerminalPlatform): String? =
+        when (resolve(platform, null)) {
+            TerminalPlatform.POSIX -> when (shell) {
+                TerminalShell.BASH -> "bash -i"
+                TerminalShell.DASH -> "dash -i"
+                else -> null
+            }
+            TerminalPlatform.WINDOWS -> when (shell) {
+                TerminalShell.POWERSHELL -> "powershell -NoLogo"
+                TerminalShell.CMD -> "cmd.exe"
                 TerminalShell.GIT_BASH -> "bash.exe -i"
                 else -> null
             }
@@ -125,4 +184,8 @@ object ShellBootstrap {
     }
 
     private val WINDOWS_DRIVE = Regex("^[A-Za-z]:[\\\\/].*")
+
+    private val POWERSHELL_PROMPT = Regex("(?m)^\\s*PS(?:\\s+[A-Za-z]:[^\\r\\n]*)?\\s*>")
+    private val CMD_PROMPT = Regex("(?m)^\\s*[A-Za-z]:\\\\[^\\r\\n>]*>")
+    private val POSIX_PROMPT = Regex("[$#]\\s*$")
 }

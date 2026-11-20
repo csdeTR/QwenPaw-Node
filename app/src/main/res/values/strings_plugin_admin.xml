@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 插件管理页 -->
+    <string name="plugin_admin_title">插件管理</string>
+    <string name="plugin_admin_config_title">插件配置编辑</string>
+    <string name="plugin_admin_loading">正在读取插件信息</string>
+    <string name="plugin_admin_empty_no_plugin">未选择插件</string>
+    <string name="plugin_admin_empty_deleted">该插件已删除，返回列表可查看其余插件。</string>
+    <string name="plugin_admin_error_not_connected">尚未连接服务器</string>
+    <string name="plugin_admin_error_load_failed">读取插件信息失败：%1$s</string>
+    <string name="plugin_admin_error_unsupported">当前服务端不支持该操作</string>
+    <string name="plugin_admin_label_id">插件 id</string>
+    <string name="plugin_admin_label_version">版本</string>
+    <string name="plugin_admin_label_author">作者</string>
+    <string name="plugin_admin_label_status">状态</string>
+    <string name="plugin_admin_label_enabled">启用</string>
+    <string name="plugin_admin_label_loaded">已加载</string>
+    <string name="plugin_admin_label_diagnostics">诊断信息</string>
+    <string name="plugin_admin_empty_diagnostics">服务端未返回诊断信息</string>
+    <string name="plugin_admin_value_on">是</string>
+    <string name="plugin_admin_value_off">否</string>
+    <string name="plugin_admin_section_actions">操作</string>
+    <string name="plugin_admin_action_unload">从当前进程卸载</string>
+    <string name="plugin_admin_hint_unload">仅从当前进程卸载，不删除文件。下次启动服务端会重新加载。</string>
+    <string name="plugin_admin_action_delete">卸载并删除</string>
+    <string name="plugin_admin_action_repair">修复依赖</string>
+    <string name="plugin_admin_hint_repair">重新检查并修复插件依赖。服务端要求先升级依赖时会转到依赖升级页。</string>
+    <string name="plugin_admin_action_edit_config">编辑配置</string>
+    <string name="plugin_admin_hint_config">服务端不提供当前配置读取。保存会整段替换 config.plugins.%1$s，请先从 Web 控制台复制当前配置。</string>
+    <string name="plugin_admin_warning_config">服务端不提供当前配置读取，保存会整段替换 config.plugins.%1$s。未写入的键会丢失，请先从 Web 控制台复制当前配置。</string>
+    <string name="plugin_admin_error_config_syntax">JSON 语法错误，或顶层不是对象</string>
+    <string name="plugin_admin_notice_title">提示</string>
+    <string name="plugin_admin_action_got_it">知道了</string>
+    <string name="plugin_admin_notice_enabled_changed">已切换启用状态，运行状态以服务端返回为准。</string>
+    <string name="plugin_admin_notice_unloaded">已从当前进程卸载，文件仍然保留。</string>
+    <string name="plugin_admin_notice_deleted">已卸载插件，文件与配置均已删除。</string>
+    <string name="plugin_admin_notice_config_saved">配置已保存。服务端没有读取端点，请回 Web 控制台核对实际值。</string>
+    <string name="plugin_admin_notice_config_unchanged">配置未变化，服务端未写入。</string>
+    <string name="plugin_admin_notice_repair_requested">已请求修复插件依赖，请刷新状态确认结果。</string>
+
+    <!-- 中断运行中任务 -->
+    <string name="plugin_admin_interrupt_title">需要中断运行中任务</string>
+    <string name="plugin_admin_interrupt_message">该插件还有运行中的任务。继续会中断这些任务，再重试本次操作。</string>
+    <string name="plugin_admin_action_interrupt_retry">中断后重试</string>
+
+    <!-- legacy 卸载钩子 -->
+    <string name="plugin_admin_legacy_title">该插件含 legacy 卸载钩子</string>
+    <string name="plugin_admin_legacy_message">保存配置会触发以下 legacy 钩子。确认后才会写入。</string>
+    <string name="plugin_admin_action_continue">继续</string>
+
+    <!-- 删除确认 -->
+    <string name="plugin_admin_delete_title">删除插件「%1$s」</string>
+    <string name="plugin_admin_delete_message">删除后插件文件与配置都会移除，无法撤销。</string>
+    <string name="plugin_admin_delete_impact_files">插件文件</string>
+    <string name="plugin_admin_delete_impact_config">插件配置</string>
+    <string name="plugin_admin_delete_impact_tasks">运行中任务</string>
+
+    <!-- 配置整段替换确认 -->
+    <string name="plugin_admin_config_save_title">整段替换插件配置</string>
+    <string name="plugin_admin_config_save_message">提交的 JSON 会整段替换 config.plugins.%1$s，未包含的键会丢失，且无法从客户端恢复。</string>
+    <string name="plugin_admin_config_save_confirm">替换配置</string>
+    <string name="plugin_admin_config_impact_scope">config.plugins.%1$s 将整段替换</string>
+    <string name="plugin_admin_config_impact_backup">请先在 Web 控制台复制原配置</string>
+
+    <!-- 依赖升级页 -->
+    <string name="plugin_admin_dep_title">依赖升级</string>
+    <string name="plugin_admin_dep_loading">正在读取升级状态</string>
+    <string name="plugin_admin_dep_empty_operation">没有可显示的依赖升级操作</string>
+    <string name="plugin_admin_dep_error_load_failed">读取升级状态失败：%1$s</string>
+    <string name="plugin_admin_dep_error_action_failed">操作失败：%1$s</string>
+    <string name="plugin_admin_dep_label_operation">操作 id</string>
+    <string name="plugin_admin_dep_label_stage">阶段</string>
+    <string name="plugin_admin_dep_label_server_message">服务端说明</string>
+    <string name="plugin_admin_dep_stage_preparing">准备中</string>
+    <string name="plugin_admin_dep_stage_needs_confirmation">等待确认</string>
+    <string name="plugin_admin_dep_stage_applying">正在升级</string>
+    <string name="plugin_admin_dep_stage_waiting_restart">等待服务端重启</string>
+    <string name="plugin_admin_dep_stage_repair_required">需要修复依赖</string>
+    <string name="plugin_admin_dep_stage_succeeded">已完成</string>
+    <string name="plugin_admin_dep_stage_failed">升级失败</string>
+    <string name="plugin_admin_dep_stage_cancelled">已取消</string>
+    <string name="plugin_admin_dep_stage_unknown">未识别的阶段：%1$s</string>
+    <string name="plugin_admin_dep_hint_confirm">服务端已准备好升级计划。确认后开始执行。</string>
+    <string name="plugin_admin_dep_hint_applying">正在执行升级，请保持页面打开。</string>
+    <string name="plugin_admin_dep_hint_waiting_restart">升级尚未生效：需要在服务端执行以下命令，重启后才会完成。本页不会把这一阶段显示为已完成。</string>
+    <string name="plugin_admin_dep_hint_repair">服务端报告依赖需要修复。可回插件详情执行「修复依赖」，或到 Web 控制台处理。</string>
+    <string name="plugin_admin_dep_hint_succeeded">依赖升级已完成。</string>
+    <string name="plugin_admin_dep_hint_failed">升级失败。修正后可在服务端重新发起。</string>
+    <string name="plugin_admin_dep_hint_cancelled">升级已取消，未被改动的依赖保持原样。</string>
+    <string name="plugin_admin_dep_label_commands">需在服务端执行的命令</string>
+    <string name="plugin_admin_dep_no_commands">服务端未返回具体维护命令。请在服务端查看升级日志确认重启方式，重启后点「重新检查」。</string>
+    <string name="plugin_admin_dep_action_apply">应用</string>
+    <string name="plugin_admin_dep_action_cancel">取消升级</string>
+    <string name="plugin_admin_dep_action_recheck">重新检查</string>
+    <string name="plugin_admin_dep_action_applying_now">正在应用</string>
+
+    <!-- 市场页的已安装插件段 -->
+    <string name="plugin_admin_market_section_installed">已安装插件</string>
+    <string name="plugin_admin_market_loading_installed">正在读取已安装插件</string>
+    <string name="plugin_admin_market_error_installed">无法读取已安装插件：%1$s</string>
+    <string name="plugin_admin_market_empty_installed">还没有已安装的插件</string>
+    <string name="plugin_admin_market_action_manage">管理</string>
+    <string name="plugin_admin_market_state_enabled">已启用</string>
+    <string name="plugin_admin_market_state_disabled">已停用</string>
+    <string name="plugin_admin_market_state_loaded">已加载</string>
+    <string name="plugin_admin_market_state_unloaded">未加载</string>
+    <string name="plugin_admin_market_dependency_title">需要先升级依赖</string>
+    <string name="plugin_admin_market_dependency_message">安装被依赖升级拦住：这是依赖冲突，不是同名插件。需要先完成依赖升级。</string>
+    <string name="plugin_admin_market_dependency_action_open">打开依赖升级</string>
+    <string name="plugin_admin_market_dependency_action_later">稍后处理</string>
+    <string name="plugin_admin_market_error_dependency_no_operation">服务端要求先升级依赖，但没有返回操作 id，请到 Web 控制台处理。</string>
+    <string name="plugin_admin_market_hint_install">插件安装后可在本页直接管理启停、配置与依赖。卸载、删除与整段替换配置前会要求确认。</string>
+</resources>

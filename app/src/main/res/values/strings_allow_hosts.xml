@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  免鉴权地址页（AllowNoAuthHostsScreen.kt）与安全页入口行（SecurityScreen.kt）的文案。
+-->
+<resources>
+    <string name="allow_hosts_title">免鉴权地址</string>
+    <string name="allow_hosts_entry_subtitle">加入的地址可跳过登录鉴权</string>
+    <string name="allow_hosts_section_auth">登录鉴权</string>
+    <string name="allow_hosts_section_list">名单</string>
+    <string name="allow_hosts_section_add">新增地址</string>
+    <string name="allow_hosts_empty">名单为空，所有地址访问服务端时都需要登录。</string>
+    <string name="allow_hosts_badge_loopback">本机回环</string>
+    <string name="allow_hosts_badge_remote">非回环地址</string>
+    <string name="allow_hosts_add_placeholder">IP 地址或主机名</string>
+    <string name="allow_hosts_add_hint">只在本机去掉首尾空格并去重；IPv4 与 IPv6 的规范化由服务端完成。</string>
+    <string name="allow_hosts_duplicate">该地址已在名单中。</string>
+    <string name="allow_hosts_auth_disabled">名单在未开启登录时不生效；当前服务端尚未开启登录。</string>
+    <string name="allow_hosts_saved">名单已保存。</string>
+    <string name="allow_hosts_loading">正在读取名单…</string>
+    <string name="allow_hosts_not_loaded">名单尚未读取。</string>
+    <string name="allow_hosts_unsupported">当前服务端版本不支持免鉴权地址配置。</string>
+    <string name="allow_hosts_confirm_title">保存免鉴权名单</string>
+    <string name="allow_hosts_confirm_message">保存后，下列地址访问服务端时无需登录鉴权。</string>
+    <string name="allow_hosts_confirm_empty">名单将为空；保存后所有地址访问服务端时都需要登录。</string>
+    <string name="allow_hosts_impact_loopback">%1$s（本机回环）</string>
+    <string name="allow_hosts_impact_remote">%1$s（非回环地址，保存后局域网与公网也可免鉴权访问）</string>
+    <string name="allow_hosts_confirm_loopback_lost">本次移除了 %1$s，本机回环也会失去免鉴权。</string>
+</resources>

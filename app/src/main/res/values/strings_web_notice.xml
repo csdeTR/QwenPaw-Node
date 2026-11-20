@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_notice_title">建议在 Web 控制台操作</string>
+    <string name="web_notice_message">该页面涉及服务端管理配置。手机端已提供主要操作，但完整的管理与排查仍以 Web 控制台为准；继续操作时请留意页面中的说明与确认。</string>
+    <string name="web_notice_continue">继续在手机操作</string>
+    <string name="web_notice_open_console">去 Web 控制台</string>
+    <string name="web_hint_console">此页更适合在 Web 控制台完成；手机端保留常用操作。</string>
+</resources>

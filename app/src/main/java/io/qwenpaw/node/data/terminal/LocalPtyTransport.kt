@@ -140,6 +140,9 @@ class LocalPtyTransport(
     }
 
     override fun resize(rows: Int, cols: Int, widthPx: Int, heightPx: Int) {
+        // PSReadLine 在 ConPTY 的 0 行/0 列缓冲区上会 SetCursorPosition(top=-1) 报错。
+        // 视图测量完成前或极端布局下可能给出 0，这里保底 2 行/2 列。
+        if (rows < 2 || cols < 2) return
         resizeRequests.tryEmit(rows to cols)
     }
 

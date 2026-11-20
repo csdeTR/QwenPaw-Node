@@ -33,8 +33,8 @@ android {
         applicationId = "io.qwenpaw.node"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.7.2"
+        versionCode = 24
+        versionName = "0.7.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 「关于」页里展示的仓库地址，单独抽成 BuildConfig 字段，

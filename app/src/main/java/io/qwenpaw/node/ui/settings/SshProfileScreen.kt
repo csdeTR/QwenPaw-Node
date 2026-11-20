@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,14 +40,18 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.terminal.SshAddress
 import io.qwenpaw.node.data.terminal.SshAuthType
+import io.qwenpaw.node.data.terminal.SshConnectionTester
 import io.qwenpaw.node.data.terminal.SshProfile
 import io.qwenpaw.node.data.terminal.SshProfileStore
 import io.qwenpaw.node.data.terminal.SshSecret
 import io.qwenpaw.node.data.terminal.ShellBootstrap
 import io.qwenpaw.node.data.terminal.TerminalPlatform
 import io.qwenpaw.node.data.terminal.TerminalShell
+import io.qwenpaw.node.ui.common.SecretVisibilityTrailingIcon
+import io.qwenpaw.node.ui.common.rememberSecretVisibility
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
 import java.util.UUID
+import kotlinx.coroutines.launch
 import android.widget.Toast
 
 /** 一个实例的 SSH 直连配置：地址、认证方式、同机与平台。 */
@@ -69,7 +76,40 @@ fun SshProfileScreen(
     var adding by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var messageError by remember { mutableStateOf(false) }
+    var testing by remember { mutableStateOf(false) }
+    var testNote by remember { mutableStateOf<String?>(null) }
+    val testScope = rememberCoroutineScope()
+    val passphraseVisibility = rememberSecretVisibility()
+    val passwordVisibility = rememberSecretVisibility()
     val context = LocalContext.current
+
+    /**
+     * 本次可用的凭据：新输入优先，留空时回落到已保存的那一项。
+     *
+     * 保存与「测试连接」共用这一份组装结果。保存时回落的仍是原本已存的同一批值，
+     * 写回的内容不变，因此「留空保留现有凭据」的含义保持原样。
+     */
+    fun draftSecret(): SshSecret? {
+        val stored = store.secret(instanceId)
+        return when (profile.auth) {
+            SshAuthType.KEY -> {
+                val key = keyInput.takeIf { it.isNotBlank() } ?: stored.privateKey()
+                if (key.isNullOrBlank()) {
+                    null
+                } else {
+                    SshSecret(
+                        privateKey = key,
+                        passphrase = passphraseInput.takeIf { it.isNotBlank() }
+                            ?: stored.passphrase(),
+                    )
+                }
+            }
+            SshAuthType.PASSWORD -> {
+                val password = passwordInput.takeIf { it.isNotBlank() } ?: stored.password()
+                if (password.isNullOrBlank()) null else SshSecret(password = password)
+            }
+        }
+    }
 
     fun save() {
         if (!store.available) {
@@ -87,26 +127,17 @@ fun SshProfileScreen(
                 if (index == 0) item.copy(default = true) else item
             })
         }
-        val secret = when (profile.auth) {
-            SshAuthType.KEY -> {
-                if (!hasKey && keyInput.isBlank()) {
-                    message = context.getString(R.string.sshprofile_need_key)
-                    messageError = true
-                    return
-                }
-                SshSecret(
-                    privateKey = keyInput.takeIf { it.isNotBlank() },
-                    passphrase = passphraseInput.takeIf { it.isNotBlank() },
-                )
-            }
-            SshAuthType.PASSWORD -> {
-                if (!hasPassword && passwordInput.isBlank()) {
-                    message = context.getString(R.string.sshprofile_need_password)
-                    messageError = true
-                    return
-                }
-                SshSecret(password = passwordInput.takeIf { it.isNotBlank() })
-            }
+        val secret = draftSecret()
+        if (secret == null) {
+            message = context.getString(
+                if (profile.auth == SshAuthType.KEY) {
+                    R.string.sshprofile_need_key
+                } else {
+                    R.string.sshprofile_need_password
+                },
+            )
+            messageError = true
+            return
         }
         if (!store.save(instanceId, profile, secret)) {
             message = context.getString(R.string.sshprofile_save_unavailable)
@@ -118,6 +149,7 @@ fun SshProfileScreen(
         keyInput = ""
         passphraseInput = ""
         passwordInput = ""
+        testNote = null
         message = context.getString(R.string.sshprofile_saved)
         messageError = false
     }
@@ -248,7 +280,17 @@ fun SshProfileScreen(
                 onValueChange = { passphraseInput = it },
                 placeholder = { Text(stringResource(R.string.sshprofile_passphrase_placeholder)) },
                 singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (passphraseVisibility.visible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    SecretVisibilityTrailingIcon(
+                        visible = passphraseVisibility.visible,
+                        onToggle = passphraseVisibility.toggle,
+                    )
+                },
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -264,7 +306,17 @@ fun SshProfileScreen(
                 value = passwordInput,
                 onValueChange = { passwordInput = it },
                 singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisibility.visible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+                    SecretVisibilityTrailingIcon(
+                        visible = passwordVisibility.visible,
+                        onToggle = passwordVisibility.toggle,
+                    )
+                },
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -274,6 +326,41 @@ fun SshProfileScreen(
             style = MaterialTheme.typography.labelSmall,
             color = LocalCaptionColor.current,
         )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            InlineAction(
+                text = stringResource(R.string.sshprofile_test_action),
+                accent = true,
+                enabled = !testing,
+                onClick = {
+                    val secret = draftSecret()
+                    if (secret == null) {
+                        message = context.getString(R.string.ssh_test_error_no_credential)
+                        messageError = true
+                        testNote = null
+                    } else {
+                        testing = true
+                        testNote = null
+                        testScope.launch {
+                            val result = SshConnectionTester.test(profile, secret)
+                            testing = false
+                            message = result.message
+                            messageError = !result.succeeded
+                            testNote = result.note
+                        }
+                    }
+                },
+            )
+            if (testing) {
+                Spacer(Modifier.width(8.dp))
+                CircularProgressIndicator(modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stringResource(R.string.sshprofile_test_running),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalCaptionColor.current,
+                )
+            }
+        }
 
         Divider()
         SectionLabel(stringResource(R.string.sshprofile_behavior_title))
@@ -332,9 +419,10 @@ fun SshProfileScreen(
             }
         }
 
-        message?.let {
+        val shown = message
+        if (shown != null) {
             Text(
-                it,
+                shown,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (messageError) {
                     MaterialTheme.colorScheme.error
@@ -342,6 +430,13 @@ fun SshProfileScreen(
                     MaterialTheme.colorScheme.primary
                 },
             )
+            testNote?.let { note ->
+                Text(
+                    note,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LocalCaptionColor.current,
+                )
+            }
         }
         PrimaryBarButton(text = stringResource(R.string.action_save), onClick = { save() })
         InlineAction(
@@ -422,18 +517,22 @@ private fun InlineAction(
     text: String,
     accent: Boolean = false,
     centered: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val modifier = Modifier
         .then(if (centered) Modifier.fillMaxWidth() else Modifier)
         .clip(RoundedCornerShape(6.dp))
-        .clickable(onClick = onClick)
+        .clickable(enabled = enabled, onClick = onClick)
         .padding(horizontal = 8.dp, vertical = 10.dp)
     Text(
         text = text,
         style = MaterialTheme.typography.labelMedium,
-        color = if (accent) MaterialTheme.colorScheme.secondary
-        else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = when {
+            !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+            accent -> MaterialTheme.colorScheme.secondary
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
         modifier = modifier,
         textAlign = if (centered) TextAlign.Center else TextAlign.Start,
     )

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 浏览器控制诊断页 -->
+    <string name="browser_title">浏览器控制诊断</string>
+    <string name="browser_retest">重新检测</string>
+    <string name="browser_retesting">检测中…</string>
+    <string name="browser_loading">正在读取控制链路状态…</string>
+    <string name="browser_load_failed">读取控制链路状态失败：%1$s</string>
+    <string name="browser_unsupported">当前服务端不支持浏览器诊断</string>
+    <string name="browser_unsupported_hint">该端点要求服务端 2.3.0 及以上版本并启用浏览器控制。升级服务端后重新进入本页。</string>
+
+    <!-- 控制链路状态 -->
+    <string name="browser_section_status">控制链路状态</string>
+    <string name="browser_label_readiness">就绪状态</string>
+    <string name="browser_label_connected">扩展连接</string>
+    <string name="browser_label_connected_since">连接起始</string>
+    <string name="browser_label_extension_version">扩展版本</string>
+    <string name="browser_label_bridge">Bridge 连接</string>
+    <string name="browser_label_contract">契约健康</string>
+    <string name="browser_label_last_self_test">最近一次自检</string>
+    <string name="browser_readiness_ready">就绪</string>
+    <string name="browser_readiness_blocked">阻塞</string>
+    <string name="browser_connected_yes">已连接</string>
+    <string name="browser_connected_no">未连接</string>
+    <string name="browser_value_absent">未提供</string>
+
+    <!-- 检查项状态 -->
+    <string name="browser_status_passed">通过</string>
+    <string name="browser_status_pending">待定</string>
+    <string name="browser_status_failed">未通过</string>
+    <string name="browser_status_unknown">未知</string>
+
+    <!-- 自检 -->
+    <string name="browser_section_self_test">自检结果</string>
+    <string name="browser_self_test_empty">尚未运行自检</string>
+    <string name="browser_self_test_empty_hint">自检会逐项检查扩展连接、页面控制通道与协议契约，未通过的检查项会给出修复建议。</string>
+    <string name="browser_self_test_summary">结论 %1$s，耗时 %2$d 毫秒</string>
+    <string name="browser_self_test_checked_at">检测于 %1$s</string>
+    <string name="browser_self_test_never">服务端没有记录自检时间</string>
+    <string name="browser_self_test_no_checks">服务端没有返回检查项</string>
+    <string name="browser_self_test_failed">自检请求失败：%1$s</string>
+    <string name="browser_check_repair">修复建议：%1$s</string>
+    <string name="browser_check_unnamed">未命名检查项</string>
+    <string name="browser_check_drift">契约漂移，严重程度 %1$s</string>
+
+    <!-- 部署限制与轨迹 -->
+    <string name="browser_section_limits">部署限制</string>
+    <string name="browser_limits_body">Chrome 扩展要求服务端与 Chrome 运行在同一台机器上，并且服务只监听本机地址。服务端部署在远程主机、容器或云端时，扩展无法连入，诊断会持续显示为阻塞，修复也不会成功。</string>
+    <string name="browser_section_traces">语义控制轨迹</string>
+    <string name="browser_traces_body">服务端尚未实现语义控制轨迹采集，本页不展示该部分数据。</string>
+
+    <!-- 配套插件 -->
+    <string name="browser_section_bridge">配套插件</string>
+    <string name="browser_bridge_supported_hint">插件 0.5.0 起提供日志读取与修复入口，日志已在插件侧脱敏。</string>
+    <string name="browser_bridge_logs">读取日志（200 行）</string>
+    <string name="browser_bridge_repair">尝试修复</string>
+    <string name="browser_bridge_need_plugin">需要配套插件 0.5.0 及以上</string>
+    <string name="browser_bridge_install">去安装或更新</string>
+
+    <!-- 修复 -->
+    <string name="browser_repair_confirm_title">尝试修复控制链路</string>
+    <string name="browser_repair_confirm_message">修复会按插件配置在运行 Chrome 的机器上重建浏览器控制通道，期间该通道会短暂断开。确认继续？</string>
+    <string name="browser_repair_confirm_action">开始修复</string>
+    <string name="browser_repairing">正在修复…</string>
+    <string name="browser_repair_done">修复请求已提交</string>
+    <string name="browser_repair_failed">修复失败：%1$s</string>
+    <string name="browser_repair_failed_code">修复失败：%1$s（%2$s）</string>
+    <string name="browser_repair_plugin_missing">修复端点不可用：插件未安装或版本低于 0.5.0。</string>
+    <string name="browser_repair_plugin_missing_hint">服务端报告浏览器扩展缺失。请在运行 Chrome 的同一台机器上安装或更新扩展，然后重新检测。</string>
+
+    <!-- 日志 -->
+    <string name="browser_logs_title">浏览器控制日志</string>
+    <string name="browser_logs_caption">服务端只保留最近的日志行，内容已脱敏。</string>
+    <string name="browser_logs_loading">正在读取日志…</string>
+    <string name="browser_logs_empty">插件没有返回日志行</string>
+    <string name="browser_logs_not_found">暂无 NM host 日志：扩展尚未运行或尚未产生日志。</string>
+    <string name="browser_logs_plugin_missing">插件未安装或版本低于 0.5.0，无法读取日志。</string>
+    <string name="browser_logs_failed">读取日志失败：%1$s</string>
+</resources>

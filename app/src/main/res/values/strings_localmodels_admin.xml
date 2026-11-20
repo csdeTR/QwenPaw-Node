@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 页内说明 -->
+    <string name="local_models_admin_hint">配置、模型删除与服务启停已可在本页完成；其余选项仍在 Web 控制台配置。</string>
+
+    <!-- 运行时启停与更新 -->
+    <string name="local_models_admin_hint_runtime">服务以配置中的端口对外提供接口；停止服务会中断正在使用该接口的请求。</string>
+    <string name="local_models_admin_action_start">启动服务</string>
+    <string name="local_models_admin_action_stop">停止服务</string>
+    <string name="local_models_admin_action_check_update">检查更新</string>
+    <string name="local_models_admin_action_update">更新运行时</string>
+    <string name="local_models_admin_action_delete">删除</string>
+    <string name="local_models_admin_checking_update">正在检查更新</string>
+    <string name="local_models_admin_update_available">运行时存在新版本，更新后需重新启动服务。</string>
+    <string name="local_models_admin_update_latest">运行时已是最新版本。</string>
+    <string name="local_models_admin_pick_model_title">选择要加载的模型</string>
+    <string name="local_models_admin_pick_model_message">服务会占用配置中的端口，并把所选模型加载到内存；内存不足时启动会失败。</string>
+    <string name="local_models_admin_pick_model_empty">尚无已下载的模型，请先下载后再启动服务。</string>
+    <string name="local_models_admin_update_message">更新会先停止正在运行的本地模型服务，再重新下载运行时；下载期间该服务不可用。</string>
+
+    <!-- 配置 -->
+    <string name="local_models_admin_section_config">配置</string>
+    <string name="local_models_admin_config_loading">正在读取配置</string>
+    <string name="local_models_admin_config_read_failed">无法读取配置</string>
+    <string name="local_models_admin_action_reload_config">重新读取</string>
+    <string name="local_models_admin_label_context">上下文长度上限</string>
+    <string name="local_models_admin_hint_context">不得低于 %1$d；运行时按该值申请缓存，低于该值会与模型的实际上下文不匹配。</string>
+    <string name="local_models_admin_label_port">端口</string>
+    <string name="local_models_admin_hint_port">留空表示由服务端选择空闲端口；原值有端口时，留空会改回自动端口。</string>
+    <string name="local_models_admin_action_auto_port">自动端口</string>
+    <string name="local_models_admin_label_kwargs">生成参数（高级）</string>
+    <string name="local_models_admin_action_expand">展开</string>
+    <string name="local_models_admin_action_collapse">收起</string>
+    <string name="local_models_admin_hint_kwargs">以 JSON 对象填写，原样传给生成请求。留空表示保持服务端现值；服务端不支持清空该项。</string>
+    <string name="local_models_admin_action_save_config">保存配置</string>
+    <string name="local_models_admin_action_saving">正在保存</string>
+    <string name="local_models_admin_hint_config_scope">仅提交改动过的字段，其余字段保持服务端现值。</string>
+
+    <!-- 配置校验 -->
+    <string name="local_models_admin_error_context_number">上下文长度必须是整数</string>
+    <string name="local_models_admin_error_context_min">上下文长度不得低于 %1$d</string>
+    <string name="local_models_admin_error_port_number">端口必须是整数</string>
+    <string name="local_models_admin_error_port_range">端口必须在 %1$d 到 %2$d 之间</string>
+    <string name="local_models_admin_error_kwargs_json">生成参数不是合法的 JSON</string>
+    <string name="local_models_admin_error_kwargs_object">生成参数必须是 JSON 对象</string>
+
+    <!-- 删除模型 -->
+    <string name="local_models_admin_delete_title">删除本地模型</string>
+    <string name="local_models_admin_delete_message">将删除「%1$s」的模型文件。</string>
+    <string name="local_models_admin_delete_impact_files">服务端已下载的模型文件</string>
+    <string name="local_models_admin_delete_impact_runtime">正在使用该模型的运行时不受影响，但此模型无法再用于启动</string>
+
+    <!-- 服务端错误 -->
+    <string name="local_models_admin_error_bad_request">请求被拒绝：%1$s</string>
+    <string name="local_models_admin_error_bad_request_plain">请求被拒绝，请检查填写的内容</string>
+    <string name="local_models_admin_error_unauthorized">当前访问令牌无权修改本地模型设置，请重新登录或换用管理员令牌</string>
+    <string name="local_models_admin_error_conflict_config">服务端当前状态不允许修改本地模型配置，请稍后重试</string>
+    <string name="local_models_admin_error_conflict_update">服务端当前状态不允许检查运行时更新，请稍后重试</string>
+    <string name="local_models_admin_error_conflict_delete">该模型正在被运行时使用，请先停止本地模型服务</string>
+    <string name="local_models_admin_error_conflict_start">所选模型尚未下载，或已有服务在运行</string>
+    <string name="local_models_admin_error_conflict_stop">运行时当前无法停止，请稍后重试</string>
+    <string name="local_models_admin_error_unsupported_config">当前服务端不支持修改本地模型配置，请升级服务端</string>
+    <string name="local_models_admin_error_unsupported_delete">当前服务端不支持删除本地模型，或该模型已不存在</string>
+    <string name="local_models_admin_error_unsupported_server">当前服务端不支持本地模型服务的启停，请升级服务端</string>
+    <string name="local_models_admin_error_unsupported_update">当前服务端不支持运行时更新检查，请升级服务端</string>
+    <string name="local_models_admin_error_not_connected">尚未连接服务器</string>
+    <string name="local_models_admin_error_with_detail">%1$s（%2$s）</string>
+
+    <!-- 结果提示 -->
+    <string name="local_models_admin_notice_config_saved">配置已保存</string>
+    <string name="local_models_admin_notice_config_unchanged">配置没有改动</string>
+    <string name="local_models_admin_notice_deleted">已删除模型文件</string>
+    <string name="local_models_admin_notice_server_started">已启动本地模型服务</string>
+    <string name="local_models_admin_notice_server_stopped">已停止本地模型服务</string>
+    <string name="local_models_admin_notice_update_found">发现运行时更新</string>
+    <string name="local_models_admin_notice_update_latest">运行时已是最新版本</string>
+</resources>

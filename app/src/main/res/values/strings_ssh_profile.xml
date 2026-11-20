@@ -28,7 +28,15 @@
     <string name="sshprofile_password_state_saved">已保存，留空保留</string>
     <string name="sshprofile_password_state_missing">必填</string>
     <string name="sshprofile_footer_hint">保存后立即生效；凭据只加密保存在本机，不上传服务端。</string>
-    <string name="sshprofile_fingerprint_hint">首次连接仍需核对主机指纹；指纹变化会拒绝连接，不会自动接受。</string>
+    <string name="sshprofile_fingerprint_hint">主机指纹按实例分别记录；首次连接仍需核对，指纹变化会拒绝连接，不会自动接受。</string>
+    <string name="sshprofile_test_action">测试连接</string>
+    <string name="sshprofile_test_running">正在测试连接</string>
+    <string name="ssh_test_success">连接成功：%1$s</string>
+    <string name="ssh_test_note">测试只验证网络与登录，不校验主机密钥，也不写入指纹记录。</string>
+    <string name="ssh_test_error_no_credential">没有可用的登录凭据，请先填写私钥或密码</string>
+    <string name="ssh_test_error_timeout">连接超时：目标主机在 10 秒内没有响应</string>
+    <string name="ssh_test_error_refused">连接被拒绝：请检查地址、端口与目标 SSH 服务是否在运行</string>
+    <string name="ssh_test_error_unknown">连接失败：%1$s</string>
     <string name="sshprofile_behavior_title">连接行为</string>
     <string name="sshprofile_same_host_title">与当前 QwenPaw 实例同机</string>
     <string name="sshprofile_same_host_hint">连接后进入智能体工作区；目标不是这台 QwenPaw 时请关闭。</string>
@@ -43,7 +51,7 @@
     <string name="sshprofile_field_port">端口</string>
     <string name="sshprofile_field_user">用户名</string>
     <string name="sshprofile_switch_default">设为默认地址</string>
-    <string name="sshprofile_switch_vpn">VPN/代理下优先</string>
+    <string name="sshprofile_switch_vpn">VPN下优先</string>
     <string name="sshprofile_error_host_user">主机与用户名不能为空</string>
     <string name="sshprofile_error_port">端口需在 1–65535</string>
 </resources>

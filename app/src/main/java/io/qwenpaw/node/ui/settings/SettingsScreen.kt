@@ -84,6 +84,17 @@ fun SettingsScreen(
     keepScreenOn: Boolean,
     appVersion: String,
     onBack: () -> Unit,
+    /** 每日首次启动是否静默检查新版本。 */
+    autoUpdateCheck: Boolean = true,
+    onAutoUpdateCheck: (Boolean) -> Unit = {},
+    /** 手动检查更新；结论（已是最新 / 失败原因）由上层以 Toast 呈现。 */
+    onCheckUpdate: () -> Unit = {},
+    /** 进入设置时直接打开「关于」：更新对话框里的「关闭检查更新」走这条路。 */
+    openAboutOnEnter: Boolean = false,
+    onConsumeOpenAboutOnEnter: () -> Unit = {},
+    /** 在「关于」页弹一次关闭自动检查的二次确认。 */
+    pendingDisableUpdateCheck: Boolean = false,
+    onConsumePendingDisableUpdateCheck: () -> Unit = {},
     /** 打开设置页下的「工作区文件」。默认空实现，预览与测试不受影响。 */
     onOpenWorkspace: () -> Unit = {},
     onOpenTerminal: () -> Unit = {},
@@ -117,6 +128,8 @@ fun SettingsScreen(
     onOpenChannels: () -> Unit = {},
     /** 打开本地模型页（运行时状态与下载进度）。 */
     onOpenLocalModels: () -> Unit = {},
+    /** 打开浏览器控制链路诊断。 */
+    onOpenBrowserDiagnostics: () -> Unit = {},
     onSwitch: (String) -> Unit,
     onRemove: (String) -> Unit,
     /** 编辑实例并验证凭据；返回 null 表示已保存，否则是给界面显示的原因。 */
@@ -186,6 +199,9 @@ fun SettingsScreen(
     onUseMiSans: (Boolean) -> Unit,
     onCompactList: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
+    /** 是否把界面固定在竖屏。 */
+    lockPortrait: Boolean = false,
+    onLockPortrait: (Boolean) -> Unit = {},
     /** 应用界面语言。1.0.0 之前只有简体中文。 */
     appLanguage: AppLanguage = AppLanguage.ZH_CN,
     onAppLanguage: (AppLanguage) -> Unit = {},
@@ -275,6 +291,8 @@ fun SettingsScreen(
     /** 依赖配套插件的功能总开关。 */
     bridgeFeaturesEnabled: Boolean = false,
     onBridgeFeaturesEnabled: (Boolean) -> Unit = {},
+    /** 未装插件时点开关：跳扩展市场并预填安装地址。 */
+    onInstallBridge: () -> Unit = {},
     /** 退出登录：吊销服务端 token 并清本地凭据。 */
     onLogout: (String) -> Unit = {},
 ) {
@@ -286,6 +304,7 @@ fun SettingsScreen(
     var editing by remember { mutableStateOf<InstanceConfig?>(null) }
     var languagePicker by remember { mutableStateOf(false) }
     var appLanguagePicker by remember { mutableStateOf(false) }
+    var askInstallBridge by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // 每次进入设置页核对一次服务端头像。不做轮询：头像不是时效性数据，
@@ -298,6 +317,15 @@ fun SettingsScreen(
     var serverConfigChild by remember { mutableStateOf(false) }
     // 待确认移除的实例。移除会连带清掉地址与智能体选择，点一下就走太危险。
     var pendingRemove by remember { mutableStateOf<InstanceConfig?>(null) }
+
+    // 从更新对话框的「关闭检查更新」进来时直接落到关于页。
+    // 消费掉标记后再设分区：否则每次返回设置页都会被拉回关于。
+    androidx.compose.runtime.LaunchedEffect(openAboutOnEnter) {
+        if (openAboutOnEnter) {
+            section = SettingsPage.ABOUT
+            onConsumeOpenAboutOnEnter()
+        }
+    }
 
     // 每一页上次离开时的滚动位置。
     //
@@ -449,6 +477,47 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { logoutFor = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
+    // 未装配套插件时点开关：先问是否安装，确认后跳扩展市场并预填地址。
+    if (askInstallBridge) {
+        AlertDialog(
+            onDismissRequest = { askInstallBridge = false },
+            title = { Text(stringResource(R.string.bridge_guide_title)) },
+            text = { Text(stringResource(R.string.bridge_guide_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    askInstallBridge = false
+                    onInstallBridge()
+                }) { Text(stringResource(R.string.bridge_guide_install)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { askInstallBridge = false }) {
+                    Text(stringResource(R.string.bridge_guide_later))
+                }
+            },
+        )
+    }
+
+    // 「关闭检查更新」的二次确认。关闭不影响已保存的实例与偏好，只是不再自动查新版，
+    // 因此确认按钮用同一句动作文案，取消不写任何配置。
+    if (pendingDisableUpdateCheck) {
+        AlertDialog(
+            onDismissRequest = onConsumePendingDisableUpdateCheck,
+            title = { Text(stringResource(R.string.settings_update_disable_confirm_title)) },
+            text = { Text(stringResource(R.string.settings_update_disable_confirm_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onAutoUpdateCheck(false)
+                    onConsumePendingDisableUpdateCheck()
+                }) { Text(stringResource(R.string.update_action_disable_check)) }
+            },
+            dismissButton = {
+                TextButton(onClick = onConsumePendingDisableUpdateCheck) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -875,8 +944,15 @@ fun SettingsScreen(
                                 Switch(
                                     checked = bridgeFeaturesEnabled &&
                                         bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready,
-                                    onCheckedChange = onBridgeFeaturesEnabled,
-                                    enabled = bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready,
+                                    onCheckedChange = { on ->
+                                        if (bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready) {
+                                            onBridgeFeaturesEnabled(on)
+                                        } else if (bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Absent) {
+                                            askInstallBridge = true
+                                        }
+                                    },
+                                    enabled = bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Ready ||
+                                        bridgeStatus is io.qwenpaw.node.data.plugin.BridgeStatus.Absent,
                                 )
                             }
                             Divider()
@@ -885,6 +961,13 @@ fun SettingsScreen(
                                 title = stringResource(R.string.settings_nav_channels),
                                 subtitle = stringResource(R.string.settings_nav_channels_subtitle),
                                 onClick = onOpenChannels,
+                            )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.monitor,
+                                title = stringResource(R.string.settings_nav_browser_title),
+                                subtitle = stringResource(R.string.settings_nav_browser_subtitle),
+                                onClick = onOpenBrowserDiagnostics,
                             )
                             Divider()
                             NavRow(
@@ -1206,6 +1289,13 @@ fun SettingsScreen(
                             onRemoveFont()
                             onUseMiSans(false)
                         },
+                    )
+                    Divider()
+                    SwitchRow(
+                        title = stringResource(R.string.settings_lock_portrait_title),
+                        subtitle = stringResource(R.string.settings_lock_portrait_subtitle),
+                        checked = lockPortrait,
+                        onCheckedChange = onLockPortrait,
                     )
                 }
                 }
@@ -1565,6 +1655,23 @@ fun SettingsScreen(
                 }
 
                 SettingsPage.ABOUT -> {
+                // 检查更新放在最前：用户点进「关于」多半就是为了这一件事。
+                Card {
+                    LinkRow(
+                        title = stringResource(R.string.settings_update_check_title),
+                        subtitle = stringResource(R.string.settings_update_check_subtitle),
+                        action = stringResource(R.string.settings_update_check_action),
+                        onClick = onCheckUpdate,
+                    )
+                    Divider()
+                    SwitchRow(
+                        title = stringResource(R.string.settings_update_auto_title),
+                        subtitle = stringResource(R.string.settings_update_auto_subtitle),
+                        checked = autoUpdateCheck,
+                        onCheckedChange = onAutoUpdateCheck,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
                 Card {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1625,6 +1732,11 @@ fun SettingsScreen(
                             name = "openclaw/openclaw",
                             url = "https://github.com/openclaw/openclaw",
                             detail = stringResource(R.string.settings_about_credit_openclaw),
+                        )
+                        CreditLine(
+                            name = "termux/termux-app",
+                            url = "https://github.com/termux/termux-app",
+                            detail = stringResource(R.string.settings_about_credit_termux),
                         )
                         CreditLine(
                             name = "k2-fsa/sherpa-onnx",

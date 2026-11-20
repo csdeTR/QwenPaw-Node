@@ -510,6 +510,23 @@ data class BridgeInfoDto(
 }
 
 /**
+ * 配套插件的更新状态，对应 `GET /api/plugins/qwenpaw-node-bridge/update/status`。
+ *
+ * 字段全部给默认值：插件版本较旧时该端点返回 404，客户端据此当作「没有更新能力」，
+ * 而不是把缺字段当成故障。[notifyClient] 由插件决定要不要打扰手机端——
+ * 插件自己可能选择只在服务端日志里提示。
+ */
+@Serializable
+data class BridgeUpdateStatusDto(
+    @SerialName("update_available") val updateAvailable: Boolean = false,
+    @SerialName("latest_version") val latestVersion: String = "",
+    @SerialName("latest_url") val latestUrl: String = "",
+    @SerialName("notify_client") val notifyClient: Boolean = false,
+    /** 插件回的是 epoch 秒整数；用 JsonElement 兼容旧测试/字符串形式。 */
+    @SerialName("checked_at") val checkedAt: JsonElement? = null,
+)
+
+/**
  * 一条全文检索命中，对应配套插件 `GET …/qwenpaw-node-bridge/search` 的 `items[]`。
  *
  * [sessionId] 是 `history.db` 的 `session_id`，**不是** `/api/chats` 里的对话 `id`。
@@ -1773,8 +1790,11 @@ data class McpClientDto(
     val enabled: Boolean = false,
     val transport: String = "stdio",
     val url: String = "",
+    val headers: Map<String, String>? = null,
     val command: String = "",
     val args: List<String> = emptyList(),
+    val env: Map<String, String>? = null,
+    val cwd: String? = null,
     @SerialName("http_timeout") val httpTimeout: Double? = null,
     val tools: List<String>? = null,
     @SerialName("oauth_status") val oauthStatus: McpOAuthStatusDto? = null,
@@ -2141,4 +2161,177 @@ data class LocalModelProgressDto(
     val source: String? = null,
     val error: String? = null,
     @SerialName("local_path") val localPath: String? = null,
+)
+
+// ---------------- 0.7.3 管理面 ----------------
+
+/**
+ * MCP 客户端的新建与部分更新请求。
+ *
+ * 所有字段可空：`PUT /api/mcp/{key}` 是部分更新，未写的字段服务端保持原值。
+ * 序列化配置是 `explicitNulls = false`，因此默认值 null 不会进请求体。
+ * 新建时服务端要求 `name` 非空，由调用方校验。
+ */
+@Serializable
+data class McpClientWriteDto(
+    val name: String? = null,
+    val description: String? = null,
+    val enabled: Boolean? = null,
+    val transport: String? = null,
+    val url: String? = null,
+    val headers: Map<String, String>? = null,
+    val command: String? = null,
+    val args: List<String>? = null,
+    val env: Map<String, String>? = null,
+    val cwd: String? = null,
+    @SerialName("http_timeout") val httpTimeout: Double? = null,
+)
+
+/** MCP OAuth 启动请求。`url` 必填，其余可选。 */
+@Serializable
+data class McpOAuthStartDto(
+    val url: String,
+    val scope: String = "",
+    @SerialName("client_id") val clientId: String = "",
+    @SerialName("auth_endpoint") val authEndpoint: String = "",
+    @SerialName("token_endpoint") val tokenEndpoint: String = "",
+)
+
+/** MCP OAuth 启动结果。浏览器打开 [authUrl]，回 App 后用 status 端点轮询。 */
+@Serializable
+data class McpOAuthStartResultDto(
+    @SerialName("auth_url") val authUrl: String = "",
+    @SerialName("session_id") val sessionId: String = "",
+)
+
+/** 插件列表与详情元素，对应 `GET /api/plugins`。 */
+@Serializable
+data class PluginListItemDto(
+    val id: String = "",
+    val name: String = "",
+    val version: String = "",
+    val description: String = "",
+    val author: String = "",
+    val enabled: Boolean = false,
+    val loaded: Boolean = false,
+    /** 2.3.0 起才有；旧版本缺省为空串。 */
+    val status: String = "",
+    /** 元素形状随插件而变，界面只做只读展示，不按固定字段解析。 */
+    val diagnostics: List<JsonElement> = emptyList(),
+    @SerialName("plugin_type") val pluginType: String = "",
+    @SerialName("market_id") val marketId: String? = null,
+    @SerialName("installation_origin") val installationOrigin: String? = null,
+)
+
+/** 插件配置整段写入。服务端没有读取端点，提交会替换 `config.plugins.<id>`。 */
+@Serializable
+data class PluginConfigWriteDto(
+    val config: JsonObject,
+    @SerialName("confirm_legacy") val confirmLegacy: Boolean = false,
+    @SerialName("interrupt_tasks") val interruptTasks: Boolean = false,
+)
+
+/** 插件启停请求。 */
+@Serializable
+data class PluginEnabledWriteDto(
+    val enabled: Boolean,
+    @SerialName("interrupt_tasks") val interruptTasks: Boolean = false,
+)
+
+/** 免鉴权地址名单。服务端负责 IPv4/IPv6 规范化与去重。 */
+@Serializable
+data class AllowNoAuthHostsDto(
+    val hosts: List<String> = emptyList(),
+)
+
+/** 本地模型配置。`port = null` 表示自动端口。 */
+@Serializable
+data class LocalModelConfigDto(
+    @SerialName("max_context_length") val maxContextLength: Int? = null,
+    val port: Int? = null,
+    @SerialName("generate_kwargs") val generateKwargs: JsonObject? = null,
+)
+
+/** 本地模型运行时更新检查。 */
+@Serializable
+data class LocalModelServerUpdateDto(
+    @SerialName("has_update") val hasUpdate: Boolean = false,
+)
+
+/** 浏览器自检的单个检查项。`metadata` 的形状随检查项不同。 */
+@Serializable
+data class BrowserCheckDto(
+    val name: String = "",
+    val passed: Boolean = false,
+    val status: String = "",
+    val code: String = "",
+    val message: String = "",
+    @SerialName("repair_action") val repairAction: String? = null,
+    val metadata: JsonObject? = null,
+    /** 仅 contract_drift 可能出现。 */
+    val severity: String? = null,
+    val detail: String? = null,
+)
+
+/** 浏览器自检结果。 */
+@Serializable
+data class BrowserSelfTestDto(
+    val status: String = "",
+    @SerialName("checked_at") val checkedAt: String? = null,
+    @SerialName("duration_ms") val durationMs: Double = 0.0,
+    val checks: List<BrowserCheckDto> = emptyList(),
+)
+
+/** 浏览器桥生命周期。 */
+@Serializable
+data class BrowserBridgeLifecycleDto(
+    val connected: Boolean = false,
+    @SerialName("connected_since") val connectedSince: String? = null,
+)
+
+/** 浏览器控制链路状态，对应 `GET /api/browser/chrome/status`。 */
+@Serializable
+data class BrowserChromeStatusDto(
+    val connected: Boolean = false,
+    @SerialName("connected_since") val connectedSince: String? = null,
+    @SerialName("extension_version") val extensionVersion: String? = null,
+    @SerialName("bridge_lifecycle") val bridgeLifecycle: BrowserBridgeLifecycleDto? = null,
+    /** 断开记录是自由形状，界面只显示可识别的字段。 */
+    @SerialName("last_extension_disconnect") val lastExtensionDisconnect: JsonObject? = null,
+    @SerialName("contract_health") val contractHealth: BrowserCheckDto? = null,
+    @SerialName("last_self_test") val lastSelfTest: BrowserSelfTestDto? = null,
+    @SerialName("readiness_state") val readinessState: String = "",
+    val backend: JsonObject? = null,
+)
+
+/** Bridge 读取 NM host 日志的返回。 */
+@Serializable
+data class BridgeBrowserLogsDto(
+    val lines: List<String> = emptyList(),
+    val truncated: Boolean = false,
+    val path: String? = null,
+)
+
+/**
+ * 服务端错误 detail 对象的保守映射。
+ *
+ * 同一状态码下不同端点会返回不同形状：插件启停是 `{id, loaded, clean, ...}`，
+ * legacy 钩子是 `{code, legacy_hooks}`，依赖升级是 `{code, operation}`。
+ * 解析不出来时调用方回退到服务端原文，不臆造结论。
+ */
+@Serializable
+data class ApiErrorDetailDto(
+    val code: String = "",
+    val message: String = "",
+    val id: String = "",
+    val loaded: Boolean = false,
+    val clean: Boolean = true,
+    val quiescent: Boolean = true,
+    val errors: List<String> = emptyList(),
+    val unchanged: Boolean = false,
+    @SerialName("needs_restart") val needsRestart: Boolean = false,
+    @SerialName("requires_confirmation") val requiresConfirmation: Boolean = false,
+    @SerialName("legacy_hooks") val legacyHooks: List<String> = emptyList(),
+    @SerialName("confirm_legacy") val confirmLegacy: Boolean = false,
+    val operation: JsonObject? = null,
 )

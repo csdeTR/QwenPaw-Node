@@ -9,10 +9,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -44,6 +45,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -99,6 +101,11 @@ fun TerminalScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
+    val density = LocalDensity.current
+    // 键盘动画期间冻结 termlib 的行列重排，稳定后一次提交，避免逐行隐藏/显示。
+    val imeSettle = rememberImeSettleState()
+    // Scaffold 的 padding 已经包含导航栏；IME 高度也含导航栏，这里减掉避免重复留白。
+    val navigationBarsBottom = WindowInsets.navigationBars.getBottom(density)
     var confirmClose by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<TerminalTab?>(null) }
 
@@ -133,7 +140,11 @@ fun TerminalScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .imePadding(),
+                .padding(
+                    bottom = with(density) {
+                        (imeSettle.bottomPx - navigationBarsBottom).coerceAtLeast(0).toDp()
+                    },
+                ),
         ) {
             if (state.tabs.size > 1) {
                 TerminalTabs(
@@ -257,9 +268,13 @@ fun TerminalScreen(
                                 clipboard.getText()?.text?.let(emulator::pasteText)
                             },
                             onPageGesture = null,
-                            resizeSuspended = false,
+                            resizeSuspended = imeSettle.suspended,
                         )
                     }
+
+                    activeTab != null && emulator == null -> Box(
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
                     else -> EmptyTerminal(onChoose = actions.switchSource)
                 }
@@ -673,6 +688,12 @@ private fun TerminalSourceDialog(
                 Spacer(Modifier.height(12.dp))
                 Text(
                     text = stringResource(R.string.terminal_credentials_note),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.terminal_credentials_note_direct),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

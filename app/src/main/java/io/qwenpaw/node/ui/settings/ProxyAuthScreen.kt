@@ -15,8 +15,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
+import io.qwenpaw.node.ui.common.SecretVisibilityTrailingIcon
+import io.qwenpaw.node.ui.common.rememberSecretVisibility
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
 
 /** 反向代理 HTTP Basic 凭据的二级页；密码留空表示保留原值。 */
@@ -29,6 +32,7 @@ fun ProxyAuthScreen(
     var user by remember { mutableStateOf(initialUser) }
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val passwordVisibility = rememberSecretVisibility()
     val needUser = stringResource(R.string.connect_proxy_need_user)
 
     InstanceSubPage(
@@ -73,7 +77,17 @@ fun ProxyAuthScreen(
                 error = null
             },
             singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (passwordVisibility.visible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            trailingIcon = {
+                SecretVisibilityTrailingIcon(
+                    visible = passwordVisibility.visible,
+                    onToggle = passwordVisibility.toggle,
+                )
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth(),

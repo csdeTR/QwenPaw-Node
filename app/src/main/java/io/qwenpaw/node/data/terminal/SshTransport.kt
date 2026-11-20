@@ -36,11 +36,14 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * 多个地址按 [SshEndpointOrder] 排序；网络类失败尝试下一个，认证失败、主机密钥变化
  * 或用户拒绝指纹立即停止。凭据只在连接期持有，不进 UI state、不写日志。
+ *
+ * [hostKeyScope] 是 TOFU 记录的作用域（实例 id）；同一条地址在不同实例下各自确认。
  */
 class SshTransport(
     endpoints: List<SshEndpoint>,
     auth: SshAuth,
     private val hostKeys: SshHostKeys,
+    private val hostKeyScope: String,
     private val scope: CoroutineScope,
     private val workspacePath: String? = null,
     private val shell: TerminalShell = TerminalShell.DEFAULT,
@@ -72,10 +75,13 @@ class SshTransport(
 
     private var job: Job? = null
     private var writeJob: Job? = null
+    private var bootstrapSent = false
+    /** 已用 exec 通道直接启动目标 shell，不能再发切换命令造成嵌套。 */
+    private var directShell = false
 
     @Volatile private var activeEndpoint: SshEndpoint? = null
     @Volatile private var session: Session? = null
-    @Volatile private var channel: ChannelShell? = null
+    @Volatile private var channel: com.jcraft.jsch.Channel? = null
     // JSch 的 Channel.getOutputStream() 每次调用都返回新的缓冲流；必须取一次后复用，
     // 否则 write 与 flush 落在两个不同实例上，字节永远不会发出去。
     @Volatile private var channelOut: OutputStream? = null
@@ -138,6 +144,8 @@ class SshTransport(
     }
 
     private suspend fun connectOne(endpoint: SshEndpoint, credential: SshAuth) {
+        bootstrapSent = false
+        directShell = false
         val coroutine = currentCoroutineContext()
         val jsch = JSch()
         if (credential is SshAuth.Key) {
@@ -180,14 +188,32 @@ class SshTransport(
         )
 
         jschSession.connect(30_000)
-        val shellChannel = jschSession.openChannel("shell") as ChannelShell
+        val shellChannel: com.jcraft.jsch.Channel = if (shell == TerminalShell.DEFAULT) {
+            (jschSession.openChannel("shell") as ChannelShell).also {
+                it.setPtyType("xterm-256color", cols, rows, widthPx, heightPx)
+            }
+        } else {
+            val command = ShellBootstrap.execCommand(shell, platform)
+            if (command == null) {
+                (jschSession.openChannel("shell") as ChannelShell).also {
+                    it.setPtyType("xterm-256color", cols, rows, widthPx, heightPx)
+                }
+            } else {
+                directShell = true
+                openExecChannel(
+                    jschSession = jschSession,
+                    command = command,
+                    cols = cols,
+                    rows = rows,
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                )
+            }
+        }
         channel = shellChannel
-        shellChannel.setPtyType("xterm-256color", cols, rows, widthPx, heightPx)
         shellChannel.connect(15_000)
         val output = shellChannel.outputStream
         channelOut = output
-        runCatching { shellChannel.setPtySize(cols, rows, widthPx, heightPx) }
-        sendBootstrap(output)
         _state.value = TerminalConnection.Connected
         _events.emit(TerminalEvent.Title(endpoint.label))
 
@@ -197,7 +223,13 @@ class SshTransport(
             val count = reader.read(buffer)
             if (count < 0) break
             if (count > 0) {
-                _events.emit(TerminalEvent.Output(buffer.copyOf(count)))
+                val chunk = buffer.copyOf(count)
+                _events.emit(TerminalEvent.Output(chunk))
+                if (!bootstrapSent) {
+                    bootstrapSent = true
+                    // 先看远端默认 shell 的提示符，已是目标 shell 就不再嵌套启动。
+                    sendBootstrap(output, String(chunk, Charsets.UTF_8))
+                }
             }
         }
         val code = runCatching { shellChannel.exitStatus }.getOrNull()?.takeUnless { it < 0 }
@@ -207,9 +239,15 @@ class SshTransport(
         }
     }
 
-    private fun sendBootstrap(out: OutputStream) {
+    private fun sendBootstrap(out: OutputStream, firstOutput: String) {
+        val switch = if (directShell) {
+            null
+        } else {
+            ShellBootstrap.switchCommand(shell, platform)
+                ?.takeUnless { ShellBootstrap.promptMatchesShell(shell, firstOutput) }
+        }
         val commands = listOfNotNull(
-            ShellBootstrap.switchCommand(shell, platform),
+            switch,
             ShellBootstrap.workspaceCommand(workspacePath, shell, platform, sameHost),
         )
         if (commands.isEmpty()) return
@@ -229,13 +267,20 @@ class SshTransport(
     }
 
     override fun resize(rows: Int, cols: Int, widthPx: Int, heightPx: Int) {
+        if (rows < 2 || cols < 2) return
         this.rows = rows
         this.cols = cols
         this.widthPx = widthPx
         this.heightPx = heightPx
         val ch = channel ?: return
         scope.launch(Dispatchers.IO) {
-            runCatching { ch.setPtySize(cols, rows, widthPx, heightPx) }
+            runCatching {
+                if (ch is ChannelShell) {
+                    ch.setPtySize(cols, rows, widthPx, heightPx)
+                } else {
+                    invokeJsch(ch, "setPtySize", INT_4, cols, rows, widthPx, heightPx)
+                }
+            }
         }
     }
 
@@ -258,7 +303,7 @@ class SshTransport(
     /** 指纹变化后，用户清除旧记录再重新确认。 */
     fun clearHostKey() {
         val endpoint = activeEndpoint ?: endpoints.firstOrNull() ?: return
-        hostKeys.forget(endpoint.host, endpoint.port)
+        hostKeys.forget(hostKeyScope, endpoint.host, endpoint.port)
     }
 
     private fun teardown() {
@@ -276,6 +321,48 @@ class SshTransport(
             runCatching { currentSession?.disconnect() }
             runCatching { currentSocket?.close() }
         }
+    }
+
+    /**
+     * 用 exec 通道直接启动目标 shell。
+     *
+     * **不能直接引用 `ChannelExec`。** 它的父类 `ChannelSession` 在 JSch 里是包私有，
+     * Android 校验器会在 `checkcast`/方法解析时抛 `IllegalAccessError`（实测
+     * Bridge 中继与 SSH 直连在指定 shell 时 100% 崩溃）。这里只拿公开的 `Channel`，
+     * 再用反射调用 `setCommand` / `setPty` / `setPtyType`；JSch 是应用内类，
+     * 反射不受隐藏 API 限制。
+     */
+    private fun openExecChannel(
+        jschSession: Session,
+        command: String,
+        cols: Int,
+        rows: Int,
+        widthPx: Int,
+        heightPx: Int,
+    ): com.jcraft.jsch.Channel {
+        val channel = jschSession.openChannel("exec")
+        invokeJsch(channel, "setCommand", arrayOf(String::class.java), command)
+        invokeJsch(channel, "setPty", arrayOf(Boolean::class.javaPrimitiveType!!), true)
+        invokeJsch(
+            channel,
+            "setPtyType",
+            arrayOf(String::class.java, INT, INT, INT, INT),
+            "xterm-256color",
+            cols,
+            rows,
+            widthPx,
+            heightPx,
+        )
+        return channel
+    }
+
+    private fun invokeJsch(
+        target: Any,
+        name: String,
+        types: Array<Class<*>>,
+        vararg args: Any?,
+    ) {
+        target.javaClass.getMethod(name, *types).apply { isAccessible = true }.invoke(target, *args)
     }
 
     private fun retryable(e: Throwable, endpoint: SshEndpoint): Boolean {
@@ -301,7 +388,7 @@ class SshTransport(
         override fun check(host: String?, key: ByteArray?): Int {
             if (key == null) return HostKeyRepository.NOT_INCLUDED
             val fingerprint = fingerprint(key)
-            val saved = hostKeys.fingerprint(endpoint.host, endpoint.port)
+            val saved = hostKeys.fingerprint(hostKeyScope, endpoint.host, endpoint.port)
             return when {
                 saved == null -> {
                     pending = HostKeyPrompt(
@@ -355,7 +442,12 @@ class SshTransport(
                 promptQueue.compareAndSet(queue, null)
             }
             if (accepted) {
-                hostKeys.remember(pending.host, pending.port, pending.fingerprint)
+                hostKeys.remember(
+                    hostKeyScope,
+                    pending.host,
+                    pending.port,
+                    pending.fingerprint,
+                )
             }
             return accepted
         }
@@ -428,3 +520,6 @@ class SshTransport(
         return String(key, 4, length, Charsets.US_ASCII)
     }
 }
+
+private val INT = Int::class.javaPrimitiveType!!
+private val INT_4: Array<Class<*>> = arrayOf(INT, INT, INT, INT)

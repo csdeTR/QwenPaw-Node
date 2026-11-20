@@ -9,6 +9,9 @@ import io.qwenpaw.node.data.local.InstanceStore
 import io.qwenpaw.node.data.remote.ChatStreamClient
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.font.FontManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /** 简单的手工依赖装配（项目规模不需要 DI 框架）。 */
 class QwenPawApp : Application() {
@@ -48,6 +51,15 @@ class QwenPawApp : Application() {
     lateinit var localAsr: io.qwenpaw.node.voice.LocalAsr
         private set
 
+    /**
+     * 终端会话。挂在应用级而不是 Activity 的 ViewModel 上：
+     * Activity 被系统回收时，前台服务仍在，终端轮询与标签不能跟着断。
+     */
+    lateinit var terminal: io.qwenpaw.node.ui.terminal.TerminalViewModel
+        private set
+
+    private val terminalScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     override fun onCreate() {
         super.onCreate()
         // 后台任务与通知取文案走 Texts，必须在任何业务代码之前安装。
@@ -79,5 +91,23 @@ class QwenPawApp : Application() {
         fontManager = FontManager(this)
         // 进程级监听：地址选择与断网恢复都依赖它，生命周期跟应用一致。
         networkMonitor.start()
+        terminal = io.qwenpaw.node.ui.terminal.TerminalViewModel(
+            api = api,
+            connection = { null },
+            appState = { io.qwenpaw.node.ui.AppState() },
+            instanceId = { null },
+            store = io.qwenpaw.node.data.terminal.TerminalStore(this),
+            hostKeys = io.qwenpaw.node.data.terminal.SshHostKeys(this),
+            profileStore = io.qwenpaw.node.data.terminal.SshProfileStore(this),
+            vpnActive = {
+                networkMonitor.current.value.kind ==
+                    io.qwenpaw.node.data.NetworkMonitor.Snapshot.KIND_VPN
+            },
+            scope = terminalScope,
+            onSessionCountChanged = { count ->
+                io.qwenpaw.node.notify.TerminalSessionNotifier.update(this, count)
+            },
+        )
+        io.qwenpaw.node.notify.TerminalSessionNotifier.stopAll = { terminal.shutdown() }
     }
 }

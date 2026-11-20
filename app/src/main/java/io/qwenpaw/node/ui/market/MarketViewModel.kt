@@ -6,6 +6,7 @@ import io.qwenpaw.node.data.model.MarketCategoryDto
 import io.qwenpaw.node.data.model.MarketProviderDto
 import io.qwenpaw.node.data.model.MarketResultDto
 import io.qwenpaw.node.data.model.PluginCatalogDto
+import io.qwenpaw.node.data.model.PluginListItemDto
 import io.qwenpaw.node.data.model.PluginMarketEntryDto
 import io.qwenpaw.node.data.remote.Connection
 import kotlinx.coroutines.Job
@@ -16,6 +17,8 @@ import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.i18n.Texts
+import io.qwenpaw.node.ui.plugins.PluginConflict
+import io.qwenpaw.node.ui.plugins.pluginConflictOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -89,6 +92,18 @@ data class MarketUiState(
     val resolvingSource: String? = null,
     val pluginInstall: PluginInstallUi? = null,
     val hubInstall: HubInstallUi? = null,
+    /** 已安装插件（`GET /api/plugins`），插件页的「已安装」段。 */
+    val installedPlugins: List<PluginListItemDto> = emptyList(),
+    val installedLoading: Boolean = false,
+    val installedLoaded: Boolean = false,
+    val installedError: String? = null,
+    /**
+     * 安装被依赖升级拦住时的操作 id。
+     *
+     * 与「同名冲突」分开放：依赖冲突的出口是依赖升级页，不是覆盖安装。
+     */
+    val dependencyOperationId: String? = null,
+    val dependencyMessage: String? = null,
     /** 从其他页面跳来时预填并自动打开的插件 URL；消费后清空。 */
     val prefillInstallUrl: String? = null,
     val notice: String? = null,
@@ -118,30 +133,31 @@ class MarketViewModel(
     private var pendingPluginUrl: String? = null
     private var hubPollJob: Job? = null
 
-    /** 三个基础请求一起拉：来源、分类、插件目录。任一段失败只影响自己。 */
+    /**
+     * 三块基础数据各自独立加载：来源与分类、插件目录、已安装插件。
+     *
+     * 任一段失败只影响自己那一段：用户打开这一页可能只想看已装的插件，
+     * 目录 CDN 拉不到不该让整页显示成错误。
+     */
     fun ensureLoaded() {
+        loadMarketMeta()
+        loadCatalog()
+        loadInstalled()
+    }
+
+    private fun loadMarketMeta() {
         val current = _state.value
-        if (current.metaLoaded || current.metaLoading) {
-            if (current.catalogLoaded || current.catalogLoading) return
-        }
+        if (current.metaLoaded || current.metaLoading) return
         val conn = connection() ?: run {
             _state.update {
                 it.copy(
                     metaLoaded = true,
-                    catalogLoaded = true,
                     metaError = Texts.get(R.string.market_error_not_connected),
                 )
             }
             return
         }
-        _state.update {
-            it.copy(
-                metaLoading = !it.metaLoaded,
-                catalogLoading = !it.catalogLoaded,
-                metaError = if (it.metaLoaded) it.metaError else null,
-                catalogError = if (it.catalogLoaded) it.catalogError else null,
-            )
-        }
+        _state.update { it.copy(metaLoading = true, metaError = null) }
         scope.launch {
             val providersJob = async {
                 runCatching { withContext(Dispatchers.IO) { api.marketProviders(conn) } }
@@ -149,30 +165,84 @@ class MarketViewModel(
             val categoriesJob = async {
                 runCatching { withContext(Dispatchers.IO) { api.marketCategories(conn) } }
             }
-            val catalogJob = async {
-                runCatching { withContext(Dispatchers.IO) { api.pluginCatalog(conn) } }
-            }
             val providers = providersJob.await()
             val categories = categoriesJob.await()
-            val catalog = catalogJob.await()
             _state.update { state ->
-                val metaFailure = providers.exceptionOrNull() ?: categories.exceptionOrNull()
-                val catalogValue = catalog.getOrNull()
+                val failure = providers.exceptionOrNull() ?: categories.exceptionOrNull()
                 state.copy(
                     providers = providers.getOrNull() ?: state.providers,
                     categories = categories.getOrNull() ?: state.categories,
                     metaLoading = false,
                     metaLoaded = true,
-                    metaError = metaFailure?.let { ErrorText.of(it) },
-                    catalog = catalogValue ?: state.catalog,
+                    metaError = failure?.let { ErrorText.of(it) },
+                )
+            }
+        }
+    }
+
+    private fun loadCatalog() {
+        val current = _state.value
+        if (current.catalogLoaded || current.catalogLoading) return
+        val conn = connection() ?: run {
+            _state.update {
+                it.copy(catalogLoaded = true, catalogError = Texts.get(R.string.market_error_not_connected))
+            }
+            return
+        }
+        _state.update { it.copy(catalogLoading = true, catalogError = null) }
+        scope.launch {
+            val catalog = runCatching { withContext(Dispatchers.IO) { api.pluginCatalog(conn) } }
+            _state.update { state ->
+                val value = catalog.getOrNull()
+                state.copy(
+                    catalog = value ?: state.catalog,
                     catalogLoading = false,
                     catalogLoaded = true,
                     // 目录「成功了但 error 非空」表示 CDN 拉不到，服务端仍回 200。
                     catalogError = catalog.exceptionOrNull()?.let { ErrorText.of(it) }
-                        ?: catalogValue?.error?.takeIf { it.isNotBlank() },
+                        ?: value?.error?.takeIf { it.isNotBlank() },
                 )
             }
         }
+    }
+
+    /** 已安装插件列表。安装、卸载后由 [refreshInstalled] 重拉。 */
+    private fun loadInstalled() {
+        val current = _state.value
+        if (current.installedLoaded || current.installedLoading) return
+        val conn = connection() ?: run {
+            _state.update {
+                it.copy(
+                    installedLoaded = true,
+                    installedError = Texts.get(R.string.market_error_not_connected),
+                )
+            }
+            return
+        }
+        _state.update { it.copy(installedLoading = true, installedError = null) }
+        scope.launch {
+            val plugins = runCatching { withContext(Dispatchers.IO) { api.plugins(conn) } }
+            _state.update { state ->
+                state.copy(
+                    installedPlugins = plugins.getOrNull() ?: state.installedPlugins,
+                    installedLoading = false,
+                    installedLoaded = true,
+                    installedError = plugins.exceptionOrNull()?.let { ErrorText.of(it) },
+                )
+            }
+        }
+    }
+
+    /** 安装结果出来后重拉已安装列表；目录里的 installed 标记同时也失效了。 */
+    fun refreshInstalled() {
+        _state.update { it.copy(installedLoaded = false) }
+        loadInstalled()
+    }
+
+    /** 已安装段与目录的手动刷新。管理页里改过状态后回到市场用这个。 */
+    fun refreshPlugins() {
+        _state.update { it.copy(installedLoaded = false, catalogLoaded = false) }
+        ensureLoaded()
     }
 
     fun setTab(tab: MarketTab) {
@@ -393,14 +463,13 @@ class MarketViewModel(
                             )
                         },
                         catalogLoaded = false,
+                        installedLoaded = false,
                     )
                 }
                 ensureLoaded()
             } catch (e: Exception) {
                 if (e is ApiException && e.code == 409) {
-                    _state.update {
-                        it.copy(pluginInstall = it.pluginInstall?.copy(conflictSource = label))
-                    }
+                    handleInstallConflict(e, label)
                 } else {
                     val message = ErrorText.of(e)
                     _state.update {
@@ -414,6 +483,48 @@ class MarketViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * 安装 409 的两种含义。
+     *
+     * 先判依赖升级：`DEPENDENCY_UPGRADE_REQUIRED` 带 `operation` 时，用户该去依赖升级页，
+     * 显示成「覆盖安装」会把依赖冲突错误地引导成覆盖，装完仍然起不来。
+     * 只有不是依赖冲突时才落到原有的同名冲突确认。
+     */
+    private fun handleInstallConflict(error: ApiException, label: String) {
+        val detail = api.apiErrorDetailOf(error)
+        val conflict = pluginConflictOf(detail)
+        if (conflict is PluginConflict.DependencyUpgrade) {
+            val message = detail?.message?.takeIf { it.isNotBlank() }
+                ?: Texts.get(R.string.plugin_admin_market_dependency_message)
+            if (conflict.operationId.isBlank()) {
+                // 没有操作 id 就没有可打开的升级页，直接说明要去 Web 控制台。
+                _state.update {
+                    it.copy(
+                        pluginInstall = null,
+                        notice = Texts.get(R.string.plugin_admin_market_error_dependency_no_operation),
+                    )
+                }
+            } else {
+                _state.update {
+                    it.copy(
+                        pluginInstall = null,
+                        dependencyOperationId = conflict.operationId,
+                        dependencyMessage = message,
+                    )
+                }
+            }
+            return
+        }
+        _state.update {
+            it.copy(pluginInstall = it.pluginInstall?.copy(conflictSource = label))
+        }
+    }
+
+    /** 界面消费掉依赖操作 id 后调用，避免返回市场时重复弹同一条。 */
+    fun dismissDependencyConflict() {
+        _state.update { it.copy(dependencyOperationId = null, dependencyMessage = null) }
     }
 
     fun dismissPluginInstall() {

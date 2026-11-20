@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
+import io.qwenpaw.node.ui.theme.QwenIcons
 
 /** 安全页的四个开关。确认弹窗只关心「被关闭的是哪一组」。 */
 private enum class GuardKind { TOOL, FILE, SANDBOX }
@@ -36,7 +37,7 @@ private enum class GuardKind { TOOL, FILE, SANDBOX }
 /**
  * 安全页：工具防护、文件防护、沙箱、技能扫描器。
  *
- * 只做开关与只读规则浏览；规则编辑仍留 Web 控制台。关闭任一组防护都要二次确认，
+ * 只做开关与只读规则浏览，另给免鉴权地址页留一个入口；规则编辑仍留 Web 控制台。关闭任一组防护都要二次确认，
  * 因为这些开关关闭后不会立刻有可见变化，用户很容易忘记自己关过什么。
  */
 @Composable
@@ -49,6 +50,8 @@ fun SecurityScreen(
     onSandbox: (Boolean) -> Unit,
     onSkillScanner: (String) -> Unit,
     onDismissNotice: () -> Unit,
+    /** 进入免鉴权地址页；未接线时行仍然显示，点按没有反应。 */
+    onOpenAllowNoAuthHosts: () -> Unit = {},
 ) {
     var pendingDisable by remember { mutableStateOf<GuardKind?>(null) }
     var showRules by remember { mutableStateOf(false) }
@@ -285,6 +288,16 @@ fun SecurityScreen(
                         }
                     }
                 }
+            }
+
+            SectionHeader(stringResource(R.string.allow_hosts_section_auth))
+            Card {
+                NavRow(
+                    icon = QwenIcons.shieldCheck,
+                    title = stringResource(R.string.allow_hosts_title),
+                    subtitle = stringResource(R.string.allow_hosts_entry_subtitle),
+                    onClick = onOpenAllowNoAuthHosts,
+                )
             }
 
             if (state.notice != null || state.error != null) {
