@@ -685,6 +685,18 @@ data class ProviderDto(
     @SerialName("discovered_models") val discoveredModels: List<ModelSlotDto> = emptyList(),
     /** 该供应商当前的默认对话模型，用于在菜单里标出「默认」。 */
     @SerialName("chat_model") val chatModel: String? = null,
+    @SerialName("base_url") val baseUrl: String? = null,
+    @SerialName("is_custom") val isCustom: Boolean = false,
+    @SerialName("supports_oauth") val supportsOauth: Boolean = false,
+    @SerialName("oauth_connected") val oauthConnected: Boolean = false,
+    @SerialName("auth_mode") val authMode: String? = null,
+    @SerialName("freeze_url") val freezeUrl: Boolean = false,
+    @SerialName("hidden_model_ids") val hiddenModelIds: List<String> = emptyList(),
+    @SerialName("custom_headers") val customHeaders: Map<String, String>? = null,
+    @SerialName("generate_kwargs") val generateKwargs: JsonObject? = null,
+    @SerialName("require_api_key") val requireApiKey: Boolean? = null,
+    @SerialName("support_model_discovery") val supportModelDiscovery: Boolean = false,
+    @SerialName("support_connection_check") val supportConnectionCheck: Boolean = false,
 ) {
     /** 三个数组按 id 去重合并，顺序为 配置 → 额外 → 探测。 */
     val allModels: List<ModelSlotDto>
@@ -1748,9 +1760,84 @@ data class PoolSkillDetailDto(
     @SerialName("auto_sync") val autoSync: Boolean = false,
     @SerialName("auto_update") val autoUpdate: Boolean = false,
     val content: String = "",
+    val config: JsonObject = JsonObject(emptyMap()),
     @SerialName("installed_from") val installedFrom: String = "",
     val requirements: SkillRequirementsDto = SkillRequirementsDto(),
     @SerialName("builtin_language") val builtinLanguage: String = "",
+    @SerialName("available_builtin_languages") val availableBuiltinLanguages: List<String> = emptyList(),
+    @SerialName("auto_sync_targets") val autoSyncTargets: List<String>? = null,
+)
+
+/** 技能池与工作区的枚举：`GET /api/skills/workspaces`。 */
+@Serializable
+data class SkillWorkspaceDto(
+    @SerialName("agent_id") val agentId: String = "",
+    @SerialName("agent_name") val agentName: String = "",
+    @SerialName("skill_names") val skillNames: List<String> = emptyList(),
+)
+
+/** 内置技能的某一种语言。 */
+@Serializable
+data class BuiltinLanguageDto(
+    val language: String = "",
+    val description: String = "",
+    @SerialName("version_text") val versionText: String = "",
+    @SerialName("source_name") val sourceName: String = "",
+    val status: String = "",
+)
+
+/** 内置来源清单的一条：`GET /api/skills/pool/builtin-sources` 与通知里的条目同形。 */
+@Serializable
+data class BuiltinSourceDto(
+    val name: String = "",
+    val description: String = "",
+    @SerialName("version_text") val versionText: String = "",
+    @SerialName("current_version_text") val currentVersionText: String = "",
+    @SerialName("current_source") val currentSource: String = "",
+    @SerialName("current_language") val currentLanguage: String = "",
+    @SerialName("available_languages") val availableLanguages: List<String> = emptyList(),
+    val languages: Map<String, BuiltinLanguageDto> = emptyMap(),
+    val status: String = "",
+)
+
+@Serializable
+data class BuiltinRemovedDto(
+    val name: String = "",
+    val description: String = "",
+    @SerialName("current_version_text") val currentVersionText: String = "",
+    @SerialName("current_source") val currentSource: String = "",
+)
+
+/** `GET /api/skills/pool/builtin-notice`。 */
+@Serializable
+data class BuiltinNoticeDto(
+    val fingerprint: String = "",
+    @SerialName("has_updates") val hasUpdates: Boolean = false,
+    @SerialName("total_changes") val totalChanges: Int = 0,
+    @SerialName("actionable_skill_names") val actionableSkillNames: List<String> = emptyList(),
+    val added: List<BuiltinSourceDto> = emptyList(),
+    val missing: List<BuiltinSourceDto> = emptyList(),
+    val updated: List<BuiltinSourceDto> = emptyList(),
+    val removed: List<BuiltinRemovedDto> = emptyList(),
+)
+
+/** 异步分发任务的句柄。没有进度字段，只有四态。 */
+@Serializable
+data class PoolDownloadJobDto(
+    @SerialName("job_id") val jobId: String = "",
+    val state: String = "running",
+    val error: String? = null,
+    val result: JsonObject? = null,
+)
+
+/** 导入内置时 409 里的冲突项。 */
+@Serializable
+data class BuiltinImportConflictDto(
+    @SerialName("skill_name") val skillName: String = "",
+    val status: String = "",
+    val language: String = "",
+    @SerialName("current_version_text") val currentVersionText: String = "",
+    @SerialName("source_version_text") val sourceVersionText: String = "",
 )
 
 /** `PUT /api/skills/save` 的结果。`mode` 取 `edit` 或 `noop`（内容未变）。 */
@@ -2091,6 +2178,22 @@ data class MailAclActionEntryDto(
 @Serializable
 data class MailAclPendingCountDto(
     val count: Int = 0,
+)
+
+/** `GET /api/mail-access-control/agents`。 */
+@Serializable
+data class MailAclAgentsDto(
+    val agents: List<String> = emptyList(),
+)
+
+/** 邮件处理暂停；`pause_id` 是恢复时唯一的凭据。 */
+@Serializable
+data class MailAclPauseDto(
+    @SerialName("pause_id") val pauseId: String = "",
+    val reason: String = "",
+    val count: Int = 0,
+    val notified: Boolean = false,
+    @SerialName("agent_id") val agentId: String = "",
 )
 
 /**

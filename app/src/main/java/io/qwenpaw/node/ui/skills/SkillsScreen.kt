@@ -49,8 +49,10 @@ import androidx.compose.ui.unit.sp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.chat.MarkdownText
+import io.qwenpaw.node.ui.common.ConsoleHint
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.common.PlainTextEditor
+import io.qwenpaw.node.ui.common.WebEntryDialog
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.theme.qwenSwitchColors
 import kotlinx.coroutines.launch
@@ -87,6 +89,9 @@ fun SkillsScreen(
     onToggleBroadcastTarget: (String) -> Unit = {},
     onRunBroadcast: (Boolean) -> Unit = {},
     onDismissBroadcast: () -> Unit = {},
+    onOpenConfig: (String) -> Unit = {},
+    onOpenPoolAdmin: () -> Unit = {},
+    onOpenConsole: (() -> Unit)? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -107,6 +112,8 @@ fun SkillsScreen(
             }
         }
     }
+
+    WebEntryDialog(pageKey = "skills", onOpenConsole = onOpenConsole)
 
     // 详情被清空（例如删除后）要退回列表，否则会停在一个空白的详情页。
     // 用派生判定而不是在组合期写状态：组合期写 `page` 会额外触发一轮重组，
@@ -185,6 +192,7 @@ fun SkillsScreen(
                 showDetail -> SkillDetail(
                     state = state,
                     onBeginEdit = onBeginEdit,
+                    onOpenConfig = onOpenConfig,
                     onDelete = { name -> deleting = name },
                 )
 
@@ -194,6 +202,7 @@ fun SkillsScreen(
                     state = state,
                     onImport = { importDialog = true },
                     onBroadcast = onOpenBroadcast,
+                    onPoolAdmin = onOpenPoolAdmin,
                     onRefresh = onRefresh,
                     onOpenSkill = { name ->
                         onOpenSkill(name)
@@ -204,6 +213,7 @@ fun SkillsScreen(
                         page = SkillPage.DETAIL
                     },
                     onSetEnabled = onSetEnabled,
+                    onOpenConsole = onOpenConsole,
                 )
             }
         }
@@ -419,10 +429,12 @@ private fun SkillList(
     state: SkillsUiState,
     onImport: () -> Unit,
     onBroadcast: (String) -> Unit,
+    onPoolAdmin: () -> Unit,
     onRefresh: () -> Unit,
     onOpenSkill: (String) -> Unit,
     onOpenPoolSkill: (String) -> Unit,
     onSetEnabled: (String, Boolean) -> Unit,
+    onOpenConsole: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -431,9 +443,13 @@ private fun SkillList(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        ConsoleHint(onOpenConsole = onOpenConsole)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onImport) {
                 Text(stringResource(R.string.skills_action_import_zip))
+            }
+            TextButton(onClick = onPoolAdmin) {
+                Text(stringResource(R.string.skills_action_pool_admin))
             }
         }
         SectionTitle(
@@ -535,6 +551,7 @@ private fun SkillList(
 private fun SkillDetail(
     state: SkillsUiState,
     onBeginEdit: () -> Unit,
+    onOpenConfig: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
     val detail = state.detail
@@ -662,6 +679,12 @@ private fun SkillDetail(
                     primary = true,
                     modifier = Modifier.weight(1f),
                     onClick = onBeginEdit,
+                )
+                ActionButton(
+                    text = stringResource(R.string.skill_config_title),
+                    primary = false,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onOpenConfig(name) },
                 )
                 ActionButton(
                     text = stringResource(R.string.action_delete),

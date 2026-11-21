@@ -1,6 +1,7 @@
 package io.qwenpaw.node.ui.acl
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,6 +36,9 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.AclChannelDto
 import io.qwenpaw.node.data.model.AclPendingDto
+import io.qwenpaw.node.data.model.MailAclPauseDto
+import io.qwenpaw.node.ui.common.ConsoleHint
+import io.qwenpaw.node.ui.common.WebEntryDialog
 import androidx.compose.ui.res.stringResource
 import java.time.Instant
 import java.time.ZoneId
@@ -56,22 +60,49 @@ fun AclScreen(
     onToggleSelected: (String) -> Unit,
     onAct: (String, String) -> Unit,
     onRemark: (String, String) -> Unit,
-    onAddMember: (group: String, userId: String, remark: String, blacklist: Boolean) -> Unit,
     onRemoveMember: (group: String, userId: String, blacklist: Boolean) -> Unit,
     onDismissNotice: () -> Unit,
     currentAgentId: String,
+    onOpenConsole: (() -> Unit)? = null,
+    onAddMemberFull: (
+        group: String,
+        userId: String,
+        remark: String,
+        username: String,
+        blacklist: Boolean,
+        broadcast: Boolean,
+    ) -> Unit = { _, _, _, _, _, _ -> },
+    onEditEntry: (
+        group: String,
+        userId: String,
+        remark: String,
+        username: String,
+        blacklist: Boolean,
+        moveToOther: Boolean,
+        displayName: String,
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
+    onResumeProcessing: (agentId: String, pauseId: String) -> Unit = { _, _ -> },
+    onMailFilter: (String?) -> Unit = {},
 ) {
+    WebEntryDialog(pageKey = "acl", onOpenConsole = onOpenConsole)
     var remarkFor by remember { mutableStateOf<AclPendingDto?>(null) }
     var remarkText by remember { mutableStateOf("") }
     var addDialog by remember { mutableStateOf(false) }
     var addGroup by remember { mutableStateOf("") }
     var addUser by remember { mutableStateOf("") }
     var addRemark by remember { mutableStateOf("") }
+    var addUsername by remember { mutableStateOf("") }
     var addBlacklist by remember { mutableStateOf(false) }
+    var addBroadcast by remember { mutableStateOf(false) }
     var removeTarget by remember { mutableStateOf<Triple<String, String, Boolean>?>(null) }
     var mailApprove by remember { mutableStateOf(false) }
+    var editTarget by remember { mutableStateOf<ListEntryTarget?>(null) }
+    var editRemarkText by remember { mutableStateOf("") }
+    var editUsernameText by remember { mutableStateOf("") }
+    var editMove by remember { mutableStateOf(false) }
+    var pauseTarget by remember { mutableStateOf<MailAclPauseDto?>(null) }
 
-    val groups = if (state.tab == AclTab.CHAT) state.chatChannels else state.mailChannels
+    val groups = if (state.tab == AclTab.CHAT) state.chatChannels else state.visibleMailChannels
 
     Scaffold { padding ->
         Column(
@@ -96,6 +127,7 @@ fun AclScreen(
                 )
                 TextButton(onClick = onRefresh) { Text(stringResource(R.string.action_refresh)) }
             }
+            ConsoleHint(onOpenConsole = onOpenConsole)
             Row(
                 modifier = Modifier.padding(horizontal = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -113,6 +145,44 @@ fun AclScreen(
                     },
                     selected = state.tab == AclTab.MAIL,
                 ) { onSetTab(AclTab.MAIL) }
+            }
+
+            if (state.tab == AclTab.MAIL) {
+                if (state.mailAgents.isEmpty()) {
+                    EmptyHint(stringResource(R.string.acl_mail_no_agents))
+                } else {
+                    Text(
+                        text = stringResource(R.string.acl_mail_agents_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 20.dp, top = 12.dp),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 14.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        FilterChip(
+                            text = stringResource(R.string.acl_filter_all),
+                            selected = state.mailFilter == null,
+                        ) { onMailFilter(null) }
+                        state.mailAgents.forEach { agentId ->
+                            FilterChip(
+                                text = agentId,
+                                selected = state.mailFilter == agentId,
+                            ) { onMailFilter(agentId) }
+                        }
+                    }
+                }
+                state.mailPauses.forEach { pause ->
+                    PauseCard(
+                        pause = pause,
+                        busy = state.busy,
+                        onResume = { pauseTarget = pause },
+                    )
+                }
             }
 
             if (state.loading) {
@@ -199,16 +269,34 @@ fun AclScreen(
                         onRemove = { userId, blacklist ->
                             removeTarget = Triple(group, userId, blacklist)
                         },
+                        onEdit = { userId, info, blacklist ->
+                            editTarget = ListEntryTarget(
+                                group = group,
+                                userId = userId,
+                                displayName = info.displayName,
+                                blacklist = blacklist,
+                                mail = state.tab == AclTab.MAIL,
+                            )
+                            editRemarkText = info.remark
+                            editUsernameText = info.username
+                            editMove = false
+                        },
                     )
                 }
             }
             // 名单为空时也必须能添加第一条，因此按钮不依赖 groups 是否为空。
             TextButton(
                 onClick = {
-                    addGroup = if (state.tab == AclTab.MAIL) currentAgentId else ""
+                    addGroup = if (state.tab == AclTab.MAIL) {
+                        state.mailFilter ?: currentAgentId
+                    } else {
+                        ""
+                    }
                     addUser = ""
                     addRemark = ""
+                    addUsername = ""
                     addBlacklist = false
+                    addBroadcast = false
                     addDialog = true
                 },
                 modifier = Modifier.padding(horizontal = 10.dp),
@@ -271,12 +359,45 @@ fun AclScreen(
                         label = { Text(stringResource(R.string.acl_add_remark)) },
                         singleLine = true,
                     )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = addUsername,
+                        onValueChange = { addUsername = it },
+                        label = {
+                            Text(
+                                stringResource(
+                                    if (state.tab == AclTab.MAIL) {
+                                        R.string.acl_add_display_name
+                                    } else {
+                                        R.string.acl_add_username
+                                    },
+                                ),
+                            )
+                        },
+                        singleLine = true,
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = addBlacklist,
                             onCheckedChange = { addBlacklist = it },
                         )
                         Text(stringResource(R.string.acl_add_blacklist))
+                    }
+                    if (state.tab == AclTab.MAIL) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = addBroadcast,
+                                onCheckedChange = { addBroadcast = it },
+                            )
+                            Text(stringResource(R.string.acl_add_broadcast))
+                        }
+                        if (addBroadcast) {
+                            Text(
+                                text = stringResource(R.string.acl_add_broadcast_warning),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             },
@@ -285,7 +406,14 @@ fun AclScreen(
                     enabled = addGroup.isNotBlank() && addUser.isNotBlank(),
                     onClick = {
                         addDialog = false
-                        onAddMember(addGroup.trim(), addUser.trim(), addRemark.trim(), addBlacklist)
+                        onAddMemberFull(
+                            addGroup.trim(),
+                            addUser.trim(),
+                            addRemark.trim(),
+                            addUsername.trim(),
+                            addBlacklist,
+                            addBroadcast,
+                        )
                     },
                 ) { Text(stringResource(R.string.action_save)) }
             },
@@ -338,6 +466,90 @@ fun AclScreen(
             },
         )
     }
+
+    editTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { editTarget = null },
+            title = { Text(stringResource(R.string.acl_edit_title)) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = editRemarkText,
+                        onValueChange = { editRemarkText = it },
+                        label = { Text(stringResource(R.string.acl_edit_remark)) },
+                        singleLine = false,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (!target.mail) {
+                        OutlinedTextField(
+                            value = editUsernameText,
+                            onValueChange = { editUsernameText = it },
+                            label = { Text(stringResource(R.string.acl_edit_username)) },
+                            singleLine = true,
+                        )
+                    } else if (target.displayName.isNotBlank()) {
+                        Text(
+                            text = stringResource(
+                                R.string.acl_edit_display_name,
+                            ) + "：" + target.displayName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = editMove,
+                            onCheckedChange = { editMove = it },
+                        )
+                        Text(stringResource(R.string.acl_edit_move))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val current = target
+                        editTarget = null
+                        onEditEntry(
+                            current.group,
+                            current.userId,
+                            editRemarkText.trim(),
+                            editUsernameText.trim(),
+                            current.blacklist,
+                            editMove,
+                            current.displayName,
+                        )
+                    },
+                ) { Text(stringResource(R.string.action_save)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { editTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
+    pauseTarget?.let { pause ->
+        AlertDialog(
+            onDismissRequest = { pauseTarget = null },
+            title = { Text(stringResource(R.string.acl_pause_confirm_title)) },
+            text = { Text(stringResource(R.string.acl_pause_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pauseTarget = null
+                        onResumeProcessing(pause.agentId, pause.pauseId)
+                    },
+                ) { Text(stringResource(R.string.acl_pause_resume)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pauseTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -385,6 +597,7 @@ private fun GroupCard(
     acl: AclChannelDto,
     onAdd: (blacklist: Boolean) -> Unit,
     onRemove: (userId: String, blacklist: Boolean) -> Unit,
+    onEdit: (userId: String, info: io.qwenpaw.node.data.model.AclUserInfoDto, blacklist: Boolean) -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -394,6 +607,7 @@ private fun GroupCard(
                 entries = acl.whitelist,
                 onAdd = { onAdd(false) },
                 onRemove = { onRemove(it, false) },
+                onEdit = { id, info -> onEdit(id, info, false) },
             )
             Divider(modifier = Modifier.padding(vertical = 6.dp))
             ListBlock(
@@ -401,6 +615,7 @@ private fun GroupCard(
                 entries = acl.blacklist,
                 onAdd = { onAdd(true) },
                 onRemove = { onRemove(it, true) },
+                onEdit = { id, info -> onEdit(id, info, true) },
             )
         }
     }
@@ -412,6 +627,7 @@ private fun ListBlock(
     entries: Map<String, io.qwenpaw.node.data.model.AclUserInfoDto>,
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
+    onEdit: (String, io.qwenpaw.node.data.model.AclUserInfoDto) -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -439,12 +655,59 @@ private fun ListBlock(
                     )
                 }
             }
+            TextButton(onClick = { onEdit(id, info) }) {
+                Text(stringResource(R.string.acl_action_edit))
+            }
             TextButton(onClick = { onRemove(id) }) {
                 Text(stringResource(R.string.acl_action_remove))
             }
         }
     }
 }
+
+@Composable
+private fun PauseCard(
+    pause: MailAclPauseDto,
+    busy: Boolean,
+    onResume: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = stringResource(R.string.acl_pause_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = stringResource(
+                    R.string.acl_pause_message,
+                    pause.reason.ifBlank {
+                        stringResource(R.string.acl_pause_unknown_reason)
+                    },
+                    pause.count,
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onResume, enabled = !busy) {
+                    Text(stringResource(R.string.acl_pause_resume))
+                }
+            }
+        }
+    }
+}
+
+private data class ListEntryTarget(
+    val group: String,
+    val userId: String,
+    val displayName: String,
+    val blacklist: Boolean,
+    val mail: Boolean,
+)
 
 @Composable
 private fun SectionTitle(text: String) {

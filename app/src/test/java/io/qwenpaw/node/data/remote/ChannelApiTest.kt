@@ -174,4 +174,50 @@ class ChannelApiTest {
         assertEquals("/api/config/channels/wechat/qrcode", request.requestUrl?.encodedPath)
         assertEquals("p 1", request.requestUrl?.queryParameter("token"))
     }
+
+    @Test
+    fun `conflict check posts proposed config and parses agents`() {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"conflict":true,"agents":[{"agent_id":"qa","agent_name":"QA Agent"}]}""",
+            ),
+        )
+        val body = JsonObject(mapOf("enabled" to JsonPrimitive(true)))
+
+        val result = api.channelConflictCheck(conn(), "telegram", body)
+
+        assertTrue(result.conflict)
+        assertEquals("qa", result.agents.single().agentId)
+        assertEquals("QA Agent", result.agents.single().agentName)
+        val request = server.takeRequest()
+        assertEquals(
+            "/api/config/channels/telegram/conflict-check",
+            request.requestUrl?.encodedPath,
+        )
+        assertTrue(request.body.readUtf8().contains("\"enabled\":true"))
+    }
+
+    @Test
+    fun `health and restart parse status`() {
+        server.enqueue(MockResponse().setBody("""{"channel":"telegram","status":"healthy","detail":"ok"}"""))
+        server.enqueue(MockResponse().setBody("""{"channel":"telegram","status":"restarted","detail":""}"""))
+
+        val health = api.channelHealth(conn(), "telegram")
+        assertEquals("healthy", health.status)
+        assertEquals("ok", health.detail)
+
+        val restart = api.restartChannel(conn(), "telegram")
+        assertEquals("restarted", restart.status)
+
+        assertEquals(
+            "/api/config/channels/telegram/health",
+            server.takeRequest().requestUrl?.encodedPath,
+        )
+        val restartRequest = server.takeRequest()
+        assertEquals("POST", restartRequest.method)
+        assertEquals(
+            "/api/config/channels/telegram/restart",
+            restartRequest.requestUrl?.encodedPath,
+        )
+    }
 }

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="channel_config_title">频道配置</string>
+    <string name="channel_config_save">保存</string>
+    <string name="channel_config_restart">重启频道</string>
+    <string name="channel_config_restart_confirm_title">重启频道</string>
+    <string name="channel_config_restart_confirm_message">服务端会停止并重新启动该频道；正在处理的连接会中断。确定重启吗？</string>
+    <string name="channel_config_health_title">运行状态</string>
+    <string name="channel_config_health_refresh">重新检测</string>
+    <string name="channel_config_health_unknown">尚未运行</string>
+    <string name="channel_config_health_healthy">正常</string>
+    <string name="channel_config_health_unhealthy">异常</string>
+    <string name="channel_config_health_disabled">已停用</string>
+    <string name="channel_config_health_detail">详情：%1$s</string>
+    <string name="channel_config_conflict_title">检测到 Bot 冲突</string>
+    <string name="channel_config_conflict_message">以下智能体正在运行同一 Bot 身份。继续保存可能导致两个智能体争用同一个 Bot。</string>
+    <string name="channel_config_conflict_confirm">仍然保存</string>
+    <string name="channel_config_secret_set">已设置</string>
+    <string name="channel_config_secret_replace">替换</string>
+    <string name="channel_config_secret_clear">清除</string>
+    <string name="channel_config_secret_clear_hint">保存后将清空该密钥</string>
+    <string name="channel_config_secret_cancel">取消</string>
+    <string name="channel_config_secret_new">新值</string>
+    <string name="channel_config_secret_keep_hint">留空表示保留原值</string>
+    <string name="channel_config_error_number">请输入数字</string>
+    <string name="channel_config_error_json">不是合法的 JSON 对象</string>
+    <string name="channel_config_availability">状态：%1$s</string>
+    <string name="channel_config_diagnostic">诊断：%1$s</string>
+    <string name="channel_config_fields_missing">服务端没有返回可编辑字段。</string>
+    <string name="channel_config_install_hint">该频道插件未安装或不可用，无法配置。请先在频道列表安装或修复插件。</string>
+    <string name="channel_config_load_failed">无法读取频道配置</string>
+    <string name="channel_config_saved">已保存并重新加载配置</string>
+    <string name="channel_config_restarted">频道已重启</string>
+    <string name="channel_config_busy">正在提交</string>
+    <string name="channel_config_enabled_hint">启用状态由下方「Enabled」字段控制；保存后服务端会重新加载该频道。</string>
+</resources>

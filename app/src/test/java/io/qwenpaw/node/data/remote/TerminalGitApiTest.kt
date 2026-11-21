@@ -145,4 +145,48 @@ class TerminalGitApiTest {
         assertEquals("/api/workspace/git/commit-diff", commitRequest.requestUrl!!.encodedPath)
         assertEquals("abc1234", commitRequest.requestUrl!!.queryParameter("commit_hash"))
     }
+
+    @Test
+    fun `git checkout sends branch and create flag`() {
+        server.enqueue(MockResponse().setBody("""{"branch":"feature/x"}"""))
+
+        val result = api.gitCheckout(conn, "feature/x", create = true)
+
+        assertEquals("feature/x", result.branch)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/workspace/git/checkout", request.requestUrl!!.encodedPath)
+        assertEquals("""{"branch":"feature/x","create":true}""", request.body.readUtf8())
+    }
+
+    @Test
+    fun `git discard sends paths and parses discarded list`() {
+        server.enqueue(MockResponse().setBody("""{"discarded":["a.txt","b.txt"]}"""))
+
+        val result = api.gitDiscard(conn, listOf("a.txt", "b.txt"))
+
+        assertEquals(listOf("a.txt", "b.txt"), result.discarded)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/workspace/git/discard", request.requestUrl!!.encodedPath)
+        assertEquals("""{"paths":["a.txt","b.txt"]}""", request.body.readUtf8())
+    }
+
+    @Test
+    fun `git revert sends commit hash and parses output`() {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"reverted":"abc1234","output":"[master 1234567] Revert"}""",
+            ),
+        )
+
+        val result = api.gitRevert(conn, "abc1234")
+
+        assertEquals("abc1234", result.reverted)
+        assertEquals("[master 1234567] Revert", result.output)
+        val request = server.takeRequest()
+        assertEquals("POST", request.method)
+        assertEquals("/api/workspace/git/revert", request.requestUrl!!.encodedPath)
+        assertEquals("""{"commit_hash":"abc1234"}""", request.body.readUtf8())
+    }
 }

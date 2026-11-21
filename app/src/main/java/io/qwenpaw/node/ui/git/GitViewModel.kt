@@ -5,6 +5,9 @@ import io.qwenpaw.node.data.model.GitBranchDto
 import io.qwenpaw.node.data.model.GitChangeDto
 import io.qwenpaw.node.data.model.GitLogEntryDto
 import io.qwenpaw.node.data.model.GitStatusDto
+import io.qwenpaw.node.data.model.GitCheckoutResultDto
+import io.qwenpaw.node.data.model.GitDiscardResultDto
+import io.qwenpaw.node.data.model.GitRevertResultDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -28,6 +31,23 @@ data class GitDiffView(
     val truncated: Boolean,
 )
 
+/** 待确认的换分支动作。 */
+data class GitBranchAction(
+    val branch: String,
+    val create: Boolean,
+)
+
+/** 待确认的丢弃动作。[paths] 始终是展开后的具体文件，避免确认后工作区又变化。 */
+data class GitDiscardAction(val paths: List<String>)
+
+/** 待确认的反向提交。 */
+data class GitRevertAction(
+    val entry: GitLogEntryDto,
+    val preview: GitDiffView? = null,
+    val previewLoading: Boolean = false,
+    val previewFailed: Boolean = false,
+)
+
 data class GitUiState(
     val loading: Boolean = true,
     val acknowledged: Boolean = false,
@@ -40,6 +60,9 @@ data class GitUiState(
     val busy: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
+    val pendingBranch: GitBranchAction? = null,
+    val pendingDiscard: GitDiscardAction? = null,
+    val pendingRevert: GitRevertAction? = null,
 ) {
     val staged: List<GitChangeDto>
         get() = status?.changes.orEmpty().filter { it.staged }
@@ -217,6 +240,186 @@ class GitViewModel(
                 load()
             } catch (e: Exception) {
                 _state.update { it.copy(busy = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    /** 选择分支后先进入确认，不直接切。 */
+    fun requestCheckout(branch: String, create: Boolean) {
+        val target = branch.trim()
+        if (target.isEmpty() || _state.value.busy) return
+        if (!create && target == _state.value.status?.branch) return
+        _state.update {
+            it.copy(
+                pendingBranch = GitBranchAction(target, create),
+                error = null,
+                notice = null,
+            )
+        }
+    }
+
+    fun dismissCheckout() {
+        _state.update { it.copy(pendingBranch = null) }
+    }
+
+    fun confirmCheckout() {
+        val action = _state.value.pendingBranch ?: return
+        val conn = connection() ?: return
+        if (_state.value.busy) return
+        scope.launch {
+            _state.update { it.copy(busy = true, error = null, notice = null) }
+            runCatching {
+                withContext(Dispatchers.IO) { api.gitCheckout(conn, action.branch, action.create) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        pendingBranch = null,
+                        notice = Texts.get(
+                            if (action.create) {
+                                R.string.git_notice_branch_created
+                            } else {
+                                R.string.git_notice_branch_switched
+                            },
+                            action.branch,
+                        ),
+                    )
+                }
+                load()
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        pendingBranch = null,
+                        error = ErrorText.of(e),
+                    )
+                }
+            }
+        }
+    }
+
+    /** 传入空列表表示「全部未暂存改动」；界面仍会把展开后的路径交给确认框。 */
+    fun requestDiscard(paths: List<String>) {
+        if (_state.value.busy) return
+        val targets = paths.ifEmpty {
+            _state.value.status?.changes.orEmpty()
+                .filter { !it.staged }
+                .map { it.path }
+                .distinct()
+        }
+        if (targets.isEmpty()) {
+            _state.update { it.copy(notice = Texts.get(R.string.git_notice_nothing_to_discard)) }
+            return
+        }
+        _state.update {
+            it.copy(
+                pendingDiscard = GitDiscardAction(targets),
+                error = null,
+                notice = null,
+            )
+        }
+    }
+
+    fun dismissDiscard() {
+        _state.update { it.copy(pendingDiscard = null) }
+    }
+
+    fun confirmDiscard() {
+        val action = _state.value.pendingDiscard ?: return
+        val conn = connection() ?: return
+        if (_state.value.busy) return
+        scope.launch {
+            _state.update { it.copy(busy = true, error = null, notice = null) }
+            runCatching {
+                withContext(Dispatchers.IO) { api.gitDiscard(conn, action.paths) }
+            }.onSuccess { result ->
+                val count = result.discarded.size.takeIf { it > 0 } ?: action.paths.size
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        pendingDiscard = null,
+                        notice = Texts.get(R.string.git_notice_discarded, count),
+                    )
+                }
+                load()
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        pendingDiscard = null,
+                        error = ErrorText.of(e),
+                    )
+                }
+            }
+        }
+    }
+
+    /** 反向提交前先取该提交的 diff，确认框里能看到实际影响。 */
+    fun requestRevert(entry: GitLogEntryDto) {
+        val conn = connection() ?: return
+        if (_state.value.busy) return
+        _state.update {
+            it.copy(
+                pendingRevert = GitRevertAction(entry = entry, previewLoading = true),
+                error = null,
+                notice = null,
+            )
+        }
+        scope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { api.gitCommitDiff(conn, entry.hash) }
+            }
+            _state.update { current ->
+                val pending = current.pendingRevert
+                if (pending?.entry?.hash != entry.hash) {
+                    current
+                } else {
+                    current.copy(
+                        pendingRevert = pending.copy(
+                            preview = result.getOrNull()?.let {
+                                diffView(entry.hash.take(8), it.diff)
+                            },
+                            previewLoading = false,
+                            previewFailed = result.isFailure,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissRevert() {
+        _state.update { it.copy(pendingRevert = null) }
+    }
+
+    fun confirmRevert() {
+        val action = _state.value.pendingRevert ?: return
+        val conn = connection() ?: return
+        if (_state.value.busy) return
+        scope.launch {
+            _state.update { it.copy(busy = true, error = null, notice = null) }
+            runCatching {
+                withContext(Dispatchers.IO) { api.gitRevert(conn, action.entry.hash) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        pendingRevert = null,
+                        notice = Texts.get(
+                            R.string.git_notice_reverted,
+                            action.entry.hash.take(8),
+                        ),
+                    )
+                }
+                load()
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        busy = false,
+                        pendingRevert = null,
+                        error = ErrorText.of(e),
+                    )
+                }
             }
         }
     }

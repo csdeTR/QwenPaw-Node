@@ -2,6 +2,7 @@
 <resources>
     <!-- 频道页 -->
     <string name="channels_title">频道</string>
+    <string name="channels_action_config">配置</string>
     <string name="channels_status_enabled">已启用</string>
     <string name="channels_status_disabled">未启用</string>
     <string name="channels_no_qr">不支持扫码授权</string>
@@ -37,6 +38,65 @@
     <string name="channels_name_yuanbao">元宝</string>
     <string name="channels_name_imessage">iMessage</string>
     <string name="channels_name_onebot">OneBot</string>
+    <string name="channels_name_azure_bot">Azure Bot</string>
+
+    <!-- 频道配置字段 -->
+    <string name="channels_field_enabled">启用</string>
+    <string name="channels_field_bot_prefix">机器人前缀</string>
+    <string name="channels_field_dm_policy">私聊策略</string>
+    <string name="channels_field_group_policy">群聊策略</string>
+    <string name="channels_field_dm_disabled">关闭私聊</string>
+    <string name="channels_field_group_disabled">关闭群聊</string>
+    <string name="channels_field_show_tool_calls">显示工具调用信息</string>
+    <string name="channels_field_show_tool_results">显示工具结果信息</string>
+    <string name="channels_field_tool_call_max_length">工具调用最大显示长度</string>
+    <string name="channels_field_tool_result_max_length">工具结果最大显示长度</string>
+    <string name="channels_field_show_thinking">显示思考过程</string>
+    <string name="channels_field_streaming_enabled">流式输出</string>
+    <string name="channels_field_require_mention">需要 @ 提及</string>
+    <string name="channels_field_access_control_dm">私聊访问控制</string>
+    <string name="channels_field_access_control_group">群聊访问控制</string>
+    <string name="channels_field_no_text_debounce">无文本消息防抖</string>
+    <string name="channels_field_show_typing">显示正在输入</string>
+    <string name="channels_field_http_proxy">HTTP 代理</string>
+    <string name="channels_field_http_proxy_auth">HTTP 代理认证</string>
+    <string name="channels_field_allow_from">允许来源</string>
+    <string name="channels_field_deny_message">拒绝提示</string>
+    <string name="channels_field_base_url">服务地址</string>
+    <string name="channels_field_bot_token">机器人令牌</string>
+    <string name="channels_field_app_id">应用 ID</string>
+    <string name="channels_field_app_secret">应用密钥</string>
+    <string name="channels_field_encrypt_key">加密密钥</string>
+    <string name="channels_field_verification_token">校验令牌</string>
+    <string name="channels_field_port">端口</string>
+    <string name="channels_field_host">主机</string>
+    <string name="channels_field_username">用户名</string>
+    <string name="channels_field_password">密码</string>
+    <string name="channels_field_token">令牌</string>
+    <string name="channels_field_aes_key">消息加密密钥</string>
+    <string name="channels_field_bot_token_file">机器人令牌文件</string>
+    <string name="channels_field_media_dir">媒体目录</string>
+    <string name="channels_field_message_merge_enabled">合并连续消息</string>
+    <string name="channels_field_message_merge_delay_ms">合并延迟（毫秒）</string>
+
+    <!-- 频道插件修复动作 -->
+    <string name="channels_action_enable">启用频道插件</string>
+    <string name="channels_action_repair">修复频道插件</string>
+    <string name="channels_status_validation_pending">已安装，待校验</string>
+    <string name="channels_status_missing_code">频道插件未安装</string>
+    <string name="channels_status_disabled_plugin">已安装但已停用</string>
+    <string name="channels_option_open">开放</string>
+    <string name="channels_option_allowlist">白名单</string>
+    <string name="channels_option_closed">关闭</string>
+    <string name="channels_enable_started">已请求启用频道插件，稍后会自动刷新</string>
+    <string name="channels_repair_started">已请求修复频道插件，稍后会自动刷新</string>
+    <string name="channels_availability_running">运行中</string>
+    <string name="channels_availability_validated">已校验</string>
+    <string name="channels_availability_validation_pending">待校验</string>
+    <string name="channels_availability_disabled">已停用</string>
+    <string name="channels_availability_missing_code">插件未安装</string>
+    <string name="channels_availability_missing_runtime">缺少运行时</string>
+    <string name="channels_availability_failed">异常</string>
 
     <!-- 二维码面板 -->
     <string name="channel_qr_title">扫码授权</string>

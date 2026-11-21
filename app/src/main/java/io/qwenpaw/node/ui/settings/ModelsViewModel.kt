@@ -5,7 +5,6 @@ import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ActiveModelDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
 import io.qwenpaw.node.data.model.ProviderDto
-import io.qwenpaw.node.data.model.TestConnectionDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -43,8 +42,6 @@ data class ModelsUiState(
     val agentDefault: ActiveModelDto? = null,
     val effective: ActiveModelDto? = null,
     /** 正在测连通性的供应商 id。 */
-    val testing: Set<String> = emptySet(),
-    val testResults: Map<String, TestConnectionDto> = emptyMap(),
     val loading: Boolean = false,
     val loaded: Boolean = false,
     val saving: Boolean = false,
@@ -187,27 +184,6 @@ class ModelsViewModel(
                         R.string.models_scope_switched,
                         Texts.get(scope.titleRes),
                     ),
-                )
-            }
-        }
-    }
-
-    /** 测一个供应商的连通性。失败不是 HTTP 错误，看返回里的 `success`。 */
-    fun test(providerId: String) {
-        val conn = connection() ?: return
-        if (providerId in _state.value.testing) return
-        _state.update { it.copy(testing = it.testing + providerId) }
-        uiScope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) { api.testProvider(conn, providerId) }
-            }
-            _state.update { current ->
-                current.copy(
-                    testing = current.testing - providerId,
-                    testResults = result.getOrNull()
-                        ?.let { current.testResults + (providerId to it) }
-                        ?: current.testResults,
-                    error = result.exceptionOrNull()?.let { ErrorText.of(it) } ?: current.error,
                 )
             }
         }

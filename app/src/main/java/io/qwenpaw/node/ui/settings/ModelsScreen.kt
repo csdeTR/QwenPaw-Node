@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.chat.OptionDialog
 import io.qwenpaw.node.ui.chat.OptionItem
+import io.qwenpaw.node.ui.common.ConsoleHint
+import io.qwenpaw.node.ui.common.WebEntryDialog
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
@@ -52,12 +54,15 @@ fun ModelsScreen(
     state: ModelsUiState,
     onBack: () -> Unit,
     onPickDefault: (ModelScope, String, String) -> Unit,
-    onTest: (String) -> Unit,
     onRetry: () -> Unit,
     onDismissNotice: () -> Unit,
+    onOpenConsole: (() -> Unit)? = null,
+    onOpenProvider: (String) -> Unit = {},
 ) {
     // 正在选模型的对话框属于哪一行；null 表示没有打开。
     var picking by remember { mutableStateOf<ModelScope?>(null) }
+
+    WebEntryDialog(pageKey = "models", onOpenConsole = onOpenConsole)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -143,6 +148,7 @@ fun ModelsScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
+                    ConsoleHint(onOpenConsole = onOpenConsole)
                     ModelsCard {
                         Text(
                             text = stringResource(R.string.models_section_default),
@@ -226,20 +232,7 @@ fun ModelsScreen(
                                         )
                                     },
                                     dimmed = !provider.enabled,
-                                    testing = provider.id in state.testing,
-                                    // 测试失败也是 200，因此按 success 分支；失败时给服务端原文。
-                                    result = state.testResults[provider.id]?.let { result ->
-                                        when {
-                                            result.success -> stringResource(
-                                                R.string.models_result_available,
-                                            )
-                                            result.message.isBlank() -> stringResource(
-                                                R.string.models_result_unavailable,
-                                            )
-                                            else -> result.message
-                                        }
-                                    },
-                                    onTest = { onTest(provider.id) },
+                                    onOpen = { onOpenProvider(provider.id) },
                                 )
                             }
                         }
@@ -332,54 +325,39 @@ private fun ProviderRow(
     name: String,
     detail: String,
     dimmed: Boolean,
-    testing: Boolean,
-    result: String?,
-    onTest: () -> Unit,
+    onOpen: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (dimmed) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = detail,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = when {
-                    testing -> stringResource(R.string.models_testing)
-                    else -> stringResource(R.string.models_action_test)
-                },
-                style = MaterialTheme.typography.labelLarge,
-                color = if (testing) {
+                text = name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (dimmed) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
-                    MaterialTheme.colorScheme.primary
+                    MaterialTheme.colorScheme.onSurface
                 },
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = !testing, onClick = onTest)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-        }
-        if (result != null) {
             Text(
-                text = result,
+                text = detail,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
             )
         }
+        Icon(
+            imageVector = QwenIcons.chevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }

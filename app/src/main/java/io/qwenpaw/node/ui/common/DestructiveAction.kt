@@ -45,6 +45,8 @@ fun DestructiveActionDialog(
     confirmLabel: String = stringResource(R.string.action_delete),
     undoable: Boolean = false,
     confirmDanger: Boolean = true,
+    /** 影响列表之后的自定义内容，例如反向提交的 diff 预览。 */
+    details: (@Composable () -> Unit)? = null,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -106,6 +108,10 @@ fun DestructiveActionDialog(
                             )
                         }
                     }
+                }
+                if (details != null) {
+                    Spacer(Modifier.height(10.dp))
+                    details()
                 }
             }
         },

@@ -75,6 +75,21 @@ data class GitBranchDto(
     val remote: Boolean = false,
 )
 
+/** `POST /api/workspace/git/checkout`。 */
+@Serializable
+data class GitCheckoutResultDto(val branch: String = "")
+
+/** `POST /api/workspace/git/discard`。 */
+@Serializable
+data class GitDiscardResultDto(val discarded: List<String> = emptyList())
+
+/** `POST /api/workspace/git/revert`。 */
+@Serializable
+data class GitRevertResultDto(
+    val reverted: String = "",
+    val output: String = "",
+)
+
 /** 插件 `/ssh/config` 的脱敏结果；私钥与口令不在这里。 */
 @Serializable
 data class SshConfigDto(

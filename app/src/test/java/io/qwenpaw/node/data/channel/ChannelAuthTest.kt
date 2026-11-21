@@ -166,30 +166,58 @@ class ChannelAuthTest {
     }
 
     @Test
-    fun `install repair yields a source`() {
+    fun `install repair carries action source and plugin id`() {
         val schema = JsonObject(
             mapOf(
                 "availability" to JsonPrimitive("missing_code"),
                 "repair" to kotlinx.serialization.json.buildJsonObject {
                     put("action", "install")
+                    put("plugin_id", "dingtalk")
                     put("source", "bundled:dingtalk")
                 },
             ),
         )
-        assertEquals("bundled:dingtalk", channelCapability("dingtalk", schema).installSource)
+        val capability = channelCapability("dingtalk", schema)
+        assertEquals("install", capability.repairAction)
+        assertEquals("dingtalk", capability.pluginId)
+        assertEquals("bundled:dingtalk", capability.repairSource)
     }
 
     @Test
-    fun `non install repair yields no source`() {
-        val schema = JsonObject(
+    fun `enable and repair keep their action`() {
+        val enable = JsonObject(
             mapOf(
                 "repair" to kotlinx.serialization.json.buildJsonObject {
-                    put("action", "restart")
-                    put("source", "bundled:dingtalk")
+                    put("action", "enable")
+                    put("plugin_id", "telegram")
                 },
             ),
         )
-        assertNull(channelCapability("dingtalk", schema).installSource)
+        assertEquals("enable", channelCapability("telegram", enable).repairAction)
+        assertEquals("telegram", channelCapability("telegram", enable).pluginId)
+
+        val repair = JsonObject(
+            mapOf(
+                "repair" to kotlinx.serialization.json.buildJsonObject {
+                    put("action", "repair")
+                    put("plugin_id", "feishu")
+                },
+            ),
+        )
+        assertEquals("repair", channelCapability("feishu", repair).repairAction)
+    }
+
+    @Test
+    fun `localized text prefers chinese object labels`() {
+        val label = JsonObject(
+            mapOf(
+                "en" to JsonPrimitive("Bot Prefix"),
+                "zh-CN" to JsonPrimitive("机器人前缀"),
+            ),
+        )
+        assertEquals("机器人前缀", localizedText(label))
+        assertEquals("Bot Prefix", localizedText(JsonPrimitive("Bot Prefix")))
+        assertNull(localizedText(null))
     }
 
     @Test

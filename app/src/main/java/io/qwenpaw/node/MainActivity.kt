@@ -189,7 +189,7 @@ private const val BRIDGE_ZIP_URL =
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, SKILLS, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, LOCAL_MODELS, TERMINAL, GIT, BROWSER_DIAGNOSTICS, PLUGIN_MANAGE, DEPENDENCY_UPGRADE, ALLOW_NO_AUTH }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, MODEL_ADMIN, SKILLS, SKILL_CONFIG, SKILL_POOL, SKILL_POOL_EDIT, SKILL_POOL_BUILTIN, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, CHANNEL_CONFIG, LOCAL_MODELS, TERMINAL, GIT, BROWSER_DIAGNOSTICS, PLUGIN_MANAGE, DEPENDENCY_UPGRADE, ALLOW_NO_AUTH }
 
 @Composable
 private fun QwenPawNav(
@@ -204,6 +204,9 @@ private fun QwenPawNav(
     var screen by remember { mutableStateOf(Screen.CHAT) }
     // 终端可从设置、对话列表或通知进入；返回时回到进入前那一页。
     var terminalOrigin by remember { mutableStateOf(Screen.SETTINGS) }
+    var channelConfigKey by remember { mutableStateOf<String?>(null) }
+    var skillConfigKey by remember { mutableStateOf<String?>(null) }
+    var modelAdminKey by remember { mutableStateOf<String?>(null) }
     // 用量统计有两个入口（对话列表顶栏、设置页）。记住是谁打开的，
     // 返回时才回到进入前那一层——固定回列表会让「设置 → 用量 → 返回」跳过设置页。
     var usageOrigin by remember { mutableStateOf(Screen.LIST) }
@@ -1275,15 +1278,27 @@ private fun QwenPawNav(
                     onBack = { screen = Screen.SETTINGS },
                     onEnsureLoaded = { viewModel.channels.refresh() },
                     onRefresh = { viewModel.channels.refresh(force = true) },
-                    onOpenChannel = viewModel.channels::openChannel,
-                    onInstallChannel = viewModel.channels::installChannel,
-                    onRetry = viewModel.channels::retry,
-                    onCloseAuth = viewModel.channels::closeAuth,
-                    onStopPolling = viewModel.channels::stopPolling,
-                    onConsumeEnabled = viewModel.channels::consumeEnabledChannel,
+                    onRepairChannel = viewModel.channels::repairChannel,
+                    onOpenConfig = { key, name ->
+                        channelConfigKey = key
+                        viewModel.channelConfig.open(key, name)
+                        screen = Screen.CHANNEL_CONFIG
+                    },
                     onConsumeNotice = viewModel.channels::consumeNotice,
+                    onOpenConsole = openConsole,
                 )
             }
+
+            Screen.CHANNEL_CONFIG -> ChannelConfigPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.channelConfig.clear()
+                    channelConfigKey = null
+                    screen = Screen.CHANNEL
+                },
+                retryKey = { channelConfigKey },
+                openConsole = openConsole,
+            )
 
             Screen.LOCAL_MODELS -> {
                 io.qwenpaw.node.ui.localmodels.LocalModelsScreen(
@@ -1445,11 +1460,35 @@ private fun QwenPawNav(
                     onPickDefault = { scope, providerId, model ->
                         viewModel.models.setDefault(scope, providerId, model)
                     },
-                    onTest = viewModel.models::test,
                     onRetry = viewModel.models::refresh,
                     onDismissNotice = viewModel.models::dismissNotice,
+                    onOpenConsole = openConsole,
+                    onOpenProvider = { providerId ->
+                        modelAdminKey = providerId
+                        viewModel.modelsAdmin.open(providerId)
+                        screen = Screen.MODEL_ADMIN
+                    },
                 )
             }
+
+            Screen.MODEL_ADMIN -> ModelsAdminPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.modelsAdmin.clear()
+                    modelAdminKey = null
+                    screen = Screen.MODELS
+                },
+                retryKey = { modelAdminKey },
+                openConsole = openConsole,
+                onOpenUrl = { url ->
+                    context.startActivity(
+                        android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(url),
+                        ),
+                    )
+                },
+            )
 
             Screen.SKILLS -> {
                 // 每次进入重拉：技能可能在 Web 控制台改过，缓存的列表会停在旧状态。
@@ -1476,8 +1515,64 @@ private fun QwenPawNav(
                     onToggleBroadcastTarget = viewModel.skills::toggleBroadcastTarget,
                     onRunBroadcast = viewModel.skills::runBroadcast,
                     onDismissBroadcast = viewModel.skills::dismissBroadcast,
+                    onOpenConfig = { name ->
+                        skillConfigKey = name
+                        viewModel.skillConfig.open(name)
+                        screen = Screen.SKILL_CONFIG
+                    },
+                    onOpenPoolAdmin = { screen = Screen.SKILL_POOL },
+                    onOpenConsole = openConsole,
                 )
             }
+
+            Screen.SKILL_CONFIG -> SkillConfigPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.skillConfig.clear()
+                    skillConfigKey = null
+                    screen = Screen.SKILLS
+                },
+                retryKey = { skillConfigKey },
+                openConsole = openConsole,
+            )
+
+            Screen.SKILL_POOL -> SkillPoolPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.skillPool.clear()
+                    screen = Screen.SKILLS
+                },
+                onOpenEditor = { name ->
+                    if (name == null) {
+                        viewModel.skillPool.beginCreate()
+                    } else {
+                        viewModel.skillPool.beginEdit(name)
+                    }
+                    screen = Screen.SKILL_POOL_EDIT
+                },
+                onOpenBuiltin = {
+                    viewModel.skillPool.openBuiltinLibrary()
+                    screen = Screen.SKILL_POOL_BUILTIN
+                },
+                openConsole = openConsole,
+            )
+
+            Screen.SKILL_POOL_EDIT -> SkillPoolEditorPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.skillPool.cancelEditor()
+                    screen = Screen.SKILL_POOL
+                },
+                onSaved = { screen = Screen.SKILL_POOL },
+            )
+
+            Screen.SKILL_POOL_BUILTIN -> SkillPoolBuiltinPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.skillPool.closeBuiltinLibrary()
+                    screen = Screen.SKILL_POOL
+                },
+            )
 
             Screen.MCP -> McpAdminPage(
                 viewModel = viewModel,
@@ -1533,17 +1628,15 @@ private fun QwenPawNav(
                     onToggleSelected = viewModel.acl::toggleSelected,
                     onAct = viewModel.acl::act,
                     onRemark = viewModel.acl::remark,
-                    onAddMember = { group, userId, remark, blacklist ->
-                        if (blacklist) {
-                            viewModel.acl.addBlacklist(group, userId, remark)
-                        } else {
-                            viewModel.acl.addMember(group, userId, remark)
-                        }
-                    },
                     onRemoveMember = viewModel.acl::removeMember,
+                    onAddMemberFull = viewModel.acl::addMemberFull,
+                    onEditEntry = viewModel.acl::editEntry,
+                    onResumeProcessing = viewModel.acl::resumeProcessing,
+                    onMailFilter = viewModel.acl::setMailFilter,
                     onDismissNotice = viewModel.acl::dismissNotice,
                     currentAgentId = instances.firstOrNull { it.id == activeId }?.agentId
                         ?: "default",
+                    onOpenConsole = openConsole,
                 )
             }
 
@@ -1614,8 +1707,18 @@ private fun QwenPawNav(
                         dismissDiff = viewModel.git::dismissDiff,
                         dismissError = viewModel.git::dismissError,
                         dismissNotice = viewModel.git::dismissNotice,
+                        requestCheckout = viewModel.git::requestCheckout,
+                        confirmCheckout = viewModel.git::confirmCheckout,
+                        dismissCheckout = viewModel.git::dismissCheckout,
+                        requestDiscard = viewModel.git::requestDiscard,
+                        confirmDiscard = viewModel.git::confirmDiscard,
+                        dismissDiscard = viewModel.git::dismissDiscard,
+                        requestRevert = viewModel.git::requestRevert,
+                        confirmRevert = viewModel.git::confirmRevert,
+                        dismissRevert = viewModel.git::dismissRevert,
                     ),
                     onBack = { screen = Screen.WORKSPACE },
+                    onOpenConsole = openConsole,
                 )
             }
 
@@ -2380,6 +2483,207 @@ private fun McpAdminPage(
     )
 }
 
+@Composable
+private fun ChannelConfigPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    retryKey: () -> String?,
+    openConsole: (() -> Unit)?,
+) {
+    val configState by viewModel.channelConfig.state.collectAsState()
+    io.qwenpaw.node.ui.channels.ChannelConfigScreen(
+        state = configState,
+        onBack = onBack,
+        onRetry = { retryKey()?.let { viewModel.channelConfig.open(it) } },
+        onSave = viewModel.channelConfig::save,
+        onSetText = viewModel.channelConfig::setText,
+        onSetSwitch = viewModel.channelConfig::setSwitch,
+        onBeginSecret = viewModel.channelConfig::beginSecretReplace,
+        onSetSecret = viewModel.channelConfig::setSecretReplacement,
+        onClearSecret = viewModel.channelConfig::clearSecret,
+        onCancelSecret = viewModel.channelConfig::cancelSecretChange,
+        onRefreshHealth = viewModel.channelConfig::refreshHealth,
+        onRequestRestart = viewModel.channelConfig::requestRestart,
+        onConfirmRestart = viewModel.channelConfig::confirmRestart,
+        onDismissRestart = viewModel.channelConfig::dismissRestart,
+        onConfirmConflict = viewModel.channelConfig::confirmConflictSave,
+        onDismissConflict = viewModel.channelConfig::dismissConflict,
+        onDismissNotice = viewModel.channelConfig::dismissNotice,
+        onOpenQr = viewModel.channelConfig::openQr,
+        onRetryQr = viewModel.channelConfig::retryQr,
+        onCloseQr = viewModel.channelConfig::closeQr,
+        onRepair = viewModel.channelConfig::repairChannel,
+        onOpenConsole = openConsole,
+    )
+}
+
+@Composable
+private fun SkillConfigPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    retryKey: () -> String?,
+    openConsole: (() -> Unit)?,
+) {
+    val configState by viewModel.skillConfig.state.collectAsState()
+    io.qwenpaw.node.ui.skills.SkillConfigScreen(
+        state = configState,
+        onBack = onBack,
+        onRetry = { retryKey()?.let { viewModel.skillConfig.open(it) } },
+        onSave = viewModel.skillConfig::save,
+        onConfigChange = viewModel.skillConfig::setConfigText,
+        onSetPreload = viewModel.skillConfig::setPreload,
+        onTagDraftChange = viewModel.skillConfig::setTagDraft,
+        onAddTags = viewModel.skillConfig::commitTags,
+        onRemoveTag = viewModel.skillConfig::removeTag,
+        onToggleChannel = viewModel.skillConfig::toggleChannel,
+        onRequestClear = viewModel.skillConfig::requestClear,
+        onConfirmClear = viewModel.skillConfig::confirmClear,
+        onDismissClear = viewModel.skillConfig::dismissClear,
+        onFilePathChange = viewModel.skillConfig::setFilePath,
+        onReadFile = viewModel.skillConfig::readFile,
+        onDismissNotice = viewModel.skillConfig::dismissNotice,
+        onOpenConsole = openConsole,
+    )
+}
+
+@Composable
+private fun SkillPoolPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    onOpenEditor: (String?) -> Unit,
+    onOpenBuiltin: () -> Unit,
+    openConsole: (() -> Unit)?,
+) {
+    val poolState by viewModel.skillPool.state.collectAsState()
+    io.qwenpaw.node.ui.skills.SkillPoolScreen(
+        state = poolState,
+        onBack = onBack,
+        onRefresh = viewModel.skillPool::refresh,
+        onBeginCreate = { onOpenEditor(null) },
+        onBeginEdit = { name -> onOpenEditor(name) },
+        onDelete = viewModel.skillPool::deletePoolSkill,
+        onToggleBatch = viewModel.skillPool::toggleBatchMode,
+        onToggleBatchSelected = viewModel.skillPool::toggleBatchSelected,
+        onBatchDelete = viewModel.skillPool::batchDelete,
+        onOpenBuiltin = onOpenBuiltin,
+        onOpenDistribute = viewModel.skillPool::openDistribute,
+        onCloseDistribute = viewModel.skillPool::closeDistribute,
+        onToggleDistributeTarget = viewModel.skillPool::toggleDistributeTarget,
+        onSetDistributeAll = viewModel.skillPool::setDistributeAll,
+        onSetDistributeOverwrite = viewModel.skillPool::setDistributeOverwrite,
+        onStartDistribute = viewModel.skillPool::startDistribute,
+        onCancelDownload = viewModel.skillPool::cancelDownload,
+        onDismissMessage = viewModel.skillPool::dismissMessage,
+        onUploadOpen = viewModel.skillPool::openUpload,
+        onReconcile = viewModel.skillPool::reconcile,
+        onUploadClose = viewModel.skillPool::closeUpload,
+        onUploadWorkspace = viewModel.skillPool::setUploadWorkspace,
+        onUploadSkill = viewModel.skillPool::setUploadSkill,
+        onUploadOverwrite = viewModel.skillPool::setUploadOverwrite,
+        onUploadConfirm = viewModel.skillPool::confirmUpload,
+        onImportZip = viewModel.skillPool::importZip,
+        onOpenConsole = openConsole,
+    )
+}
+
+@Composable
+private fun SkillPoolEditorPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val state by viewModel.skillPool.state.collectAsState()
+    io.qwenpaw.node.ui.skills.SkillPoolEditorScreen(
+        editor = state.editor,
+        workspaces = state.workspaces,
+        onBack = onBack,
+        onSave = { overwrite ->
+            viewModel.skillPool.saveEditor(overwrite) { ok -> if (ok) onSaved() }
+        },
+        onName = viewModel.skillPool::setEditorName,
+        onContent = viewModel.skillPool::setEditorContent,
+        onConfig = viewModel.skillPool::setEditorConfig,
+        onTagDraft = viewModel.skillPool::setEditorTagDraft,
+        onAddTags = viewModel.skillPool::commitEditorTags,
+        onRemoveTag = viewModel.skillPool::removeEditorTag,
+        onSetAutoUpdate = viewModel.skillPool::setEditorAutoUpdate,
+        onSetAutoSync = viewModel.skillPool::setEditorAutoSync,
+        onToggleTarget = viewModel.skillPool::toggleEditorTarget,
+    )
+}
+
+@Composable
+private fun SkillPoolBuiltinPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+) {
+    val state by viewModel.skillPool.state.collectAsState()
+    io.qwenpaw.node.ui.skills.SkillPoolBuiltinScreen(
+        state = state,
+        onBack = onBack,
+        onToggle = viewModel.skillPool::toggleBuiltinSelection,
+        onLanguage = viewModel.skillPool::setBuiltinLanguage,
+        onImport = viewModel.skillPool::confirmBuiltinImport,
+        onUpdateBuiltin = viewModel.skillPool::updateBuiltin,
+    )
+}
+
+@Composable
+private fun ModelsAdminPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    retryKey: () -> String?,
+    openConsole: (() -> Unit)?,
+    onOpenUrl: (String) -> Unit,
+) {
+    val state by viewModel.modelsAdmin.state.collectAsState()
+    io.qwenpaw.node.ui.settings.ModelsAdminScreen(
+        state = state,
+        onBack = onBack,
+        onRetry = { retryKey()?.let { viewModel.modelsAdmin.open(it) } },
+        onSetTab = viewModel.modelsAdmin::setTab,
+        onSave = viewModel.modelsAdmin::saveProvider,
+        onSetEnabled = viewModel.modelsAdmin::setEnabled,
+        onSetName = viewModel.modelsAdmin::setName,
+        onSetBaseUrl = viewModel.modelsAdmin::setBaseUrl,
+        onSetAuthMode = viewModel.modelsAdmin::setAuthMode,
+        onSetChatModel = viewModel.modelsAdmin::setChatModel,
+        onSetCustomHeaders = viewModel.modelsAdmin::setCustomHeaders,
+        onSetGenerateKwargs = viewModel.modelsAdmin::setGenerateKwargs,
+        onBeginSecret = viewModel.modelsAdmin::beginSecretReplace,
+        onSetSecret = viewModel.modelsAdmin::setSecretReplacement,
+        onClearSecret = viewModel.modelsAdmin::clearSecret,
+        onCancelSecret = viewModel.modelsAdmin::cancelSecretChange,
+        onTestModel = viewModel.modelsAdmin::testModel,
+        onDiscover = viewModel.modelsAdmin::discover,
+        onDelete = viewModel.modelsAdmin::deleteProvider,
+        onBeginAddModel = viewModel.modelsAdmin::beginAddModel,
+        onBeginEditModel = viewModel.modelsAdmin::beginEditModel,
+        onCancelEditModel = viewModel.modelsAdmin::cancelEditModel,
+        onSaveModel = viewModel.modelsAdmin::saveModel,
+        onEditId = viewModel.modelsAdmin::setEditId,
+        onEditName = viewModel.modelsAdmin::setEditName,
+        onEditFree = viewModel.modelsAdmin::setEditFree,
+        onEditImage = viewModel.modelsAdmin::setEditImage,
+        onEditVideo = viewModel.modelsAdmin::setEditVideo,
+        onEditType = viewModel.modelsAdmin::setEditType,
+        onDeleteModel = viewModel.modelsAdmin::deleteModel,
+        onToggleVisibility = viewModel.modelsAdmin::toggleModelVisibility,
+        onProbe = viewModel.modelsAdmin::probeModel,
+        onPoolSearch = viewModel.modelsAdmin::setPoolSearch,
+        onPoolFamily = viewModel.modelsAdmin::setPoolFamily,
+        onPoolTab = viewModel.modelsAdmin::setPoolTab,
+        onPoolLoad = { viewModel.modelsAdmin.loadPoolPage(0) },
+        onSelectAllPool = viewModel.modelsAdmin::selectAllPool,
+        onSelectPoolModel = viewModel.modelsAdmin::selectPoolModel,
+        onStartOAuth = { viewModel.modelsAdmin.startOAuth(onOpenUrl) },
+        onDismissOAuth = viewModel.modelsAdmin::dismissOAuth,
+        onDismissNotice = viewModel.modelsAdmin::dismissNotice,
+        onOpenUrl = onOpenUrl,
+        onOpenConsole = openConsole,
+    )
+}
+
 /**
  * 页面的上一层。
  *
@@ -2398,6 +2702,11 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.AGENTS, Screen.RUNTIME, Screen.PORTABILITY, Screen.APP_CENTER,
     Screen.CHANNEL, Screen.LOCAL_MODELS, Screen.BROWSER_DIAGNOSTICS, Screen.PLUGIN_MANAGE,
     Screen.ACL -> Screen.SETTINGS
+    Screen.CHANNEL_CONFIG -> Screen.CHANNEL
+    Screen.SKILL_CONFIG -> Screen.SKILLS
+    Screen.SKILL_POOL -> Screen.SKILLS
+    Screen.SKILL_POOL_EDIT, Screen.SKILL_POOL_BUILTIN -> Screen.SKILL_POOL
+    Screen.MODEL_ADMIN -> Screen.MODELS
     // 依赖升级从插件管理或市场进入，显式返回由页面回调处理；系统返回回插件管理。
     Screen.DEPENDENCY_UPGRADE -> Screen.PLUGIN_MANAGE
     // 免鉴权地址是安全页的下一层。

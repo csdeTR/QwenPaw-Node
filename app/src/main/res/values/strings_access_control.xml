@@ -36,4 +36,23 @@
     <string name="acl_time_unknown">时间未知</string>
     <string name="acl_busy">正在提交</string>
     <string name="acl_need_one">请选择一条待审批记录</string>
+    <string name="acl_filter_all">全部智能体</string>
+    <string name="acl_mail_agents_title">邮件智能体</string>
+    <string name="acl_mail_no_agents">没有启用邮件访问控制的智能体。</string>
+    <string name="acl_pause_title">邮件处理已暂停</string>
+    <string name="acl_pause_message">原因：%1$s；受影响邮件 %2$d 封。</string>
+    <string name="acl_pause_unknown_reason">未知原因</string>
+    <string name="acl_pause_resume">恢复处理</string>
+    <string name="acl_pause_confirm_title">恢复邮件处理</string>
+    <string name="acl_pause_confirm_message">恢复后服务端会继续处理该智能体的收件箱。若暂停原因仍未排除，可能再次暂停。</string>
+    <string name="acl_edit_title">编辑名单条目</string>
+    <string name="acl_edit_remark">备注</string>
+    <string name="acl_edit_username">用户名</string>
+    <string name="acl_edit_display_name">显示名（只读）</string>
+    <string name="acl_edit_move">移到另一份名单</string>
+    <string name="acl_action_edit">编辑</string>
+    <string name="acl_add_username">用户名</string>
+    <string name="acl_add_display_name">显示名（可选）</string>
+    <string name="acl_add_broadcast">广播到全部邮件智能体</string>
+    <string name="acl_add_broadcast_warning">新增会写入全部已启用邮件访问控制的智能体。</string>
 </resources>

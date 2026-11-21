@@ -10,14 +10,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -46,6 +49,9 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.GitChangeDto
 import io.qwenpaw.node.data.model.GitLogEntryDto
+import io.qwenpaw.node.ui.common.ConsoleHint
+import io.qwenpaw.node.ui.common.DestructiveActionDialog
+import io.qwenpaw.node.ui.common.WebEntryDialog
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.workspace.IconCircle
 
@@ -63,6 +69,15 @@ data class GitActions(
     val dismissDiff: () -> Unit,
     val dismissError: () -> Unit,
     val dismissNotice: () -> Unit,
+    val requestCheckout: (String, Boolean) -> Unit,
+    val confirmCheckout: () -> Unit,
+    val dismissCheckout: () -> Unit,
+    val requestDiscard: (List<String>) -> Unit,
+    val confirmDiscard: () -> Unit,
+    val dismissDiscard: () -> Unit,
+    val requestRevert: (GitLogEntryDto) -> Unit,
+    val confirmRevert: () -> Unit,
+    val dismissRevert: () -> Unit,
 )
 
 @Composable
@@ -70,10 +85,13 @@ fun GitScreen(
     state: GitUiState,
     actions: GitActions,
     onBack: () -> Unit,
+    onOpenConsole: (() -> Unit)? = null,
 ) {
     var noticeDismissed by remember { mutableStateOf(false) }
     var showBranches by remember { mutableStateOf(false) }
+    var newBranch by remember { mutableStateOf("") }
 
+    WebEntryDialog(pageKey = "git", onOpenConsole = onOpenConsole)
     LaunchedEffect(Unit) { actions.open() }
 
     Scaffold(
@@ -172,6 +190,7 @@ fun GitScreen(
                 }
 
                 else -> Column(modifier = Modifier.fillMaxSize()) {
+                    ConsoleHint(onOpenConsole = onOpenConsole)
                     state.error?.let { message ->
                         GitBanner(
                             text = message,
@@ -195,6 +214,7 @@ fun GitScreen(
                         GitTab.HISTORY -> HistoryTab(
                             state = state,
                             onOpen = actions.showCommitDiff,
+                            onRevert = actions.requestRevert,
                         )
                     }
                 }
@@ -228,13 +248,18 @@ fun GitScreen(
             onDismissRequest = { showBranches = false },
             title = { Text(stringResource(R.string.git_branches_title)) },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 440.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     val branches = state.branches
                     if (branches.isEmpty()) {
                         Text(stringResource(R.string.git_branches_empty))
                     } else {
                         val remoteSuffix = stringResource(R.string.git_branch_remote)
                         branches.forEach { branch ->
+                            val enabled = !branch.current && !branch.remote && !state.busy
                             Text(
                                 text = buildString {
                                     if (branch.current) append("● ")
@@ -242,11 +267,55 @@ fun GitScreen(
                                     if (branch.remote) append(remoteSuffix)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(vertical = 3.dp),
+                                color = if (enabled) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(enabled = enabled) {
+                                        showBranches = false
+                                        actions.requestCheckout(branch.name, false)
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 8.dp),
                             )
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Divider()
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = stringResource(R.string.git_branch_create_section),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = newBranch,
+                        onValueChange = { newBranch = it },
+                        singleLine = true,
+                        placeholder = { Text(stringResource(R.string.git_branch_name_hint)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                val name = newBranch.trim()
+                                if (name.isEmpty()) return@TextButton
+                                showBranches = false
+                                newBranch = ""
+                                actions.requestCheckout(name, true)
+                            },
+                            enabled = newBranch.isNotBlank() && !state.busy,
+                        ) {
+                            Text(stringResource(R.string.git_branch_create))
+                        }
+                    }
                     Text(
                         stringResource(R.string.git_branches_hint),
                         style = MaterialTheme.typography.labelSmall,
@@ -259,6 +328,97 @@ fun GitScreen(
                     Text(stringResource(R.string.action_close))
                 }
             },
+        )
+    }
+
+    state.pendingBranch?.let { action ->
+        val current = state.status?.branch?.ifBlank { "HEAD" } ?: "HEAD"
+        val changed = state.status?.changes?.size ?: 0
+        DestructiveActionDialog(
+            title = stringResource(R.string.git_checkout_title),
+            message = stringResource(R.string.git_checkout_message),
+            impacts = listOf(
+                stringResource(R.string.git_checkout_impact_current, current),
+                if (action.create) {
+                    stringResource(R.string.git_checkout_impact_create, action.branch)
+                } else {
+                    stringResource(R.string.git_checkout_impact_target, action.branch)
+                },
+                stringResource(R.string.git_checkout_impact_changes, changed),
+            ),
+            confirmLabel = stringResource(R.string.git_checkout_confirm),
+            onConfirm = actions.confirmCheckout,
+            onDismiss = actions.dismissCheckout,
+        )
+    }
+
+    state.pendingDiscard?.let { action ->
+        val shown = action.paths.take(50)
+        DestructiveActionDialog(
+            title = stringResource(R.string.git_discard_title),
+            message = stringResource(R.string.git_discard_message),
+            impacts = buildList {
+                addAll(shown)
+                if (action.paths.size > shown.size) {
+                    add(stringResource(R.string.git_more_items, action.paths.size - shown.size))
+                }
+            },
+            confirmLabel = stringResource(R.string.git_discard_confirm),
+            onConfirm = actions.confirmDiscard,
+            onDismiss = actions.dismissDiscard,
+        )
+    }
+
+    state.pendingRevert?.let { action ->
+        DestructiveActionDialog(
+            title = stringResource(R.string.git_revert_title),
+            message = stringResource(R.string.git_revert_message),
+            impacts = listOf(
+                stringResource(R.string.git_revert_impact_hash, action.entry.hash),
+                action.entry.message.ifBlank {
+                    stringResource(R.string.git_no_commit_message)
+                },
+            ),
+            confirmLabel = stringResource(R.string.git_revert_confirm),
+            details = {
+                when {
+                    action.previewLoading -> Text(
+                        text = stringResource(R.string.git_revert_preview_loading),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    action.previewFailed -> Text(
+                        text = stringResource(R.string.git_revert_preview_failed),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+
+                    action.preview != null -> Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        action.preview.text.lineSequence().take(80).forEach { line ->
+                            Text(
+                                text = line.ifEmpty { " " },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = when {
+                                    line.startsWith("+") && !line.startsWith("+++") ->
+                                        MaterialTheme.colorScheme.primary
+                                    line.startsWith("-") && !line.startsWith("---") ->
+                                        MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+            },
+            onConfirm = actions.confirmRevert,
+            onDismiss = actions.dismissRevert,
         )
     }
 }
@@ -348,6 +508,29 @@ private fun ChangesTab(
     val unstagedTitle = stringResource(R.string.git_section_unstaged)
     val untrackedTitle = stringResource(R.string.git_section_untracked)
     Column(modifier = Modifier.fillMaxSize()) {
+        if (state.unstaged.isNotEmpty() || state.untracked.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.git_discard_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        actions.requestDiscard(
+                            (state.unstaged + state.untracked).map { it.path }.distinct(),
+                        )
+                    },
+                    enabled = !state.busy,
+                ) { Text(stringResource(R.string.git_discard_all)) }
+            }
+        }
         LazyColumn(
             modifier = Modifier.weight(1f),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -478,6 +661,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(
                 if (staged) actions.unstage(listOf(change.path))
                 else actions.stage(listOf(change.path))
             },
+            onDiscard = if (staged) null else ({ actions.requestDiscard(listOf(change.path)) }),
         )
     }
 }
@@ -489,6 +673,7 @@ private fun ChangeRow(
     enabled: Boolean,
     onClick: () -> Unit,
     onToggle: () -> Unit,
+    onDiscard: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -517,6 +702,11 @@ private fun ChangeRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (onDiscard != null) {
+            TextButton(onClick = onDiscard, enabled = enabled) {
+                Text(stringResource(R.string.git_discard))
+            }
+        }
         TextButton(onClick = onToggle, enabled = enabled) {
             Text(
                 if (staged) {
@@ -533,6 +723,7 @@ private fun ChangeRow(
 private fun HistoryTab(
     state: GitUiState,
     onOpen: (String) -> Unit,
+    onRevert: (GitLogEntryDto) -> Unit,
 ) {
     if (state.log.isEmpty()) {
         Box(
@@ -554,33 +745,50 @@ private fun HistoryTab(
         ),
     ) {
         items(state.log, key = { it.hash }) { entry ->
-            HistoryRow(entry = entry, onClick = { onOpen(entry.hash) })
+            HistoryRow(
+                entry = entry,
+                enabled = !state.busy,
+                onClick = { onOpen(entry.hash) },
+                onRevert = { onRevert(entry) },
+            )
         }
     }
 }
 
 @Composable
-private fun HistoryRow(entry: GitLogEntryDto, onClick: () -> Unit) {
+private fun HistoryRow(
+    entry: GitLogEntryDto,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    onRevert: () -> Unit,
+) {
     val noMessage = stringResource(R.string.git_no_commit_message)
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = entry.message.ifBlank { noMessage },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = "${entry.hash}  ${entry.author}  ${entry.date}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.message.ifBlank { noMessage },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "${entry.hash.take(8)}  ${entry.author}  ${entry.date}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onRevert, enabled = enabled) {
+            Text(stringResource(R.string.git_revert))
+        }
     }
     Divider()
 }

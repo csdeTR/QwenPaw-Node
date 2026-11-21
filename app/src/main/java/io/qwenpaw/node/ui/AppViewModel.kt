@@ -1878,6 +1878,15 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { channelHolder = it }
 
+    /** 单频道配置。按频道键区分，换绑时清空。 */
+    private var channelConfigHolder: io.qwenpaw.node.ui.channels.ChannelConfigViewModel? = null
+
+    val channelConfig: io.qwenpaw.node.ui.channels.ChannelConfigViewModel
+        get() = channelConfigHolder ?: io.qwenpaw.node.ui.channels.ChannelConfigViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { channelConfigHolder = it }
+
     /** 本地模型：运行时状态、清单与下载进度。 */
     private var localModelsHolder: io.qwenpaw.node.ui.localmodels.LocalModelsViewModel? = null
 
@@ -2059,6 +2068,15 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { modelsHolder = it }
 
+    /** 供应商详情与模型/模型池/OAuth 管理。 */
+    private var modelsAdminHolder: io.qwenpaw.node.ui.settings.ModelsAdminViewModel? = null
+
+    val modelsAdmin: io.qwenpaw.node.ui.settings.ModelsAdminViewModel
+        get() = modelsAdminHolder ?: io.qwenpaw.node.ui.settings.ModelsAdminViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { modelsAdminHolder = it }
+
     /** 技能。技能归属当前智能体，切换实例或智能体时清空。 */
     private var skillsHolder: io.qwenpaw.node.ui.skills.SkillsViewModel? = null
 
@@ -2067,6 +2085,24 @@ class AppViewModel(
             api = api,
             connection = ::activeConnection,
         ).also { skillsHolder = it }
+
+    /** 工作区技能的配置表单。 */
+    private var skillConfigHolder: io.qwenpaw.node.ui.skills.SkillConfigViewModel? = null
+
+    val skillConfig: io.qwenpaw.node.ui.skills.SkillConfigViewModel
+        get() = skillConfigHolder ?: io.qwenpaw.node.ui.skills.SkillConfigViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { skillConfigHolder = it }
+
+    /** 技能池管理与自动化。 */
+    private var skillPoolHolder: io.qwenpaw.node.ui.skills.SkillPoolViewModel? = null
+
+    val skillPool: io.qwenpaw.node.ui.skills.SkillPoolViewModel
+        get() = skillPoolHolder ?: io.qwenpaw.node.ui.skills.SkillPoolViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { skillPoolHolder = it }
 
     /** MCP。客户端卡片按智能体区分，切换时清空。 */
     private var mcpHolder: io.qwenpaw.node.ui.mcp.McpViewModel? = null
@@ -2125,7 +2161,10 @@ class AppViewModel(
             checkpointHolder?.clear()
             usageHolder?.clear()
             modelsHolder?.clear()
+            modelsAdminHolder?.clear()
             skillsHolder?.clear()
+            skillConfigHolder?.clear()
+            skillPoolHolder?.clear()
             mcpHolder?.clear()
             marketHolder?.clear()
             aclHolder?.clear()
@@ -2134,6 +2173,7 @@ class AppViewModel(
             portabilityHolder?.clear()
             appCenterHolder?.clear()
             channelHolder?.clear()
+            channelConfigHolder?.clear()
             localModelsHolder?.clear()
             browserDiagnosticsHolder?.clear()
             pluginManageHolder?.clear()

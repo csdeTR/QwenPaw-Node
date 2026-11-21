@@ -2,6 +2,7 @@ package io.qwenpaw.node.data.channel
 
 import androidx.annotation.StringRes
 import io.qwenpaw.node.R
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -63,12 +64,16 @@ fun isQrCapable(key: String): Boolean = key in QR_CAPABLE_CHANNELS
 data class ChannelCapability(
     /** 服务端是否声明可扫码。2.3.0 起由频道插件的能力描述决定。 */
     val qrAvailable: Boolean,
-    /** `missing_code` / `failed` / `validated` / `running`；2.2.2 为 null。 */
+    /** `missing_code` / `disabled` / `validation_pending` / `validated` / `running`；2.2.2 为 null。 */
     val availability: String?,
     /** 服务端给的显示名，插件频道同样有。 */
     val label: String?,
-    /** `repair.action == "install"` 时可直接安装的来源，如 `bundled:dingtalk`。 */
-    val installSource: String?,
+    /** `install` / `enable` / `repair`；没有 repair 块时为 null。 */
+    val repairAction: String?,
+    /** 插件 id，`enable` 与 `repair` 用它。 */
+    val pluginId: String?,
+    /** `install` 用的来源，通常是 `bundled:<plugin_id>`。 */
+    val repairSource: String?,
     /** 失败诊断原文。 */
     val diagnostic: String?,
 )
@@ -82,7 +87,6 @@ data class ChannelCapability(
 fun channelCapability(key: String, schema: JsonObject?): ChannelCapability {
     val hasFlag = schema?.containsKey("qrcode_available") == true
     val repair = schema?.get("repair") as? JsonObject
-    val repairAction = repair?.let { jsonString(it, "action") }
     return ChannelCapability(
         qrAvailable = if (hasFlag) {
             jsonBoolean(schema!!, "qrcode_available")
@@ -91,11 +95,9 @@ fun channelCapability(key: String, schema: JsonObject?): ChannelCapability {
         },
         availability = schema?.let { jsonString(it, "availability") },
         label = schema?.let { jsonString(it, "label") },
-        installSource = if (repairAction == "install") {
-            repair?.let { jsonString(it, "source") }
-        } else {
-            null
-        },
+        repairAction = repair?.let { jsonString(it, "action") },
+        pluginId = repair?.let { jsonString(it, "plugin_id") },
+        repairSource = repair?.let { jsonString(it, "source") },
         diagnostic = schema?.let { jsonString(it, "diagnostic") },
     )
 }
@@ -103,6 +105,25 @@ fun channelCapability(key: String, schema: JsonObject?): ChannelCapability {
 /** 取字符串字段；非字符串或空串返回 null。 */
 fun jsonString(obj: JsonObject, key: String): String? =
     (obj[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+/**
+ * 解析插件描述里的本地化文本。
+ *
+ * `config_fields` 的 label/help 可能是纯字符串（英文），也可能是
+ * `{"zh-CN": "...", "en": "..."}` 这样的对象；中文优先取 `zh-CN`，再 `zh`，再 `en`。
+ */
+fun localizedText(element: JsonElement?): String? = when (element) {
+    is JsonPrimitive -> element.contentOrNull?.takeIf { it.isNotBlank() }
+    is JsonObject -> listOf("zh-CN", "zh", "en")
+        .firstNotNullOfOrNull { key ->
+            (element[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+        ?: element.values.firstNotNullOfOrNull {
+            (it as? JsonPrimitive)?.contentOrNull?.takeIf { text -> text.isNotBlank() }
+        }
+
+    else -> null
+}
 
 /** 频道键对应的名称资源。插件频道不在表里，调用方原样显示键名。 */
 @StringRes

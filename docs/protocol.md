@@ -2371,3 +2371,82 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
 - 该端点受插件访问策略保护：开了 Web 登录时需带 token，未开时只放行私有/回环或受信任标记。
 - **`GET/PUT /update/settings` 与 `POST /update/check` 是 Console 专用**，不在客户端契约内；客户端不调用，也不依赖其形状。
 - 客户端本地最多每 6 小时查询一次，并记录已跳过版本；插件端每天在 `check_time` 检查一次，服务端在该时间之后启动且当天未检查时会补查。
+
+---
+
+## 40、0.7.4 管理面写操作与 Git 写操作
+
+2026-11-21 在 qp-test（2.3.0.post1）上源码与只读实测核对；`GET /api/models` 为**裸数组**（38 项），
+`model-templates`、`providers/{id}/oauth/start`、`config/channels/{c}/conflict-check`、`skills/pool/*` 均实测 200。
+
+### 40.1 模型与提供商
+
+- `PUT /api/models/{provider_id}/config` body 字段均可选；服务端 `Provider.update_config` **跳过 `None`**，
+  因此「未改」传 `null` 即保留，传空串会清空 `api_key`。客户端只提交改动项。
+- `POST /api/models/custom-providers` body：`id/name/default_base_url/api_key/api_key_prefix/chat_model/models[]`；
+  `chat_model` 只认 `OpenAIChatModel` / `OpenAIResponseModel` / `AnthropicChatModel`。
+- 模型路由 `/{provider_id}/models/{model_id:path}` 的 `model_id` 可含 `/`（如 `kilo-auto/free`），
+  客户端拼原始路径、不逐段编码，交给 path 转换器。
+- `PUT /{provider}/models/{model}/config` 字段含 `model_type`（`chat`/`decision`）、
+  `max_input_length`（≥1000）、`generate_kwargs`（字典）、`thinking_control`、`relay_reasoning` 等。
+- 模型池 `GET /{provider}/pool` 查询参数 `tab(all|candidates|selected)`、`search`、`family`、`offset`、`limit`（≤100，默认 30）；
+  返回 `models/total/selected_count/candidate_count/families/offset/limit`，**不带每个模型是否已选的标记**，
+  客户端用 `provider.allModels` 的 id 集合判断选中态。
+- 决策模型：全局走 `PUT /api/models/active`（`model_type=decision`、`scope=global`）；
+  智能体级该端点对非 `chat` 回 400，改走 `PATCH /api/agents/{agentId}/model-settings`（`{decision_model:{provider_id,model}}`）。
+- OAuth：`POST /api/providers/{id}/oauth/start`（无 body）→ `{authorize_url,state,flow_type}`；
+  `GET …/oauth/status?state=` → `{status: pending|completed|failed, error}`；只有 `openrouter` 注册了 flow，
+  非 localhost 的 HTTP 部署在无 Hub 托管回调时会回 422。qp-test 因有托管回调，start 返回 200。
+
+### 40.2 频道配置
+
+- `GET /api/config/channels/schemas` 每个频道含 `config_fields`（`name/label/type/options/json_type/help/placeholder`），
+  `type` 取 `switch/text/password/number/select/json`；字段名含 secret/token/password 的字符串自动标 `password`。
+- `GET /api/config/channels/{channel}` 返回**完整配置含密钥明文**；`PUT` 是整段替换（缺省字段回落默认），
+  必须 GET 后整体回写。密钥只写不读：界面不回显，未改时回写原值。
+- `POST …/conflict-check` body 是拟保存配置，返回 `{conflict,agents:[{agent_id,agent_name}]}`，只做提示无强制覆盖。
+- `GET …/health` 返回 `{channel,status: healthy|unhealthy|disabled,detail}`，未运行 404；`POST …/restart` 返回 `{channel,status:"restarted",detail}`。
+
+### 40.3 技能池与技能配置
+
+- 池列表元素含 `sync_status/tags/auto_sync/auto_update/external/external_path`；详情额外含
+  `content/config/auto_sync_targets/available_builtin_languages/builtin_language`。
+- `PUT /api/skills/pool/{name}/tags`、`PUT /api/skills/{name}/tags`、`PUT /api/skills/{name}/channels`、
+  `POST /api/skills/pool/batch-delete` 的 body 都是**裸字符串数组**；`PUT /api/skills/{name}/preload` 是 `{preload}`。
+- `PUT /api/skills/pool/{name}/automation` 原子提交 `{auto_update?, auto_sync:{enabled,targets?}}`；
+  `auto_update` 仅内置技能可用（否则 400），两者都缺 422。
+- 异步分发：`POST /api/skills/pool/downloads`（202）→ `{job_id,state,error,result}`，`state` 只有
+  `running/cancelling/completed/failed`，**没有进度**；`GET`/`DELETE /pool/downloads/{job_id}` 轮询与取消。
+  冲突预检走同步 `POST /api/skills/pool/download`（`preview_only=true`），409 detail 带 `conflicts`。
+- 导入内置：`POST /api/skills/pool/import-builtin`（`{imports:[{skill_name,language}],overwrite_conflicts}`），
+  冲突 409 detail 带 `conflicts`（status 取 `outdated/language_switch/conflict`）。
+
+### 40.4 Git 写操作
+
+- `POST /api/workspace/git/checkout` `{branch,create}` → `{branch}`；失败 400 带 stderr。
+- `POST /api/workspace/git/discard` `{paths}`（空=全部）→ `{discarded:[…]}`；只影响未暂存改动，
+  已跟踪文件走 `git restore`、未跟踪走 `git clean -fd`，已暂存内容不在其中。
+- `POST /api/workspace/git/revert` `{commit_hash}` → `{reverted,output}`；生成一条新提交。
+
+### 40.5 ACL 与邮件
+
+- 聊天列表项 `POST /api/access-control/remark`（`{channel,user_id,remark}`）与 `/username`（`{channel,user_id,username}`）
+  更新白/黑名单条目，与 `/pending/remark` 不是同一条。
+- 邮件 `GET /api/mail-access-control/agents` → `{agents:[…]}`；`GET /processing-pauses` →
+  `[{pause_id,reason,count,notified,agent_id}]`；`POST /processing/{agent_id}/resume` `{pause_id}`，暂停变化时 409。
+
+### 40.6 0.7.4 修复轮补充
+
+- 模型测试只走模型级：`POST /api/models/{provider_id}/models/test`，body **必填** `{"model_id": …}`；
+  供应商级 `/{provider_id}/test` 仍存在，但客户端不再提供界面入口。
+- 频率配置保存为差量提交：只有 `custom_headers` / `generate_kwargs` 实际变化时才发送；
+  `api_key` 仅在替换或清除时出现，未改时省略以免破坏已脱敏的原值。
+- 频道 `repair.action` 实测只有 `install` / `enable` / `repair` 三种，`repair.plugin_id` 与频道键同名
+  （如 `mattermost`），`repair.source` 形如 `bundled:mattermost`。客户端按动作分别调用
+  `/api/plugins/install`（`force=true`）、`/api/plugins/{id}/enabled` 与
+  `/api/plugins/{id}/repair-dependencies`；安装成功后服务端热加载，`availability` 从
+  `missing_code` 变为 `validated`，`repair` 消失。
+- 频道 `config_fields` 的 `label/help/placeholder` 可能是字符串或 `{zh-CN,zh,en}` 对象；
+  客户端优先 `zh-CN`，并为已知字段名补中文映射。
+- 二维码授权与 Console 一致放在频道配置页；`qrcode_available` 为真才显示入口，
+  `missing_code` 时显示安装动作。

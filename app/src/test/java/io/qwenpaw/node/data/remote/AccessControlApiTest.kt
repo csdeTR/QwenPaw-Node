@@ -111,4 +111,67 @@ class AccessControlApiTest {
         assertTrue(entry.effectiveFirstMessage.contains("正文"))
         assertEquals("default||a@b.c", entry.key)
     }
+
+    @Test
+    fun `list remark and username use non pending endpoints`() {
+        server.enqueue(MockResponse().setBody("""{"status":"ok"}"""))
+        server.enqueue(MockResponse().setBody("""{"status":"ok"}"""))
+
+        api.aclListRemark(conn, "telegram", "u1", "老用户")
+        api.aclUsername(conn, "telegram", "u1", "Alice")
+
+        val remark = server.takeRequest()
+        assertEquals("/api/access-control/remark", remark.requestUrl!!.encodedPath)
+        assertTrue(remark.body.readUtf8().contains("\"remark\":\"老用户\""))
+
+        val username = server.takeRequest()
+        assertEquals("/api/access-control/username", username.requestUrl!!.encodedPath)
+        assertTrue(username.body.readUtf8().contains("\"username\":\"Alice\""))
+    }
+
+    @Test
+    fun `mail list remark uses non pending endpoint`() {
+        server.enqueue(MockResponse().setBody("""{"status":"ok"}"""))
+
+        api.mailAclListRemark(conn, "default", "a@b.c", "同事")
+
+        val request = server.takeRequest()
+        assertEquals("/api/mail-access-control/remark", request.requestUrl!!.encodedPath)
+        val body = request.body.readUtf8()
+        assertTrue(body.contains("\"agent_id\":\"default\""))
+        assertTrue(body.contains("\"address\":\"a@b.c\""))
+        assertTrue(body.contains("\"remark\":\"同事\""))
+    }
+
+    @Test
+    fun `mail agents and pauses decode`() {
+        server.enqueue(MockResponse().setBody("""{"agents":["default","qa"]}"""))
+        server.enqueue(
+            MockResponse().setBody(
+                """[{"pause_id":"p1","reason":"too_many","count":12,
+                    "notified":true,"agent_id":"default"}]""",
+            ),
+        )
+
+        assertEquals(listOf("default", "qa"), api.mailAclAgents(conn))
+        val pause = api.mailAclPauses(conn).single()
+        assertEquals("p1", pause.pauseId)
+        assertEquals("too_many", pause.reason)
+        assertEquals(12, pause.count)
+        assertEquals("default", pause.agentId)
+    }
+
+    @Test
+    fun `mail resume posts pause id to agent path`() {
+        server.enqueue(MockResponse().setBody("""{"status":"ok"}"""))
+
+        api.mailAclResume(conn, "default", "p1")
+
+        val request = server.takeRequest()
+        assertEquals(
+            "/api/mail-access-control/processing/default/resume",
+            request.requestUrl!!.encodedPath,
+        )
+        assertEquals("""{"pause_id":"p1"}""", request.body.readUtf8())
+    }
 }

@@ -99,7 +99,7 @@ class ModelsApiTest {
     }
 
     @Test
-    fun `provider test failure is 200 with success false`() = runBlocking {
+    fun `model test failure is 200 with success false`() = runBlocking {
         server.enqueue(
             MockResponse().setBody(
                 """{"success":false,
@@ -109,17 +109,21 @@ class ModelsApiTest {
             ),
         )
 
-        val result = api.testProvider(conn, "lmstudio")
+        val result = api.testModel(conn, "lmstudio", "qwen3.8-max")
 
         assertFalse("测试失败不是 HTTP 错误，界面必须看 success", result.success)
         assertTrue(result.message.startsWith("Connection failed"))
         val request = server.takeRequest()
         assertEquals("POST", request.method)
-        assertEquals("/api/models/lmstudio/test", request.requestUrl!!.encodedPath)
+        assertEquals(
+            "/api/models/lmstudio/models/test",
+            request.requestUrl!!.encodedPath,
+        )
+        assertEquals("""{"model_id":"qwen3.8-max"}""", request.body.readUtf8())
     }
 
     @Test
-    fun `provider test success decodes message`() = runBlocking {
+    fun `model test success decodes message`() = runBlocking {
         server.enqueue(
             MockResponse().setBody(
                 """{"success":true,"message":"Connection successful","status":null,
@@ -128,22 +132,23 @@ class ModelsApiTest {
             ),
         )
 
-        val result = api.testProvider(conn, "dashscope")
+        val result = api.testModel(conn, "dashscope", "qwen3.7-plus")
 
         assertTrue(result.success)
         assertEquals("Connection successful", result.message)
     }
 
-    /** 未知供应商是 404，原文里句末有没有句号两版不一致，客户端不加工。 */
     @Test
-    fun `unknown provider surfaces server detail`() = runBlocking {
+    fun `unknown model surfaces server detail`() = runBlocking {
         server.enqueue(
             MockResponse()
                 .setResponseCode(404)
-                .setBody("""{"detail":"Provider 'nope' not found."}"""),
+                .setBody("""{"detail":"Model 'nope' not found."}"""),
         )
 
-        val error = runCatching { api.testProvider(conn, "nope") }.exceptionOrNull()
+        val error = runCatching {
+            api.testModel(conn, "dashscope", "nope")
+        }.exceptionOrNull()
 
         assertTrue(error is ApiException)
         assertEquals(404, (error as ApiException).code)

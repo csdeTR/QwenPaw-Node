@@ -92,3 +92,7 @@
 | 涉及时间、时区、格式化的断言 | 同上单测 + 固定 `ZoneId` | 显式写出时区，不依赖运行环境的默认值 |
 | 任何文档 | 对照 [internal/writing.md](internal/writing.md) 的语体规则逐条核对 | 文案与源码字符串一致，链接与节号引用可达 |
 | 端口、地址、路径类常量 | 实际执行一次相关命令 | 命令能跑通，不是照抄旧记录 |
+
+### 6.3 上游与发布
+
+**未经用户明确确认，不得 `git push`、不得打 tag 或发布 Release。** 本地提交可以；推送、tag 与 Release 必须逐次确认。撤回步骤见 [internal/release.md](internal/release.md)。

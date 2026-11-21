@@ -13,6 +13,8 @@ import io.qwenpaw.node.data.model.AgentDto
 import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.data.model.AgentListDto
 import io.qwenpaw.node.data.model.MailAclActionEntryDto
+import io.qwenpaw.node.data.model.MailAclAgentsDto
+import io.qwenpaw.node.data.model.MailAclPauseDto
 import io.qwenpaw.node.data.model.MailAclPendingCountDto
 import io.qwenpaw.node.data.model.AgentProfileDto
 import io.qwenpaw.node.data.model.AgentRefDto
@@ -38,7 +40,10 @@ import io.qwenpaw.node.data.model.ChatGroupDto
 import io.qwenpaw.node.data.model.ChatHistoryDto
 import io.qwenpaw.node.data.model.ChatSpecDto
 import io.qwenpaw.node.data.model.ChatStatusDto
+import io.qwenpaw.node.data.model.ChannelConflictDto
+import io.qwenpaw.node.data.model.ChannelHealthDto
 import io.qwenpaw.node.data.model.ChannelQrDto
+import io.qwenpaw.node.data.model.ChannelRestartDto
 import io.qwenpaw.node.data.model.ChannelQrStatusDto
 import io.qwenpaw.node.data.model.CheckpointGraphDto
 import io.qwenpaw.node.data.model.CheckpointStatusDto
@@ -56,9 +61,12 @@ import io.qwenpaw.node.data.model.GcRequestDto
 import io.qwenpaw.node.data.model.GcResultDto
 import io.qwenpaw.node.data.model.GcSettingsDto
 import io.qwenpaw.node.data.model.GitBranchDto
+import io.qwenpaw.node.data.model.GitCheckoutResultDto
 import io.qwenpaw.node.data.model.GitCommitDiffDto
 import io.qwenpaw.node.data.model.GitDiffDto
+import io.qwenpaw.node.data.model.GitDiscardResultDto
 import io.qwenpaw.node.data.model.GitLogEntryDto
+import io.qwenpaw.node.data.model.GitRevertResultDto
 import io.qwenpaw.node.data.model.GitStatusDto
 import io.qwenpaw.node.data.model.HarnessesDto
 import io.qwenpaw.node.data.model.HarnessProviderDto
@@ -85,6 +93,12 @@ import io.qwenpaw.node.data.model.SandboxStatusDto
 import io.qwenpaw.node.data.model.ServerLanguageDto
 import io.qwenpaw.node.data.model.SkillImportResultDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
+import io.qwenpaw.node.data.model.ModelTemplateDto
+import io.qwenpaw.node.data.model.DiscoverModelsResultDto
+import io.qwenpaw.node.data.model.ProbeMultimodalDto
+import io.qwenpaw.node.data.model.ModelPoolPageDto
+import io.qwenpaw.node.data.model.OAuthStartDto
+import io.qwenpaw.node.data.model.OAuthStatusDto
 import io.qwenpaw.node.data.model.OffloadPolicyDto
 import io.qwenpaw.node.data.model.BroadcastResultDto
 import io.qwenpaw.node.data.model.HubInstallTaskDto
@@ -96,8 +110,12 @@ import io.qwenpaw.node.data.model.PluginEnabledWriteDto
 import io.qwenpaw.node.data.model.PluginInstallResultDto
 import io.qwenpaw.node.data.model.PluginListItemDto
 import io.qwenpaw.node.data.model.PluginMarketResponseDto
+import io.qwenpaw.node.data.model.BuiltinNoticeDto
+import io.qwenpaw.node.data.model.BuiltinSourceDto
+import io.qwenpaw.node.data.model.PoolDownloadJobDto
 import io.qwenpaw.node.data.model.PoolSkillDetailDto
 import io.qwenpaw.node.data.model.PoolSkillDto
+import io.qwenpaw.node.data.model.SkillWorkspaceDto
 import io.qwenpaw.node.data.model.PortabilityJobDto
 import io.qwenpaw.node.data.model.PortabilitySelectionDto
 import io.qwenpaw.node.data.model.PortabilitySourceDto
@@ -164,6 +182,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -1244,11 +1263,13 @@ class QwenPawApi(
         model: String,
         scope: String,
         agentId: String? = null,
+        modelType: String = "chat",
     ): ModelsActiveDto {
         val body = buildJsonObject {
             put("provider_id", providerId)
             put("model", model)
             put("scope", scope)
+            put("model_type", modelType)
             if (scope == "agent" && agentId != null) put("agent_id", agentId)
         }
         return decode(request(conn, "PUT", "/api/models/active", body), ModelsActiveDto.serializer())
@@ -1261,10 +1282,172 @@ class QwenPawApi(
      * 失败不是 HTTP 错误——实测返回 200 + `success=false`，调用方要看 `success`。
      * 路径带的是**供应商** id；模型级测试是 `/{provider_id}/models/test`，本期不接。
      */
-    fun testProvider(conn: Connection, providerId: String): TestConnectionDto = decode(
-        request(conn, "POST", "/api/models/$providerId/test"),
+    /**
+     * 模型级连通性测试：`POST /api/models/{provider_id}/models/test`。
+     *
+     * body 必填 `{model_id}`。供应商级 `/{provider_id}/test` 不再提供界面入口：
+     * 用户在模型条目上看到的结果才对应实际要用的那个模型。
+     */
+    fun testModel(conn: Connection, providerId: String, modelId: String): TestConnectionDto = decode(
+        request(
+            conn,
+            "POST",
+            "/api/models/${encodeSegment(providerId)}/models/test",
+            buildJsonObject { put("model_id", modelId) },
+        ),
         TestConnectionDto.serializer(),
     )
+
+    // ---------- 模型与提供商管理 ----------
+
+    fun modelTemplates(conn: Connection): List<ModelTemplateDto> = decode(
+        request(conn, "GET", "/api/models/model-templates"),
+        kotlinx.serialization.builtins.ListSerializer(ModelTemplateDto.serializer()),
+    )
+
+    fun createCustomProvider(conn: Connection, body: JsonObject): String =
+        request(conn, "POST", "/api/models/custom-providers", body)
+
+    fun deleteCustomProvider(conn: Connection, providerId: String) {
+        request(conn, "DELETE", "/api/models/custom-providers/${encodeSegment(providerId)}")
+    }
+
+    fun configureProvider(conn: Connection, providerId: String, body: JsonObject): String =
+        request(conn, "PUT", "/api/models/${encodeSegment(providerId)}/config", body)
+
+    fun discoverProviderModels(conn: Connection, providerId: String, body: JsonObject?): DiscoverModelsResultDto =
+        decode(
+            request(conn, "POST", "/api/models/${encodeSegment(providerId)}/discover", body),
+            DiscoverModelsResultDto.serializer(),
+        )
+
+    fun addModel(conn: Connection, providerId: String, body: JsonObject): String =
+        request(conn, "POST", "/api/models/${encodeSegment(providerId)}/models", body)
+
+    fun removeModel(conn: Connection, providerId: String, modelId: String) {
+        request(conn, "DELETE", "/api/models/${encodeSegment(providerId)}/models/$modelId")
+    }
+
+    fun configureModel(
+        conn: Connection,
+        providerId: String,
+        modelId: String,
+        body: JsonObject,
+    ): String = request(
+        conn,
+        "PUT",
+        "/api/models/${encodeSegment(providerId)}/models/$modelId/config",
+        body,
+    )
+
+    fun setModelVisibility(
+        conn: Connection,
+        providerId: String,
+        modelId: String,
+        hidden: Boolean,
+    ) {
+        request(
+            conn,
+            "PUT",
+            "/api/models/${encodeSegment(providerId)}/models/$modelId/visibility",
+            buildJsonObject { put("hidden", hidden) },
+        )
+    }
+
+    fun probeModelMultimodal(
+        conn: Connection,
+        providerId: String,
+        modelId: String,
+    ): ProbeMultimodalDto = decode(
+        request(
+            conn,
+            "POST",
+            "/api/models/${encodeSegment(providerId)}/models/$modelId/probe-multimodal",
+        ),
+        ProbeMultimodalDto.serializer(),
+    )
+
+    fun modelPool(
+        conn: Connection,
+        providerId: String,
+        tab: String = "all",
+        search: String = "",
+        family: String = "all",
+        offset: Int = 0,
+        limit: Int = 30,
+    ): ModelPoolPageDto = decode(
+        getUrl(
+            conn,
+            workspaceUrl(
+                conn,
+                "/api/models/${encodeSegment(providerId)}/pool",
+                mapOf(
+                    "tab" to tab,
+                    "search" to search.takeIf { it.isNotBlank() },
+                    "family" to family.takeIf { it != "all" },
+                    "offset" to offset.toString(),
+                    "limit" to limit.toString(),
+                ),
+            ),
+        ),
+        ModelPoolPageDto.serializer(),
+    )
+
+    fun selectAllPoolModels(conn: Connection, providerId: String, selected: Boolean) {
+        request(
+            conn,
+            "PUT",
+            "/api/models/${encodeSegment(providerId)}/pool/selection",
+            buildJsonObject { put("selected", selected) },
+        )
+    }
+
+    fun selectPoolModel(
+        conn: Connection,
+        providerId: String,
+        modelId: String,
+        selected: Boolean,
+    ) {
+        request(
+            conn,
+            "PUT",
+            "/api/models/${encodeSegment(providerId)}/models/$modelId/pool",
+            buildJsonObject { put("selected", selected) },
+        )
+    }
+
+    fun oauthStart(conn: Connection, providerId: String): OAuthStartDto = decode(
+        request(conn, "POST", "/api/providers/${encodeSegment(providerId)}/oauth/start"),
+        OAuthStartDto.serializer(),
+    )
+
+    fun oauthStatus(conn: Connection, providerId: String, state: String): OAuthStatusDto = decode(
+        getUrl(
+            conn,
+            workspaceUrl(
+                conn,
+                "/api/providers/${encodeSegment(providerId)}/oauth/status",
+                mapOf("state" to state),
+            ),
+        ),
+        OAuthStatusDto.serializer(),
+    )
+
+    /** 智能体级决策模型：`PATCH /api/agents/{agentId}/model-settings`。 */
+    fun setAgentDecisionModel(conn: Connection, agentId: String, providerId: String, model: String) {
+        val body = buildJsonObject {
+            putJsonObject("decision_model") {
+                put("provider_id", providerId)
+                put("model", model)
+            }
+        }
+        request(
+            conn,
+            "PATCH",
+            "/api/agents/${encodeSegment(agentId)}/model-settings",
+            body,
+        )
+    }
 
     // ---------- 头像 ----------
 
@@ -1680,6 +1863,260 @@ class QwenPawApi(
      */
     fun deleteSkill(conn: Connection, name: String) {
         request(conn, "DELETE", "/api/skills/${encodeSegment(name)}")
+    }
+
+    /** `GET /api/skills/{name}/config`。返回 `{config:{...}}` 里的对象。 */
+    fun skillConfig(conn: Connection, name: String): JsonObject =
+        runCatching {
+            json.parseToJsonElement(
+                request(conn, "GET", "/api/skills/${encodeSegment(name)}/config"),
+            ).jsonObject["config"]?.jsonObject
+        }.getOrNull() ?: JsonObject(emptyMap())
+
+    /** `PUT /api/skills/{name}/config`。整段替换该技能的配置对象。 */
+    fun saveSkillConfig(conn: Connection, name: String, config: JsonObject) {
+        request(
+            conn,
+            "PUT",
+            "/api/skills/${encodeSegment(name)}/config",
+            buildJsonObject { put("config", config) },
+        )
+    }
+
+    fun clearSkillConfig(conn: Connection, name: String) {
+        request(conn, "DELETE", "/api/skills/${encodeSegment(name)}/config")
+    }
+
+    /** `PUT /api/skills/{name}/preload`，body 是 `{preload}`。 */
+    fun setSkillPreload(conn: Connection, name: String, preload: Boolean) {
+        request(
+            conn,
+            "PUT",
+            "/api/skills/${encodeSegment(name)}/preload",
+            buildJsonObject { put("preload", preload) },
+        )
+    }
+
+    /** `PUT /api/skills/{name}/tags`，body 是**裸字符串数组**。 */
+    fun setSkillTags(conn: Connection, name: String, tags: List<String>) {
+        val body = buildJsonArray { tags.forEach { add(it) } }
+        requestRaw(conn, "PUT", "/api/skills/${encodeSegment(name)}/tags", body.toString())
+    }
+
+    /** `PUT /api/skills/{name}/channels`，body 同样是裸字符串数组。 */
+    fun setSkillChannels(conn: Connection, name: String, channels: List<String>) {
+        val body = buildJsonArray { channels.forEach { add(it) } }
+        requestRaw(conn, "PUT", "/api/skills/${encodeSegment(name)}/channels", body.toString())
+    }
+
+    /** `GET /api/skills/{name}/files/{path}`。没有目录列举端点，只能按路径单取。 */
+    fun skillFile(conn: Connection, name: String, path: String): String {
+        val segments = path.split('/').filter { it.isNotEmpty() }
+            .joinToString("/") { encodeSegment(it) }
+        val fullPath = "/api/skills/${encodeSegment(name)}/files/$segments"
+        val text = request(conn, "GET", fullPath)
+        return runCatching {
+            json.parseToJsonElement(text).jsonObject["content"]?.jsonPrimitive?.content
+        }.getOrNull().orEmpty()
+    }
+
+    fun skillWorkspaces(conn: Connection): List<SkillWorkspaceDto> = decode(
+        request(conn, "GET", "/api/skills/workspaces"),
+        kotlinx.serialization.builtins.ListSerializer(SkillWorkspaceDto.serializer()),
+    )
+
+    fun poolBuiltinSources(conn: Connection): List<BuiltinSourceDto> = decode(
+        request(conn, "GET", "/api/skills/pool/builtin-sources"),
+        kotlinx.serialization.builtins.ListSerializer(BuiltinSourceDto.serializer()),
+    )
+
+    fun poolBuiltinNotice(conn: Connection): BuiltinNoticeDto = decode(
+        request(conn, "GET", "/api/skills/pool/builtin-notice"),
+        BuiltinNoticeDto.serializer(),
+    )
+
+    fun refreshPoolSkills(conn: Connection): List<PoolSkillDto> = decode(
+        request(conn, "POST", "/api/skills/pool/refresh"),
+        kotlinx.serialization.builtins.ListSerializer(PoolSkillDto.serializer()),
+    )
+
+    /** 新建池技能。重名 409 的 detail 是 `{reason,suggested_name}`。 */
+    fun createPoolSkill(
+        conn: Connection,
+        name: String,
+        content: String,
+        config: JsonObject?,
+    ): String {
+        val body = buildJsonObject {
+            put("name", name)
+            put("content", content)
+            config?.let { put("config", it) }
+        }
+        val text = request(conn, "POST", "/api/skills/pool/create", body)
+        return runCatching {
+            json.parseToJsonElement(text).jsonObject["name"]?.jsonPrimitive?.content
+        }.getOrNull() ?: name
+    }
+
+    /** 保存/另存池技能。[sourceName] 与 [name] 不同表示改名，冲突时带 overwrite。 */
+    fun savePoolSkill(
+        conn: Connection,
+        name: String,
+        content: String,
+        sourceName: String?,
+        config: JsonObject?,
+        overwrite: Boolean,
+    ): String {
+        val body = buildJsonObject {
+            put("name", name)
+            put("content", content)
+            sourceName?.let { put("source_name", it) }
+            config?.let { put("config", it) }
+            put("overwrite", overwrite)
+        }
+        val text = request(conn, "PUT", "/api/skills/pool/save", body)
+        return runCatching {
+            json.parseToJsonElement(text).jsonObject["name"]?.jsonPrimitive?.content
+        }.getOrNull() ?: name
+    }
+
+    fun deletePoolSkill(conn: Connection, name: String) {
+        request(conn, "DELETE", "/api/skills/pool/${encodeSegment(name)}")
+    }
+
+    /** 批量删除池技能，body 是裸字符串数组。 */
+    fun batchDeletePoolSkills(conn: Connection, names: List<String>) {
+        val body = buildJsonArray { names.forEach { add(it) } }
+        requestRaw(conn, "POST", "/api/skills/pool/batch-delete", body.toString())
+    }
+
+    /** `PUT /api/skills/pool/{name}/tags`，body 是裸字符串数组。 */
+    fun setPoolSkillTags(conn: Connection, name: String, tags: List<String>) {
+        val body = buildJsonArray { tags.forEach { add(it) } }
+        requestRaw(conn, "PUT", "/api/skills/pool/${encodeSegment(name)}/tags", body.toString())
+    }
+
+    /** `PUT /api/skills/pool/{name}/automation`，原子提交 auto_update 与 auto_sync。 */
+    fun setPoolSkillAutomation(
+        conn: Connection,
+        name: String,
+        autoUpdate: Boolean?,
+        autoSyncEnabled: Boolean?,
+        autoSyncTargets: List<String>?,
+    ) {
+        val body = buildJsonObject {
+            autoUpdate?.let { put("auto_update", it) }
+            if (autoSyncEnabled != null) {
+                putJsonObject("auto_sync") {
+                    put("enabled", autoSyncEnabled)
+                    autoSyncTargets?.let { targets ->
+                        putJsonArray("targets") { targets.forEach { add(it) } }
+                    }
+                }
+            }
+        }
+        request(conn, "PUT", "/api/skills/pool/${encodeSegment(name)}/automation", body)
+    }
+
+    /** `POST /api/skills/pool/import-builtin`。冲突 409 时 detail 带 `conflicts`。 */
+    fun importBuiltinSkills(
+        conn: Connection,
+        imports: List<Pair<String, String>>,
+        overwrite: Boolean,
+    ): String {
+        val body = buildJsonObject {
+            putJsonArray("imports") {
+                imports.forEach { (skillName, language) ->
+                    addJsonObject {
+                        put("skill_name", skillName)
+                        put("language", language)
+                    }
+                }
+            }
+            put("overwrite_conflicts", overwrite)
+        }
+        return request(conn, "POST", "/api/skills/pool/import-builtin", body)
+    }
+
+    /** `POST /api/skills/pool/{name}/update-builtin`。 */
+    fun updateBuiltinSkill(conn: Connection, name: String, language: String) {
+        request(
+            conn,
+            "POST",
+            "/api/skills/pool/${encodeSegment(name)}/update-builtin",
+            buildJsonObject { put("language", language) },
+        )
+    }
+
+    /** `POST /api/skills/pool/downloads` 异步分发，返回任务句柄。 */
+    fun startPoolDownload(
+        conn: Connection,
+        skillName: String,
+        targets: List<String>,
+        allWorkspaces: Boolean,
+        overwrite: Boolean,
+    ): PoolDownloadJobDto {
+        val body = buildJsonObject {
+            put("skill_name", skillName)
+            putJsonArray("targets") {
+                targets.forEach { addJsonObject { put("workspace_id", it) } }
+            }
+            put("all_workspaces", allWorkspaces)
+            put("overwrite", overwrite)
+            put("preview_only", false)
+        }
+        return decode(
+            request(conn, "POST", "/api/skills/pool/downloads", body),
+            PoolDownloadJobDto.serializer(),
+        )
+    }
+
+    fun poolDownloadStatus(conn: Connection, jobId: String): PoolDownloadJobDto = decode(
+        request(conn, "GET", "/api/skills/pool/downloads/${encodeSegment(jobId)}"),
+        PoolDownloadJobDto.serializer(),
+    )
+
+    fun cancelPoolDownload(conn: Connection, jobId: String): PoolDownloadJobDto = decode(
+        request(conn, "DELETE", "/api/skills/pool/downloads/${encodeSegment(jobId)}"),
+        PoolDownloadJobDto.serializer(),
+    )
+
+    /** 冲突预检：走同步端点 `preview_only=true`。409 的 detail 与广播冲突同形。 */
+    fun previewPoolDownload(
+        conn: Connection,
+        skillName: String,
+        targets: List<String>,
+        allWorkspaces: Boolean,
+    ): String {
+        val body = buildJsonObject {
+            put("skill_name", skillName)
+            putJsonArray("targets") {
+                targets.forEach { addJsonObject { put("workspace_id", it) } }
+            }
+            put("all_workspaces", allWorkspaces)
+            put("overwrite", false)
+            put("preview_only", true)
+        }
+        return try {
+            request(conn, "POST", "/api/skills/pool/download", body)
+        } catch (e: ApiException) {
+            if (e.code == 409) e.detail.orEmpty() else throw e
+        }
+    }
+
+    /** `POST /api/skills/pool/upload`：把一个工作区技能复制进技能池。 */
+    fun uploadPoolSkill(
+        conn: Connection,
+        workspaceId: String,
+        skillName: String,
+        overwrite: Boolean,
+    ): String {
+        val body = buildJsonObject {
+            put("workspace_id", workspaceId)
+            put("skill_name", skillName)
+            put("overwrite", overwrite)
+        }
+        return request(conn, "POST", "/api/skills/pool/upload", body)
     }
 
     /** 技能池列表。池内技能没有 `enabled`，本版只读。 */
@@ -3046,6 +3483,45 @@ class QwenPawApi(
         GitCommitDiffDto.serializer(),
     )
 
+    /** `POST /api/workspace/git/checkout`。`create=true` 时服务端执行 `checkout -b`。 */
+    fun gitCheckout(conn: Connection, branch: String, create: Boolean): GitCheckoutResultDto =
+        decode(
+            request(
+                conn,
+                "POST",
+                "/api/workspace/git/checkout",
+                buildJsonObject {
+                    put("branch", branch)
+                    put("create", create)
+                },
+            ),
+            GitCheckoutResultDto.serializer(),
+        )
+
+    /** `POST /api/workspace/git/discard`。会同时 restore 已跟踪文件与 clean 未跟踪文件。 */
+    fun gitDiscard(conn: Connection, paths: List<String>): GitDiscardResultDto = decode(
+        request(
+            conn,
+            "POST",
+            "/api/workspace/git/discard",
+            buildJsonObject {
+                putJsonArray("paths") { paths.forEach { add(it) } }
+            },
+        ),
+        GitDiscardResultDto.serializer(),
+    )
+
+    /** `POST /api/workspace/git/revert`。服务端会生成一条新提交。 */
+    fun gitRevert(conn: Connection, hash: String): GitRevertResultDto = decode(
+        request(
+            conn,
+            "POST",
+            "/api/workspace/git/revert",
+            buildJsonObject { put("commit_hash", hash) },
+        ),
+        GitRevertResultDto.serializer(),
+    )
+
     // ---------- 插件 SSH ----------
 
     /** 插件 `/ssh/config` 的脱敏目标；未配置时插件回 404。 */
@@ -3160,6 +3636,31 @@ class QwenPawApi(
         json.parseToJsonElement(request(conn, "GET", "/api/config/channels/schemas"))
             .jsonObject
             .mapValues { (_, value) -> value.jsonObject }
+
+    /** `POST …/conflict-check`。只做提示，服务端没有强制覆盖参数。 */
+    fun channelConflictCheck(
+        conn: Connection,
+        name: String,
+        body: JsonObject,
+    ): ChannelConflictDto = decode(
+        request(
+            conn,
+            "POST",
+            "/api/config/channels/${encodeSegment(name)}/conflict-check",
+            body,
+        ),
+        ChannelConflictDto.serializer(),
+    )
+
+    fun channelHealth(conn: Connection, name: String): ChannelHealthDto = decode(
+        request(conn, "GET", "/api/config/channels/${encodeSegment(name)}/health"),
+        ChannelHealthDto.serializer(),
+    )
+
+    fun restartChannel(conn: Connection, name: String): ChannelRestartDto = decode(
+        request(conn, "POST", "/api/config/channels/${encodeSegment(name)}/restart"),
+        ChannelRestartDto.serializer(),
+    )
 
     /** `GET …/qrcode`。不支持的频道服务端回 404。 */
     fun channelQrcode(conn: Connection, name: String): ChannelQrDto = decode(
@@ -3498,6 +3999,67 @@ class QwenPawApi(
                 put("address", address)
                 put("remark", remark)
             },
+        )
+    }
+
+    /** `POST /api/access-control/remark`：更新白/黑名单条目的备注（不是待审批）。 */
+    fun aclListRemark(conn: Connection, channel: String, userId: String, remark: String) {
+        request(
+            conn,
+            "POST",
+            "/api/access-control/remark",
+            buildJsonObject {
+                put("channel", channel)
+                put("user_id", userId)
+                put("remark", remark)
+            },
+        )
+    }
+
+    /** `POST /api/access-control/username`：更新白/黑名单条目的用户名。 */
+    fun aclUsername(conn: Connection, channel: String, userId: String, username: String) {
+        request(
+            conn,
+            "POST",
+            "/api/access-control/username",
+            buildJsonObject {
+                put("channel", channel)
+                put("user_id", userId)
+                put("username", username)
+            },
+        )
+    }
+
+    /** `POST /api/mail-access-control/remark`：更新邮件白/黑名单条目的备注。 */
+    fun mailAclListRemark(conn: Connection, agentId: String, address: String, remark: String) {
+        request(
+            conn,
+            "POST",
+            "/api/mail-access-control/remark",
+            buildJsonObject {
+                put("agent_id", agentId)
+                put("address", address)
+                put("remark", remark)
+            },
+        )
+    }
+
+    fun mailAclAgents(conn: Connection): List<String> = decode(
+        request(conn, "GET", "/api/mail-access-control/agents"),
+        MailAclAgentsDto.serializer(),
+    ).agents
+
+    fun mailAclPauses(conn: Connection): List<MailAclPauseDto> = decode(
+        request(conn, "GET", "/api/mail-access-control/processing-pauses"),
+        ListSerializer(MailAclPauseDto.serializer()),
+    )
+
+    fun mailAclResume(conn: Connection, agentId: String, pauseId: String) {
+        request(
+            conn,
+            "POST",
+            "/api/mail-access-control/processing/${encodeSegment(agentId)}/resume",
+            buildJsonObject { put("pause_id", pauseId) },
         )
     }
 
