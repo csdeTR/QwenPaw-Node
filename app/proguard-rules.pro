@@ -64,8 +64,14 @@
 -keep interface androidx.camera.core.CameraProvider { *; }
 -dontwarn androidx.camera.**
 
-# ML Kit 离线条码模型由 native 代码按类名回查 Java 侧；保留扫描入口与模型类，
-# 否则 release 包扫码会在初始化阶段失败。
--keep class com.google.mlkit.vision.barcode.** { *; }
--keep class com.google.mlkit.vision.common.** { *; }
+# ML Kit 的组件发现按原始类名查找接口与实现；只保留 barcode 包不够，
+# common.sdkinternal.ExecutorSelector 被 R8 改名后会在启动时抛
+# UnsatisfiedDependencyException。common、vision 与 GMS 内部实现一起保留。
+-keep class com.google.mlkit.** { *; }
+-keep interface com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_barcode.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_barcode_bundled.** { *; }
 -dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.internal.mlkit_**
