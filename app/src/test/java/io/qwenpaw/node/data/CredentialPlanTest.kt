@@ -89,20 +89,20 @@ class CredentialPlanTest {
     @Test
     fun `filled token is used as is`() {
         val plan = planCredentials(
-            "", "abc.def", "", "", stored,
+            "", "", "", "", stored,
             mode = CredentialMode.TOKEN,
+            typedToken = "abc.def",
         )
         plan as CredentialPlan.UseToken
         assertEquals("abc.def", plan.token)
     }
 
     @Test
-    fun `token mode reads the token from the password field`() {
-        // 表单在令牌模式下把令牌放在密码框的位置，避免多一个字段；
-        // 这里固定住这条约定，免得以后两边各改一半。
+    fun `token mode reads the token field not the password field`() {
         val plan = planCredentials(
-            "ignored", "tok123", "", "", stored,
+            "ignored", "should-not-be-used", "", "", stored,
             mode = CredentialMode.TOKEN,
+            typedToken = "tok123",
         )
         plan as CredentialPlan.UseToken
         assertEquals("tok123", plan.token)
@@ -113,15 +113,16 @@ class CredentialPlanTest {
         val plan = planCredentials(
             "", "", "", "",
             StoredCredentials(
-                username = null,
+                username = "alice",
                 basicUser = null,
                 basicPassword = null,
                 token = "saved",
             ),
             mode = CredentialMode.TOKEN,
             storedToken = "saved",
+            storedMode = CredentialMode.TOKEN,
         )
-        assertTrue(plan is CredentialPlan.UseExisting)
+        assertTrue("令牌实例的 username 可能非空，不能因此拒绝保留", plan is CredentialPlan.UseExisting)
     }
 
     @Test
@@ -142,16 +143,36 @@ class CredentialPlanTest {
             "alice", "", "", "", stored,
             mode = CredentialMode.TOKEN,
             storedToken = "old",
+            storedMode = CredentialMode.PASSWORD,
         )
         plan as CredentialPlan.Invalid
         assertEquals(R.string.connect_cred_token_required, plan.messageRes)
     }
 
     @Test
+    fun `switching from token to password requires a password`() {
+        val plan = planCredentials(
+            "alice", "", "", "",
+            StoredCredentials(
+                username = "alice",
+                basicUser = null,
+                basicPassword = null,
+                token = "saved",
+            ),
+            mode = CredentialMode.PASSWORD,
+            storedToken = "saved",
+            storedMode = CredentialMode.TOKEN,
+        )
+        plan as CredentialPlan.Invalid
+        assertEquals(R.string.connect_cred_username_password_required, plan.messageRes)
+    }
+
+    @Test
     fun `token mode still resolves proxy credentials`() {
         val plan = planCredentials(
-            "", "tok", "new-proxy", "new-pass", stored,
+            "", "", "new-proxy", "new-pass", stored,
             mode = CredentialMode.TOKEN,
+            typedToken = "tok",
         )
         plan as CredentialPlan.UseToken
         assertEquals("new-proxy", plan.basicUser)

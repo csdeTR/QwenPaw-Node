@@ -11,6 +11,7 @@ import io.qwenpaw.node.data.channel.channelDefaults
 import io.qwenpaw.node.data.channel.channelDisplayNameRes
 import io.qwenpaw.node.data.channel.initialChannelValues
 import io.qwenpaw.node.data.channel.jsonString
+import io.qwenpaw.node.data.channel.keepConsoleEnabled
 import io.qwenpaw.node.data.channel.mergeChannelCredentials
 import io.qwenpaw.node.data.channel.parseChannelFields
 import io.qwenpaw.node.data.channel.qrOutcome
@@ -63,6 +64,14 @@ data class ChannelConfigUiState(
     /** 非空表示二维码面板打开。 */
     val auth: ChannelAuthState? = null,
     val repairing: Boolean = false,
+    /** 插件没装或运行时缺失：显示安装面板，不显示通用错误。 */
+    val missingPlugin: Boolean = false,
+    /** 服务端版本低于门槛：整页提示并隐藏表单与保存。 */
+    val versionUnsupported: Boolean = false,
+    /** 无法确认服务端版本：显示提示但放行。 */
+    val versionUnknown: Boolean = false,
+    /** 服务端版本原文，用于「当前版本 x.y.z」这句提示。 */
+    val serverVersionRaw: String? = null,
 )
 
 /**
@@ -70,10 +79,15 @@ data class ChannelConfigUiState(
  *
  * 服务端 `PUT /channels/{channel}` 是整段替换，因此表单以 GET 到的完整配置为底；
  * 密钥字段的原值只用于回写，不进入可渲染文本。
+ *
+ * 插件缺失时配置 GET 会失败（2.3.0 上回 404），此时状态切到 [ChannelConfigUiState.missingPlugin]，
+ * 由安装面板引导安装，而不是把 404 的通用文案当作配置错误。
  */
 class ChannelConfigViewModel(
     private val api: QwenPawApi,
     private val connection: () -> Connection?,
+    /** 当前实例记录的服务端版本；未接时返回 null，界面按「无法确认」处理。 */
+    private val serverVersion: () -> String? = { null },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(ChannelConfigUiState())
@@ -81,68 +95,106 @@ class ChannelConfigViewModel(
 
     private var pendingSave: JsonObject? = null
     private var pollJob: Job? = null
+    private var reloadJob: Job? = null
+    private var repairJob: Job? = null
     private val pollIntervalMs = 2_000L
     private val maxPolls = 300
 
     fun open(channelKey: String, label: String? = null) {
         val conn = connection() ?: return
+        val version = serverVersion()
+        val gate = channelVersionGate(version)
         _state.value = ChannelConfigUiState(
             channelKey = channelKey,
             label = label.orEmpty(),
-            loading = true,
+            loading = gate != ChannelVersionGate.UNSUPPORTED,
+            loaded = gate == ChannelVersionGate.UNSUPPORTED,
+            versionUnsupported = gate == ChannelVersionGate.UNSUPPORTED,
+            versionUnknown = gate == ChannelVersionGate.UNKNOWN,
+            serverVersionRaw = version,
         )
-        scope.launch {
-            val fetched = withContext(Dispatchers.IO) {
-                coroutineScope {
-                    val schemas = async { runCatching { api.channelSchemas(conn) } }
-                    val config = async { runCatching { api.channel(conn, channelKey) } }
-                    val health = async { runCatching { api.channelHealth(conn, channelKey) } }
-                    Triple(schemas.await(), config.await(), health.await())
-                }
+        if (gate == ChannelVersionGate.UNSUPPORTED) return
+        scope.launch { load(conn) }
+    }
+
+    /**
+     * 读取 schema、配置与运行状态。
+     *
+     * 配置读取失败时先看 schema 的行状态：缺插件就走安装面板，只有其余失败才交给 [ErrorText]。
+     */
+    private suspend fun load(conn: Connection) {
+        val key = _state.value.channelKey
+        val fetched = withContext(Dispatchers.IO) {
+            coroutineScope {
+                val schemas = async { runCatching { api.channelSchemas(conn) } }
+                val config = async { runCatching { api.channel(conn, key) } }
+                val health = async { runCatching { api.channelHealth(conn, key) } }
+                Triple(schemas.await(), config.await(), health.await())
             }
-            val schema = fetched.first.getOrNull()?.get(channelKey)
-            val config = fetched.second.getOrNull()
-            val failure = fetched.second.exceptionOrNull()
-            if (config == null) {
+        }
+        val schema = fetched.first.getOrNull()?.get(key)
+        val config = fetched.second.getOrNull()
+        val capability = channelCapability(key, schema)
+        if (config == null) {
+            if (capability.missingPlugin) {
+                _state.update {
+                    it.copy(
+                        label = it.label.ifBlank {
+                            channelDisplayNameRes(key)?.let(Texts::get) ?: capability.label ?: key
+                        },
+                        loading = false,
+                        loaded = true,
+                        error = null,
+                        missingPlugin = true,
+                        availability = capability.availability,
+                        diagnostic = capability.diagnostic,
+                        qrAvailable = capability.qrAvailable,
+                        repairAction = capability.repairAction,
+                        pluginId = capability.pluginId,
+                        repairSource = capability.repairSource,
+                    )
+                }
+            } else {
                 _state.update {
                     it.copy(
                         loading = false,
                         loaded = true,
-                        error = failure?.let(ErrorText::of)
+                        missingPlugin = false,
+                        error = fetched.second.exceptionOrNull()?.let(ErrorText::of)
                             ?: Texts.get(R.string.channel_config_load_failed),
                     )
                 }
-                return@launch
             }
-            val fields = parseChannelFields(schema)
-            val defaults = channelDefaults(schema)
-            val capability = channelCapability(channelKey, schema)
-            _state.update {
-                it.copy(
-                    label = it.label.ifBlank {
-                        channelDisplayNameRes(channelKey)?.let(Texts::get)
-                            ?: capability.label
-                            ?: channelKey
-                    },
-                    fields = fields,
-                    values = initialChannelValues(fields, config, defaults),
-                    original = config,
-                    availability = capability.availability,
-                    diagnostic = capability.diagnostic,
-                    qrAvailable = capability.qrAvailable,
-                    repairAction = capability.repairAction,
-                    pluginId = capability.pluginId,
-                    repairSource = capability.repairSource,
-                    health = fetched.third.getOrNull(),
-                    loading = false,
-                    loaded = true,
-                    error = if (fields.isEmpty()) {
-                        Texts.get(R.string.channel_config_fields_missing)
-                    } else {
-                        null
-                    },
-                )
-            }
+            return
+        }
+        val fields = parseChannelFields(schema)
+        val defaults = channelDefaults(schema)
+        _state.update {
+            it.copy(
+                label = it.label.ifBlank {
+                    channelDisplayNameRes(key)?.let(Texts::get)
+                        ?: capability.label
+                        ?: key
+                },
+                fields = fields,
+                values = initialChannelValues(fields, config, defaults),
+                original = config,
+                availability = capability.availability,
+                diagnostic = capability.diagnostic,
+                qrAvailable = capability.qrAvailable,
+                repairAction = capability.repairAction,
+                pluginId = capability.pluginId,
+                repairSource = capability.repairSource,
+                health = fetched.third.getOrNull() ?: it.health,
+                loading = false,
+                loaded = true,
+                missingPlugin = false,
+                error = if (fields.isEmpty()) {
+                    Texts.get(R.string.channel_config_fields_missing)
+                } else {
+                    null
+                },
+            )
         }
     }
 
@@ -221,7 +273,10 @@ class ChannelConfigViewModel(
                 _state.update { it.copy(fieldErrors = payload.errors, error = null) }
             }
 
-            is ChannelPayloadResult.Ok -> checkConflictThenSave(conn, payload.body)
+            is ChannelPayloadResult.Ok -> {
+                // console 停用后手机端就进不去配置，冲突检查与写入都必须用强制启用后的 body。
+                checkConflictThenSave(conn, keepConsoleEnabled(current.channelKey, payload.body))
+            }
         }
     }
 
@@ -280,33 +335,10 @@ class ChannelConfigViewModel(
         }
     }
 
+    /** 重新读取表单。安装、保存与二维码写回之后都走这里，判定规则只保留一份。 */
     private fun reload(conn: Connection) {
-        val key = _state.value.channelKey
-        scope.launch {
-            val fetched = withContext(Dispatchers.IO) {
-                coroutineScope {
-                    val schemas = async { runCatching { api.channelSchemas(conn) } }
-                    val config = async { runCatching { api.channel(conn, key) } }
-                    val health = async { runCatching { api.channelHealth(conn, key) } }
-                    Triple(schemas.await(), config.await(), health.await())
-                }
-            }
-            val schema = fetched.first.getOrNull()?.get(key)
-            val config = fetched.second.getOrNull() ?: return@launch
-            val fields = parseChannelFields(schema)
-            _state.update {
-                it.copy(
-                    fields = fields,
-                    values = initialChannelValues(
-                        fields,
-                        config,
-                        channelDefaults(schema),
-                    ),
-                    original = config,
-                    health = fetched.third.getOrNull() ?: it.health,
-                )
-            }
-        }
+        reloadJob?.cancel()
+        reloadJob = scope.launch { load(conn) }
     }
 
     fun refreshHealth() {
@@ -526,7 +558,9 @@ class ChannelConfigViewModel(
         val conn = connection() ?: return
         if (current.repairing) return
         _state.update { it.copy(repairing = true, error = null, notice = null) }
-        scope.launch {
+        // 上一轮安装的复查还在等时重新发起，只保留最新一轮，避免两套复查交错刷新。
+        repairJob?.cancel()
+        repairJob = scope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     when (action) {
@@ -551,6 +585,10 @@ class ChannelConfigViewModel(
                     }
                 }
             }
+            val failure = result.exceptionOrNull()
+            // 服务端同一时间只跑一个插件任务；「已有任务在运行」时保留原文并提示等待，
+            // 不再进入后面的连续复查，否则只会反复拿到同一条 409。
+            val taskRunning = isPluginTaskRunning(failure?.let(::pluginErrorRaw))
             _state.update {
                 it.copy(
                     repairing = false,
@@ -563,7 +601,11 @@ class ChannelConfigViewModel(
                     } else {
                         it.notice
                     },
-                    error = result.exceptionOrNull()?.let(ErrorText::of),
+                    error = when {
+                        failure == null -> null
+                        taskRunning -> repairTaskRunningText(pluginErrorRaw(failure))
+                        else -> ErrorText.of(failure)
+                    },
                 )
             }
             if (result.isSuccess) {
@@ -580,6 +622,9 @@ class ChannelConfigViewModel(
     }
 
     fun clear() {
+        pollJob?.cancel()
+        reloadJob?.cancel()
+        repairJob?.cancel()
         _state.value = ChannelConfigUiState()
         pendingSave = null
     }

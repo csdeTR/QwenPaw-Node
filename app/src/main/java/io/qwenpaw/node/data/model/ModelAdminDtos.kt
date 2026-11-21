@@ -2,6 +2,7 @@ package io.qwenpaw.node.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 /** `GET /api/models/model-templates` 的条目。 */
 @Serializable
@@ -39,7 +40,29 @@ data class PoolModelDto(
     @SerialName("is_free") val isFree: Boolean = false,
     @SerialName("is_recommended") val isRecommended: Boolean = false,
     @SerialName("supports_image") val supportsImage: Boolean? = null,
+    @SerialName("supports_audio") val supportsAudio: Boolean? = null,
     @SerialName("supports_video") val supportsVideo: Boolean? = null,
+    @SerialName("supports_tool_calling") val supportsToolCalling: Boolean? = null,
+    @SerialName("max_input_length") val maxInputLength: Long? = null,
+    @SerialName("effective_max_input_length") val effectiveMaxInputLength: Long? = null,
+    @SerialName("automatic_max_input_length") val automaticMaxInputLength: Long? = null,
+    @SerialName("max_input_length_auto_detected") val maxInputLengthAutoDetected: Long? = null,
+    @SerialName("max_input_length_configured") val maxInputLengthConfigured: Boolean = false,
+    @SerialName("context_length_source") val contextLengthSource: String? = null,
+    @SerialName("max_output_length") val maxOutputLength: Long? = null,
+    @SerialName("max_output_length_source") val maxOutputLengthSource: String? = null,
+    @SerialName("config_overrides") val configOverrides: List<String> = emptyList(),
+    @SerialName("thinking_control") val thinkingControl: ThinkingControlDto? = null,
+    @SerialName("thinking_enabled") val thinkingEnabled: Boolean? = null,
+    @SerialName("thinking_budget") val thinkingBudget: Long? = null,
+    @SerialName("reasoning_effort") val reasoningEffort: String? = null,
+    @SerialName("relay_reasoning") val relayReasoning: Boolean? = null,
+    @SerialName("generate_kwargs") val generateKwargs: JsonObject? = null,
+    @SerialName("thinking_param_style") val thinkingParamStyle: String? = null,
+    @SerialName("reasoning_effort_options") val reasoningEffortOptions: List<String> = emptyList(),
+    @SerialName("thinking_budget_range") val thinkingBudgetRange: List<Long> = emptyList(),
+    @SerialName("requires_paid_confirmation") val requiresPaidConfirmation: Boolean = false,
+    @SerialName("remote_missing") val remoteMissing: Boolean = false,
 )
 
 @Serializable

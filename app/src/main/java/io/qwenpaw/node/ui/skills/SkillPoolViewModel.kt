@@ -95,12 +95,27 @@ data class SkillPoolUiState(
     val batchSelected: Set<String> = emptySet(),
     val uploading: Boolean = false,
     val zipImporting: Boolean = false,
+    /** 旧的弹窗开关；导入改为独立页面后仍保留，便于宿主判断导入流程是否在进行。 */
     val uploadOpen: Boolean = false,
     val uploadWorkspace: String = "",
-    val uploadSkill: String = "",
+    /** 导入页第二步多选的技能；切换工作区与导入成功后清空，失败项保留。 */
+    val uploadSkills: Set<String> = emptySet(),
+    val uploadWorkspaceQuery: String = "",
+    val uploadSkillQuery: String = "",
     val uploadOverwrite: Boolean = false,
     val reconciling: Boolean = false,
 )
+
+/** 导入页第一步：按搜索词过滤工作区，名称与 ID 都参与匹配。 */
+internal fun SkillPoolUiState.filteredUploadWorkspaces(): List<SkillWorkspaceDto> =
+    workspaces.filter { SkillSelection.matches(uploadWorkspaceQuery, it.agentName, it.agentId) }
+
+/** 导入页第二步：所选工作区的技能，再按搜索词过滤；顺序沿用服务端返回。 */
+internal fun SkillPoolUiState.uploadSkillCandidates(): List<String> =
+    SkillSelection.filterNames(
+        workspaces.firstOrNull { it.agentId == uploadWorkspace }?.skillNames.orEmpty(),
+        uploadSkillQuery,
+    )
 
 /**
  * 技能池管理与自动化。
@@ -442,6 +457,30 @@ class SkillPoolViewModel(
         }
     }
 
+    /** 全选当前池内全部技能。 */
+    fun selectAllSkills() {
+        _state.update {
+            it.copy(batchSelected = SkillSelection.selectAll(it.pool.map { skill -> skill.name }))
+        }
+    }
+
+    /** 反选：池内未选的选中、已选的取消；池内已不存在的历史选择被丢弃。 */
+    fun invertSelection() {
+        _state.update {
+            it.copy(
+                batchSelected = SkillSelection.invert(
+                    it.batchSelected,
+                    it.pool.map { skill -> skill.name },
+                ),
+            )
+        }
+    }
+
+    /** 全不选。 */
+    fun clearSelection() {
+        _state.update { it.copy(batchSelected = SkillSelection.clear()) }
+    }
+
     fun batchDelete() {
         val conn = connection() ?: return
         val names = _state.value.batchSelected.toList()
@@ -608,64 +647,133 @@ class SkillPoolViewModel(
         _state.update { it.copy(message = null, error = null) }
     }
 
+    /** 进入「从工作区导入」：清空上一次的工作区、选择与搜索词，入口由此固定落在第一步。 */
     fun openUpload() {
         _state.update {
             it.copy(
                 uploadOpen = true,
-                uploadWorkspace = it.workspaces.firstOrNull()?.agentId.orEmpty(),
-                uploadSkill = "",
+                uploadWorkspace = "",
+                uploadSkills = emptySet(),
+                uploadWorkspaceQuery = "",
+                uploadSkillQuery = "",
+                uploadOverwrite = false,
+                error = null,
+                message = null,
+            )
+        }
+        if (_state.value.workspaces.isEmpty()) refresh()
+    }
+
+    fun closeUpload() {
+        _state.update {
+            it.copy(
+                uploadOpen = false,
+                uploadWorkspace = "",
+                uploadSkills = emptySet(),
+                uploadWorkspaceQuery = "",
+                uploadSkillQuery = "",
                 uploadOverwrite = false,
             )
         }
     }
 
-    fun closeUpload() {
-        _state.update { it.copy(uploadOpen = false, uploadSkill = "", uploadOverwrite = false) }
-    }
-
+    /** 选中工作区时清空技能选择与搜索词，避免把上一个工作区的技能名带进来。 */
     fun setUploadWorkspace(agentId: String) {
-        _state.update { it.copy(uploadWorkspace = agentId, uploadSkill = "") }
+        _state.update {
+            it.copy(uploadWorkspace = agentId, uploadSkills = emptySet(), uploadSkillQuery = "")
+        }
     }
 
+    fun setUploadWorkspaceQuery(value: String) {
+        _state.update { it.copy(uploadWorkspaceQuery = value) }
+    }
+
+    fun setUploadSkillQuery(value: String) {
+        _state.update { it.copy(uploadSkillQuery = value) }
+    }
+
+    fun toggleUploadSkill(skillName: String) {
+        _state.update {
+            val next = if (skillName in it.uploadSkills) {
+                it.uploadSkills - skillName
+            } else {
+                it.uploadSkills + skillName
+            }
+            it.copy(uploadSkills = next)
+        }
+    }
+
+    /** 旧的单选入口：清空后只选中这一项。 */
     fun setUploadSkill(skillName: String) {
-        _state.update { it.copy(uploadSkill = skillName) }
+        _state.update {
+            it.copy(uploadSkills = if (skillName.isBlank()) emptySet() else setOf(skillName))
+        }
+    }
+
+    /** 全选当前可见（已按搜索词过滤）的技能。 */
+    fun selectAllUploadSkills() {
+        _state.update {
+            it.copy(uploadSkills = SkillSelection.selectAll(it.uploadSkillCandidates()))
+        }
+    }
+
+    fun clearUploadSkills() {
+        _state.update { it.copy(uploadSkills = SkillSelection.clear()) }
     }
 
     fun setUploadOverwrite(value: Boolean) {
         _state.update { it.copy(uploadOverwrite = value) }
     }
 
-    fun confirmUpload() {
+    /**
+     * 逐个上传所选技能。
+     *
+     * `POST /api/skills/pool/upload` 一次只接受一个技能名，因此按工作区清单的顺序串行调用。
+     * 全部成功时清空选择并回调 [onImported]；部分失败时失败项留在选中集里便于重试，
+     * 由宿主决定是否停留在导入页。
+     */
+    fun confirmUpload(onImported: () -> Unit = {}) {
         val conn = connection() ?: return
         val current = _state.value
-        if (current.uploadWorkspace.isBlank() || current.uploadSkill.isBlank()) return
-        _state.update { it.copy(uploading = true, error = null) }
+        val workspace = current.uploadWorkspace
+        val ordered = current.workspaces
+            .firstOrNull { it.agentId == workspace }
+            ?.skillNames
+            ?.filter { it in current.uploadSkills }
+            .orEmpty()
+        val names = ordered.ifEmpty { current.uploadSkills.toList() }
+        if (workspace.isBlank() || names.isEmpty() || current.uploading) return
+        _state.update { it.copy(uploading = true, error = null, message = null) }
         scope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    api.uploadPoolSkill(
-                        conn,
-                        current.uploadWorkspace,
-                        current.uploadSkill,
-                        current.uploadOverwrite,
-                    )
+            val results = withContext(Dispatchers.IO) {
+                names.map { name ->
+                    name to runCatching {
+                        api.uploadPoolSkill(conn, workspace, name, current.uploadOverwrite)
+                    }
                 }
+            }
+            val succeeded = results.filter { it.second.isSuccess }.map { it.first }
+            val failed = results.filter { it.second.isFailure }.map { it.first }
+            val message = when {
+                succeeded.isEmpty() -> _state.value.message
+                succeeded.size == 1 -> Texts.get(R.string.skill_pool_upload_done, succeeded.first())
+                else -> Texts.get(R.string.skill_pool_upload_done_many, succeeded.size)
             }
             _state.update {
                 it.copy(
                     uploading = false,
-                    uploadOpen = false,
-                    uploadSkill = "",
-                    uploadOverwrite = false,
-                    message = if (result.isSuccess) {
-                        Texts.get(R.string.skill_pool_upload_done, current.uploadSkill)
-                    } else {
-                        it.message
-                    },
-                    error = result.exceptionOrNull()?.let(ErrorText::of),
+                    uploadSkills = failed.toSet(),
+                    message = message,
+                    error = results.firstNotNullOfOrNull { pair -> pair.second.exceptionOrNull() }
+                        ?.let(ErrorText::of),
                 )
             }
-            if (result.isSuccess) refresh()
+            if (failed.isEmpty()) {
+                refresh()
+                onImported()
+            } else if (succeeded.isNotEmpty()) {
+                refresh()
+            }
         }
     }
 

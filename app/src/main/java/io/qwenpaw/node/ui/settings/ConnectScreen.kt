@@ -111,8 +111,12 @@ fun InstanceForm(
     ) -> io.qwenpaw.node.data.VerifyResult,
     /** 编辑页传入已保存实例的 token；新增实例时为 null。 */
     verifyToken: String? = null,
-    /** 已有凭据时优先用它拉列表（编辑已有实例）。 */
-    loadAgentsWithToken: (suspend () -> List<AgentDto>)? = null,
+    /** 已有凭据或本次输入的令牌，优先用它拉列表。 */
+    loadAgentsWithToken: (suspend (
+        hosts: List<String>,
+        token: String,
+        basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
+    ) -> List<AgentDto>)? = null,
     /** 当前网络，用于地址编辑区提示「这条现在会被优先使用」。 */
     currentNetKind: String = NetworkMonitor.Snapshot.KIND_OTHER,
     currentSsid: String? = null,
@@ -145,7 +149,8 @@ fun InstanceForm(
     // 令牌是否由本次扫码填入；编辑页据此提示「留空保留原值」的时机。
     var tokenFromScan by remember { mutableStateOf(false) }
     var agentId by remember { mutableStateOf(initialAgentId) }
-    var advanced by remember { mutableStateOf(false) }
+    // 编辑令牌实例时直接把令牌区展开：否则用户要先去「高级选项」里找。
+    var advanced by remember { mutableStateOf(initialMode == io.qwenpaw.node.data.CredentialMode.TOKEN) }
     var showProxyAuth by remember { mutableStateOf(false) }
     var fixedPunctuation by remember { mutableStateOf(false) }
     // 反向代理的 HTTP Basic 凭据，收在「高级选项」里。
@@ -295,14 +300,26 @@ fun InstanceForm(
         loadingAgents = true
         agentError = null
         scope.launch {
-            // 优先用已有凭据；失败再回退到「地址 + 手填账号」这条路。
-            val byToken = loadAgentsWithToken?.let { loader ->
-                runCatching { loader() }.getOrNull()
+            // 令牌能用就优先用令牌。令牌模式失败时不再回退到空账号密码：
+            // 那样会把「令牌无效」伪装成「请填写账号密码」。
+            val token = activeToken()?.takeIf { it.isNotBlank() }
+            val tokenAttempt = if (token != null && loadAgentsWithToken != null) {
+                runCatching { loadAgentsWithToken(effectiveUrls, token, proxyAuth()) }
+            } else {
+                null
             }
-            val list = byToken?.takeIf { it.isNotEmpty() }
-                ?: runCatching { onLoadAgents(effectiveUrls, username, password, proxyAuth()) }
+            val list = when {
+                tokenAttempt?.isSuccess == true -> tokenAttempt.getOrDefault(emptyList())
+                tokenAttempt?.isFailure == true && mode == io.qwenpaw.node.data.CredentialMode.TOKEN -> {
+                    agentError = io.qwenpaw.node.data.remote.ErrorText.of(
+                        tokenAttempt.exceptionOrNull()!!,
+                    )
+                    emptyList()
+                }
+                else -> runCatching { onLoadAgents(effectiveUrls, username, password, proxyAuth()) }
                     .onFailure { e -> agentError = io.qwenpaw.node.data.remote.ErrorText.of(e) }
                     .getOrDefault(emptyList())
+            }
             agents = list
             if (list.size == 1) agentId = list.first().id
             loadingAgents = false
@@ -583,6 +600,7 @@ fun InstanceForm(
                         scanned = tokenFromScan,
                         canScan = onOpenScanner != null,
                         onScan = onOpenScanner,
+                        hasSavedToken = !verifyToken.isNullOrBlank(),
                     )
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1161,6 +1179,7 @@ private fun TokenCredentialFields(
     scanned: Boolean,
     canScan: Boolean,
     onScan: (() -> Unit)?,
+    hasSavedToken: Boolean,
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1199,6 +1218,14 @@ private fun TokenCredentialFields(
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     )
+    if (hasSavedToken && token.isBlank()) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.connect_token_keep),
+            style = MaterialTheme.typography.labelSmall,
+            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+        )
+    }
     Spacer(Modifier.height(8.dp))
     Row(
         modifier = Modifier.fillMaxWidth(),

@@ -1,14 +1,18 @@
 package io.qwenpaw.node.ui.settings
 
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.model.BaseUrlOptionDto
 import io.qwenpaw.node.data.model.DiscoverModelsResultDto
 import io.qwenpaw.node.data.model.ModelPoolPageDto
+import io.qwenpaw.node.data.model.ModelSlotDto
 import io.qwenpaw.node.data.model.ModelTemplateDto
 import io.qwenpaw.node.data.model.OAuthStartDto
 import io.qwenpaw.node.data.model.OAuthStatusDto
+import io.qwenpaw.node.data.model.PoolModelDto
 import io.qwenpaw.node.data.model.ProbeMultimodalDto
 import io.qwenpaw.node.data.model.ProviderDto
 import io.qwenpaw.node.data.model.TestConnectionDto
+import io.qwenpaw.node.data.model.selectedModelIds as selectedIdsOf
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -28,9 +32,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
 enum class ModelsAdminTab { CONFIG, MODELS, POOL }
@@ -54,6 +61,61 @@ data class OAuthUi(
     val error: String? = null,
 )
 
+/** 模型详情表单。可空能力用 null 表示「自动」。 */
+data class ModelDetailDraft(
+    val modelType: String = "chat",
+    val supportsImage: Boolean? = null,
+    val supportsAudio: Boolean? = null,
+    val supportsVideo: Boolean? = null,
+    val supportsToolCalling: Boolean? = null,
+    val maxInput: String = "",
+    val maxOutput: String = "",
+    val thinkingKind: String = "unknown",
+    val thinkingWire: String = "",
+    val thinkingEfforts: Set<String> = emptySet(),
+    val thinkingSupportsOff: Boolean = false,
+    val thinkingBudgetMin: String = "",
+    val thinkingBudgetMax: String = "",
+    val thinkingEnabled: Boolean? = null,
+    val thinkingBudget: String = "",
+    val reasoningEffort: String = "",
+    val relayReasoning: Boolean = true,
+    val generateKwargs: String = "{}",
+) {
+    companion object {
+        fun from(model: PoolModelDto): ModelDetailDraft {
+            val control = model.thinkingControl
+            val kwargs = model.generateKwargs ?: JsonObject(emptyMap())
+            val maxTokens = (kwargs["max_tokens"] as? JsonPrimitive)?.contentOrNull
+            val withoutMaxTokens = JsonObject(kwargs.filterKeys { it != "max_tokens" })
+            return ModelDetailDraft(
+                modelType = model.modelType.ifBlank { "chat" },
+                supportsImage = model.supportsImage,
+                supportsAudio = model.supportsAudio,
+                supportsVideo = model.supportsVideo,
+                supportsToolCalling = model.supportsToolCalling,
+                maxInput = if (model.maxInputLengthConfigured) {
+                    (model.maxInputLength ?: model.effectiveMaxInputLength)?.toString().orEmpty()
+                } else {
+                    ""
+                },
+                maxOutput = maxTokens.orEmpty(),
+                thinkingKind = control?.kind ?: "unknown",
+                thinkingWire = control?.wire.orEmpty(),
+                thinkingEfforts = control?.efforts?.toSet().orEmpty(),
+                thinkingSupportsOff = control?.supportsOff ?: false,
+                thinkingBudgetMin = control?.budgetMin?.toString().orEmpty(),
+                thinkingBudgetMax = control?.budgetMax?.toString().orEmpty(),
+                thinkingEnabled = model.thinkingEnabled,
+                thinkingBudget = model.thinkingBudget?.toString().orEmpty(),
+                reasoningEffort = model.reasoningEffort.orEmpty(),
+                relayReasoning = model.relayReasoning ?: true,
+                generateKwargs = formatJsonObject(withoutMaxTokens),
+            )
+        }
+    }
+}
+
 data class ModelsAdminUiState(
     val providerId: String = "",
     val providerName: String = "",
@@ -63,6 +125,8 @@ data class ModelsAdminUiState(
     val name: String = "",
     val baseUrl: String = "",
     val freezeUrl: Boolean = false,
+    val baseUrlOptions: List<BaseUrlOptionDto> = emptyList(),
+    val isQwenPawLocal: Boolean = false,
     val apiKey: SecretDraft = SecretDraft(),
     val authMode: String = "api_key",
     val chatModel: String = "",
@@ -77,6 +141,9 @@ data class ModelsAdminUiState(
     val poolFamily: String = "all",
     val poolTab: String = "all",
     val poolLoading: Boolean = false,
+    val selectedModelIds: Set<String> = emptySet(),
+    val detail: PoolModelDto? = null,
+    val detailDraft: ModelDetailDraft? = null,
     val editing: ModelEditState? = null,
     val adding: Boolean = false,
     val discover: DiscoverModelsResultDto? = null,
@@ -106,6 +173,7 @@ class ModelsAdminViewModel(
     private val _state = MutableStateFlow(ModelsAdminUiState())
     val state: StateFlow<ModelsAdminUiState> = _state.asStateFlow()
     private var oauthJob: Job? = null
+    private var poolReloadJob: Job? = null
 
     fun open(providerId: String) {
         val conn = connection() ?: return
@@ -129,6 +197,9 @@ class ModelsAdminViewModel(
                 name = provider?.name.orEmpty(),
                 baseUrl = provider?.baseUrl.orEmpty(),
                 freezeUrl = provider?.freezeUrl == true,
+                baseUrlOptions = provider?.meta?.baseUrlOptions.orEmpty(),
+                isQwenPawLocal = providerId == "qwenpaw-local" || providerId == "copaw-local",
+                selectedModelIds = provider?.let(::selectedIdsOf).orEmpty(),
                 apiKey = SecretDraft(original = ""),
                 authMode = provider?.authMode ?: "api_key",
                 chatModel = provider?.chatModel.orEmpty(),
@@ -216,7 +287,10 @@ class ModelsAdminViewModel(
         val baseUrlChanged = !current.freezeUrl && current.baseUrl != provider?.baseUrl.orEmpty()
         val autoDiscover = baseUrlChanged || secretWireValue(current.apiKey) != null
         val body = buildJsonObject {
-            put("enabled", current.enabled)
+            // QwenPaw Local 不能停用；其余提供商只在真的改过时提交 enabled。
+            if (!current.isQwenPawLocal && current.enabled != (provider?.enabled ?: true)) {
+                put("enabled", current.enabled)
+            }
             if (current.isCustom && current.name != provider?.name.orEmpty()) {
                 put("name", current.name)
             }
@@ -230,7 +304,7 @@ class ModelsAdminViewModel(
             secretWireValue(current.apiKey)?.let { put("api_key", it) }
             if (headers != baselineHeaders) put("custom_headers", headers)
             if (kwargs != baselineKwargs) put("generate_kwargs", kwargs)
-            put("auto_discover", autoDiscover)
+            if (autoDiscover) put("auto_discover", true)
         }
         if (body.isEmpty()) {
             _state.update { it.copy(notice = Texts.get(R.string.models_admin_no_changes)) }
@@ -390,9 +464,30 @@ class ModelsAdminViewModel(
         }
     }
 
-    fun setPoolSearch(value: String) = _state.update { it.copy(poolSearch = value) }
-    fun setPoolFamily(value: String) = _state.update { it.copy(poolFamily = value) }
-    fun setPoolTab(value: String) = _state.update { it.copy(poolTab = value) }
+    fun setPoolSearch(value: String) {
+        _state.update { it.copy(poolSearch = value) }
+        schedulePoolReload()
+    }
+
+    fun setPoolFamily(value: String) {
+        _state.update { it.copy(poolFamily = value) }
+        schedulePoolReload()
+    }
+
+    fun setPoolTab(value: String) {
+        _state.update { it.copy(poolTab = value) }
+        schedulePoolReload()
+    }
+
+    /** 筛选变化立刻重新请求；250ms 防抖避免输入每个字都打一次接口。 */
+    private fun schedulePoolReload() {
+        poolReloadJob?.cancel()
+        poolReloadJob = scope.launch {
+            delay(250)
+            loadPoolPage(0)
+        }
+    }
+
     fun loadPoolPage(offset: Int) {
         val conn = connection() ?: return
         val providerId = _state.value.providerId
@@ -411,7 +506,11 @@ class ModelsAdminViewModel(
                 }
             }
             _state.update {
-                it.copy(pool = result.getOrDefault(ModelPoolPageDto()), poolLoading = false, error = result.exceptionOrNull()?.let(ErrorText::of))
+                it.copy(
+                    pool = result.getOrDefault(ModelPoolPageDto()),
+                    poolLoading = false,
+                    error = result.exceptionOrNull()?.let(ErrorText::of) ?: it.error,
+                )
             }
         }
     }
@@ -423,18 +522,166 @@ class ModelsAdminViewModel(
             val result = runCatching {
                 withContext(Dispatchers.IO) { api.selectAllPoolModels(conn, providerId, selected) }
             }
-            if (result.isSuccess) loadPoolPage(_state.value.pool.offset)
+            if (result.isSuccess) {
+                refreshProvider(conn, providerId)
+                loadPoolPage(0)
+            } else {
+                _state.update {
+                    it.copy(error = result.exceptionOrNull()?.let(ErrorText::of))
+                }
+            }
         }
     }
 
     fun selectPoolModel(modelId: String, selected: Boolean) {
         val conn = connection() ?: return
         val providerId = _state.value.providerId
+        val before = _state.value.selectedModelIds
+        _state.update {
+            it.copy(
+                selectedModelIds = if (selected) it.selectedModelIds + modelId
+                else it.selectedModelIds - modelId,
+                error = null,
+            )
+        }
         scope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) { api.selectPoolModel(conn, providerId, modelId, selected) }
             }
-            if (result.isSuccess) loadPoolPage(_state.value.pool.offset)
+            if (result.isSuccess) {
+                refreshProvider(conn, providerId)
+                loadPoolPage(_state.value.pool.offset)
+            } else {
+                _state.update {
+                    it.copy(
+                        selectedModelIds = before,
+                        error = result.exceptionOrNull()?.let(ErrorText::of),
+                    )
+                }
+            }
+        }
+    }
+
+    /** 选择后只刷新 provider 与已选集合，不重置配置表单里正在编辑的内容。 */
+    private fun refreshProvider(conn: Connection, providerId: String) {
+        scope.launch {
+            val providers = runCatching {
+                withContext(Dispatchers.IO) { api.providers(conn) }
+            }.getOrNull() ?: return@launch
+            val provider = providers.firstOrNull { it.id == providerId } ?: return@launch
+            _state.update {
+                it.copy(
+                    provider = provider,
+                    providerName = provider.name.ifBlank { providerId },
+                    selectedModelIds = selectedIdsOf(provider),
+                )
+            }
+        }
+    }
+
+    fun openModelDetail(model: PoolModelDto) {
+        _state.update {
+            it.copy(detail = model, detailDraft = ModelDetailDraft.from(model), error = null)
+        }
+    }
+
+    fun closeModelDetail() = _state.update { it.copy(detail = null, detailDraft = null) }
+
+    fun updateModelDetail(transform: (ModelDetailDraft) -> ModelDetailDraft) = _state.update {
+        val draft = it.detailDraft ?: return@update it
+        it.copy(detailDraft = transform(draft))
+    }
+
+    fun saveModelDetail() {
+        val conn = connection() ?: return
+        val current = _state.value
+        val model = current.detail ?: return
+        val draft = current.detailDraft ?: return
+        val kwargs = parseJsonObjectOrNull(draft.generateKwargs)
+        if (kwargs == null) {
+            _state.update { it.copy(error = Texts.get(R.string.models_admin_invalid_json)) }
+            return
+        }
+        val maxInput = draft.maxInput.trim()
+        if (maxInput.isNotEmpty() && (maxInput.toLongOrNull() == null || maxInput.toLong() < 1000)) {
+            _state.update { it.copy(error = Texts.get(R.string.models_model_max_input_invalid)) }
+            return
+        }
+        val maxOutput = draft.maxOutput.trim().toLongOrNull()
+        val finalKwargs = JsonObject(
+            kwargs.toMutableMap().apply {
+                if (maxOutput != null) {
+                    put("max_tokens", JsonPrimitive(maxOutput))
+                } else {
+                    remove("max_tokens")
+                }
+            },
+        )
+        val thinkingControl = buildJsonObject {
+            put("kind", draft.thinkingKind)
+            if (draft.thinkingWire.isNotBlank()) put("wire", draft.thinkingWire)
+            if (draft.thinkingKind == "effort") {
+                put("efforts", JsonArray(draft.thinkingEfforts.map { JsonPrimitive(it) }))
+            }
+            if (draft.thinkingKind == "budget") {
+                draft.thinkingBudgetMin.toLongOrNull()?.let { put("budget_min", it) }
+                draft.thinkingBudgetMax.toLongOrNull()?.let { put("budget_max", it) }
+            }
+            put("supports_off", draft.thinkingSupportsOff)
+        }
+        val body = buildJsonObject {
+            put("model_type", draft.modelType)
+            put("supports_image", draft.supportsImage?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("supports_audio", draft.supportsAudio?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("supports_video", draft.supportsVideo?.let { JsonPrimitive(it) } ?: JsonNull)
+            put(
+                "supports_tool_calling",
+                draft.supportsToolCalling?.let { JsonPrimitive(it) } ?: JsonNull,
+            )
+            put(
+                "max_input_length",
+                maxInput.toLongOrNull()?.let { JsonPrimitive(it) } ?: JsonNull,
+            )
+            put("generate_kwargs", finalKwargs)
+            put("relay_reasoning", draft.relayReasoning)
+            put("thinking_enabled", draft.thinkingEnabled?.let { JsonPrimitive(it) } ?: JsonNull)
+            put(
+                "thinking_budget",
+                draft.thinkingBudget.trim().toLongOrNull()?.let { JsonPrimitive(it) } ?: JsonNull,
+            )
+            put(
+                "reasoning_effort",
+                draft.reasoningEffort.takeIf { it.isNotBlank() }?.let { JsonPrimitive(it) }
+                    ?: JsonNull,
+            )
+            // 原本没有能力声明、用户也没动过时不要提交 unknown，
+            // 否则会把服务端探测到的思考能力覆盖掉。
+            if (draft.thinkingKind != "unknown" || model.thinkingControl != null) {
+                put("thinking_control", thinkingControl)
+            }
+        }
+        _state.update { it.copy(busy = true, error = null, notice = null) }
+        scope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { api.configureModel(conn, current.providerId, model.id, body) }
+            }
+            _state.update {
+                it.copy(
+                    busy = false,
+                    detail = if (result.isSuccess) null else it.detail,
+                    detailDraft = if (result.isSuccess) null else it.detailDraft,
+                    notice = if (result.isSuccess) {
+                        Texts.get(R.string.models_model_saved)
+                    } else {
+                        it.notice
+                    },
+                    error = result.exceptionOrNull()?.let(ErrorText::of),
+                )
+            }
+            if (result.isSuccess) {
+                refreshProvider(conn, current.providerId)
+                loadPoolPage(_state.value.pool.offset)
+            }
         }
     }
 

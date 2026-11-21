@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -80,7 +81,20 @@ fun ChannelScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp),
         ) {
+            // 版本过低时整页提示：这些实例上频道接口不存在，列表与安装操作都没有意义。
+            if (state.versionUnsupported) {
+                VersionBlockedNotice(state.serverVersionRaw)
+                return@Column
+            }
             ConsoleHint(onOpenConsole = onOpenConsole)
+            if (state.versionUnknown) {
+                Text(
+                    text = stringResource(R.string.channels_version_unknown),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+            }
             if (state.loading && !state.loaded) {
                 Row(
                     modifier = Modifier
@@ -122,9 +136,34 @@ fun ChannelScreen(
                         onOpenConfig(row.key, channelName(context, row, row.key))
                     },
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
             }
         }
+    }
+}
+
+/** 版本低于门槛的整页提示：只说明要求与当前版本，不给任何频道操作。 */
+@Composable
+private fun VersionBlockedNotice(currentVersion: String?) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.channels_version_unsupported_title),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = stringResource(
+                R.string.channels_version_unsupported_message,
+                currentVersion.orEmpty(),
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -143,42 +182,59 @@ private fun ChannelRowView(
     onConfig: () -> Unit,
 ) {
     Card {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(horizontal = 12.dp, vertical = 4.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = channelName(LocalContext.current, row, row.key),
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                Text(
-                    text = statusText(row),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            if (row.needsRepair && !busy) {
-                TextButton(onClick = onRepair) {
-                    Text(repairActionLabel(row.repairAction))
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp)
+                            .size(14.dp),
+                        strokeWidth = 2.dp,
+                    )
                 }
+                if (row.needsRepair && !busy) {
+                    CompactTextButton(
+                        text = repairActionLabel(row),
+                        onClick = onRepair,
+                    )
+                }
+                CompactTextButton(
+                    text = stringResource(R.string.channels_action_config),
+                    onClick = onConfig,
+                )
             }
-            TextButton(onClick = onConfig) {
-                Text(stringResource(R.string.channels_action_config))
-            }
+            Text(
+                text = statusText(row),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
         }
+    }
+}
+
+/** 卡片内的紧凑文字按钮：默认高度的按钮会让每张卡多占近二十 dp。 */
+@Composable
+private fun CompactTextButton(text: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.height(32.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+    ) {
+        Text(text = text, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -187,19 +243,25 @@ private fun statusText(row: ChannelRow): String {
     val enabled = stringResource(
         if (row.enabled) R.string.channels_status_enabled else R.string.channels_status_disabled,
     )
-    val repair = row.repairAction?.let { action ->
-        when (action) {
-            "install" -> stringResource(R.string.channels_status_missing_code)
-            "enable" -> stringResource(R.string.channels_status_disabled_plugin)
-            else -> stringResource(R.string.channels_status_validation_pending)
-        }
+    // 缺插件与缺运行时的处置都是安装，但显示上要区分：后者不是「没装」。
+    val plugin = when {
+        row.availability == "missing_runtime" ->
+            stringResource(R.string.channels_availability_missing_runtime)
+
+        row.missingPlugin -> stringResource(R.string.channels_status_missing_code)
+        row.repairAction == "enable" ->
+            stringResource(R.string.channels_status_disabled_plugin)
+
+        row.repairAction != null -> stringResource(R.string.channels_status_validation_pending)
+        else -> null
     }
-    return listOfNotNull(enabled.takeIf { it.isNotBlank() }, repair).joinToString("，")
+    return listOfNotNull(enabled.takeIf { it.isNotBlank() }, plugin).joinToString("，")
 }
 
+/** 缺插件时主操作是安装；已安装但停用或待修复时沿用原动作名。 */
 @Composable
-private fun repairActionLabel(action: String?): String = when (action) {
-    "install" -> stringResource(R.string.channels_install)
-    "enable" -> stringResource(R.string.channels_action_enable)
+private fun repairActionLabel(row: ChannelRow): String = when {
+    row.missingPlugin -> stringResource(R.string.channels_install_plugin)
+    row.repairAction == "enable" -> stringResource(R.string.channels_action_enable)
     else -> stringResource(R.string.channels_action_repair)
 }

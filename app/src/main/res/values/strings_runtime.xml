@@ -151,8 +151,8 @@
     <string name="models_section_default">默认模型</string>
     <string name="models_follow_global">跟随全局</string>
     <string name="models_default_hint">全局默认影响服务端所有智能体的默认模型；单个对话的模型仍可在聊天页切换。</string>
-    <string name="models_section_providers">供应商</string>
-    <string name="models_no_providers">服务端未配置供应商，请在 Web 控制台添加。</string>
+    <string name="models_section_providers">提供商</string>
+    <string name="models_no_providers">服务端未配置提供商，请在 Web 控制台添加。</string>
     <string name="models_no_models">未发现可用模型</string>
     <plurals name="models_model_count">
         <item quantity="other">%1$d 个模型</item>

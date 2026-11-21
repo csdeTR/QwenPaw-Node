@@ -96,6 +96,7 @@ fun MarketScreen(
     onRefreshPlugins: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     // 解析失败等一次性说明。放在 Nav 之上而不是状态里：它只描述「这一次点击」，
     // 留着会让用户下次进页面还看到上次的提示。
     var note by remember { mutableStateOf<String?>(null) }
@@ -205,9 +206,9 @@ fun MarketScreen(
                     onQuery = onQuery,
                     onCategory = onCategory,
                     onSearch = onSearch,
-                    onOpen = { url -> openUrl(context, url) },
+                    onOpen = { url -> confirmBrowser(url) },
                     onOpenResult = { result ->
-                        onOpenResult(result, { url -> openUrl(context, url) }) { reason ->
+                        onOpenResult(result, { url -> confirmBrowser(url) }) { reason ->
                             note = reason
                         }
                     },
@@ -218,7 +219,7 @@ fun MarketScreen(
                     state = state,
                     onQuery = onPluginQuery,
                     onSearch = onSearchPlugins,
-                    onOpen = { url -> openUrl(context, url) },
+                    onOpen = { url -> confirmBrowser(url) },
                     onInstallFromFile = { pluginFileLauncher.launch("application/zip") },
                     onInstallFromUrl = { pluginUrlDialog = true },
                     onInstallCatalog = { entry -> onInstallPluginUrl(entry.installUrl) },
@@ -1168,25 +1169,6 @@ private fun CardBox(content: @Composable () -> Unit) {
             .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surface),
     ) { content() }
-}
-
-/**
- * 用系统浏览器打开一个地址。
- *
- * 失败只当无事发生：市场里的地址来自第三方，格式不对是常见情况，
- * 抛出来会让用户在一个只读页面上看到崩溃。
- */
-private fun openUrl(context: android.content.Context, url: String) {
-    val target = url.trim()
-    if (target.isEmpty()) return
-    runCatching {
-        context.startActivity(
-            android.content.Intent(
-                android.content.Intent.ACTION_VIEW,
-                android.net.Uri.parse(target),
-            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }
 }
 
 /** 分类只展示前几项：实测服务端有十几项，一屏放不下，全列出来会把搜索结果挤出屏幕。 */

@@ -76,7 +76,10 @@ data class ChannelCapability(
     val repairSource: String?,
     /** 失败诊断原文。 */
     val diagnostic: String?,
-)
+) {
+    /** 插件缺失时配置接口不可用，界面要引导安装而不是显示通用错误。 */
+    val missingPlugin: Boolean get() = isMissingPlugin(availability, repairAction)
+}
 
 /**
  * 解析频道能力。
@@ -101,6 +104,18 @@ fun channelCapability(key: String, schema: JsonObject?): ChannelCapability {
         diagnostic = schema?.let { jsonString(it, "diagnostic") },
     )
 }
+
+/**
+ * 插件没装或运行时缺失。
+ *
+ * 这两种状态下列表行不能给出「进入配置就能改」的暗示：配置 GET 会 404，
+ * 而 404 的通用文案（「会话不存在或已被删除」）在这里完全不成立。
+ * `repair.action == install` 同样按缺插件处理，因为安装是唯一的下一步。
+ */
+fun isMissingPlugin(availability: String?, repairAction: String?): Boolean =
+    availability == "missing_code" ||
+        availability == "missing_runtime" ||
+        repairAction == "install"
 
 /** 取字符串字段；非字符串或空串返回 null。 */
 fun jsonString(obj: JsonObject, key: String): String? =

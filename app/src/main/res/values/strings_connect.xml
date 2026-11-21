@@ -51,6 +51,8 @@
     <string name="qr_scan_invalid">这张二维码不是 QwenPaw Node 的配对码。</string>
     <string name="qr_scan_unsupported">该二维码由更新版本的客户端生成，请升级应用。</string>
     <string name="qr_scan_empty">未能从图片中识别出二维码。</string>
+    <string name="qr_scan_image_failed">读取图片失败，请换一张图片重试。</string>
+    <string name="qr_scan_camera_failed">相机启动失败，请改用相册导入。</string>
     <string name="pair_qr_malformed">配对码内容不完整</string>
     <string name="pair_qr_no_address">配对码里没有服务器地址</string>
     <string name="pair_qr_no_token">配对码里没有访问令牌</string>

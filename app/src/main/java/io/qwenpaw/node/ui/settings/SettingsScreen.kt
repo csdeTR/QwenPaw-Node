@@ -306,6 +306,7 @@ fun SettingsScreen(
     var appLanguagePicker by remember { mutableStateOf(false) }
     var askInstallBridge by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
 
     // 每次进入设置页核对一次服务端头像。不做轮询：头像不是时效性数据，
     // 用户改完网页端的头像再来这里就是最常见的一次刷新时机。
@@ -586,9 +587,13 @@ fun SettingsScreen(
                             }
                         },
                         onLoadAgents = onLoadAgents,
-                        // 新增实例还没有 token：插件探测只能得到「未能确认」。
-                        onVerifyHosts = { hosts, basic, attempt, _ ->
-                            onVerifyHosts(hosts, basic, attempt, null, null)
+                        // 新增实例也可能用访问令牌：验证与读取列表都要带上它，
+                        // 否则令牌方式会退化成「空账号密码」并拉不到列表。
+                        onVerifyHosts = { hosts, basic, attempt, token ->
+                            onVerifyHosts(hosts, basic, attempt, token, null)
+                        },
+                        loadAgentsWithToken = { hosts, token, basic ->
+                            onLoadAgentsWithToken(hosts, token, basic)
                         },
                         currentNetKind = currentNetKind,
                         currentSsid = currentSsid,
@@ -680,7 +685,7 @@ fun SettingsScreen(
                         onVerifyHosts(hosts, basic, attempt, token, instance.id)
                     },
                     verifyToken = instance.token,
-                    loadAgentsWithToken = { onLoadAgentsFor(instance) },
+                    loadAgentsWithToken = { _, _, _ -> onLoadAgentsFor(instance) },
                     initialMode = if (instance.usesTokenCredential) {
                         io.qwenpaw.node.data.CredentialMode.TOKEN
                     } else {
@@ -879,13 +884,6 @@ fun SettingsScreen(
                                 subtitle = stringResource(R.string.settings_nav_models_subtitle),
                                 onClick = onOpenModels,
                                 trailing = { FavoriteStar("models" in favorites) { toggleFavorite("models") } },
-                            )
-                            Divider()
-                            NavRow(
-                                icon = QwenIcons.download,
-                                title = stringResource(R.string.settings_nav_local_models),
-                                subtitle = stringResource(R.string.settings_nav_local_models_subtitle),
-                                onClick = onOpenLocalModels,
                             )
                             Divider()
                             NavRow(
@@ -1707,14 +1705,14 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_about_repo_title),
                         subtitle = io.qwenpaw.node.BuildConfig.REPO_URL,
                         action = stringResource(R.string.settings_action_visit),
-                        onClick = { openUrl(context, io.qwenpaw.node.BuildConfig.REPO_URL) },
+                        onClick = { confirmBrowser(io.qwenpaw.node.BuildConfig.REPO_URL) },
                     )
                     Divider()
                     LinkRow(
                         title = stringResource(R.string.settings_about_bridge_repo_title),
                         subtitle = io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL,
                         action = stringResource(R.string.settings_action_visit),
-                        onClick = { openUrl(context, io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL) },
+                        onClick = { confirmBrowser(io.qwenpaw.node.BuildConfig.BRIDGE_REPO_URL) },
                     )
                     Divider()
                     Column(modifier = Modifier.padding(14.dp)) {
@@ -3126,12 +3124,12 @@ private fun LinkRow(
  */
 @Composable
 private fun CreditLine(name: String, url: String, detail: String) {
-    val context = LocalContext.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable { openUrl(context, url) }
+            .clickable { confirmBrowser(url) }
             .padding(vertical = 4.dp),
     ) {
         Text(
@@ -3149,18 +3147,6 @@ private fun CreditLine(name: String, url: String, detail: String) {
 
 /** 把缩放系数显示成百分比，1.0 显示为 100%。 */
 private fun percent(value: Float): String = "${(value * 100).toInt()}%"
-
-/** 用系统浏览器打开一个网址。 */
-private fun openUrl(context: android.content.Context, url: String) {
-    runCatching {
-        context.startActivity(
-            android.content.Intent(
-                android.content.Intent.ACTION_VIEW,
-                android.net.Uri.parse(url),
-            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }
-}
 
 @Composable
 internal fun SwitchRow(

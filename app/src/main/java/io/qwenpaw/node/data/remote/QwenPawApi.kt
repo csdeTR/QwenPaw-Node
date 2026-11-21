@@ -286,6 +286,9 @@ class QwenPawApi(
         ignoreUnknownKeys = true
         explicitNulls = false
         encodeDefaults = true
+        // 服务端会把列表字段显式写成 null（例如 reasoning_effort_options），
+        // 对带默认值的非空字段按默认值处理，避免一个 null 让整页解析失败。
+        coerceInputValues = true
     }
 
     // ---------- 基础 ----------
@@ -1432,6 +1435,31 @@ class QwenPawApi(
         ),
         OAuthStatusDto.serializer(),
     )
+
+    /**
+     * 智能体模型设置：`GET /api/agents/{id}` 返回完整配置，这里取原始对象。
+     *
+     * 只读其中的 `fallback_models` / `fallback_policy` / `subagent_model` /
+     * `thinking_level` / `thinking_budget` / `decision_model`，不复制整份 Agent DTO。
+     */
+    fun agentModelSettings(conn: Connection, agentId: String): JsonObject =
+        Json.parseToJsonElement(
+            request(conn, "GET", "/api/agents/${encodeSegment(agentId)}"),
+        ).jsonObject
+
+    /** `PATCH /api/agents/{id}/model-settings`，提交完整快照，返回更新后的配置。 */
+    fun updateAgentModelSettings(
+        conn: Connection,
+        agentId: String,
+        body: JsonObject,
+    ): JsonObject = Json.parseToJsonElement(
+        request(
+            conn,
+            "PATCH",
+            "/api/agents/${encodeSegment(agentId)}/model-settings",
+            body,
+        ),
+    ).jsonObject
 
     /** 智能体级决策模型：`PATCH /api/agents/{agentId}/model-settings`。 */
     fun setAgentDecisionModel(conn: Connection, agentId: String, providerId: String, model: String) {

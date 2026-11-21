@@ -5,6 +5,12 @@ import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.ActiveModelDto
 import io.qwenpaw.node.data.model.ModelsActiveDto
 import io.qwenpaw.node.data.model.ProviderDto
+import io.qwenpaw.node.data.model.ProviderScope
+import io.qwenpaw.node.data.model.ProviderSections
+import io.qwenpaw.node.data.model.configuredModelCount
+import io.qwenpaw.node.data.model.groupProviders
+import io.qwenpaw.node.data.model.isProviderConfigured
+import io.qwenpaw.node.data.model.providerDisplayName
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -28,6 +34,117 @@ enum class ModelScope(val wire: String, @StringRes val titleRes: Int) {
     AGENT("agent", R.string.models_scope_agent),
 }
 
+/** 提供商卡片上的配置状态。停用优先于「未配置」：停用的提供商即便填过地址也不可用。 */
+enum class ProviderStatus {
+    CONFIGURED,
+    DISABLED,
+    UNCONFIGURED,
+}
+
+/**
+ * 提供商当前是否已配置好。
+ *
+ * 判据只在 [isProviderConfigured] 一处：卡片标签、已配置区与可用区的划分都读它，
+ * 各写一套会让同一个提供商同时出现在两个区里。
+ */
+fun providerStatus(provider: ProviderDto): ProviderStatus = when {
+    !provider.enabled -> ProviderStatus.DISABLED
+    isProviderConfigured(provider) -> ProviderStatus.CONFIGURED
+    else -> ProviderStatus.UNCONFIGURED
+}
+
+/**
+ * 凭据状态对应的文案 key；没有可说的返回 null。
+ *
+ * `require_api_key` 为 null（旧版服务端不带该字段）时不猜：既不说「无需密钥」，
+ * 也不说「未设置密钥」，否则会给出与实际不符的结论。
+ */
+@StringRes
+fun providerCredentialRes(provider: ProviderDto): Int? = when {
+    provider.oauthConnected -> R.string.models_rework_credential_oauth
+    provider.requireApiKey == true && provider.apiKey.isNullOrBlank() ->
+        R.string.models_rework_credential_missing
+    provider.requireApiKey == true -> R.string.models_rework_credential_set
+    provider.requireApiKey == false -> R.string.models_rework_credential_none
+    else -> null
+}
+
+/** 变体名：服务端给了 `provider_variant` 就用它，否则退回显示名。 */
+@androidx.annotation.StringRes
+fun variantLabelRes(variant: String?): Int? = when (variant) {
+    "dashscope" -> R.string.models_variant_dashscope
+    "chat_completions" -> R.string.models_variant_chat_completions
+    "responses" -> R.string.models_variant_responses
+    "open_platform" -> R.string.models_variant_open_platform
+    "open_platform_cn" -> R.string.models_variant_open_platform_cn
+    "open_platform_intl" -> R.string.models_variant_open_platform_intl
+    "coding_plan" -> R.string.models_variant_coding_plan
+    "coding_plan_cn" -> R.string.models_variant_coding_plan_cn
+    "coding_plan_intl" -> R.string.models_variant_coding_plan_intl
+    "token_plan" -> R.string.models_variant_token_plan
+    "token_plan_intl" -> R.string.models_variant_token_plan_intl
+    "china" -> R.string.models_variant_china
+    "international" -> R.string.models_variant_international
+    "bigmodel" -> R.string.models_variant_bigmodel
+    "zai" -> R.string.models_variant_zai
+    "chatgpt" -> R.string.models_variant_chatgpt
+    else -> null
+}
+
+fun variantLabel(provider: ProviderDto): String {
+    val res = variantLabelRes(provider.providerVariant)
+    return when {
+        res != null -> Texts.get(res)
+        !provider.providerVariant.isNullOrBlank() -> provider.providerVariant
+        else -> providerDisplayName(provider)
+    }
+}
+
+/** 提供商属于哪个页签。与 [groupProviders] 的分组口径保持一致，避免数量与列表对不上。 */
+fun providerScopeOf(provider: ProviderDto): ProviderScope =
+    if (provider.isLocal || provider.isCustom) ProviderScope.LOCAL else ProviderScope.CLOUD
+
+fun countProviders(providers: List<ProviderDto>, scope: ProviderScope): Int =
+    providers.count { providerScopeOf(it) == scope }
+
+/**
+ * 搜索匹配。
+ *
+ * 命中 id、显示名、分组名与变体名四类：用户可能输入 `zhipu`（分组名）、
+ * `bigmodel`（变体名）或 `Z.AI`（显示名），只匹配显示名会让搜索看起来没生效。
+ */
+fun matchesProviderQuery(provider: ProviderDto, query: String): Boolean {
+    val text = query.trim()
+    if (text.isEmpty()) return true
+    return listOf(
+        provider.id,
+        provider.name,
+        provider.providerGroupName,
+        provider.providerVariant,
+        provider.providerGroup,
+    ).any { it != null && it.contains(text, ignoreCase = true) }
+}
+
+fun filterProviders(providers: List<ProviderDto>, query: String): List<ProviderDto> =
+    if (query.isBlank()) providers else providers.filter { matchesProviderQuery(it, query) }
+
+/** 卡片上的模型数量。只算已配置与额外添加的，探测到但未选的模型不算。 */
+fun modelCountText(provider: ProviderDto): String {
+    val count = configuredModelCount(provider)
+    return if (count == 0) {
+        Texts.get(R.string.models_rework_no_models)
+    } else {
+        Texts.get(R.string.models_rework_model_count, count)
+    }
+}
+
+/** 列表页显示用的状态文案。 */
+fun providerStatusText(provider: ProviderDto): String = when (providerStatus(provider)) {
+    ProviderStatus.CONFIGURED -> Texts.get(R.string.models_rework_status_configured)
+    ProviderStatus.DISABLED -> Texts.get(R.string.models_rework_status_disabled)
+    ProviderStatus.UNCONFIGURED -> Texts.get(R.string.models_rework_status_unconfigured)
+}
+
 /**
  * 模型与提供商页的状态。
  *
@@ -41,7 +158,6 @@ data class ModelsUiState(
     val globalDefault: ActiveModelDto? = null,
     val agentDefault: ActiveModelDto? = null,
     val effective: ActiveModelDto? = null,
-    /** 正在测连通性的供应商 id。 */
     val loading: Boolean = false,
     val loaded: Boolean = false,
     val saving: Boolean = false,
@@ -60,13 +176,22 @@ data class ModelsUiState(
         return choices.firstOrNull { it.providerId == providerId && it.modelId == model }?.modelName
             ?: model
     }
+
+    /**
+     * 按页签与搜索词切出「已配置 / 可用」两段。
+     *
+     * 搜索在分组之前做：先分组再过滤会把「Zhipu 四版本命中一个」渲染成整组，
+     * 用户搜 `z.ai` 却看到 BigModel 卡。
+     */
+    fun sections(scope: ProviderScope, query: String): ProviderSections =
+        groupProviders(filterProviders(providers, query), scope)
 }
 
 /**
  * 模型与提供商页的状态与动作。
  *
- * 只做列表、两个作用域的默认模型切换与供应商连通性测试。
- * 配置表单、模型增删、OAuth 流程都在 Web 控制台，手机上不做。
+ * 只负责提供商列表与两处默认模型的摘要；具体配置进入提供商详情页，
+ * 默认模型切换进入默认模型页。
  */
 class ModelsViewModel(
     private val api: QwenPawApi,
@@ -126,10 +251,8 @@ class ModelsViewModel(
                     effective = fetched.effective.getOrNull()?.activeLlm,
                     loading = false,
                     loaded = true,
-                    // 默认模型与供应商列表任一取不到都算失败：两行与列表都在这页上。
-                    error = (fetched.providers.exceptionOrNull()
-                        ?: fetched.global.exceptionOrNull()
-                        ?: fetched.agent.exceptionOrNull())?.let { ErrorText.of(it) },
+                    // 提供商列表取不到就是失败：这页的主体内容就是它。
+                    error = fetched.providers.exceptionOrNull()?.let { ErrorText.of(it) },
                 )
             }
         }
@@ -138,9 +261,8 @@ class ModelsViewModel(
     /**
      * 切换某个作用域的默认模型。
      *
-     * **不做乐观更新**：服务端可能回 400（参数）或 404（供应商不存在），
-     * 本地先改会让界面停留在一个并未生效的值上。成功后重拉两组默认模型——
-     * agent 行会带动 `effective` 变化。
+     * **不做乐观更新**：服务端可能回 400（参数）或 404（提供商不存在），
+     * 本地先改会让界面停留在一个并未生效的值上。成功后重拉三组默认模型。
      */
     fun setDefault(scope: ModelScope, providerId: String, model: String) {
         val conn = connection() ?: return
@@ -163,7 +285,6 @@ class ModelsViewModel(
                 _state.update { it.copy(saving = false, error = ErrorText.of(failure)) }
                 return@launch
             }
-            // 成功后重拉两组默认模型：写入 agent 行会带动 effective 变化。
             val fresh = withContext(Dispatchers.IO) {
                 coroutineScope {
                     val global = async { runCatching { api.activeModels(conn, ModelScope.GLOBAL.wire) } }
@@ -180,10 +301,7 @@ class ModelsViewModel(
                     globalDefault = fresh.first.getOrNull()?.activeLlm ?: current.globalDefault,
                     agentDefault = fresh.second.getOrNull()?.activeLlm ?: current.agentDefault,
                     effective = fresh.third.getOrNull()?.activeLlm ?: current.effective,
-                    notice = Texts.get(
-                        R.string.models_scope_switched,
-                        Texts.get(scope.titleRes),
-                    ),
+                    notice = Texts.get(R.string.models_rework_saved),
                 )
             }
         }

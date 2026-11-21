@@ -63,3 +63,9 @@
 -keep class androidx.camera.core.** { *; }
 -keep interface androidx.camera.core.CameraProvider { *; }
 -dontwarn androidx.camera.**
+
+# ML Kit 离线条码模型由 native 代码按类名回查 Java 侧；保留扫描入口与模型类，
+# 否则 release 包扫码会在初始化阶段失败。
+-keep class com.google.mlkit.vision.barcode.** { *; }
+-keep class com.google.mlkit.vision.common.** { *; }
+-dontwarn com.google.mlkit.**

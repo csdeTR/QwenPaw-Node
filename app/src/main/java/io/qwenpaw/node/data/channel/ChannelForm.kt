@@ -3,9 +3,11 @@ package io.qwenpaw.node.data.channel
 import androidx.annotation.StringRes
 import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.common.SecretDraft
-import io.qwenpaw.node.ui.common.formatJsonObject
-import io.qwenpaw.node.ui.common.parseJsonObjectOrNull
 import io.qwenpaw.node.ui.common.secretMergeValue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -33,6 +35,15 @@ data class ChannelField(
     val options: List<String> = emptyList(),
     val help: String? = null,
     val placeholder: String? = null,
+    /**
+     * `json_type`：`array` 或 `object`，未声明为 null。
+     *
+     * 服务端把 `allow_from` 声明成数组，客户端若一律按对象解析并写回 `{}`，
+     * 保存会被 422 拒绝（`Input should be a valid list`）。
+     */
+    val jsonType: String? = null,
+    /** 服务端声明必填；留空的必填字段要报错，而不是写入空值。 */
+    val required: Boolean = false,
 )
 
 data class ChannelFormValues(
@@ -44,6 +55,9 @@ data class ChannelFormValues(
 enum class ChannelFieldError {
     NUMBER,
     JSON,
+
+    /** 语法正确但形状不对：`json_type=array` 却填了对象，或反过来。 */
+    JSON_TYPE,
 }
 
 sealed interface ChannelPayloadResult {
@@ -79,6 +93,8 @@ fun parseChannelFields(schema: JsonObject?): List<ChannelField> {
             } ?: emptyList(),
             help = localizedText(obj["help"]),
             placeholder = localizedText(obj["placeholder"]),
+            jsonType = obj.string("json_type")?.lowercase()?.takeIf { it == JSON_ARRAY || it == JSON_OBJECT },
+            required = (obj["required"] as? JsonPrimitive)?.booleanOrNull ?: false,
         )
     }
 }
@@ -113,8 +129,10 @@ fun initialChannelValues(
             }
 
             ChannelFieldType.JSON -> {
-                val value = (current as? JsonObject) ?: (fallback as? JsonObject)
-                text[field.name] = value?.let(::formatJsonObject) ?: ""
+                // JSON 字段可能是数组（如 allow_from）也可能是对象，两者都要原样回填。
+                val element = current?.takeUnless { it is JsonNull }
+                    ?: fallback?.takeUnless { it is JsonNull }
+                text[field.name] = element?.let(::formatChannelJson) ?: ""
             }
 
             else -> {
@@ -170,11 +188,30 @@ fun buildChannelPayload(
             }
 
             ChannelFieldType.JSON -> {
-                val parsed = parseJsonObjectOrNull(values.text[field.name].orEmpty())
-                if (parsed == null) {
-                    errors[field.name] = ChannelFieldError.JSON
-                } else {
-                    body[field.name] = parsed
+                val raw = values.text[field.name].orEmpty().trim()
+                when {
+                    // 可选字段留空时沿用原值：写 {} 或空串会把服务端已有配置冲掉。
+                    raw.isEmpty() -> if (field.required) {
+                        errors[field.name] = if (field.jsonType != null) {
+                            ChannelFieldError.JSON_TYPE
+                        } else {
+                            ChannelFieldError.JSON
+                        }
+                    }
+
+                    else -> {
+                        val element = runCatching { Json.parseToJsonElement(raw) }.getOrNull()
+                        when {
+                            element == null -> errors[field.name] = ChannelFieldError.JSON
+                            field.jsonType == JSON_ARRAY && element !is JsonArray ->
+                                errors[field.name] = ChannelFieldError.JSON_TYPE
+
+                            field.jsonType == JSON_OBJECT && element !is JsonObject ->
+                                errors[field.name] = ChannelFieldError.JSON_TYPE
+
+                            else -> body[field.name] = element
+                        }
+                    }
                 }
             }
 
@@ -192,6 +229,38 @@ fun buildChannelPayload(
 
 private fun JsonObject.string(key: String): String? =
     (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+/** `json_type` 的两个取值。 */
+private const val JSON_ARRAY = "array"
+private const val JSON_OBJECT = "object"
+
+/** console 频道键：服务端把它当管理端入口，停用后手机端就进不去配置。 */
+const val CONSOLE_CHANNEL_KEY = "console"
+
+/** 编辑框里的回填文本：数组、对象与标量都按缩进后的 JSON 展示，保存时再原样解析回来。 */
+fun formatChannelJson(element: JsonElement): String =
+    if (element is JsonNull) {
+        ""
+    } else {
+        Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), element)
+    }
+
+/**
+ * console 频道强制保持启用。
+ *
+ * 服务端允许 `PUT` 把 `enabled` 写成 false，但 console 是 Web 控制台与调试入口，
+ * 停用后要回到服务端手动打开才能恢复，因此保存前一律改写为 true。
+ */
+fun keepConsoleEnabled(channel: String, body: JsonObject): JsonObject =
+    if (channel == CONSOLE_CHANNEL_KEY) {
+        JsonObject(body.toMutableMap().apply { put("enabled", JsonPrimitive(true)) })
+    } else {
+        body
+    }
+
+/** console 的「启用」开关不显示：它的值由 [keepConsoleEnabled] 决定，不给用户改。 */
+fun isChannelFieldHidden(channel: String, fieldName: String): Boolean =
+    channel == CONSOLE_CHANNEL_KEY && fieldName == "enabled"
 
 /** 运行状态值的中文标签；未知值原样显示。 */
 @StringRes

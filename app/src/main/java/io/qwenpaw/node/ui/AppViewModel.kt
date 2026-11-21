@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.CredentialMode
 import io.qwenpaw.node.data.CredentialPlan
 import io.qwenpaw.node.data.InstanceRepository
 import io.qwenpaw.node.data.StoredCredentials
@@ -843,6 +844,12 @@ class AppViewModel(
             ),
             mode = draft.mode,
             storedToken = instance.token,
+            typedToken = draft.token,
+            storedMode = if (instance.usesTokenCredential) {
+                CredentialMode.TOKEN
+            } else {
+                CredentialMode.PASSWORD
+            },
         )
         val base = instance.copy(
             name = draft.resolvedName(),
@@ -1869,6 +1876,9 @@ class AppViewModel(
     fun activeBaseUrl(): String? =
         repository.active()?.let { repository.resolvedBaseUrl(it) }
 
+    /** 当前实例上次连接时记录的服务端版本；升级服务端后需重新验证才会刷新。 */
+    fun activeServerVersion(): String? = repository.active()?.serverVersion
+
     /** 频道列表与扫码授权。 */
     private var channelHolder: io.qwenpaw.node.ui.channels.ChannelViewModel? = null
 
@@ -1876,6 +1886,7 @@ class AppViewModel(
         get() = channelHolder ?: io.qwenpaw.node.ui.channels.ChannelViewModel(
             api = api,
             connection = ::activeConnection,
+            serverVersion = ::activeServerVersion,
         ).also { channelHolder = it }
 
     /** 单频道配置。按频道键区分，换绑时清空。 */
@@ -1885,6 +1896,7 @@ class AppViewModel(
         get() = channelConfigHolder ?: io.qwenpaw.node.ui.channels.ChannelConfigViewModel(
             api = api,
             connection = ::activeConnection,
+            serverVersion = ::activeServerVersion,
         ).also { channelConfigHolder = it }
 
     /** 本地模型：运行时状态、清单与下载进度。 */
@@ -2077,6 +2089,24 @@ class AppViewModel(
             connection = ::activeConnection,
         ).also { modelsAdminHolder = it }
 
+    /** 添加自定义提供商。 */
+    private var providerAddHolder: io.qwenpaw.node.ui.settings.ProviderAddViewModel? = null
+
+    val providerAdd: io.qwenpaw.node.ui.settings.ProviderAddViewModel
+        get() = providerAddHolder ?: io.qwenpaw.node.ui.settings.ProviderAddViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { providerAddHolder = it }
+
+    /** 全局与当前智能体的默认模型。 */
+    private var modelDefaultsHolder: io.qwenpaw.node.ui.settings.ModelDefaultsViewModel? = null
+
+    val modelDefaults: io.qwenpaw.node.ui.settings.ModelDefaultsViewModel
+        get() = modelDefaultsHolder ?: io.qwenpaw.node.ui.settings.ModelDefaultsViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { modelDefaultsHolder = it }
+
     /** 技能。技能归属当前智能体，切换实例或智能体时清空。 */
     private var skillsHolder: io.qwenpaw.node.ui.skills.SkillsViewModel? = null
 
@@ -2162,6 +2192,8 @@ class AppViewModel(
             usageHolder?.clear()
             modelsHolder?.clear()
             modelsAdminHolder?.clear()
+            providerAddHolder?.clear()
+            modelDefaultsHolder?.clear()
             skillsHolder?.clear()
             skillConfigHolder?.clear()
             skillPoolHolder?.clear()

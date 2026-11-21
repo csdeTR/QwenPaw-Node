@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="models_admin_title">供应商详情</string>
-    <string name="models_admin_not_found">没有找到该供应商</string>
+    <string name="models_admin_title">提供商详情</string>
+    <string name="models_admin_not_found">没有找到该提供商</string>
     <string name="models_admin_invalid_json">请求头或生成参数不是合法的 JSON 对象</string>
-    <string name="models_admin_saved">供应商配置已保存</string>
+    <string name="models_admin_saved">提供商配置已保存</string>
     <string name="models_admin_no_changes">没有可保存的改动</string>
-    <string name="models_admin_deleted">已删除自定义供应商</string>
+    <string name="models_admin_deleted">已删除自定义提供商</string>
     <string name="models_admin_test_ok">连接成功：%1$s</string>
     <string name="models_admin_test_fail">连接失败：%1$s</string>
     <string name="models_admin_model_added">模型已添加</string>
@@ -29,9 +29,9 @@
     <string name="models_admin_oauth_connected">已连接 OAuth</string>
     <string name="models_admin_oauth_pending">等待授权完成…</string>
     <string name="models_admin_oauth_cancel">取消</string>
-    <string name="models_admin_delete">删除供应商</string>
-    <string name="models_admin_delete_title">删除自定义供应商</string>
-    <string name="models_admin_delete_message">删除后该供应商及其模型配置会被移除，此操作不可撤销。</string>
+    <string name="models_admin_delete">删除提供商</string>
+    <string name="models_admin_delete_title">删除自定义提供商</string>
+    <string name="models_admin_delete_message">删除后该提供商及其模型配置会被移除，此操作不可撤销。</string>
     <string name="models_admin_add_model">添加模型</string>
     <string name="models_admin_model_id">模型 ID</string>
     <string name="models_admin_model_name">显示名</string>
@@ -55,7 +55,7 @@
     <string name="models_admin_pool_clear_all">全不选</string>
     <string name="models_admin_pool_count">共 %1$d 个模型，已选 %2$d</string>
     <string name="models_admin_pool_empty">没有匹配的模型</string>
-    <string name="models_admin_no_models">该供应商还没有模型</string>
+    <string name="models_admin_no_models">该提供商还没有模型</string>
     <string name="models_admin_secret_set">已设置</string>
     <string name="models_admin_secret_replace">替换</string>
     <string name="models_admin_secret_clear">清除</string>

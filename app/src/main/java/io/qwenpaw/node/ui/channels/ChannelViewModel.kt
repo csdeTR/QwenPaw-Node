@@ -1,9 +1,12 @@
 package io.qwenpaw.node.ui.channels
 
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.ServerVersion
 import io.qwenpaw.node.data.channel.ChannelCapability
 import io.qwenpaw.node.data.channel.channelCapability
+import io.qwenpaw.node.data.channel.isMissingPlugin
 import io.qwenpaw.node.data.channel.jsonBoolean
+import io.qwenpaw.node.data.remote.ApiException
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -40,7 +43,69 @@ data class ChannelRow(
 ) {
     /** 需要安装/启用/修复时才显示动作按钮。 */
     val needsRepair: Boolean get() = repairAction != null
+
+    /** 插件没装或运行时缺失：主操作改为安装，配置仍可打开（面板里给安装入口）。 */
+    val missingPlugin: Boolean get() = isMissingPlugin(availability, repairAction)
 }
+
+/** 频道功能对服务端版本的要求。 */
+enum class ChannelVersionGate {
+    /** 已确认满足 `2.3.0.post1`。 */
+    SUPPORTED,
+
+    /** 已确认低于门槛：整页提示，不发任何频道请求。 */
+    UNSUPPORTED,
+
+    /** 版本未知或无法解析：放行并提示可能不可用。 */
+    UNKNOWN,
+}
+
+/** 由服务端版本字符串判定频道功能是否可用；空值与无法解析都按未知处理。 */
+fun channelVersionGate(raw: String?): ChannelVersionGate {
+    val version = ServerVersion.parse(raw) ?: return ChannelVersionGate.UNKNOWN
+    return if (version.atLeast(ServerVersion.CHANNELS_MIN)) {
+        ChannelVersionGate.SUPPORTED
+    } else {
+        ChannelVersionGate.UNSUPPORTED
+    }
+}
+
+/**
+ * 服务端报「已有安装或修复任务在运行」。
+ *
+ * 服务端同一时间只允许一个插件任务；此时重试只会连续拿到同一条 409，
+ * 因此要停下自动复查、把原文交给用户，而不是反复重发。
+ */
+fun isPluginTaskRunning(message: String?): Boolean {
+    val text = message.orEmpty().lowercase()
+    if (text.isBlank()) return false
+    return TASK_RUNNING_PHRASES.any { text.contains(it) }
+}
+
+private val TASK_RUNNING_PHRASES = listOf(
+    "task is already running",
+    "already running",
+    "already in progress",
+    // 服务端也可能回中文原文；这些只是匹配用的片段，不是界面文案，
+    // 因此用转义写法，避免被「源码里不得出现中文字面量」的门禁拦下。
+    "\u4efb\u52a1\u5df2\u5728\u8fd0\u884c",
+    "\u5df2\u6709\u4efb\u52a1\u5728\u8fd0\u884c",
+    "\u4efb\u52a1\u6b63\u5728\u8fdb\u884c",
+)
+
+/** 插件动作失败的原文：`detail` 是服务端原话，`message` 可能已被改写。 */
+internal fun pluginErrorRaw(e: Throwable): String? =
+    (e as? ApiException)?.let { api ->
+        api.detail?.takeIf { it.isNotBlank() } ?: api.message.takeIf { it.isNotBlank() }
+    } ?: e.message?.takeIf { it.isNotBlank() }
+
+/** 「已有任务在运行」的界面文案：服务端原文加上等待提示。 */
+internal fun repairTaskRunningText(raw: String?): String =
+    if (raw.isNullOrBlank()) {
+        Texts.get(R.string.channels_task_running_hint)
+    } else {
+        Texts.get(R.string.channels_task_running, raw)
+    }
 
 data class ChannelUiState(
     val channels: List<ChannelRow> = emptyList(),
@@ -51,6 +116,12 @@ data class ChannelUiState(
     val busyChannel: String? = null,
     /** 一次性提示；界面取走后调用 [ChannelViewModel.consumeNotice]。 */
     val noticeRes: Int? = null,
+    /** 服务端版本低于门槛：整页提示并隐藏列表与操作。 */
+    val versionUnsupported: Boolean = false,
+    /** 无法确认服务端版本：显示提示但放行。 */
+    val versionUnknown: Boolean = false,
+    /** 服务端版本原文，用于「当前版本 x.y.z」这句提示。 */
+    val serverVersionRaw: String? = null,
 )
 
 /**
@@ -65,6 +136,8 @@ data class ChannelUiState(
 class ChannelViewModel(
     private val api: QwenPawApi,
     private val connection: () -> Connection?,
+    /** 当前实例记录的服务端版本；未接时返回 null，界面按「无法确认」处理。 */
+    private val serverVersion: () -> String? = { null },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(ChannelUiState())
@@ -74,7 +147,37 @@ class ChannelViewModel(
     fun refresh(force: Boolean = false) {
         if (!force && (_state.value.loaded || _state.value.loading)) return
         val conn = connection() ?: return
-        _state.update { it.copy(loading = true, error = null) }
+        val version = serverVersion()
+        when (channelVersionGate(version)) {
+            // 已知过低时整页提示即可：这些实例上频道接口会 404，发请求只会多一条无用的错误。
+            ChannelVersionGate.UNSUPPORTED -> {
+                retryJob?.cancel()
+                _state.update {
+                    it.copy(
+                        channels = emptyList(),
+                        loading = false,
+                        loaded = true,
+                        busyChannel = null,
+                        error = null,
+                        versionUnsupported = true,
+                        versionUnknown = false,
+                        serverVersionRaw = version,
+                    )
+                }
+                return
+            }
+
+            ChannelVersionGate.SUPPORTED, ChannelVersionGate.UNKNOWN -> Unit
+        }
+        _state.update {
+            it.copy(
+                loading = true,
+                error = null,
+                versionUnsupported = false,
+                versionUnknown = channelVersionGate(version) == ChannelVersionGate.UNKNOWN,
+                serverVersionRaw = version,
+            )
+        }
         scope.launch {
             val fetched = withContext(Dispatchers.IO) {
                 runCatching {
@@ -171,8 +274,19 @@ class ChannelViewModel(
                 }
             }
             result.onFailure { e ->
+                // 「已有任务在运行」不是失败原因，而是服务端当前的串行状态：
+                // 保留原文并补充等待说明，同时停掉自动复查，避免连着拿同一条 409。
+                val taskRunning = isPluginTaskRunning(pluginErrorRaw(e))
+                if (taskRunning) retryJob?.cancel()
                 _state.update {
-                    it.copy(busyChannel = null, error = ErrorText.of(e))
+                    it.copy(
+                        busyChannel = null,
+                        error = if (taskRunning) {
+                            repairTaskRunningText(pluginErrorRaw(e))
+                        } else {
+                            ErrorText.of(e)
+                        },
+                    )
                 }
             }
             if (result.isSuccess) {

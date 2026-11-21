@@ -66,6 +66,10 @@ internal fun planCredentials(
     mode: CredentialMode = CredentialMode.PASSWORD,
     /** 已保存的令牌；为 null 表示该实例还没有令牌。 */
     storedToken: String? = null,
+    /** 本次表单里填写的令牌。编辑时留空表示保留。 */
+    typedToken: String = "",
+    /** 已保存凭据原本属于哪种方式。切换方式时必须重新输入，不能静默沿用。 */
+    storedMode: CredentialMode = CredentialMode.PASSWORD,
 ): CredentialPlan {
     val basicUser = typedBasicUser.trim()
 
@@ -80,7 +84,7 @@ internal fun planCredentials(
     }
 
     if (mode == CredentialMode.TOKEN) {
-        val token = typedPassword.trim()
+        val token = typedToken.trim()
         return when {
             token.isNotEmpty() -> CredentialPlan.UseToken(
                 token = token,
@@ -88,8 +92,8 @@ internal fun planCredentials(
                 basicPassword = resolvedBasic.second,
             )
 
-            !storedToken.isNullOrBlank() && stored.username.isNullOrBlank() ->
-                // 该实例本来就是令牌方式，留空即保留。
+            // 只有原本就用令牌登录时才允许留空保留；从密码切过来时必须输入新令牌。
+            storedMode == CredentialMode.TOKEN && !storedToken.isNullOrBlank() ->
                 CredentialPlan.UseExisting(resolvedBasic.first, resolvedBasic.second)
 
             else -> CredentialPlan.Invalid(R.string.connect_cred_token_required)
@@ -98,13 +102,15 @@ internal fun planCredentials(
 
     val username = typedUsername.trim()
     return when {
-        username.isBlank() && typedPassword.isBlank() ->
+        username.isBlank() && typedPassword.isBlank() && storedMode == CredentialMode.PASSWORD ->
             CredentialPlan.UseExisting(resolvedBasic.first, resolvedBasic.second)
 
         username.isBlank() ->
             return CredentialPlan.Invalid(R.string.connect_cred_username_password_required)
 
-        typedPassword.isBlank() && username == stored.username ->
+        // 从令牌切回密码时，用户名可能还留在表单里；必须重新填密码。
+        typedPassword.isBlank() && username == stored.username &&
+            storedMode == CredentialMode.PASSWORD ->
             CredentialPlan.UseExisting(resolvedBasic.first, resolvedBasic.second)
 
         typedPassword.isBlank() ->

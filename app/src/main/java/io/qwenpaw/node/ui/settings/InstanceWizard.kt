@@ -36,7 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -553,7 +552,7 @@ internal fun SecurityNoticeDialog(
             onDismiss()
         }
     }
-    val uriHandler = LocalUriHandler.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     val docUrl = "https://qwenpaw.agentscope.io/docs/security" +
         "#Web-%E7%99%BB%E5%BD%95%E8%AE%A4%E8%AF%81"
 
@@ -584,7 +583,7 @@ internal fun SecurityNoticeDialog(
             dismissButton = {
                 androidx.compose.material3.TextButton(
                     onClick = {
-                        runCatching { uriHandler.openUri(docUrl) }
+                        confirmBrowser(docUrl)
                         advance()
                     },
                 ) { Text(stringResource(R.string.wizard_doc)) }
@@ -888,7 +887,7 @@ private fun StepLogin(
     canScan: Boolean,
     onScan: () -> Unit,
 ) {
-    val uriHandler = LocalUriHandler.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     val tokenVisibility = rememberSecretVisibility()
     val passwordVisibility = rememberSecretVisibility()
     Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
@@ -948,7 +947,7 @@ private fun StepLogin(
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { uriHandler.openUri(BRIDGE_REPO_URL) }
+                    .clickable { confirmBrowser(BRIDGE_REPO_URL) }
                     .padding(horizontal = 4.dp, vertical = 4.dp),
             )
         }

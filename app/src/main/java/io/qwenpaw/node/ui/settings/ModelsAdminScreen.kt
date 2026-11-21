@@ -98,12 +98,44 @@ fun ModelsAdminScreen(
     onDismissNotice: () -> Unit,
     onOpenUrl: (String) -> Unit,
     onOpenConsole: (() -> Unit)? = null,
+    onOpenModelDetail: (io.qwenpaw.node.data.model.PoolModelDto) -> Unit = {},
+    onCloseModelDetail: () -> Unit = {},
+    onModelDetailChange: ((ModelDetailDraft) -> ModelDetailDraft) -> Unit = {},
+    onSaveModelDetail: () -> Unit = {},
 ) {
     var deletingModel by remember { mutableStateOf<String?>(null) }
     var confirmingDeleteProvider by remember { mutableStateOf(false) }
+    val detail = state.detail
+    val detailDraft = state.detailDraft
 
     WebEntryDialog(pageKey = "models_admin", onOpenConsole = onOpenConsole)
-    LaunchedEffect(Unit) { if (!state.loading && state.provider == null) onRetry() }
+    LaunchedEffect(Unit) { if (!state.loading && state.provider == null && detail == null) onRetry() }
+
+    val header: @Composable () -> Unit = {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            ConsoleHint(onOpenConsole = onOpenConsole)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TabChip(
+                    stringResource(R.string.models_admin_tab_config),
+                    state.tab == ModelsAdminTab.CONFIG,
+                ) { onSetTab(ModelsAdminTab.CONFIG) }
+                TabChip(
+                    stringResource(R.string.models_admin_tab_models),
+                    state.tab == ModelsAdminTab.MODELS,
+                ) { onSetTab(ModelsAdminTab.MODELS) }
+                TabChip(
+                    stringResource(R.string.models_admin_tab_pool),
+                    state.tab == ModelsAdminTab.POOL,
+                ) { onSetTab(ModelsAdminTab.POOL) }
+            }
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -119,16 +151,19 @@ fun ModelsAdminScreen(
                 IconCircle(
                     icon = QwenIcons.arrowLeft,
                     description = stringResource(R.string.action_back),
-                    onClick = onBack,
+                    onClick = if (detail != null) onCloseModelDetail else onBack,
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = state.providerName,
+                    text = if (detail != null) detail.name.ifBlank { detail.id } else state.providerName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onSave, enabled = !state.saving && !state.busy) {
+                TextButton(
+                    onClick = if (detail != null) onSaveModelDetail else onSave,
+                    enabled = !state.saving && !state.busy,
+                ) {
                     Text(stringResource(R.string.models_admin_save))
                 }
             }
@@ -139,28 +174,16 @@ fun ModelsAdminScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            if (detail != null && detailDraft != null) {
+                ModelDetailScreen(
+                    state = state,
+                    model = detail,
+                    draft = detailDraft,
+                    onChange = onModelDetailChange,
+                )
+                return@Box
+            }
             Column(modifier = Modifier.fillMaxSize()) {
-                ConsoleHint(onOpenConsole = onOpenConsole)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TabChip(
-                        stringResource(R.string.models_admin_tab_config),
-                        state.tab == ModelsAdminTab.CONFIG,
-                    ) { onSetTab(ModelsAdminTab.CONFIG) }
-                    TabChip(
-                        stringResource(R.string.models_admin_tab_models),
-                        state.tab == ModelsAdminTab.MODELS,
-                    ) { onSetTab(ModelsAdminTab.MODELS) }
-                    TabChip(
-                        stringResource(R.string.models_admin_tab_pool),
-                        state.tab == ModelsAdminTab.POOL,
-                    ) { onSetTab(ModelsAdminTab.POOL) }
-                }
                 state.notice?.let { NoticeRow(it, false, onDismissNotice) }
                 state.error?.let { NoticeRow(it, true, onDismissNotice) }
                 state.oauth?.let { oauth ->
@@ -194,6 +217,7 @@ fun ModelsAdminScreen(
                 when (state.tab) {
                     ModelsAdminTab.CONFIG -> ConfigTab(
                         state = state,
+                        header = header,
                         onSetEnabled = onSetEnabled,
                         onSetName = onSetName,
                         onSetBaseUrl = onSetBaseUrl,
@@ -212,22 +236,28 @@ fun ModelsAdminScreen(
 
                     ModelsAdminTab.MODELS -> ModelsTab(
                         state = state,
+                        header = header,
                         onAddModel = onBeginAddModel,
                         onEditModel = onBeginEditModel,
                         onDeleteModel = { deletingModel = it },
                         onToggleVisibility = onToggleVisibility,
                         onProbe = onProbe,
                         onTestModel = onTestModel,
+                        onOpenDetail = { id ->
+                            state.pool.models.firstOrNull { it.id == id }?.let(onOpenModelDetail)
+                        },
                     )
 
                     ModelsAdminTab.POOL -> PoolTab(
                         state = state,
+                        header = header,
                         onSearch = onPoolSearch,
                         onFamily = onPoolFamily,
                         onTab = onPoolTab,
                         onLoad = onPoolLoad,
                         onSelectAll = onSelectAllPool,
                         onSelectModel = onSelectPoolModel,
+                        onOpenDetail = onOpenModelDetail,
                     )
                 }
             }
@@ -278,6 +308,7 @@ fun ModelsAdminScreen(
 @Composable
 private fun ConfigTab(
     state: ModelsAdminUiState,
+    header: @Composable () -> Unit,
     onSetEnabled: (Boolean) -> Unit,
     onSetName: (String) -> Unit,
     onSetBaseUrl: (String) -> Unit,
@@ -300,13 +331,16 @@ private fun ConfigTab(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(R.string.models_admin_enabled),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Switch(checked = state.enabled, onCheckedChange = onSetEnabled)
+        header()
+        if (!state.isQwenPawLocal) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.models_admin_enabled),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.enabled, onCheckedChange = onSetEnabled)
+            }
         }
         if (state.isCustom) {
             OutlinedTextField(
@@ -318,13 +352,36 @@ private fun ConfigTab(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (!state.freezeUrl) {
+        if (state.baseUrlOptions.isNotEmpty()) {
+            Text(
+                text = stringResource(R.string.models_admin_base_url_scenario),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.baseUrlOptions.forEach { option ->
+                    TabChip(option.label, state.baseUrl == option.value) {
+                        onSetBaseUrl(option.value)
+                    }
+                }
+            }
+        } else {
             OutlinedTextField(
                 value = state.baseUrl,
                 onValueChange = onSetBaseUrl,
+                readOnly = state.freezeUrl,
+                enabled = !state.freezeUrl,
                 label = { Text(stringResource(R.string.models_admin_base_url)) },
                 singleLine = true,
-           
+                supportingText = if (state.freezeUrl) {
+                    { Text(stringResource(R.string.models_admin_base_url_fixed)) }
+                } else {
+                    null
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -345,13 +402,17 @@ private fun ConfigTab(
                 Text(state.authMode)
             }
         }
-        if (state.isCustom) {
+        if (state.chatModel.isNotBlank()) {
             OutlinedTextField(
                 value = state.chatModel,
-                onValueChange = onSetChatModel,
+                onValueChange = {},
+                readOnly = true,
+                enabled = false,
                 label = { Text(stringResource(R.string.models_admin_chat_model)) },
                 singleLine = true,
-           
+                supportingText = {
+                    Text(stringResource(R.string.models_admin_protocol_readonly))
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -473,38 +534,48 @@ private fun SecretField(
 @Composable
 private fun ModelsTab(
     state: ModelsAdminUiState,
+    header: @Composable () -> Unit,
     onAddModel: () -> Unit,
     onEditModel: (String, String) -> Unit,
     onDeleteModel: (String) -> Unit,
     onToggleVisibility: (String, Boolean) -> Unit,
     onProbe: (String) -> Unit,
     onTestModel: (String) -> Unit,
+    onOpenDetail: (String) -> Unit,
 ) {
     val models = state.provider?.allModels.orEmpty()
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.models_admin_tab_models),
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onAddModel) {
-                Text(stringResource(R.string.models_admin_add_model))
-            }
-        }
         if (models.isEmpty()) {
-            Text(
-                text = stringResource(R.string.models_admin_no_models),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                item { header() }
+                item {
+                    Text(
+                        text = stringResource(R.string.models_admin_no_models),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                    )
+                }
+            }
         } else {
             LazyColumn(modifier = Modifier.weight(1f)) {
+                item {
+                    header()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.models_admin_tab_models),
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onAddModel) {
+                            Text(stringResource(R.string.models_admin_add_model))
+                        }
+                    }
+                }
                 items(models, key = { it.id }) { model ->
                     val hidden = model.id in (state.provider?.hiddenModelIds.orEmpty())
                     val testing = model.id in state.testingModels
@@ -593,6 +664,9 @@ private fun ModelsTab(
                                 TextButton(onClick = { onProbe(model.id) }) {
                                     Text(stringResource(R.string.models_admin_probe))
                                 }
+                                TextButton(onClick = { onOpenDetail(model.id) }) {
+                                    Text(stringResource(R.string.models_admin_open_detail))
+                                }
                                 TextButton(onClick = { onDeleteModel(model.id) }) {
                                     Text(stringResource(R.string.action_delete))
                                 }
@@ -608,111 +682,140 @@ private fun ModelsTab(
 @Composable
 private fun PoolTab(
     state: ModelsAdminUiState,
+    header: @Composable () -> Unit,
     onSearch: (String) -> Unit,
     onFamily: (String) -> Unit,
     onTab: (String) -> Unit,
     onLoad: () -> Unit,
     onSelectAll: (Boolean) -> Unit,
     onSelectModel: (String, Boolean) -> Unit,
+    onOpenDetail: (io.qwenpaw.node.data.model.PoolModelDto) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = state.poolSearch,
-            onValueChange = onSearch,
-            label = { Text(stringResource(R.string.models_admin_pool_search)) },
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            listOf("all", "candidates", "selected").forEach { tab ->
-                TabChip(
-                    when (tab) {
-                        "candidates" -> stringResource(R.string.models_admin_pool_candidates)
-                        "selected" -> stringResource(R.string.models_admin_pool_selected)
-                        else -> stringResource(R.string.models_admin_pool_all)
-                    },
-                    state.poolTab == tab,
-                ) { onTab(tab) }
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            (listOf("all") + state.pool.families).forEach { family ->
-                TabChip(family, state.poolFamily == family) { onFamily(family) }
-            }
-        }
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(
-                    R.string.models_admin_pool_count,
-                    state.pool.total,
-                    state.pool.selectedCount,
-                ),
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.weight(1f),
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        item { header() }
+        item {
+            OutlinedTextField(
+                value = state.poolSearch,
+                onValueChange = onSearch,
+                label = { Text(stringResource(R.string.models_admin_pool_search)) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
             )
-            TextButton(onClick = { onSelectAll(true) }) {
-                Text(stringResource(R.string.models_admin_pool_select_all))
-            }
-            TextButton(onClick = { onSelectAll(false) }) {
-                Text(stringResource(R.string.models_admin_pool_clear_all))
+        }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf("all", "candidates", "selected").forEach { tab ->
+                    TabChip(
+                        when (tab) {
+                            "candidates" -> stringResource(R.string.models_admin_pool_candidates)
+                            "selected" -> stringResource(R.string.models_admin_pool_selected)
+                            else -> stringResource(R.string.models_admin_pool_all)
+                        },
+                        state.poolTab == tab,
+                    ) { onTab(tab) }
+                }
             }
         }
-        TextButton(onClick = onLoad) {
-            Text(stringResource(R.string.action_refresh))
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                (listOf("all") + state.pool.families).forEach { family ->
+                    TabChip(
+                        if (family == "all") stringResource(R.string.models_admin_pool_all) else family,
+                        state.poolFamily == family,
+                    ) { onFamily(family) }
+                }
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.models_admin_pool_count,
+                        state.pool.total,
+                        state.pool.selectedCount,
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { onSelectAll(true) }) {
+                    Text(stringResource(R.string.models_admin_pool_select_all))
+                }
+                TextButton(onClick = { onSelectAll(false) }) {
+                    Text(stringResource(R.string.models_admin_pool_clear_all))
+                }
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onLoad) {
+                    Text(stringResource(R.string.action_refresh))
+                }
+                if (state.poolLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.models_admin_pool_loading),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
         if (state.pool.models.isEmpty()) {
-            Text(
-                text = stringResource(R.string.models_admin_pool_empty),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
-        } else {
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(state.pool.models, key = { it.id }) { model ->
-                    val selected = model.id in (state.provider?.allModels.orEmpty().map { it.id })
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = selected,
-                            onCheckedChange = { onSelectModel(model.id, it) },
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(model.name, style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                text = model.id,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (model.isFree) {
-                            Text(
-                                text = stringResource(R.string.models_admin_is_free),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
+            item {
+                Text(
+                    text = stringResource(R.string.models_admin_pool_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                )
+            }
+        }
+        items(state.pool.models, key = { it.id }) { model ->
+            val selected = model.id in state.selectedModelIds
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = { onSelectModel(model.id, it) },
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(model.name.ifBlank { model.id }, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = model.id,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (model.isFree) {
+                    Text(
+                        text = stringResource(R.string.models_admin_is_free),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+                TextButton(onClick = { onOpenDetail(model) }) {
+                    Text(stringResource(R.string.models_admin_open_detail))
                 }
             }
         }

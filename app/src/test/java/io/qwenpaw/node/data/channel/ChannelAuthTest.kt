@@ -228,4 +228,23 @@ class ChannelAuthTest {
         )
         assertEquals("plugin crashed", capability.diagnostic)
     }
+
+    @Test
+    fun `missing code runtime or install action counts as missing plugin`() {
+        assertTrue(isMissingPlugin("missing_code", null))
+        assertTrue(isMissingPlugin("missing_runtime", "repair"))
+        assertTrue(isMissingPlugin(null, "install"))
+        assertTrue(isMissingPlugin("failed", "install"))
+
+        assertFalse(isMissingPlugin("running", null))
+        assertFalse(isMissingPlugin("disabled", "enable"))
+        assertFalse(isMissingPlugin("validation_pending", "repair"))
+        assertFalse(isMissingPlugin(null, null))
+
+        val capability = channelCapability(
+            "dingtalk",
+            json("availability" to "missing_code"),
+        )
+        assertTrue(capability.missingPlugin)
+    }
 }

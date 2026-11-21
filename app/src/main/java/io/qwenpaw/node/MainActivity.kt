@@ -189,7 +189,7 @@ private const val BRIDGE_ZIP_URL =
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, MODEL_ADMIN, SKILLS, SKILL_CONFIG, SKILL_POOL, SKILL_POOL_EDIT, SKILL_POOL_BUILTIN, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, CHANNEL_CONFIG, LOCAL_MODELS, TERMINAL, GIT, BROWSER_DIAGNOSTICS, PLUGIN_MANAGE, DEPENDENCY_UPGRADE, ALLOW_NO_AUTH }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, MODEL_ADMIN, PROVIDER_ADD, MODEL_DEFAULTS, SKILLS, SKILL_CONFIG, SKILL_POOL, SKILL_POOL_EDIT, SKILL_POOL_BUILTIN, SKILL_POOL_IMPORT, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, CHANNEL_CONFIG, LOCAL_MODELS, TERMINAL, GIT, BROWSER_DIAGNOSTICS, PLUGIN_MANAGE, DEPENDENCY_UPGRADE, ALLOW_NO_AUTH }
 
 @Composable
 private fun QwenPawNav(
@@ -207,6 +207,9 @@ private fun QwenPawNav(
     var channelConfigKey by remember { mutableStateOf<String?>(null) }
     var skillConfigKey by remember { mutableStateOf<String?>(null) }
     var modelAdminKey by remember { mutableStateOf<String?>(null) }
+    var modelsInitialTab by remember {
+        mutableStateOf(io.qwenpaw.node.data.model.ProviderScope.CLOUD)
+    }
     // 用量统计有两个入口（对话列表顶栏、设置页）。记住是谁打开的，
     // 返回时才回到进入前那一层——固定回列表会让「设置 → 用量 → 返回」跳过设置页。
     var usageOrigin by remember { mutableStateOf(Screen.LIST) }
@@ -215,16 +218,10 @@ private fun QwenPawNav(
     var dependencyOrigin by remember { mutableStateOf(Screen.MARKET) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     // Web 进入提示与「去 Web 控制台」共用一个打开动作；地址不可用时不给无效按钮。
     val openConsole: (() -> Unit)? = viewModel.activeBaseUrl()?.let { base ->
-        {
-            context.startActivity(
-                android.content.Intent(
-                    android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse(base),
-                ),
-            )
-        }
+        { confirmBrowser(base) }
     }
     val bridgeSupportsBrowser = (appState.bridgeStatus as? io.qwenpaw.node.data.plugin.BridgeStatus.Ready)
         ?.info?.supports("browser") == true
@@ -1259,16 +1256,7 @@ private fun QwenPawNav(
                     baseUrl = base,
                     onBack = { screen = Screen.SETTINGS },
                     onEnsureLoaded = { viewModel.appCenter.refresh() },
-                    onOpenConsole = {
-                        base?.let {
-                            context.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(it),
-                                ),
-                            )
-                        }
-                    },
+                    onOpenConsole = { base?.let(confirmBrowser) },
                 )
             }
 
@@ -1468,8 +1456,35 @@ private fun QwenPawNav(
                         viewModel.modelsAdmin.open(providerId)
                         screen = Screen.MODEL_ADMIN
                     },
+                    onOpenProviderAdd = {
+                        viewModel.providerAdd.begin()
+                        screen = Screen.PROVIDER_ADD
+                    },
+                    onOpenModelDefaults = {
+                        viewModel.modelDefaults.ensureLoaded()
+                        screen = Screen.MODEL_DEFAULTS
+                    },
+                    initialTab = modelsInitialTab,
                 )
             }
+
+            Screen.PROVIDER_ADD -> ProviderAddPage(
+                viewModel = viewModel,
+                onBack = { screen = Screen.MODELS },
+                onSaved = {
+                    modelsInitialTab = io.qwenpaw.node.data.model.ProviderScope.LOCAL
+                    viewModel.models.refresh()
+                    screen = Screen.MODELS
+                },
+            )
+
+            Screen.MODEL_DEFAULTS -> ModelDefaultsPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.modelDefaults.clear()
+                    screen = Screen.MODELS
+                },
+            )
 
             Screen.MODEL_ADMIN -> ModelsAdminPage(
                 viewModel = viewModel,
@@ -1480,14 +1495,7 @@ private fun QwenPawNav(
                 },
                 retryKey = { modelAdminKey },
                 openConsole = openConsole,
-                onOpenUrl = { url ->
-                    context.startActivity(
-                        android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse(url),
-                        ),
-                    )
-                },
+                onOpenUrl = { url -> confirmBrowser(url) },
             )
 
             Screen.SKILLS -> {
@@ -1554,6 +1562,7 @@ private fun QwenPawNav(
                     viewModel.skillPool.openBuiltinLibrary()
                     screen = Screen.SKILL_POOL_BUILTIN
                 },
+                onOpenImport = { screen = Screen.SKILL_POOL_IMPORT },
                 openConsole = openConsole,
             )
 
@@ -1572,6 +1581,15 @@ private fun QwenPawNav(
                     viewModel.skillPool.closeBuiltinLibrary()
                     screen = Screen.SKILL_POOL
                 },
+            )
+
+            Screen.SKILL_POOL_IMPORT -> SkillPoolImportPage(
+                viewModel = viewModel,
+                onBack = {
+                    viewModel.skillPool.closeUpload()
+                    screen = Screen.SKILL_POOL
+                },
+                onImported = { screen = Screen.SKILL_POOL },
             )
 
             Screen.MCP -> McpAdminPage(
@@ -2247,11 +2265,9 @@ private fun toast(context: android.content.Context, text: String) {
     android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
 }
 
-/** 用系统浏览器打开网址。地址无效时静默失败：调用方已经关掉了对话框，没有回滚的余地。 */
+/** 已确认过的入口直接打开；地址无效时静默失败，调用方已经关掉了对话框。 */
 private fun openExternal(context: android.content.Context, url: String) {
-    runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    }
+    io.qwenpaw.node.ui.common.openBrowser(context, url)
 }
 
 /**
@@ -2444,6 +2460,7 @@ private fun McpAdminPage(
     onOpenConsole: (() -> Unit)?,
 ) {
     val context = LocalContext.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     LaunchedEffect(Unit) { viewModel.mcp.refresh() }
     io.qwenpaw.node.ui.mcp.McpScreen(
         state = state,
@@ -2472,14 +2489,7 @@ private fun McpAdminPage(
         ),
         onBack = onBack,
         onOpenConsole = onOpenConsole,
-        onOpenUrl = { url ->
-            context.startActivity(
-                android.content.Intent(
-                    android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse(url),
-                ),
-            )
-        },
+        onOpenUrl = { url -> confirmBrowser(url) },
     )
 }
 
@@ -2552,6 +2562,7 @@ private fun SkillPoolPage(
     onBack: () -> Unit,
     onOpenEditor: (String?) -> Unit,
     onOpenBuiltin: () -> Unit,
+    onOpenImport: () -> Unit,
     openConsole: (() -> Unit)?,
 ) {
     val poolState by viewModel.skillPool.state.collectAsState()
@@ -2574,8 +2585,14 @@ private fun SkillPoolPage(
         onStartDistribute = viewModel.skillPool::startDistribute,
         onCancelDownload = viewModel.skillPool::cancelDownload,
         onDismissMessage = viewModel.skillPool::dismissMessage,
-        onUploadOpen = viewModel.skillPool::openUpload,
+        onUploadOpen = {
+            viewModel.skillPool.openUpload()
+            onOpenImport()
+        },
         onReconcile = viewModel.skillPool::reconcile,
+        onSelectAllSkills = viewModel.skillPool::selectAllSkills,
+        onInvertSelection = viewModel.skillPool::invertSelection,
+        onClearSelection = viewModel.skillPool::clearSelection,
         onUploadClose = viewModel.skillPool::closeUpload,
         onUploadWorkspace = viewModel.skillPool::setUploadWorkspace,
         onUploadSkill = viewModel.skillPool::setUploadSkill,
@@ -2583,6 +2600,33 @@ private fun SkillPoolPage(
         onUploadConfirm = viewModel.skillPool::confirmUpload,
         onImportZip = viewModel.skillPool::importZip,
         onOpenConsole = openConsole,
+    )
+}
+
+@Composable
+private fun SkillPoolImportPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    onImported: () -> Unit,
+) {
+    val state by viewModel.skillPool.state.collectAsState()
+    io.qwenpaw.node.ui.skills.SkillPoolImportScreen(
+        state = state,
+        onBack = onBack,
+        onWorkspace = viewModel.skillPool::setUploadWorkspace,
+        onWorkspaceQuery = viewModel.skillPool::setUploadWorkspaceQuery,
+        onSkillQuery = viewModel.skillPool::setUploadSkillQuery,
+        onToggleSkill = viewModel.skillPool::toggleUploadSkill,
+        onSelectAllSkills = viewModel.skillPool::selectAllUploadSkills,
+        onClearSkills = viewModel.skillPool::clearUploadSkills,
+        onOverwrite = viewModel.skillPool::setUploadOverwrite,
+        onConfirm = {
+            viewModel.skillPool.confirmUpload {
+                viewModel.skillPool.closeUpload()
+                onImported()
+            }
+        },
+        onDismissNotice = viewModel.skillPool::dismissMessage,
     )
 }
 
@@ -2638,6 +2682,29 @@ private fun ModelsAdminPage(
     onOpenUrl: (String) -> Unit,
 ) {
     val state by viewModel.modelsAdmin.state.collectAsState()
+    if (state.providerId == "qwenpaw-local") {
+        val localState by viewModel.localModels.state.collectAsState()
+        io.qwenpaw.node.ui.localmodels.LocalModelsScreen(
+            state = localState,
+            onBack = onBack,
+            onEnsureLoaded = { viewModel.localModels.refresh() },
+            onStopPolling = viewModel.localModels::stopPolling,
+            onInstallRuntime = viewModel.localModels::installRuntime,
+            onDownloadModel = viewModel.localModels::downloadModel,
+            onCancel = viewModel.localModels::cancelActive,
+            onConsumeMessage = viewModel.localModels::consumeMessage,
+            onOpenConsole = openConsole,
+            onDeleteModel = viewModel.localModels::deleteModel,
+            onStartServer = viewModel.localModels::startServer,
+            onStopServer = viewModel.localModels::stopServer,
+            onCheckUpdate = viewModel.localModels::checkUpdate,
+            onUpdateRuntime = viewModel.localModels::updateRuntime,
+            onSaveConfig = viewModel.localModels::saveConfig,
+            onConfigDraftChange = viewModel.localModels::updateConfigDraft,
+            onReloadConfig = { viewModel.localModels.loadConfig(force = true) },
+        )
+        return
+    }
     io.qwenpaw.node.ui.settings.ModelsAdminScreen(
         state = state,
         onBack = onBack,
@@ -2682,6 +2749,56 @@ private fun ModelsAdminPage(
         onDismissNotice = viewModel.modelsAdmin::dismissNotice,
         onOpenUrl = onOpenUrl,
         onOpenConsole = openConsole,
+        onOpenModelDetail = viewModel.modelsAdmin::openModelDetail,
+        onCloseModelDetail = viewModel.modelsAdmin::closeModelDetail,
+        onModelDetailChange = viewModel.modelsAdmin::updateModelDetail,
+        onSaveModelDetail = viewModel.modelsAdmin::saveModelDetail,
+    )
+}
+
+@Composable
+private fun ProviderAddPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    onSaved: () -> Unit,
+) {
+    val state by viewModel.providerAdd.state.collectAsState()
+    io.qwenpaw.node.ui.settings.ProviderAddScreen(
+        state = state,
+        onBack = onBack,
+        onId = viewModel.providerAdd::setId,
+        onName = viewModel.providerAdd::setName,
+        onBaseUrl = viewModel.providerAdd::setBaseUrl,
+        onApiKey = viewModel.providerAdd::setApiKey,
+        onProtocol = viewModel.providerAdd::setProtocol,
+        onSave = viewModel.providerAdd::save,
+        onSaved = onSaved,
+    )
+}
+
+@Composable
+private fun ModelDefaultsPage(
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+) {
+    val state by viewModel.modelDefaults.state.collectAsState()
+    LaunchedEffect(Unit) { viewModel.modelDefaults.ensureLoaded() }
+    io.qwenpaw.node.ui.settings.ModelDefaultsScreen(
+        state = state,
+        onBack = onBack,
+        onSelectTab = viewModel.modelDefaults::selectTab,
+        onRetry = viewModel.modelDefaults::refresh,
+        onGlobalChat = viewModel.modelDefaults::setGlobalChat,
+        onGlobalDecision = viewModel.modelDefaults::setGlobalDecision,
+        onAgentPrimary = viewModel.modelDefaults::setAgentPrimary,
+        onAgentDecision = viewModel.modelDefaults::setAgentDecision,
+        onAgentSubagent = viewModel.modelDefaults::setAgentSubagent,
+        onFallbackEnabled = viewModel.modelDefaults::setFallbackEnabled,
+        onAddFallback = viewModel.modelDefaults::addFallback,
+        onRemoveFallback = viewModel.modelDefaults::removeFallback,
+        onThinking = viewModel.modelDefaults::setThinking,
+        onSave = viewModel.modelDefaults::saveAgent,
+        onDismissNotice = viewModel.modelDefaults::dismissNotice,
     )
 }
 
@@ -2706,8 +2823,8 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.CHANNEL_CONFIG -> Screen.CHANNEL
     Screen.SKILL_CONFIG -> Screen.SKILLS
     Screen.SKILL_POOL -> Screen.SKILLS
-    Screen.SKILL_POOL_EDIT, Screen.SKILL_POOL_BUILTIN -> Screen.SKILL_POOL
-    Screen.MODEL_ADMIN -> Screen.MODELS
+    Screen.SKILL_POOL_EDIT, Screen.SKILL_POOL_BUILTIN, Screen.SKILL_POOL_IMPORT -> Screen.SKILL_POOL
+    Screen.MODEL_ADMIN, Screen.PROVIDER_ADD, Screen.MODEL_DEFAULTS -> Screen.MODELS
     // 依赖升级从插件管理或市场进入，显式返回由页面回调处理；系统返回回插件管理。
     Screen.DEPENDENCY_UPGRADE -> Screen.PLUGIN_MANAGE
     // 免鉴权地址是安全页的下一层。

@@ -2,7 +2,12 @@ package io.qwenpaw.node.data.remote
 
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.MultiAddressFailure
+import io.qwenpaw.node.data.channel.pydanticDetailText
 import io.qwenpaw.node.ui.i18n.Texts
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * 把异常映射成给用户看的中文提示。
@@ -31,7 +36,11 @@ object ErrorText {
             404 -> Texts.get(R.string.error_not_found_404)
             409 -> Texts.get(R.string.error_busy_409)
             503 -> Texts.get(R.string.error_console_disabled_503)
-            else -> e.message
+            // 422 的 detail 是 pydantic 的数组原文，整段贴到界面上看不出是哪个字段错了。
+            // 其余状态码同样可能是 JSON 形状的 detail，一并转成可读文本。
+            else -> jsonDetailText(e.detail ?: e.message)
+                ?: jsonDetailText(e.message)
+                ?: e.message
         }
 
         // 并行验证的汇总失败：逐地址给出原因，否则用户只知道「都连不上」，
@@ -180,6 +189,26 @@ object ErrorText {
         val text = of(e)
         val extra = hint(e, usedHttps) ?: return text
         return "$text\n$extra"
+    }
+
+    /**
+     * JSON 形状的 `detail` 转成一行中文。
+     *
+     * FastAPI 的 422 给的是 `[{loc,msg,type}]`，`QwenPawApi.extractDetail` 会把它
+     * 原样塞进 message；对象形状（`{message: ...}`）出现在插件类接口的 409、500 上。
+     * 解析失败时返回 null，调用方按原来的纯文本显示。
+     */
+    private fun jsonDetailText(detail: String?): String? {
+        val text = detail?.trim().orEmpty()
+        if (text.length < 2) return null
+        val first = text.first()
+        if (first != '[' && first != '{') return null
+        val element = runCatching { Json.parseToJsonElement(text) }.getOrNull() ?: return null
+        pydanticDetailText(element)?.takeIf { it.isNotBlank() }?.let { return it }
+        val obj = element as? JsonObject ?: return null
+        return listOf("message", "detail", "msg", "reason").firstNotNullOfOrNull { key ->
+            (obj[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
     }
 
     private inline fun <reified T : Throwable> Throwable.hasCause(): Boolean {

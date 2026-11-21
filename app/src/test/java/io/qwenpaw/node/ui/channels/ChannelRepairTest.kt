@@ -13,6 +13,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -134,5 +135,38 @@ class ChannelRepairTest {
                 it.method == "POST" && it.path == "/api/plugins/feishu-plugin/repair-dependencies"
             }
         }
+    }
+
+    @Test
+    fun `unsupported version hides channels and sends no request`() {
+        val gated = ChannelViewModel(
+            api = QwenPawApi(),
+            connection = { Connection("http://${server.hostName}:${server.port}", "tk") },
+            serverVersion = { "2.2.2" },
+        )
+        gated.refresh()
+
+        assertTrue(gated.state.value.versionUnsupported)
+        assertFalse(gated.state.value.versionUnknown)
+        assertEquals("2.2.2", gated.state.value.serverVersionRaw)
+        assertTrue(gated.state.value.channels.isEmpty())
+        assertTrue("低版本不应发起频道请求", requests.isEmpty())
+        gated.clear()
+    }
+
+    @Test
+    fun `unknown version warns but still loads`() {
+        val gated = ChannelViewModel(
+            api = QwenPawApi(),
+            connection = { Connection("http://${server.hostName}:${server.port}", "tk") },
+            serverVersion = { null },
+        )
+        gated.refresh()
+        waitUntil { gated.state.value.loaded }
+
+        assertTrue(gated.state.value.versionUnknown)
+        assertFalse(gated.state.value.versionUnsupported)
+        assertTrue(gated.state.value.channels.isNotEmpty())
+        gated.clear()
     }
 }

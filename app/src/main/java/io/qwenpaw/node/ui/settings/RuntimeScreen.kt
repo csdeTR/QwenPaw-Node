@@ -70,6 +70,7 @@ fun RuntimeScreen(
     var editing by remember { mutableStateOf<AcpAgentForm?>(null) }
     var logoutTarget by remember { mutableStateOf<HarnessProviderDto?>(null) }
     val context = LocalContext.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
 
     LaunchedEffect(Unit) { onEnsureLoaded() }
 
@@ -165,14 +166,9 @@ fun RuntimeScreen(
             },
             confirmButton = {
                 login.url?.let { url ->
-                    TextButton(onClick = {
-                        context.startActivity(
-                            android.content.Intent(
-                                android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse(url),
-                            ),
-                        )
-                    }) { Text(stringResource(R.string.runtime_open_verify_page)) }
+                    TextButton(onClick = { confirmBrowser(url) }) {
+                        Text(stringResource(R.string.runtime_open_verify_page))
+                    }
                 }
             },
             dismissButton = {
@@ -373,6 +369,7 @@ private fun HarnessTab(
     onInstall: (String) -> Unit,
     onDismissNotice: () -> Unit,
 ) {
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     state.error?.let { message ->
         Text(
             text = message,

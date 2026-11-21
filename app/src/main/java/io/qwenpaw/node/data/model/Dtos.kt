@@ -640,6 +640,19 @@ data class ThinkingValueDto(
     @SerialName("budget_tokens") val budgetTokens: Long? = null,
 )
 
+/** 提供商的可选接入场景。 */
+@Serializable
+data class ProviderMetaDto(
+    @SerialName("base_url_options") val baseUrlOptions: List<BaseUrlOptionDto> = emptyList(),
+    @SerialName("api_key_url") val apiKeyUrl: String? = null,
+)
+
+@Serializable
+data class BaseUrlOptionDto(
+    val label: String = "",
+    val value: String = "",
+)
+
 /** 模型池里的单个模型条目。 */
 @Serializable
 data class ModelSlotDto(
@@ -648,6 +661,30 @@ data class ModelSlotDto(
     @SerialName("is_free") val isFree: Boolean = false,
     @SerialName("is_recommended") val isRecommended: Boolean = false,
     @SerialName("max_input_length") val maxInputLength: Long? = null,
+    @SerialName("model_type") val modelType: String = "chat",
+    @SerialName("effective_max_input_length") val effectiveMaxInputLength: Long? = null,
+    @SerialName("automatic_max_input_length") val automaticMaxInputLength: Long? = null,
+    @SerialName("max_input_length_auto_detected") val maxInputLengthAutoDetected: Long? = null,
+    @SerialName("max_input_length_configured") val maxInputLengthConfigured: Boolean = false,
+    @SerialName("context_length_source") val contextLengthSource: String? = null,
+    @SerialName("max_output_length") val maxOutputLength: Long? = null,
+    @SerialName("max_output_length_source") val maxOutputLengthSource: String? = null,
+    @SerialName("config_overrides") val configOverrides: List<String> = emptyList(),
+    @SerialName("supports_image") val supportsImage: Boolean? = null,
+    @SerialName("supports_audio") val supportsAudio: Boolean? = null,
+    @SerialName("supports_video") val supportsVideo: Boolean? = null,
+    @SerialName("supports_tool_calling") val supportsToolCalling: Boolean? = null,
+    @SerialName("thinking_control") val thinkingControl: ThinkingControlDto? = null,
+    @SerialName("thinking_enabled") val thinkingEnabled: Boolean? = null,
+    @SerialName("thinking_budget") val thinkingBudget: Long? = null,
+    @SerialName("reasoning_effort") val reasoningEffort: String? = null,
+    @SerialName("relay_reasoning") val relayReasoning: Boolean? = null,
+    @SerialName("generate_kwargs") val generateKwargs: JsonObject? = null,
+    @SerialName("thinking_param_style") val thinkingParamStyle: String? = null,
+    @SerialName("reasoning_effort_options") val reasoningEffortOptions: List<String> = emptyList(),
+    @SerialName("thinking_budget_range") val thinkingBudgetRange: List<Long> = emptyList(),
+    @SerialName("requires_paid_confirmation") val requiresPaidConfirmation: Boolean = false,
+    @SerialName("remote_missing") val remoteMissing: Boolean = false,
 )
 
 /**
@@ -697,6 +734,23 @@ data class ProviderDto(
     @SerialName("require_api_key") val requireApiKey: Boolean? = null,
     @SerialName("support_model_discovery") val supportModelDiscovery: Boolean = false,
     @SerialName("support_connection_check") val supportConnectionCheck: Boolean = false,
+    /** 本地运行时，例如 QwenPaw Local、Ollama、LM Studio。 */
+    @SerialName("is_local") val isLocal: Boolean = false,
+    /** 同一提供商的不同接入场景（Zhipu 的 BigModel 与 Z.AI 等）共用这个分组键。 */
+    @SerialName("provider_group") val providerGroup: String? = null,
+    @SerialName("provider_group_name") val providerGroupName: String? = null,
+    @SerialName("provider_variant") val providerVariant: String? = null,
+    @SerialName("is_free_tier") val isFreeTier: Boolean = false,
+    @SerialName("model_count") val modelCount: Int? = null,
+    /** 服务端返回的密钥描述；只用于判断「是否已配置」，不展示明文。 */
+    @SerialName("api_key") val apiKey: String? = null,
+    @SerialName("models_last_sync_error") val modelsLastSyncError: String? = null,
+    @SerialName("models_syncing") val modelsSyncing: Boolean = false,
+    @SerialName("seen_model_ids") val seenModelIds: List<String> = emptyList(),
+    @SerialName("thinking_param_style") val thinkingParamStyle: String? = null,
+    @SerialName("reasoning_effort_options") val reasoningEffortOptions: List<String> = emptyList(),
+    @SerialName("thinking_budget_range") val thinkingBudgetRange: List<Long> = emptyList(),
+    val meta: ProviderMetaDto? = null,
 ) {
     /** 三个数组按 id 去重合并，顺序为 配置 → 额外 → 探测。 */
     val allModels: List<ModelSlotDto>

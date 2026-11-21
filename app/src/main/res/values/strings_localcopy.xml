@@ -62,7 +62,7 @@
     <string name="cmd_deny_detail">拒绝排队中的工具调用，可附一句理由，智能体会据此调整做法。</string>
     <string name="cmd_goal_detail">把一段描述设为持续目标，智能体循环执行直到声明完成或失败。</string>
     <string name="cmd_mission_detail">按 master、worker、verifier 三层流水线拆解并验证复杂任务，适合有明确验收方式的工作。</string>
-    <string name="cmd_model_detail">不带参数时显示当前模型与来源；带 &lt;供应商&gt;:&lt;模型&gt; 时切换默认模型，另有 list、info、reset 子命令。</string>
+    <string name="cmd_model_detail">不带参数时显示当前模型与来源；带 &lt;提供商&gt;:&lt;模型&gt; 时切换默认模型，另有 list、info、reset 子命令。</string>
     <string name="cmd_new_detail">结束当前对话并新建一条，旧内容转为长期记忆。</string>
     <string name="cmd_plan_detail">把任务拆成结构化计划并逐步执行，适合步骤较多的改动。</string>
     <string name="cmd_reme_detail">调用聊天中允许的 ReMe 记忆动作，例如用 search 按关键词检索记忆。</string>

@@ -186,6 +186,10 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.5.3")
     implementation("androidx.camera:camera-lifecycle:1.5.3")
     implementation("androidx.camera:camera-view:1.5.3")
+    // 扫码识别改用离线内置的 ML Kit：弱光与倾斜场景比 ZXing 稳，
+    // 且不依赖 Google Play 服务，redroid 与国内设备都能用。
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // 保留 ZXing 核心库给 JVM 往返测试与二维码生成。
     implementation("com.google.zxing:core:3.5.4")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

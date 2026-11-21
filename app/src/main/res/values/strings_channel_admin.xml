@@ -23,7 +23,15 @@
     <string name="channel_config_secret_new">新值</string>
     <string name="channel_config_secret_keep_hint">留空表示保留原值</string>
     <string name="channel_config_error_number">请输入数字</string>
-    <string name="channel_config_error_json">不是合法的 JSON 对象</string>
+    <string name="channel_config_error_json">不是合法的 JSON</string>
+    <string name="channel_config_error_json_array">此字段需要 JSON 数组</string>
+    <string name="channel_config_error_json_object">此字段需要 JSON 对象</string>
+    <string name="channel_config_json_array_hint">应为 JSON 数组，例如 [&quot;a&quot;, &quot;b&quot;]</string>
+    <string name="channel_config_json_object_hint">应为 JSON 对象，例如 {&quot;key&quot;: &quot;value&quot;}</string>
+    <string name="channel_config_json_any_hint">支持 JSON 数组与对象；留空表示保留服务端原值</string>
+    <string name="channel_config_missing_plugin_title">频道插件未安装</string>
+    <string name="channel_config_missing_plugin_message">该频道的插件尚未安装，配置内容暂时无法读取。安装完成后会自动重新加载。</string>
+    <string name="channel_config_missing_runtime_message">该频道的插件缺少运行时依赖，配置内容暂时无法读取。修复完成后会自动重新加载。</string>
     <string name="channel_config_availability">状态：%1$s</string>
     <string name="channel_config_diagnostic">诊断：%1$s</string>
     <string name="channel_config_fields_missing">服务端没有返回可编辑字段。</string>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 模型与提供商列表 -->
+    <string name="models_rework_tab_cloud">云端提供商</string>
+    <string name="models_rework_tab_local">本地 &amp; 自定义</string>
+    <string name="models_rework_tab_count">%1$s %2$d</string>
+    <string name="models_rework_search_hint">搜索提供商</string>
+    <string name="models_rework_add_provider">添加提供商</string>
+    <string name="models_rework_section_configured">已配置</string>
+    <string name="models_rework_section_available">可用提供商</string>
+    <string name="models_rework_defaults_row">默认模型</string>
+    <string name="models_rework_defaults_summary">全局 %1$s，当前智能体 %2$s</string>
+    <string name="models_rework_status_configured">已配置</string>
+    <string name="models_rework_status_unconfigured">未配置</string>
+    <string name="models_rework_status_disabled">已停用</string>
+    <string name="models_rework_tag_free">免费</string>
+    <string name="models_rework_tag_local">本地</string>
+    <string name="models_rework_tag_custom">自定义</string>
+    <string name="models_rework_model_count">模型 %1$d 个</string>
+    <string name="models_rework_no_models">尚未添加模型</string>
+    <string name="models_rework_action_config">配置</string>
+    <string name="models_rework_action_models">模型</string>
+    <string name="models_rework_credential_set">密钥已设置</string>
+    <string name="models_rework_credential_missing">未设置密钥</string>
+    <string name="models_rework_credential_none">无需密钥</string>
+    <string name="models_rework_credential_oauth">已连接 OAuth</string>
+    <string name="models_rework_variant_pick_title">选择 %1$s 的版本</string>
+    <string name="models_rework_local_embedded_type">嵌入式（进程内）</string>
+    <string name="models_rework_local_type">类型 %1$s</string>
+    <string name="models_rework_empty_cloud">没有匹配的云端提供商</string>
+    <string name="models_rework_empty_local">没有匹配的本地或自定义提供商</string>
+    <string name="models_rework_not_set">未设置</string>
+
+    <!-- 添加提供商 -->
+    <string name="models_rework_add_title">添加提供商</string>
+    <string name="models_rework_field_id">提供商 ID</string>
+    <string name="models_rework_field_id_hint">小写字母、数字、连字符、下划线，创建后不可改</string>
+    <string name="models_rework_field_name">显示名称</string>
+    <string name="models_rework_field_name_hint">留空时以提供商 ID 作为显示名称</string>
+    <string name="models_rework_field_base_url">默认 Base URL</string>
+    <string name="models_rework_field_base_url_hint">以 http:// 或 https:// 开头</string>
+    <string name="models_rework_field_api_key">API 密钥（可选）</string>
+    <string name="models_rework_field_api_key_hint">可以稍后在提供商详情页补充</string>
+    <string name="models_rework_field_protocol">协议</string>
+    <string name="models_rework_protocol_chat">OpenAI 兼容（Chat Completions）</string>
+    <string name="models_rework_protocol_response">OpenAI 兼容（Responses API）</string>
+    <string name="models_rework_protocol_anthropic">Anthropic 兼容</string>
+    <string name="models_rework_protocol_title">选择协议</string>
+    <string name="models_rework_error_id_empty">请填写提供商 ID</string>
+    <string name="models_rework_error_id_invalid">提供商 ID 只能使用小写字母、数字、连字符与下划线，并以字母开头</string>
+    <string name="models_rework_error_base_url_empty">请填写默认 Base URL</string>
+    <string name="models_rework_error_base_url_invalid">Base URL 必须是合法的 http 或 https 地址</string>
+    <string name="models_rework_add_hint">本页只创建提供商，模型与密钥细节可在创建后继续设置。</string>
+
+    <!-- 默认模型 -->
+    <string name="models_rework_defaults_title">默认模型</string>
+    <string name="models_rework_defaults_tab_global">全局模型</string>
+    <string name="models_rework_defaults_tab_agent">当前智能体</string>
+    <string name="models_rework_defaults_chat">默认对话模型</string>
+    <string name="models_rework_defaults_decision">默认决策模型</string>
+    <string name="models_rework_defaults_decision_unset">未设置，沿用对话模型</string>
+    <string name="models_rework_saved">已保存</string>
+    <string name="models_rework_agent_primary">主模型</string>
+    <string name="models_rework_agent_primary_hint">主模型在保存时写入智能体设置</string>
+    <string name="models_rework_agent_decision">决策模型</string>
+    <string name="models_rework_agent_decision_unset">未设置，沿用全局决策模型</string>
+    <string name="models_rework_agent_subagent">子智能体模型</string>
+    <string name="models_rework_agent_subagent_same">与主模型相同</string>
+    <string name="models_rework_agent_fallback">失败时使用备用模型</string>
+    <string name="models_rework_agent_fallback_hint">主模型调用失败时按顺序尝试下列模型</string>
+    <string name="models_rework_agent_fallback_add">添加备用模型</string>
+    <string name="models_rework_agent_fallback_pick">选择备用模型</string>
+    <string name="models_rework_agent_fallback_empty">尚未添加备用模型</string>
+    <string name="models_rework_agent_fallback_remove">移除</string>
+    <string name="models_rework_agent_thinking">思考强度</string>
+    <string name="models_rework_budget_chip">%1$d tokens</string>
+    <string name="models_rework_agent_no_agent">当前实例没有可用的智能体</string>
+    <string name="models_rework_picker_follow">跟随默认</string>
+    <string name="models_rework_picker_title">选择%1$s</string>
+    <string name="models_rework_no_models_hint">服务端还没有可用模型，请先在提供商页添加</string>
+</resources>

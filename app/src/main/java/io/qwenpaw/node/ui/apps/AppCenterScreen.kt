@@ -44,6 +44,7 @@ fun AppCenterScreen(
     onOpenConsole: () -> Unit,
 ) {
     val context = LocalContext.current
+    val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
     LaunchedEffect(Unit) { onEnsureLoaded() }
 
     Scaffold(
@@ -108,12 +109,7 @@ fun AppCenterScreen(
                     enabled = baseUrl != null,
                     onOpen = {
                         val base = baseUrl ?: return@AppRow
-                        context.startActivity(
-                            android.content.Intent(
-                                android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse("$base/apps/${app.id}"),
-                            ),
-                        )
+                        confirmBrowser("$base/apps/${app.id}")
                     },
                 )
                 Spacer(Modifier.height(8.dp))

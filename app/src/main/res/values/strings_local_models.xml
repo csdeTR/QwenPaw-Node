@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 本地模型页 -->
-    <string name="local_models_title">本地模型</string>
+    <string name="local_models_title">QwenPaw Local</string>
     <string name="local_models_section_server">运行状态</string>
     <string name="local_models_section_models">可下载模型</string>
     <string name="local_models_section_progress">当前下载</string>

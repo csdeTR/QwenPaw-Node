@@ -432,9 +432,9 @@ SSE 的 `turn_usage` 帧里，`context_usage` 与 `usage` **平级**：
 
 `DELETE /api/chats/{id}/model` 返回 `Method Not Allowed`，不存在清除端点。
 
-查询侧：`GET /api/models` 列出供应商。
+查询侧：`GET /api/models` 列出提供商。
 
-**不要用 `GET /api/models/{provider_id}/pool` 取会话可切换的模型列表。**本机部署下该端点返回空数组，依赖它会得到「没有可用模型」的错误结论。可选模型分散在 `GET /api/models` 每个供应商的三个数组里：`models`（配置里写明的）、`extra_models`（额外添加的）、`discovered_models`（探测到的）。客户端按此顺序合并、按 id 去重，并跳过 `enabled = false` 的供应商。
+**不要用 `GET /api/models/{provider_id}/pool` 取会话可切换的模型列表。**本机部署下该端点返回空数组，依赖它会得到「没有可用模型」的错误结论。可选模型分散在 `GET /api/models` 每个提供商的三个数组里：`models`（配置里写明的）、`extra_models`（额外添加的）、`discovered_models`（探测到的）。客户端按此顺序合并、按 id 去重，并跳过 `enabled = false` 的提供商。
 
 ### 智能体审批模式
 
@@ -1586,7 +1586,7 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | --- | --- | --- | --- |
 | GET | `/api/agent-stats` | **按 `X-Agent-Id` 过滤**，只有当前智能体 | 今天往前 30 天 |
 | GET | `/api/agent-stats/llm-tool-trend` | **跨智能体汇总**（全局） | 同上 |
-| GET | `/api/token-usage/details` | **全局**，一行是「日期 × 智能体 × 供应商 × 模型」 | 同上 |
+| GET | `/api/token-usage/details` | **全局**，一行是「日期 × 智能体 × 提供商 × 模型」 | 同上 |
 | GET | `/api/token-usage` | 全局聚合（第 10 节） | 同上 |
 
 查询参数都是 `start_date` / `end_date`（`YYYY-MM-DD`，**两端都含**）。**传反的区间会被服务端自动交换**：`start_date=2026-11-14&end_date=2026-11-12`返回的 `start_date` 是 `2026-11-12`。客户端因此不需要自己纠正顺序。
@@ -1642,9 +1642,9 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 | --- | --- | --- |
 | 成功 | 200 | 新的 `ActiveModelsInfo` |
 | `scope=agent` 缺 `agent_id` | 400 | `agent_id is required when scope is 'agent'` |
-| 供应商不存在 | 404 | `Provider 'nope' not found.`（**句末有句号**） |
+| 提供商不存在 | 404 | `Provider 'nope' not found.`（**句末有句号**） |
 
-### 29.6 供应商连通性测试
+### 29.6 提供商连通性测试
 
 `POST /api/models/{provider_id}/test`，body 可省略（服务端声明为`Optional[TestProviderRequest]`）。返回：
 
@@ -1660,13 +1660,13 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
  "message":"Connection failed: API error when connecting to `http://localhost:1234/v1` (status=unknown): Connection error."}
 ```
 
-按状态码判断会把「供应商连不上」显示成「测试成功」。失败时直接把 `message` 透给用户。
+按状态码判断会把「提供商连不上」显示成「测试成功」。失败时直接把 `message` 透给用户。
 
-未知供应商回 **404** `Provider 'nope' not found`（**句末没有句号**，与 29.5 的 404 文案不一致，两处都是服务端原文，客户端不做字符串加工）。
+未知提供商回 **404** `Provider 'nope' not found`（**句末没有句号**，与 29.5 的 404 文案不一致，两处都是服务端原文，客户端不做字符串加工）。
 
 ### 29.7 模型级测试单独一条路径
 
-服务端没有 `POST /api/models/{id}/test` 这个「模型级」端点：`/{provider_id}/test` 测的是**供应商**连通性。模型级是`POST /api/models/{provider_id}/models/test`，body `{model_id}`，返回同一个 `TestConnectionResponse`。客户端本期只接供应商级。
+服务端没有 `POST /api/models/{id}/test` 这个「模型级」端点：`/{provider_id}/test` 测的是**提供商**连通性。模型级是`POST /api/models/{provider_id}/models/test`，body `{model_id}`，返回同一个 `TestConnectionResponse`。客户端本期只接提供商级。
 
 ### 29.8 模型池端点不能当列表数据源
 
@@ -1681,9 +1681,9 @@ PUT /api/workspace/transcription-provider-type  {"transcription_provider_type":"
 
 **客户端不接这个端点。** 本地部署下它的 `models` 常常是空数组（第 9 节已记），模型清单统一取 `GET /api/models` 的三个数组（配置 / 额外 / 探测）。0.4.1 顺带删掉了客户端里无调用方、且 `limit` 默认写 200 的 `modelPool` 方法——那个默认值一旦被调用必然 422。
 
-### 29.9 供应商列表的可用性形状
+### 29.9 提供商列表的可用性形状
 
-`GET /api/models` 实测 2.2.2.post1 有 36 个供应商（32 个 enabled），但**只有 2 个带模型**（`dashscope` 1 个、`a2a` 1 个）；2.3.0b2 有 38 个，同样 2 个模型。大多数 enabled 供应商的模型数组为空（未配凭据或未发现），界面必须能表达「已启用但没有模型」，不能把它当成「没有供应商」。
+`GET /api/models` 实测 2.2.2.post1 有 36 个提供商（32 个 enabled），但**只有 2 个带模型**（`dashscope` 1 个、`a2a` 1 个）；2.3.0b2 有 38 个，同样 2 个模型。大多数 enabled 提供商的模型数组为空（未配凭据或未发现），界面必须能表达「已启用但没有模型」，不能把它当成「没有提供商」。
 
 单个 `ModelInfo` 有 50 余个字段，客户端只用 `id` / `name` / `is_free` /`is_recommended` / `max_input_length`。
 
@@ -2383,17 +2383,38 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
 
 - `PUT /api/models/{provider_id}/config` body 字段均可选；服务端 `Provider.update_config` **跳过 `None`**，
   因此「未改」传 `null` 即保留，传空串会清空 `api_key`。客户端只提交改动项。
+- `GET /api/models` 的提供商条目新增本轮依赖的字段（2026-11-22 实测）：
+  `is_local`、`is_custom`、`provider_group`、`provider_group_name`、`provider_variant`、
+  `is_free_tier`、`model_count`（可为 `null`）、`api_key`（脱敏字符串，空串表示未设置）、
+  `freeze_url`、`meta.base_url_options:[{label,value}]`。
+  `qwenpaw-local`、`ollama`、`lmstudio` 的 `is_local=true`；`ollama`/`lmstudio` 默认停用。
+  `provider_group` 为空字符串表示不分组；Zhipu、Aliyun、OpenAI 等按分组聚合多个变体。
+- 提供商「已配置」判据：停用=false；`openai-chatgpt` 看 `oauth_connected`；
+  `qwenpaw-local` 恒为已配置；自定义看 `base_url`；`require_api_key=false` 或已有 `api_key`。
+  未配置的提供商（包括已停用的）归入「可用提供商」。
 - `POST /api/models/custom-providers` body：`id/name/default_base_url/api_key/api_key_prefix/chat_model/models[]`；
   `chat_model` 只认 `OpenAIChatModel` / `OpenAIResponseModel` / `AnthropicChatModel`。
 - 模型路由 `/{provider_id}/models/{model_id:path}` 的 `model_id` 可含 `/`（如 `kilo-auto/free`），
   客户端拼原始路径、不逐段编码，交给 path 转换器。
 - `PUT /{provider}/models/{model}/config` 字段含 `model_type`（`chat`/`decision`）、
-  `max_input_length`（≥1000）、`generate_kwargs`（字典）、`thinking_control`、`relay_reasoning` 等。
+  `max_input_length`（≥1000）、`generate_kwargs`（字典）、`thinking_control`、`relay_reasoning`、
+  `supports_image/audio/video/tool_calling`（`null` 表示自动）、`thinking_enabled`、
+  `thinking_budget`、`reasoning_effort`。`max_tokens` 放在 `generate_kwargs` 内；
+  `thinking_control` 含 `kind`（`unknown/unsupported/effort/budget`）、`wire`、`efforts`、
+  `budget_min/max/default`、`supports_off`。
 - 模型池 `GET /{provider}/pool` 查询参数 `tab(all|candidates|selected)`、`search`、`family`、`offset`、`limit`（≤100，默认 30）；
-  返回 `models/total/selected_count/candidate_count/families/offset/limit`，**不带每个模型是否已选的标记**，
-  客户端用 `provider.allModels` 的 id 集合判断选中态。
+  返回 `models/total/selected_count/candidate_count/families/offset/limit`，**不带每个模型是否已选的标记**。
+  客户端用 `provider.models + provider.extra_models` 的 id 集合判断选中态；**不要用 `allModels`**，
+  它包含 `discovered_models`，会把探测到的候选误显示为已选。
+  池条目含 `max_input_length`、`max_input_length_auto_detected`、`max_input_length_configured`、
+  `effective_max_input_length`、`max_output_length`、`config_overrides` 与能力字段。
+  单条选择 `PUT /{provider}/models/{model}/pool` body `{selected,seen}`；
+  全选 `PUT /{provider}/pool/selection` body `{selected}`。选择后重新读取 provider 与池页。
 - 决策模型：全局走 `PUT /api/models/active`（`model_type=decision`、`scope=global`）；
   智能体级该端点对非 `chat` 回 400，改走 `PATCH /api/agents/{agentId}/model-settings`（`{decision_model:{provider_id,model}}`）。
+- 智能体模型设置：`GET /api/agents/{id}` 读取 `fallback_models`、`fallback_policy{enabled,target_scope}`、
+  `subagent_model`、`thinking_level`、`thinking_budget`、`decision_model`；
+  `PATCH /api/agents/{id}/model-settings` 提交同一组字段，**主模型不在其中**，主模型仍走 `PUT /api/models/active`（`scope=agent`）。
 - OAuth：`POST /api/providers/{id}/oauth/start`（无 body）→ `{authorize_url,state,flow_type}`；
   `GET …/oauth/status?state=` → `{status: pending|completed|failed, error}`；只有 `openrouter` 注册了 flow，
   非 localhost 的 HTTP 部署在无 Hub 托管回调时会回 422。qp-test 因有托管回调，start 返回 200。
@@ -2402,6 +2423,12 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
 
 - `GET /api/config/channels/schemas` 每个频道含 `config_fields`（`name/label/type/options/json_type/help/placeholder`），
   `type` 取 `switch/text/password/number/select/json`；字段名含 secret/token/password 的字符串自动标 `password`。
+  **JSON 字段必须按 `json_type` 提交**：`allow_from` 在 2.3.0.post1 上是 `json_type=array`，默认 `[]`；
+  提交 `{}` 或空串会得到 422 `list_type`。可选 JSON 字段留空时应沿用原值。
+- 频道配置改版要求服务端 `2.3.0.post1` 及以上；低于该版本整页提示不可用。`console` 频道由服务端强制启用，
+  客户端隐藏启用开关并在保存时强制 `enabled=true`。
+- 未安装插件时 `GET /config/channels/{channel}` 会 404，但 schema 的 `availability` 为
+  `missing_code/missing_runtime`、`repair.action=install`；客户端应显示安装面板，不能把它当作「对话不存在」。
 - `GET /api/config/channels/{channel}` 返回**完整配置含密钥明文**；`PUT` 是整段替换（缺省字段回落默认），
   必须 GET 后整体回写。密钥只写不读：界面不回显，未改时回写原值。
 - `POST …/conflict-check` body 是拟保存配置，返回 `{conflict,agents:[{agent_id,agent_name}]}`，只做提示无强制覆盖。
@@ -2438,7 +2465,7 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
 ### 40.6 0.7.4 修复轮补充
 
 - 模型测试只走模型级：`POST /api/models/{provider_id}/models/test`，body **必填** `{"model_id": …}`；
-  供应商级 `/{provider_id}/test` 仍存在，但客户端不再提供界面入口。
+  提供商级 `/{provider_id}/test` 仍存在，但客户端不再提供界面入口。
 - 频率配置保存为差量提交：只有 `custom_headers` / `generate_kwargs` 实际变化时才发送；
   `api_key` 仅在替换或清除时出现，未改时省略以免破坏已脱敏的原值。
 - 频道 `repair.action` 实测只有 `install` / `enable` / `repair` 三种，`repair.plugin_id` 与频道键同名

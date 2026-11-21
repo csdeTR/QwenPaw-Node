@@ -1,19 +1,27 @@
 package io.qwenpaw.node.ui.settings
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,10 +32,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,11 +44,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -48,19 +58,30 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.barcode.BarcodeScanner
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.qr.PairParse
 import io.qwenpaw.node.data.qr.PairQr
-import io.qwenpaw.node.data.qr.QrDecoder
 import io.qwenpaw.node.data.qr.TokenPair
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import androidx.compose.runtime.rememberCoroutineScope
 
 /**
- * 扫码页：相机取帧 + 相册导入。
+ * 扫码页：ML Kit 离线识别加 CameraX 取帧。
  *
- * 两条入口共用 [QrDecoder]，因此解码失败与「不是配对码」在两条路上表现一致。
- * 没有摄像头或没有权限时不隐瞒：直接说明并保留相册入口——redroid 与部分
- * 模拟器正是这种情况，而验收用的是事先导出的二维码图片。
+ * 早期版本把 CameraX 的 Y 平面直接交给 ZXing，弱光、倾斜与行填充都会明显
+ * 降低识别率。这里改用与 OpenClaw 安卓端相同的做法：ML Kit 只识别 QR，
+ * 帧带旋转角，后摄优先；另补手电筒、双指变焦、点击对焦与相册降采样。
  *
  * 这个页面由 [MainActivity] 作为覆盖层拥有，不进入导航栈：扫完或取消都只是
  * 关掉覆盖层，用户回到原来的表单，输入内容不会丢。
@@ -71,6 +92,7 @@ fun QrScanScreen(
     onDecoded: (TokenPair) -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val hasCamera = remember {
         context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
     }
@@ -82,22 +104,51 @@ fun QrScanScreen(
     }
     var message by remember { mutableStateOf<String?>(null) }
     var handled by remember { mutableStateOf(false) }
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var hasFlash by remember { mutableStateOf(false) }
+    var torchOn by remember { mutableStateOf(false) }
 
-    fun accept(text: String?) {
-        if (handled) return
+    val scanner = remember {
+        BarcodeScanning.getClient(
+            BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .build(),
+        )
+    }
+    DisposableEffect(scanner) {
+        onDispose { scanner.close() }
+    }
+
+    val currentOnDecoded by rememberUpdatedState(onDecoded)
+
+    /** 返回 true 表示已接手结果，相机可以停止继续识别。 */
+    fun accept(text: String?): Boolean {
+        if (handled) return true
         if (text.isNullOrBlank()) {
             message = context.getString(R.string.qr_scan_empty)
-            return
+            return false
         }
-        when (val parsed = PairQr.parse(text)) {
+        return when (val parsed = PairQr.parse(text)) {
             is PairParse.Ok -> {
                 handled = true
-                onDecoded(parsed.pair)
+                currentOnDecoded(parsed.pair)
+                true
             }
 
-            PairParse.NotPairQr -> message = context.getString(R.string.qr_scan_invalid)
-            is PairParse.Unsupported -> message = context.getString(R.string.qr_scan_unsupported)
-            is PairParse.Broken -> message = context.getString(parsed.reasonRes)
+            PairParse.NotPairQr -> {
+                message = context.getString(R.string.qr_scan_invalid)
+                false
+            }
+
+            is PairParse.Unsupported -> {
+                message = context.getString(R.string.qr_scan_unsupported)
+                false
+            }
+
+            is PairParse.Broken -> {
+                message = context.getString(parsed.reasonRes)
+                false
+            }
         }
     }
 
@@ -112,15 +163,20 @@ fun QrScanScreen(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val text = runCatching {
-            context.contentResolver.openInputStream(uri).use { stream ->
-                val bitmap = BitmapFactory.decodeStream(stream)
-                val pixels = IntArray(bitmap.width * bitmap.height)
-                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-                QrDecoder.decodeArgb(pixels, bitmap.width, bitmap.height)
+        scope.launch(Dispatchers.IO) {
+            val bitmap = runCatching { decodeGalleryBitmap(context, uri) }.getOrNull()
+            if (bitmap == null) {
+                scope.launch {
+                    message = context.getString(R.string.qr_scan_image_failed)
+                }
+                return@launch
             }
-        }.getOrNull()
-        accept(text)
+            val text = runCatching { scanner.scan(bitmap) }.getOrNull()
+            bitmap.recycle()
+            scope.launch {
+                accept(text)
+            }
+        }
     }
 
     LaunchedEffect(hasCamera) {
@@ -131,13 +187,40 @@ fun QrScanScreen(
         }
     }
 
+    LaunchedEffect(camera, torchOn) {
+        camera?.cameraControl?.enableTorch(torchOn)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black),
     ) {
         if (hasCamera && granted) {
-            CameraPreview(onText = ::accept)
+            CameraPreview(
+                scanner = scanner,
+                onText = ::accept,
+                onCamera = { camera = it },
+                onFlash = { available ->
+                    hasFlash = available
+                    if (!available) torchOn = false
+                },
+                onCameraError = {
+                    message = context.getString(R.string.qr_scan_camera_failed)
+                },
+            )
+            // 取景框只做视觉引导，不做裁剪：ML Kit 自己找码，
+            // 手动裁剪反而会把贴在框边的码切掉。
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(248.dp)
+                        .border(2.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp)),
+                )
+            }
         }
 
         Column(
@@ -161,6 +244,13 @@ fun QrScanScreen(
                 color = Color.White.copy(alpha = 0.72f),
                 textAlign = TextAlign.Center,
             )
+            if (hasCamera && granted && hasFlash) {
+                Spacer(Modifier.height(12.dp))
+                ScanButton(
+                    label = stringResource(R.string.qr_scan_torch),
+                    highlighted = torchOn,
+                ) { torchOn = !torchOn }
+            }
             Spacer(Modifier.weight(1f))
             message?.let {
                 Text(
@@ -183,7 +273,7 @@ fun QrScanScreen(
                     )
                 }
                 Spacer(Modifier.width(12.dp))
-                ScanButton(stringResource(android.R.string.cancel), onBack)
+                ScanButton(stringResource(android.R.string.cancel), highlighted = false, onBack)
             }
             Spacer(Modifier.height(36.dp))
         }
@@ -191,14 +281,21 @@ fun QrScanScreen(
 }
 
 @Composable
-private fun ScanButton(label: String, onClick: () -> Unit) {
+private fun ScanButton(
+    label: String,
+    highlighted: Boolean = false,
+    onClick: () -> Unit,
+) {
     Text(
         text = label,
         style = MaterialTheme.typography.labelLarge,
         color = Color.White,
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.18f))
+            .background(
+                if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                else Color.White.copy(alpha = 0.18f),
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 10.dp),
     )
@@ -207,12 +304,18 @@ private fun ScanButton(label: String, onClick: () -> Unit) {
 /**
  * 相机预览与逐帧分析。
  *
- * 分析器只取 Y 平面：二维码识别不需要色度，少一次颜色转换就能多解几帧。
- * `KEEP_ONLY_LATEST` 保证回调不被积压——截图大小的帧积压两帧之后，
- * 用户看到的就是几秒前的画面。
+ * `KEEP_ONLY_LATEST` 保证回调不被积压；`processingFrame` 防止一帧还没处理完
+ * 又送下一帧，`handledScan` 保证同一个码只回调一次。后摄优先，没有后摄的
+ * 设备回退前摄，避免整页只剩相册入口。
  */
 @Composable
-private fun CameraPreview(onText: (String) -> Unit) {
+private fun CameraPreview(
+    scanner: BarcodeScanner,
+    onText: (String) -> Boolean,
+    onCamera: (Camera?) -> Unit,
+    onFlash: (Boolean) -> Unit,
+    onCameraError: () -> Unit,
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember {
@@ -221,77 +324,204 @@ private fun CameraPreview(onText: (String) -> Unit) {
         }
     }
     val executor = remember { Executors.newSingleThreadExecutor() }
+    val processingFrame = remember { AtomicBoolean(false) }
+    val handledScan = remember { AtomicBoolean(false) }
+    val scanActive = remember { AtomicBoolean(true) }
+    var cameraRef by remember { mutableStateOf<Camera?>(null) }
 
     DisposableEffect(lifecycleOwner) {
+        scanActive.set(true)
         val future = ProcessCameraProvider.getInstance(context)
         var provider: ProcessCameraProvider? = null
+        var analysis: ImageAnalysis? = null
         future.addListener({
-            val cameraProvider = runCatching { future.get() }.getOrNull() ?: return@addListener
+            val cameraProvider = runCatching { future.get() }.getOrNull()
+            if (cameraProvider == null) {
+                onCameraError()
+                return@addListener
+            }
             provider = cameraProvider
             val preview = Preview.Builder().build().also {
                 it.surfaceProvider = previewView.surfaceProvider
             }
-            val analysis = ImageAnalysis.Builder()
+            val analysisUseCase = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
-                .also { it.setAnalyzer(executor, YuvAnalyzer(onText)) }
-            runCatching {
+            analysisUseCase.setAnalyzer(executor) { imageProxy ->
+                analyzeFrame(
+                    imageProxy = imageProxy,
+                    scanner = scanner,
+                    processingFrame = processingFrame,
+                    handledScan = handledScan,
+                    scanActive = scanActive,
+                    onText = onText,
+                )
+            }
+            analysis = analysisUseCase
+            val selector = when {
+                cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) ->
+                    CameraSelector.DEFAULT_BACK_CAMERA
+
+                cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ->
+                    CameraSelector.DEFAULT_FRONT_CAMERA
+
+                else -> null
+            }
+            if (selector == null) {
+                analysisUseCase.clearAnalyzer()
+                onCameraError()
+                return@addListener
+            }
+            val camera = runCatching {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
                     lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    selector,
                     preview,
-                    analysis,
+                    analysisUseCase,
                 )
+            }.getOrElse {
+                analysisUseCase.clearAnalyzer()
+                onCameraError()
+                return@addListener
             }
+            cameraRef = camera
+            onCamera(camera)
+            onFlash(camera.cameraInfo.hasFlashUnit())
         }, ContextCompat.getMainExecutor(context))
 
         onDispose {
+            scanActive.set(false)
+            analysis?.clearAnalyzer()
             provider?.unbindAll()
+            cameraRef = null
+            onCamera(null)
             executor.shutdown()
         }
     }
 
     AndroidView(
         factory = { previewView },
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTransformGestures { _, _, zoomChange, _ ->
+                    val camera = cameraRef ?: return@detectTransformGestures
+                    val state = camera.cameraInfo.zoomState.value ?: return@detectTransformGestures
+                    val target = (state.zoomRatio * zoomChange).coerceIn(
+                        state.minZoomRatio,
+                        state.maxZoomRatio,
+                    )
+                    camera.cameraControl.setZoomRatio(target)
+                }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val camera = cameraRef ?: return@detectTapGestures
+                    val point = previewView.meteringPointFactory.createPoint(offset.x, offset.y)
+                    camera.cameraControl.startFocusAndMetering(
+                        FocusMeteringAction.Builder(point).build(),
+                    )
+                }
+            },
     )
 }
 
-private class YuvAnalyzer(private val onText: (String) -> Unit) : ImageAnalysis.Analyzer {
-    private var lastAttempt = 0L
-
-    override fun analyze(image: ImageProxy) {
-        try {
-            // 每帧都解会白耗电：每 6 帧试一次，扫码观感上仍是即时的。
-            val now = System.currentTimeMillis()
-            if (now - lastAttempt < 100) return
-            lastAttempt = now
-            val plane = image.planes.firstOrNull() ?: return
-            val buffer = plane.buffer
-            val rowStride = plane.rowStride
-            val pixelStride = plane.pixelStride
-            // pixelStride 通常为 1；大于 1 时把有效像素压成连续数组，
-            // 否则 PlanarYUVLuminanceSource 会把填充字节也当成像素。
-            val width = image.width
-            val height = image.height
-            val bytes = if (pixelStride == 1) {
-                ByteArray(buffer.remaining()).also { buffer.get(it) }
-            } else {
-                ByteArray(width * height).also { out ->
-                    var index = 0
-                    for (row in 0 until height) {
-                        val rowStart = row * rowStride
-                        for (col in 0 until width) {
-                            out[index++] = buffer.get(rowStart + col * pixelStride)
-                        }
-                    }
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
+private fun analyzeFrame(
+    imageProxy: androidx.camera.core.ImageProxy,
+    scanner: BarcodeScanner,
+    processingFrame: AtomicBoolean,
+    handledScan: AtomicBoolean,
+    scanActive: AtomicBoolean,
+    onText: (String) -> Boolean,
+) {
+    if (!scanActive.get() || handledScan.get() || !processingFrame.compareAndSet(false, true)) {
+        imageProxy.close()
+        return
+    }
+    val mediaImage = imageProxy.image
+    if (mediaImage == null) {
+        processingFrame.set(false)
+        imageProxy.close()
+        return
+    }
+    val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+    scanner.process(inputImage)
+        .addOnSuccessListener { barcodes ->
+            val text = barcodes.asSequence().mapNotNull { it.rawValue }.firstOrNull()
+            if (text != null && scanActive.get() && handledScan.compareAndSet(false, true)) {
+                if (!onText(text)) {
+                    // 不是配对码：保留相机继续扫，避免一次误识别就锁死页面。
+                    handledScan.set(false)
                 }
             }
-            val stride = if (pixelStride == 1) rowStride else width
-            QrDecoder.decodeYuv(bytes, width, height, stride)?.let(onText)
-        } finally {
-            image.close()
         }
+        .addOnCompleteListener {
+            processingFrame.set(false)
+            imageProxy.close()
+        }
+}
+
+private suspend fun BarcodeScanner.scan(bitmap: Bitmap): String? =
+    suspendCancellableCoroutine { continuation ->
+        process(InputImage.fromBitmap(bitmap, 0))
+            .addOnSuccessListener { barcodes ->
+                continuation.resume(barcodes.asSequence().mapNotNull { it.rawValue }.firstOrNull())
+            }
+            .addOnFailureListener { continuation.resume(null) }
     }
+
+/**
+ * 相册图片：先按 EXIF 修正方向，再降采样到 1600 像素以内。
+ * 直接解码原图在 1 亿像素的手机照片上会占用数百 MB 内存。
+ */
+private fun decodeGalleryBitmap(context: Context, uri: Uri): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.contentResolver.openInputStream(uri)?.use {
+        BitmapFactory.decodeStream(it, null, bounds)
+    }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    while (bounds.outWidth / sample > 1600 || bounds.outHeight / sample > 1600) {
+        sample *= 2
+    }
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    val bitmap = context.contentResolver.openInputStream(uri)?.use {
+        BitmapFactory.decodeStream(it, null, options)
+    } ?: return null
+    val orientation = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            ExifInterface(stream).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
+        }
+    }.getOrNull() ?: ExifInterface.ORIENTATION_NORMAL
+    return rotateForExif(bitmap, orientation)
+}
+
+private fun rotateForExif(bitmap: Bitmap, orientation: Int): Bitmap {
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.postRotate(90f)
+            matrix.postScale(-1f, 1f)
+        }
+
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.postRotate(270f)
+            matrix.postScale(-1f, 1f)
+        }
+
+        else -> return bitmap
+    }
+    val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    if (rotated !== bitmap) bitmap.recycle()
+    return rotated
 }
