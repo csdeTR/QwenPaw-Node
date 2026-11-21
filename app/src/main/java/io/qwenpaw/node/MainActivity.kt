@@ -2625,6 +2625,7 @@ private fun SkillPoolBuiltinPage(
         onLanguage = viewModel.skillPool::setBuiltinLanguage,
         onImport = viewModel.skillPool::confirmBuiltinImport,
         onUpdateBuiltin = viewModel.skillPool::updateBuiltin,
+        onDismissMessage = viewModel.skillPool::dismissMessage,
     )
 }
 

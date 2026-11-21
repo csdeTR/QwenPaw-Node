@@ -43,6 +43,7 @@ fun SkillPoolBuiltinScreen(
     onLanguage: (String, String) -> Unit,
     onImport: (Boolean) -> Unit,
     onUpdateBuiltin: (String, String) -> Unit,
+    onDismissMessage: () -> Unit = {},
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -93,6 +94,12 @@ fun SkillPoolBuiltinScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
             )
+            state.message?.let { message ->
+                BuiltinNotice(message, error = false, onDismiss = onDismissMessage)
+            }
+            state.error?.let { message ->
+                BuiltinNotice(message, error = true, onDismiss = onDismissMessage)
+            }
             if (state.builtinSources.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -173,6 +180,31 @@ fun SkillPoolBuiltinScreen(
 }
 
 @Composable
+private fun BuiltinNotice(text: String, error: Boolean, onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                if (error) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.surface,
+            )
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (error) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onDismiss) {
+            Text(stringResource(R.string.action_close))
+        }
+    }
+}
+
+@Composable
 private fun BuiltinRow(
     source: BuiltinSourceDto,
     checked: Boolean,
@@ -181,9 +213,11 @@ private fun BuiltinRow(
     onLanguage: (String) -> Unit,
     onUpdate: (String) -> Unit,
 ) {
-    val languages = (source.availableLanguages + source.languages.keys + listOf("en", "zh"))
-        .distinct()
-        .filter { it.isNotBlank() }
+    val languages = when {
+        source.availableLanguages.isNotEmpty() -> source.availableLanguages
+        source.languages.isNotEmpty() -> source.languages.keys.toList()
+        else -> listOf("en", "zh")
+    }.distinct().filter { it.isNotBlank() }
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(12.dp),
