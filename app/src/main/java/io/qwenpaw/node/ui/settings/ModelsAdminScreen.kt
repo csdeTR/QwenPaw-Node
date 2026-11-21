@@ -314,6 +314,8 @@ private fun ConfigTab(
                 onValueChange = onSetName,
                 label = { Text(stringResource(R.string.models_admin_name)) },
                 singleLine = true,
+           
+                modifier = Modifier.fillMaxWidth(),
             )
         }
         if (!state.freezeUrl) {
@@ -322,6 +324,8 @@ private fun ConfigTab(
                 onValueChange = onSetBaseUrl,
                 label = { Text(stringResource(R.string.models_admin_base_url)) },
                 singleLine = true,
+           
+                modifier = Modifier.fillMaxWidth(),
             )
         }
         SecretField(
@@ -347,6 +351,8 @@ private fun ConfigTab(
                 onValueChange = onSetChatModel,
                 label = { Text(stringResource(R.string.models_admin_chat_model)) },
                 singleLine = true,
+           
+                modifier = Modifier.fillMaxWidth(),
             )
         }
         OutlinedTextField(
@@ -356,6 +362,8 @@ private fun ConfigTab(
             minLines = 2,
             maxLines = 5,
             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+       
+            modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = state.generateKwargs,
@@ -364,6 +372,8 @@ private fun ConfigTab(
             minLines = 2,
             maxLines = 5,
             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+       
+            modifier = Modifier.fillMaxWidth(),
         )
         state.discover?.let {
             Text(

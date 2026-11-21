@@ -69,7 +69,9 @@ fun SkillPoolBuiltinScreen(
                 )
                 TextButton(
                     onClick = {
-                        state.builtinSources.forEach { onToggle(it.name) }
+                        state.builtinSources
+                            .filter { it.name !in state.builtinSelection }
+                            .forEach { onToggle(it.name) }
                     },
                 ) { Text(stringResource(R.string.skill_pool_builtin_select_all)) }
                 TextButton(
