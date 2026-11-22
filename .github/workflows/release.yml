@@ -108,7 +108,7 @@ jobs:
             echo "::error::找不到 apksigner，无法确认签名"
             exit 1
           fi
-          EXPECTED="${{ vars.EXPECTED_CERT_SHA256 }}"
+          EXPECTED=$(printf '%s' "${{ vars.EXPECTED_CERT_SHA256 }}" | tr -d '[:space:]:' | tr 'A-F' 'a-f')
           if [ -z "$EXPECTED" ]; then
             echo "::error::缺少仓库变量 EXPECTED_CERT_SHA256，无法确认签名证书"
             exit 1
@@ -118,9 +118,11 @@ jobs:
               echo "::error::$f 签名校验失败，不发布未签名的包"
               exit 1
             }
-            ACTUAL=$(printf '%s\n' "$OUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr -d ' ')
+            # apksigner 不同版本的输出前缀不完全一致，直接抓 64 位十六进制摘要。
+            ACTUAL=$(printf '%s\n' "$OUT" | tr -d '\r' | grep -i 'certificate SHA-256' | grep -oE '[0-9a-fA-F]{64}' | head -1 | tr 'A-F' 'a-f')
             if [ "$ACTUAL" != "$EXPECTED" ]; then
-              echo "::error::$f 证书指纹 $ACTUAL 与预期不一致"
+              echo "::error::$f 证书指纹 ${ACTUAL:-<空>} 与预期不一致"
+              printf '%s\n' "$OUT" | head -6
               exit 1
             fi
           done
