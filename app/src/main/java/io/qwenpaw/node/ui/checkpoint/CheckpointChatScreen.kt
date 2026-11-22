@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +34,7 @@ import io.qwenpaw.node.ui.chat.ChatUiState
 import io.qwenpaw.node.ui.chat.MessageAppearance
 import io.qwenpaw.node.ui.chat.buildItems
 import io.qwenpaw.node.ui.chat.buildTimeline
+import io.qwenpaw.node.ui.common.bottomBarInsets
 
 /**
  * 检查点的只读对话页。
@@ -140,7 +141,7 @@ private fun SnapshotActionBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
+                .windowInsetsPadding(bottomBarInsets())
                 .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
             Text(

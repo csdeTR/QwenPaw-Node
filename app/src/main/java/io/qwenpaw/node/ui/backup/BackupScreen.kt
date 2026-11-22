@@ -55,6 +55,7 @@ import io.qwenpaw.node.data.model.BackupScopeDto
 import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.TimeLabels
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.settings.Card
 import io.qwenpaw.node.ui.settings.SectionHeader
 import io.qwenpaw.node.ui.theme.QwenIcons
@@ -163,6 +164,7 @@ fun BackupScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             Column(
                 modifier = Modifier

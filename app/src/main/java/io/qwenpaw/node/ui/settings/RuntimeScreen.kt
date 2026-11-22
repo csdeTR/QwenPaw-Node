@@ -37,6 +37,7 @@ import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
+import io.qwenpaw.node.ui.common.pageContentInsets
 
 private const val TAB_ACP = 0
 private const val TAB_HARNESS = 1
@@ -76,6 +77,7 @@ fun RuntimeScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             AdminTopBar(
                 title = stringResource(R.string.runtime_title),

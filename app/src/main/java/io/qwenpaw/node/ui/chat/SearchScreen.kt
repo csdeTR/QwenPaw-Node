@@ -50,6 +50,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.SearchHitDto
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.theme.QwenIcons
 
 /**
@@ -84,6 +85,7 @@ fun SearchScreen(
     // 命中没有时间基准可依赖，列表靠服务端给的 created_at 排序，这里不再排序。
 
     Scaffold(
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             Column(
                 modifier = Modifier

@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.BuiltinSourceDto
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.workspace.IconCircle
 
@@ -47,6 +48,7 @@ fun SkillPoolBuiltinScreen(
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             Row(
                 modifier = Modifier

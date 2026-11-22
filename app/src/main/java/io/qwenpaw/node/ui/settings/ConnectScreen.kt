@@ -134,6 +134,9 @@ fun InstanceForm(
     onConsumeScannedPair: () -> Unit = {},
     /** 打开扫码页；为 null 时不显示扫描按钮。 */
     onOpenScanner: (() -> Unit)? = null,
+    /** 反代验证二级页是否打开。由宿主提升，便于同时隐藏上层顶栏。 */
+    proxyAuthOpen: Boolean = false,
+    onProxyAuthOpenChange: (Boolean) -> Unit = {},
 ) {
     // 至少保留一行输入框，否则用户没有地方填地址。
     var addresses by remember {
@@ -151,7 +154,6 @@ fun InstanceForm(
     var agentId by remember { mutableStateOf(initialAgentId) }
     // 编辑令牌实例时直接把令牌区展开：否则用户要先去「高级选项」里找。
     var advanced by remember { mutableStateOf(initialMode == io.qwenpaw.node.data.CredentialMode.TOKEN) }
-    var showProxyAuth by remember { mutableStateOf(false) }
     var fixedPunctuation by remember { mutableStateOf(false) }
     // 反向代理的 HTTP Basic 凭据，收在「高级选项」里。
     var basicUser by remember { mutableStateOf(initialBasicUser) }
@@ -356,605 +358,609 @@ fun InstanceForm(
         onConsumeScannedPair()
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        if (showHeader) {
-            Image(
-                painter = painterResource(R.drawable.qwenpaw_logo),
-                contentDescription = "QwenPaw",
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .height(94.dp),
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = stringResource(R.string.connect_title),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-                // 显式给色：这一层没有 Surface 提供 LocalContentColor，
-                // 不写的话深色模式下会退到默认黑色。
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.connect_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(22.dp))
-
-            StepIndicator(step = step, total = 4)
-            Spacer(Modifier.height(18.dp))
-        }
-
-        // 实例名称。放在地址上方，与地址别名在视觉上分开：
-// 名称属于「这个实例叫什么」，别名属于「这条地址叫什么」。
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.connect_server_name),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = stringResource(R.string.connect_optional),
-                style = MaterialTheme.typography.labelSmall,
-                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        OutlinedTextField(
-            value = instanceName,
-            onValueChange = { instanceName = it },
-            placeholder = { Text(stringResource(R.string.connect_name_placeholder)) },
-            singleLine = true,
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.connect_server_address),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = stringResource(R.string.connect_required),
-                style = MaterialTheme.typography.labelSmall,
-                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        AddressListEditor(
-            entries = addresses,
-            onChange = { next, folded ->
-                if (folded) fixedPunctuation = true
-                onAddressesChange(next)
-            },
-            isError = error != null,
-            currentKind = currentNetKind,
-            currentSsid = currentSsid,
-        )
-        if (fixedPunctuation) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.connect_fixed_punctuation),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.connect_address_https_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        // 「验证连接」：只查版本，不拉智能体列表。
-        // 步骤 1 的勾以验证成功为准，而非「地址非空」。
-        // 列表顺序回退的说明只在 AddressListEditor 里写一次，这里不重复。
-        Spacer(Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val canVerify = !hostBlank && !verifying
-            Text(
-                text = when {
-                    verifying -> stringResource(R.string.connect_verifying)
-                    hostVerified -> stringResource(R.string.connect_verified)
-                    else -> stringResource(R.string.connect_verify)
-                },
-                style = MaterialTheme.typography.labelMedium,
-                color = when {
-                    hostVerified -> MaterialTheme.colorScheme.secondary
-                    canVerify -> MaterialTheme.colorScheme.primary
-                    else -> io.qwenpaw.node.ui.theme.LocalCaptionColor.current
-                },
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(
-                        1.dp,
-                        if (hostVerified) MaterialTheme.colorScheme.secondary
-                        else MaterialTheme.colorScheme.outlineVariant,
-                        RoundedCornerShape(8.dp),
-                    )
-                    .clickable(enabled = canVerify) { verifyHosts() }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
-            if (verifying) {
-                Spacer(Modifier.width(8.dp))
-                CircularProgressIndicator(
-                    modifier = Modifier.size(13.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            val progress = verifyingAt
-            when {
-                // 多个地址逐个尝试时，把「第几个、哪条」写出来，
-                // 否则用户只看到转圈，分不清是卡住还是在回退。
-                progress != null && progress.total > 1 -> {
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = stringResource(
-                            R.string.connect_verify_attempting,
-                            progress.index,
-                            progress.total,
-                            progress.url,
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                progress != null -> {
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = stringResource(R.string.connect_verify_url, progress.url),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                verifyMessage != null -> {
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = verifyMessage.orEmpty(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (verifyFailed) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            io.qwenpaw.node.ui.theme.LocalCaptionColor.current
-                        },
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Row(
+    // 表单与反代验证二级页共用同一块画面：二级页覆盖在表单之上，
+    // 表单的输入、验证结果与滚动位置都不随页面切换丢失。
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .clickable { advanced = !advanced }
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(
-                imageVector = if (advanced) QwenIcons.chevronUp else QwenIcons.chevronDown,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = stringResource(R.string.connect_advanced),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        AnimatedVisibility(visible = advanced) {
-            Column {
-                // 登录方式：两种身份证明，服务端只认其中之一。
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Chip(
-                        text = stringResource(R.string.connect_auth_mode_password),
-                        selected = mode == io.qwenpaw.node.data.CredentialMode.PASSWORD,
-                        onClick = { mode = io.qwenpaw.node.data.CredentialMode.PASSWORD },
-                    )
-                    Chip(
-                        text = stringResource(R.string.connect_auth_mode_token),
-                        selected = mode == io.qwenpaw.node.data.CredentialMode.TOKEN,
-                        onClick = { mode = io.qwenpaw.node.data.CredentialMode.TOKEN },
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-
-                if (mode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
-                    TokenCredentialFields(
-                        token = token,
-                        onTokenChange = {
-                            token = it
-                            tokenFromScan = false
-                        },
-                        scanned = tokenFromScan,
-                        canScan = onOpenScanner != null,
-                        onScan = onOpenScanner,
-                        hasSavedToken = !verifyToken.isNullOrBlank(),
-                    )
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = stringResource(R.string.connect_username),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.connect_optional),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = stringResource(R.string.connect_password),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.connect_optional),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        singleLine = true,
-                        visualTransformation = if (passwordVisibility.visible) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        trailingIcon = {
-                            SecretVisibilityTrailingIcon(
-                                visible = passwordVisibility.visible,
-                                onToggle = passwordVisibility.toggle,
-                            )
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = if (mode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
-                        stringResource(R.string.connect_token_help)
-                    } else {
-                        stringResource(R.string.connect_login_hint)
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                Divider()
-                NavRow(
-                    icon = QwenIcons.shieldCheck,
-                    title = stringResource(R.string.connect_proxy_title),
-                    subtitle = if (basicUser.isNotBlank()) {
-                        stringResource(R.string.connect_proxy_configured)
-                    } else {
-                        stringResource(R.string.connect_proxy_unconfigured)
-                    },
-                    onClick = { showProxyAuth = true },
-                )
-                if (onOpenSshProfile != null) {
-                    Divider()
-                    NavRow(
-                        icon = QwenIcons.terminal,
-                        title = stringResource(R.string.connect_ssh_title),
-                        subtitle = stringResource(R.string.connect_ssh_subtitle),
-                        onClick = onOpenSshProfile,
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        // 第二步：读智能体列表
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.connect_select_agent),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(Modifier.weight(1f))
-            if (agents.isEmpty()) {
-                Text(
-                    text = if (loadingAgents) {
-                        stringResource(R.string.connect_reading)
-                    } else {
-                        stringResource(R.string.connect_read_list)
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (hostBlank) {
-                        io.qwenpaw.node.ui.theme.LocalCaptionColor.current
-                    } else {
-                        MaterialTheme.colorScheme.secondary
-                    },
+            if (showHeader) {
+                Image(
+                    painter = painterResource(R.drawable.qwenpaw_logo),
+                    contentDescription = "QwenPaw",
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = !hostBlank && !loadingAgents) { fetchAgents() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(top = 8.dp)
+                        .height(94.dp),
                 )
-            } else {
+                Spacer(Modifier.height(16.dp))
                 Text(
-                    text = stringResource(R.string.connect_reload),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = !loadingAgents) { fetchAgents() }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-
-        when {
-            loadingAgents -> Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 12.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(15.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.connect_loading_agents),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            agentError != null -> Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(12.dp),
-            ) {
-                Text(
-                    text = agentError.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    text = stringResource(R.string.connect_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    // 显式给色：这一层没有 Surface 提供 LocalContentColor，
+                    // 不写的话深色模式下会退到默认黑色。
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = stringResource(R.string.action_retry),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { fetchAgents() }
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    text = stringResource(R.string.connect_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(8.dp))
-                ManualAgentIdField(
-                    value = agentId,
-                    onValueChange = { agentId = it },
-                )
+                Spacer(Modifier.height(22.dp))
+
+                StepIndicator(step = step, total = 4)
+                Spacer(Modifier.height(18.dp))
             }
 
-            agents.isEmpty() -> Column {
+            // 实例名称。放在地址上方，与地址别名在视觉上分开：
+    // 名称属于「这个实例叫什么」，别名属于「这条地址叫什么」。
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = stringResource(R.string.connect_agents_empty_hint),
-                    style = MaterialTheme.typography.bodySmall,
+                    text = stringResource(R.string.connect_server_name),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.connect_optional),
+                    style = MaterialTheme.typography.labelSmall,
                     color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(
+                value = instanceName,
+                onValueChange = { instanceName = it },
+                placeholder = { Text(stringResource(R.string.connect_name_placeholder)) },
+                singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.connect_server_address),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.connect_required),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            AddressListEditor(
+                entries = addresses,
+                onChange = { next, folded ->
+                    if (folded) fixedPunctuation = true
+                    onAddressesChange(next)
+                },
+                isError = error != null,
+                currentKind = currentNetKind,
+                currentSsid = currentSsid,
+            )
+            if (fixedPunctuation) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.connect_fixed_punctuation),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.connect_address_https_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            // 「验证连接」：只查版本，不拉智能体列表。
+            // 步骤 1 的勾以验证成功为准，而非「地址非空」。
+            // 列表顺序回退的说明只在 AddressListEditor 里写一次，这里不重复。
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val canVerify = !hostBlank && !verifying
+                Text(
+                    text = when {
+                        verifying -> stringResource(R.string.connect_verifying)
+                        hostVerified -> stringResource(R.string.connect_verified)
+                        else -> stringResource(R.string.connect_verify)
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = when {
+                        hostVerified -> MaterialTheme.colorScheme.secondary
+                        canVerify -> MaterialTheme.colorScheme.primary
+                        else -> io.qwenpaw.node.ui.theme.LocalCaptionColor.current
+                    },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(
+                            1.dp,
+                            if (hostVerified) MaterialTheme.colorScheme.secondary
+                            else MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .clickable(enabled = canVerify) { verifyHosts() }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+                if (verifying) {
+                    Spacer(Modifier.width(8.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(13.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+                val progress = verifyingAt
+                when {
+                    // 多个地址逐个尝试时，把「第几个、哪条」写出来，
+                    // 否则用户只看到转圈，分不清是卡住还是在回退。
+                    progress != null && progress.total > 1 -> {
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = stringResource(
+                                R.string.connect_verify_attempting,
+                                progress.index,
+                                progress.total,
+                                progress.url,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    progress != null -> {
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = stringResource(R.string.connect_verify_url, progress.url),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    verifyMessage != null -> {
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = verifyMessage.orEmpty(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (verifyFailed) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                io.qwenpaw.node.ui.theme.LocalCaptionColor.current
+                            },
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { advanced = !advanced }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = if (advanced) QwenIcons.chevronUp else QwenIcons.chevronDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = stringResource(R.string.connect_advanced),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(visible = advanced) {
+                Column {
+                    // 登录方式：两种身份证明，服务端只认其中之一。
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Chip(
+                            text = stringResource(R.string.connect_auth_mode_password),
+                            selected = mode == io.qwenpaw.node.data.CredentialMode.PASSWORD,
+                            onClick = { mode = io.qwenpaw.node.data.CredentialMode.PASSWORD },
+                        )
+                        Chip(
+                            text = stringResource(R.string.connect_auth_mode_token),
+                            selected = mode == io.qwenpaw.node.data.CredentialMode.TOKEN,
+                            onClick = { mode = io.qwenpaw.node.data.CredentialMode.TOKEN },
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+
+                    if (mode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+                        TokenCredentialFields(
+                            token = token,
+                            onTokenChange = {
+                                token = it
+                                tokenFromScan = false
+                            },
+                            scanned = tokenFromScan,
+                            canScan = onOpenScanner != null,
+                            onScan = onOpenScanner,
+                            hasSavedToken = !verifyToken.isNullOrBlank(),
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = stringResource(R.string.connect_username),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(R.string.connect_optional),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = it },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = stringResource(R.string.connect_password),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(R.string.connect_optional),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            singleLine = true,
+                            visualTransformation = if (passwordVisibility.visible) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            trailingIcon = {
+                                SecretVisibilityTrailingIcon(
+                                    visible = passwordVisibility.visible,
+                                    onToggle = passwordVisibility.toggle,
+                                )
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (mode == io.qwenpaw.node.data.CredentialMode.TOKEN) {
+                            stringResource(R.string.connect_token_help)
+                        } else {
+                            stringResource(R.string.connect_login_hint)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Divider()
+                    NavRow(
+                        icon = QwenIcons.shieldCheck,
+                        title = stringResource(R.string.connect_proxy_title),
+                        subtitle = if (basicUser.isNotBlank()) {
+                            stringResource(R.string.connect_proxy_configured)
+                        } else {
+                            stringResource(R.string.connect_proxy_unconfigured)
+                        },
+                        onClick = { onProxyAuthOpenChange(true) },
+                    )
+                    if (onOpenSshProfile != null) {
+                        Divider()
+                        NavRow(
+                            icon = QwenIcons.terminal,
+                            title = stringResource(R.string.connect_ssh_title),
+                            subtitle = stringResource(R.string.connect_ssh_subtitle),
+                            onClick = onOpenSshProfile,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 第二步：读智能体列表
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.connect_select_agent),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.weight(1f))
+                if (agents.isEmpty()) {
+                    Text(
+                        text = if (loadingAgents) {
+                            stringResource(R.string.connect_reading)
+                        } else {
+                            stringResource(R.string.connect_read_list)
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (hostBlank) {
+                            io.qwenpaw.node.ui.theme.LocalCaptionColor.current
+                        } else {
+                            MaterialTheme.colorScheme.secondary
+                        },
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = !hostBlank && !loadingAgents) { fetchAgents() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.connect_reload),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = !loadingAgents) { fetchAgents() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+
+            when {
+                loadingAgents -> Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(15.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.connect_loading_agents),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                agentError != null -> Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        text = agentError.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.action_retry),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { fetchAgents() }
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    ManualAgentIdField(
+                        value = agentId,
+                        onValueChange = { agentId = it },
+                    )
+                }
+
+                agents.isEmpty() -> Column {
+                    Text(
+                        text = stringResource(R.string.connect_agents_empty_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    ManualAgentIdField(
+                        value = agentId,
+                        onValueChange = { agentId = it },
+                    )
+                }
+
+                else -> Column {
+                    agents.forEach { agent ->
+                        AgentRow(
+                            agent = agent,
+                            selected = agent.id == agentId,
+                            onClick = { agentId = agent.id },
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+
+            if (!saved.isNullOrEmpty() && onUseSaved != null) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = stringResource(R.string.connect_saved_instances),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                ManualAgentIdField(
-                    value = agentId,
-                    onValueChange = { agentId = it },
-                )
-            }
-
-            else -> Column {
-                agents.forEach { agent ->
-                    AgentRow(
-                        agent = agent,
-                        selected = agent.id == agentId,
-                        onClick = { agentId = agent.id },
-                    )
-                    Spacer(Modifier.height(6.dp))
+                saved.forEach { instance ->
+                    SavedInstanceRow(instance = instance, onClick = { onUseSaved(instance) })
+                    Spacer(Modifier.height(8.dp))
                 }
             }
-        }
 
-        if (!saved.isNullOrEmpty() && onUseSaved != null) {
             Spacer(Modifier.height(14.dp))
-            Text(
-                text = stringResource(R.string.connect_saved_instances),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            saved.forEach { instance ->
-                SavedInstanceRow(instance = instance, onClick = { onUseSaved(instance) })
+
+            if (error != null) {
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(8.dp))
             }
-        }
 
-        Spacer(Modifier.height(14.dp))
-
-        if (error != null) {
-            Text(
-                text = error,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(
-                    if (connecting) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                    else MaterialTheme.colorScheme.primary,
-                )
-                .clickable(enabled = !connecting) {
-                    onConnect(
-                        InstanceDraft(
-                            addresses = addresses.filter { it.url.isNotBlank() },
-                            instanceName = instanceName,
-                            username = username,
-                            password = password,
-                            agentId = agentId.ifBlank { "default" },
-                            basicUser = basicUser.trim(),
-                            basicPassword = basicPassword,
-                            mode = mode,
-                            token = token.trim(),
-                        ),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (connecting) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                        else MaterialTheme.colorScheme.primary,
+                    )
+                    .clickable(enabled = !connecting) {
+                        onConnect(
+                            InstanceDraft(
+                                addresses = addresses.filter { it.url.isNotBlank() },
+                                instanceName = instanceName,
+                                username = username,
+                                password = password,
+                                agentId = agentId.ifBlank { "default" },
+                                basicUser = basicUser.trim(),
+                                basicPassword = basicPassword,
+                                mode = mode,
+                                token = token.trim(),
+                            ),
+                        )
+                    }
+                    .padding(vertical = 14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (connecting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.connect_connecting),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text(
+                        text = submitLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimary,
                     )
                 }
-                .padding(vertical = 14.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (connecting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-                Spacer(Modifier.width(8.dp))
+            }
+            if (onCancel != null) {
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = stringResource(R.string.connect_connecting),
+                    text = stringResource(R.string.action_cancel),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            } else {
-                Text(
-                    text = submitLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = !connecting, onClick = onCancel)
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
                 )
             }
-        }
-        if (onCancel != null) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Text(
-                text = stringResource(R.string.action_cancel),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(enabled = !connecting, onClick = onCancel)
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                text = stringResource(R.string.connect_footer_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+            )
+            Spacer(Modifier.height(16.dp))
+        }
+
+        securityNotice?.let { notice ->
+            SecurityNoticeDialog(
+                notice = notice,
+                onDismiss = { securityNotice = null },
             )
         }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = stringResource(R.string.connect_footer_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
-        )
-        Spacer(Modifier.height(16.dp))
-    }
 
-    securityNotice?.let { notice ->
-        SecurityNoticeDialog(
-            notice = notice,
-            onDismiss = { securityNotice = null },
-        )
-    }
+        if (proxyAuthOpen) {
+            ProxyAuthScreen(
+                initialUser = basicUser,
+                onBack = { onProxyAuthOpenChange(false) },
+                onSave = { user, pwd ->
+                    basicUser = user
+                    basicPassword = pwd
+                    hostVerified = false
+                    verifyMessage = null
+                    verifyFailed = false
+                    onProxyAuthOpenChange(false)
+                },
+            )
+        }
 
-    if (showProxyAuth) {
-        ProxyAuthScreen(
-            initialUser = basicUser,
-            onBack = { showProxyAuth = false },
-            onSave = { user, pwd ->
-                basicUser = user
-                basicPassword = pwd
-                hostVerified = false
-                verifyMessage = null
-                verifyFailed = false
-                showProxyAuth = false
-            },
-        )
-    }
-
-    if (identityWarning) {
-        AlertDialog(
-            onDismissRequest = { identityWarning = false },
-            title = { Text(stringResource(R.string.connect_identity_title)) },
-            text = { Text(stringResource(R.string.connect_identity_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        identityWarning = false
-                        hostVerified = true
-                    },
-                ) { Text(stringResource(R.string.connect_identity_continue)) }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        identityWarning = false
-                        hostVerified = false
-                    },
-                ) { Text(stringResource(R.string.action_cancel)) }
-            },
-        )
+        if (identityWarning) {
+            AlertDialog(
+                onDismissRequest = { identityWarning = false },
+                title = { Text(stringResource(R.string.connect_identity_title)) },
+                text = { Text(stringResource(R.string.connect_identity_message)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            identityWarning = false
+                            hostVerified = true
+                        },
+                    ) { Text(stringResource(R.string.connect_identity_continue)) }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            identityWarning = false
+                            hostVerified = false
+                        },
+                    ) { Text(stringResource(R.string.action_cancel)) }
+                },
+            )
+        }
     }
 }
 

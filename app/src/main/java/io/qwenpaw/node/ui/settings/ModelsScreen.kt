@@ -73,10 +73,10 @@ fun ModelsScreen(
     onOpenModelDefaults: () -> Unit = {},
     // 「模型」按钮的落点。不单独给时与「配置」同页，宿主可改成直接落到模型页签。
     onOpenProviderModels: ((String) -> Unit)? = null,
-    initialTab: ProviderScope = ProviderScope.CLOUD,
+    onSelectTab: (ProviderScope) -> Unit = {},
 ) {
     val openModels: (String) -> Unit = onOpenProviderModels ?: onOpenProvider
-    var tab by remember(initialTab) { mutableStateOf(initialTab) }
+    val tab = state.tab
     var query by remember { mutableStateOf("") }
     // 需要先选版本的可用分组。选完立刻进配置页，不留在本页。
     var pickingGroup by remember { mutableStateOf<ProviderGroup?>(null) }
@@ -89,6 +89,7 @@ fun ModelsScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = io.qwenpaw.node.ui.common.pageContentInsets(),
         topBar = {
             Column(
                 modifier = Modifier
@@ -162,7 +163,7 @@ fun ModelsScreen(
                             cloudCount,
                         ),
                         selected = tab == ProviderScope.CLOUD,
-                        onClick = { tab = ProviderScope.CLOUD },
+                        onClick = { onSelectTab(ProviderScope.CLOUD) },
                     )
                     ScopeTab(
                         label = stringResource(
@@ -171,7 +172,7 @@ fun ModelsScreen(
                             localCount,
                         ),
                         selected = tab == ProviderScope.LOCAL,
-                        onClick = { tab = ProviderScope.LOCAL },
+                        onClick = { onSelectTab(ProviderScope.LOCAL) },
                     )
                 }
                 OutlinedTextField(

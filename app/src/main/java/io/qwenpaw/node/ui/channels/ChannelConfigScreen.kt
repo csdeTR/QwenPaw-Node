@@ -48,6 +48,7 @@ import io.qwenpaw.node.data.channel.channelOptionLabelRes
 import io.qwenpaw.node.data.channel.isChannelFieldHidden
 import io.qwenpaw.node.ui.common.ConsoleHint
 import io.qwenpaw.node.ui.common.WebEntryDialog
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.workspace.IconCircle
 
@@ -82,6 +83,7 @@ fun ChannelConfigScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             Row(
                 modifier = Modifier
@@ -500,6 +502,26 @@ private fun repairActionLabel(action: String): String = when (action) {
 private fun fieldLabel(field: ChannelField): String =
     field.labelRes?.let { stringResource(it) } ?: field.label
 
+/** 说明文字：资源优先，服务端原文只作回退。 */
+@Composable
+private fun fieldHelp(field: ChannelField): String? =
+    field.helpRes?.let { stringResource(it) } ?: field.help
+
+/** 输入提示：资源优先，服务端原文只作回退。 */
+@Composable
+private fun fieldPlaceholder(field: ChannelField): String? =
+    field.placeholderRes?.let { stringResource(it) } ?: field.placeholder
+
+/** 说明行的统一样式，四个分支共用。 */
+@Composable
+private fun FieldHelpText(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
 @Composable
 private fun FieldRow(
     field: ChannelField,
@@ -519,13 +541,7 @@ private fun FieldRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(fieldLabel(field), style = MaterialTheme.typography.bodyMedium)
-                field.help?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                fieldHelp(field)?.let { FieldHelpText(it) }
             }
             Switch(
                 checked = state.values.switches[field.name] ?: false,
@@ -550,18 +566,12 @@ private fun FieldRow(
                 onValueChange = {},
                 readOnly = true,
                 label = { Text(fieldLabel(field)) },
-                placeholder = field.placeholder?.let { { Text(it) } },
+                placeholder = fieldPlaceholder(field)?.let { { Text(it) } },
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onPickSelect),
             )
-            field.help?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            fieldHelp(field)?.let { FieldHelpText(it) }
         }
 
         ChannelFieldType.JSON -> Column {
@@ -570,7 +580,10 @@ private fun FieldRow(
                 onValueChange = { onSetText(field.name, it) },
                 label = { Text(fieldLabel(field)) },
                 placeholder = {
-                    Text(if (field.jsonType == "array") "[]" else "{}")
+                    Text(
+                        fieldPlaceholder(field)
+                            ?: if (field.jsonType == "array") "[]" else "{}",
+                    )
                 },
                 minLines = 3,
                 maxLines = 10,
@@ -593,13 +606,7 @@ private fun FieldRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            field.help?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            fieldHelp(field)?.let { FieldHelpText(it) }
         }
 
         ChannelFieldType.NUMBER, ChannelFieldType.TEXT -> Column {
@@ -607,7 +614,7 @@ private fun FieldRow(
                 value = state.values.text[field.name].orEmpty(),
                 onValueChange = { onSetText(field.name, it) },
                 label = { Text(fieldLabel(field)) },
-                placeholder = field.placeholder?.let { { Text(it) } },
+                placeholder = fieldPlaceholder(field)?.let { { Text(it) } },
                 singleLine = true,
                 keyboardOptions = if (field.type == ChannelFieldType.NUMBER) {
                     KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -618,13 +625,7 @@ private fun FieldRow(
                 modifier = Modifier.fillMaxWidth(),
             )
             FieldError(field, state)
-            field.help?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            fieldHelp(field)?.let { FieldHelpText(it) }
         }
     }
 }
@@ -660,6 +661,7 @@ private fun SecretField(
                     value = draft?.replacement.orEmpty(),
                     onValueChange = onSet,
                     label = { Text(stringResource(R.string.channel_config_secret_new)) },
+                    placeholder = fieldPlaceholder(field)?.let { { Text(it) } },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -698,13 +700,7 @@ private fun SecretField(
                 }
             }
         }
-        field.help?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        fieldHelp(field)?.let { FieldHelpText(it) }
     }
 }
 

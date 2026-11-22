@@ -89,3 +89,48 @@ data class OAuthStatusDto(
     val status: String = "pending",
     val error: String? = null,
 )
+
+/**
+ * 把 provider 列表里的模型条目转成模型详情用的形状。
+ *
+ * 「模型」页签的行来自 `provider.allModels`，不一定在当前模型池分页里；
+ * 详情入口必须能用它打开，否则部分行的「设置」会静默无响应。
+ */
+fun resolveModelDetail(
+    id: String,
+    pool: List<PoolModelDto>,
+    provider: ProviderDto?,
+): PoolModelDto? = pool.firstOrNull { it.id == id }
+    ?: provider?.allModels?.firstOrNull { it.id == id }?.toPoolModel()
+
+fun ModelSlotDto.toPoolModel(): PoolModelDto = PoolModelDto(
+    id = id,
+    name = name,
+    modelType = modelType,
+    isFree = isFree,
+    isRecommended = isRecommended,
+    supportsImage = supportsImage,
+    supportsAudio = supportsAudio,
+    supportsVideo = supportsVideo,
+    supportsToolCalling = supportsToolCalling,
+    maxInputLength = maxInputLength,
+    effectiveMaxInputLength = effectiveMaxInputLength,
+    automaticMaxInputLength = automaticMaxInputLength,
+    maxInputLengthAutoDetected = maxInputLengthAutoDetected,
+    maxInputLengthConfigured = maxInputLengthConfigured,
+    contextLengthSource = contextLengthSource,
+    maxOutputLength = maxOutputLength,
+    maxOutputLengthSource = maxOutputLengthSource,
+    configOverrides = configOverrides,
+    thinkingControl = thinkingControl,
+    thinkingEnabled = thinkingEnabled,
+    thinkingBudget = thinkingBudget,
+    reasoningEffort = reasoningEffort,
+    relayReasoning = relayReasoning,
+    generateKwargs = generateKwargs,
+    thinkingParamStyle = thinkingParamStyle,
+    reasoningEffortOptions = reasoningEffortOptions,
+    thinkingBudgetRange = thinkingBudgetRange,
+    requiresPaidConfirmation = requiresPaidConfirmation,
+    remoteMissing = remoteMissing,
+)

@@ -55,6 +55,7 @@ import io.qwenpaw.node.data.model.PluginCatalogEntryDto
 import io.qwenpaw.node.data.model.PluginListItemDto
 import io.qwenpaw.node.data.model.PluginMarketEntryDto
 import io.qwenpaw.node.data.remote.SafZipSource
+import io.qwenpaw.node.ui.common.pageContentInsets
 import kotlinx.coroutines.launch
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -136,6 +137,7 @@ fun MarketScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             Column(
                 modifier = Modifier

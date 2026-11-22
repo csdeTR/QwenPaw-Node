@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.data.model.SkillWorkspaceDto
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.workspace.IconCircle
 
@@ -77,6 +78,7 @@ fun SkillPoolEditorScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             Row(
                 modifier = Modifier

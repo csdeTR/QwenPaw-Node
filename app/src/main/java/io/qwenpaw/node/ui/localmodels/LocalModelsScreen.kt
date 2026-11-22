@@ -52,6 +52,7 @@ import io.qwenpaw.node.ui.common.ChoiceDialog
 import io.qwenpaw.node.ui.common.ConsoleHint
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.common.WebEntryDialog
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.settings.Card
 import io.qwenpaw.node.ui.settings.SectionHeader
 import io.qwenpaw.node.ui.workspace.DownloadPolicy
@@ -100,6 +101,7 @@ fun LocalModelsScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = { AdminTopBar(title = stringResource(R.string.local_models_title), onBack = onBack) },
     ) { padding ->
         Column(

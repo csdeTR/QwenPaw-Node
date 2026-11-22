@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,6 +89,10 @@ internal fun McpEditorScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // 顶栏在正文之上不随键盘上移，只把表单区让开键盘；
+                // 否则最下面的地址、超时与保存入口会被输入法挡住。
+                // 这一页没有 Scaffold 预留手势条，因此只补键盘，不减导航栏。
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

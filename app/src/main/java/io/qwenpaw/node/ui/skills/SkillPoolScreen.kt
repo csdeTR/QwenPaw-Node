@@ -14,10 +14,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -52,6 +52,7 @@ import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.common.ConsoleHint
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.common.WebEntryDialog
+import io.qwenpaw.node.ui.common.bottomBarInsets
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.workspace.IconCircle
 import kotlinx.coroutines.launch
@@ -335,7 +336,7 @@ private fun BatchBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
+                .windowInsetsPadding(bottomBarInsets())
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 10.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,

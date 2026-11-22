@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.common.ConsoleHint
 import io.qwenpaw.node.ui.common.WebEntryDialog
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.workspace.IconCircle
 
@@ -66,6 +67,7 @@ fun SkillConfigScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             Row(
                 modifier = Modifier

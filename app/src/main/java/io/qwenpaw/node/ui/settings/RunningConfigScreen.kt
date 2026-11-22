@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.chat.APPROVAL_OPTIONS
 import io.qwenpaw.node.ui.common.AdminTopBar
+import io.qwenpaw.node.ui.common.pageContentInsets
 
 /**
  * 运行配置。
@@ -51,6 +52,7 @@ fun RunningConfigScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             AdminTopBar(
                 title = stringResource(R.string.runconfig_title),

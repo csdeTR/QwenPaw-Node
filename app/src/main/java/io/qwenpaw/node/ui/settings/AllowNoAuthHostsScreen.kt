@@ -34,6 +34,7 @@ import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.ConsoleHint
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.common.WebEntryDialog
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
 
 /**
@@ -69,6 +70,7 @@ fun AllowNoAuthHostsScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = pageContentInsets(),
         topBar = {
             AdminTopBar(
                 title = stringResource(R.string.allow_hosts_title),

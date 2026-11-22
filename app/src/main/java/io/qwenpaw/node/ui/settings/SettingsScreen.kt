@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +63,8 @@ import io.qwenpaw.node.data.local.AddressEntry
 import io.qwenpaw.node.data.local.InstanceConfig
 import io.qwenpaw.node.font.FontState
 import io.qwenpaw.node.ui.VoiceTrigger
+import io.qwenpaw.node.ui.common.pageContentInsets
+import io.qwenpaw.node.ui.common.pageImePadding
 import io.qwenpaw.node.ui.i18n.AppLanguage
 import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.ThemeMode
@@ -548,25 +551,36 @@ fun SettingsScreen(
     when (current.page) {
     // 添加实例先选方式：填表适合熟手，引导适合不清楚各项含义的人。
     SettingsPage.ADD_MODE, SettingsPage.ADD_FORM, SettingsPage.ADD_WIZARD -> {
-        Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+        var addProxyAuthOpen by remember(current.addMode) { mutableStateOf(false) }
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            // 反代二级页自己处理系统栏与键盘；打开时不能再让父层留一遍。
+            contentWindowInsets = if (addProxyAuthOpen) {
+                androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
+            } else {
+                androidx.compose.foundation.layout.WindowInsets.systemBars
+            },
+        ) { padding ->
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
                     // 添加实例的两种模式都要填表，键盘弹出时内容必须整体让开，
                     // 否则表单下半部分始终被挡住。
-                    .imePadding(),
+                    .then(if (addProxyAuthOpen) Modifier else Modifier.imePadding()),
             ) {
-                SettingsTopBar(
-                    onBack = {
-                        if (addMode != null) addMode = null else adding = false
-                    },
-                    subtitle = when (current.addMode) {
-                        null -> stringResource(R.string.settings_add_instance)
-                        AddMode.FORM -> stringResource(R.string.settings_add_instance_form)
-                        AddMode.WIZARD -> stringResource(R.string.settings_add_instance_wizard)
-                    },
-                )
+                if (!addProxyAuthOpen) {
+                    SettingsTopBar(
+                        onBack = {
+                            if (addMode != null) addMode = null else adding = false
+                        },
+                        subtitle = when (current.addMode) {
+                            null -> stringResource(R.string.settings_add_instance)
+                            AddMode.FORM -> stringResource(R.string.settings_add_instance_form)
+                            AddMode.WIZARD -> stringResource(R.string.settings_add_instance_wizard)
+                        },
+                    )
+                }
                 // 读 current 而不是外部 addMode：退出中的旧槽位要保留它自己那一页的内容。
                 when (current.addMode) {
                     null -> AddModeChooser(
@@ -603,6 +617,8 @@ fun SettingsScreen(
                         scannedPair = scannedPair,
                         onConsumeScannedPair = onConsumeScannedPair,
                         onOpenScanner = onOpenScanner,
+                        proxyAuthOpen = addProxyAuthOpen,
+                        onProxyAuthOpenChange = { addProxyAuthOpen = it },
                     )
 
                     AddMode.WIZARD -> InstanceWizard(
@@ -641,74 +657,91 @@ fun SettingsScreen(
         var editSaving by remember(instance.id) { mutableStateOf(false) }
         var editError by remember(instance.id) { mutableStateOf<String?>(null) }
         var showSshProfile by remember(instance.id) { mutableStateOf(false) }
+        var editProxyAuthOpen by remember(instance.id) { mutableStateOf(false) }
         val sshProfileStore = remember(context, instance.id) {
             io.qwenpaw.node.data.terminal.SshProfileStore(context)
         }
-        Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-            ) {
-                SettingsTopBar(
-                    onBack = { editing = null },
-                    subtitle = stringResource(R.string.settings_edit_instance),
-                )
-                InstanceForm(
-                    showHeader = false,
-                    connecting = editSaving,
-                    error = editError,
-                    initialAddresses = instance.addresses,
-                    initialName = instance.name,
-                    initialUsername = instance.username.orEmpty(),
-                    initialAgentId = instance.agentId,
-                    initialBasicUser = instance.basicUser.orEmpty(),
-                    // 密码不回显：编辑页留空表示「不修改」，填了才覆盖。
-                    // 与「留空即清空」相比，这种做法不会因为用户没注意就丢掉配置。
-                    initialBasicPassword = "",
-                    onConnect = { draft ->
-                        editScope.launch {
-                            editSaving = true
-                            editError = null
-                            val failure = onEditWithCredentials(instance, draft)
-                            editSaving = false
-                            if (failure == null) {
-                                editing = null
-                            } else {
-                                editError = failure
+        // 二级页覆盖在实例编辑表单之上：表单状态不丢，也不必另开 Dialog 窗口。
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                // 编辑表单的输入框在正文里，键盘高度并进 Scaffold 的 padding：
+                // 顶栏不动，正文整体上移，滑到底能看见保存按钮。
+                contentWindowInsets = if (editProxyAuthOpen) {
+                    androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
+                } else {
+                    pageContentInsets()
+                },
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                ) {
+                    if (!editProxyAuthOpen) {
+                        SettingsTopBar(
+                            onBack = { editing = null },
+                            subtitle = stringResource(R.string.settings_edit_instance),
+                        )
+                    }
+                    InstanceForm(
+                        showHeader = false,
+                        connecting = editSaving,
+                        error = editError,
+                        initialAddresses = instance.addresses,
+                        initialName = instance.name,
+                        initialUsername = instance.username.orEmpty(),
+                        initialAgentId = instance.agentId,
+                        initialBasicUser = instance.basicUser.orEmpty(),
+                        // 密码不回显：编辑页留空表示「不修改」，填了才覆盖。
+                        // 与「留空即清空」相比，这种做法不会因为用户没注意就丢掉配置。
+                        initialBasicPassword = "",
+                        onConnect = { draft ->
+                            editScope.launch {
+                                editSaving = true
+                                editError = null
+                                val failure = onEditWithCredentials(instance, draft)
+                                editSaving = false
+                                if (failure == null) {
+                                    editing = null
+                                } else {
+                                    editError = failure
+                                }
                             }
-                        }
-                    },
-                    onLoadAgents = { _, _, _, _ -> emptyList() },
-                    // 编辑已有实例：带上保存的 token，验证时才能读到配套插件版本。
-                    onVerifyHosts = { hosts, basic, attempt, token ->
-                        onVerifyHosts(hosts, basic, attempt, token, instance.id)
-                    },
-                    verifyToken = instance.token,
-                    loadAgentsWithToken = { _, _, _ -> onLoadAgentsFor(instance) },
-                    initialMode = if (instance.usesTokenCredential) {
-                        io.qwenpaw.node.data.CredentialMode.TOKEN
-                    } else {
-                        io.qwenpaw.node.data.CredentialMode.PASSWORD
-                    },
-                    scannedPair = scannedPair,
-                    onConsumeScannedPair = onConsumeScannedPair,
-                    onOpenScanner = onOpenScanner,
-                    currentNetKind = currentNetKind,
-                    currentSsid = currentSsid,
-                    submitLabel = stringResource(R.string.action_save),
-                    isTrustedHost = isTrustedHost,
-                    onOpenSshProfile = { showSshProfile = true },
-                    onCancel = { editing = null },
+                        },
+                        onLoadAgents = { _, _, _, _ -> emptyList() },
+                        // 编辑已有实例：带上保存的 token，验证时才能读到配套插件版本。
+                        onVerifyHosts = { hosts, basic, attempt, token ->
+                            onVerifyHosts(hosts, basic, attempt, token, instance.id)
+                        },
+                        verifyToken = instance.token,
+                        loadAgentsWithToken = { _, _, _ -> onLoadAgentsFor(instance) },
+                        initialMode = if (instance.usesTokenCredential) {
+                            io.qwenpaw.node.data.CredentialMode.TOKEN
+                        } else {
+                            io.qwenpaw.node.data.CredentialMode.PASSWORD
+                        },
+                        scannedPair = scannedPair,
+                        onConsumeScannedPair = onConsumeScannedPair,
+                        onOpenScanner = onOpenScanner,
+                        currentNetKind = currentNetKind,
+                        currentSsid = currentSsid,
+                        submitLabel = stringResource(R.string.action_save),
+                        isTrustedHost = isTrustedHost,
+                        onOpenSshProfile = { showSshProfile = true },
+                        onCancel = { editing = null },
+                        proxyAuthOpen = editProxyAuthOpen,
+                        onProxyAuthOpenChange = { editProxyAuthOpen = it },
+                    )
+                }
+            }
+            if (showSshProfile) {
+                SshProfileScreen(
+                    store = sshProfileStore,
+                    instanceId = instance.id,
+                    onBack = { showSshProfile = false },
                 )
             }
-        }
-        if (showSshProfile) {
-            SshProfileScreen(
-                store = sshProfileStore,
-                instanceId = instance.id,
-                onBack = { showSshProfile = false },
-            )
         }
     }
 
@@ -765,6 +798,9 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    // 顶栏在正文之上不随键盘上移，只把滚动区让开键盘：
+                    // 关键词在页内的定时任务、工具与环境变量表单滑到底才看得见保存。
+                    .pageImePadding()
                     .then(
                         // 预览页的滑块必须钉在底部，这一页不能整页滚动。
                         if (page == SettingsPage.APPEARANCE_PREVIEW) {

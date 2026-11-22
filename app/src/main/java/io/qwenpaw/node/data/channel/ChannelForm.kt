@@ -34,7 +34,11 @@ data class ChannelField(
     val type: ChannelFieldType,
     val options: List<String> = emptyList(),
     val help: String? = null,
+    /** 已知字段的中文说明；为空时退回 [help]。 */
+    @StringRes val helpRes: Int? = null,
     val placeholder: String? = null,
+    /** 已知字段的中文输入提示；为空时退回 [placeholder]。 */
+    @StringRes val placeholderRes: Int? = null,
     /**
      * `json_type`：`array` 或 `object`，未声明为 null。
      *
@@ -92,7 +96,9 @@ fun parseChannelFields(schema: JsonObject?): List<ChannelField> {
                     .getOrDefault(emptyList())
             } ?: emptyList(),
             help = localizedText(obj["help"]),
+            helpRes = channelFieldHelpRes(name),
             placeholder = localizedText(obj["placeholder"]),
+            placeholderRes = channelFieldPlaceholderRes(name),
             jsonType = obj.string("json_type")?.lowercase()?.takeIf { it == JSON_ARRAY || it == JSON_OBJECT },
             required = (obj["required"] as? JsonPrimitive)?.booleanOrNull ?: false,
         )
@@ -315,6 +321,216 @@ fun channelFieldLabelRes(name: String): Int? = when (name) {
     "media_dir" -> R.string.channels_field_media_dir
     "message_merge_enabled" -> R.string.channels_field_message_merge_enabled
     "message_merge_delay_ms" -> R.string.channels_field_message_merge_delay_ms
+
+    // 钉钉
+    "client_id" -> R.string.channels_field_client_id
+    "client_secret" -> R.string.channels_field_client_secret
+    "message_type" -> R.string.channels_field_message_type
+    "cron_message_type" -> R.string.channels_field_cron_message_type
+    "card_template_id" -> R.string.channels_field_card_template_id
+    "card_template_key" -> R.string.channels_field_card_template_key
+    "card_auto_layout" -> R.string.channels_field_card_auto_layout
+    "robot_code" -> R.string.channels_field_robot_code
+    "endpoint" -> R.string.channels_field_endpoint
+    "at_sender_on_reply" -> R.string.channels_field_at_sender_on_reply
+    "share_session_in_group" -> R.string.channels_field_share_session_in_group
+
+    // OneBot 与其它走 WebSocket 的频道
+    "ws_host" -> R.string.channels_field_ws_host
+    "ws_port" -> R.string.channels_field_ws_port
+    "ws_url" -> R.string.channels_field_ws_url
+    "access_token" -> R.string.channels_field_access_token
+    "media_download_max_mb" -> R.string.channels_field_media_download_max_mb
+    "media_base64" -> R.string.channels_field_media_base64
+    "media_base64_max_mb" -> R.string.channels_field_media_base64_max_mb
+
+    // Matrix
+    "homeserver" -> R.string.channels_field_homeserver
+    "user_id" -> R.string.channels_field_user_id
+    "group_allow_from" -> R.string.channels_field_group_allow_from
+    "groups" -> R.string.channels_field_groups
+    "encryption" -> R.string.channels_field_encryption
+    "vision_enabled" -> R.string.channels_field_vision_enabled
+    "history_limit" -> R.string.channels_field_history_limit
+    "device_name" -> R.string.channels_field_device_name
+    "sync_timeout_ms" -> R.string.channels_field_sync_timeout_ms
+    "mention_pill_in_body" -> R.string.channels_field_mention_pill_in_body
+    "outbound_structured_mentions" -> R.string.channels_field_outbound_structured_mentions
+
+    // MQTT
+    "transport" -> R.string.channels_field_transport
+    "clean_session" -> R.string.channels_field_clean_session
+    "qos" -> R.string.channels_field_qos
+    "subscribe_topic" -> R.string.channels_field_subscribe_topic
+    "publish_topic" -> R.string.channels_field_publish_topic
+    "tls_enabled" -> R.string.channels_field_tls_enabled
+    "tls_ca_certs" -> R.string.channels_field_tls_ca_certs
+    "tls_certfile" -> R.string.channels_field_tls_certfile
+    "tls_keyfile" -> R.string.channels_field_tls_keyfile
+
+    // SIP 与语音
+    "sip_mode" -> R.string.channels_field_sip_mode
+    "sip_host" -> R.string.channels_field_sip_host
+    "sip_port" -> R.string.channels_field_sip_port
+    "sip_username" -> R.string.channels_field_sip_username
+    "sip_password" -> R.string.channels_field_sip_password
+    "sip_server" -> R.string.channels_field_sip_server
+    "sip_transport" -> R.string.channels_field_sip_transport
+    "rtp_port_low" -> R.string.channels_field_rtp_port_low
+    "rtp_port_high" -> R.string.channels_field_rtp_port_high
+    "dashscope_api_key" -> R.string.channels_field_dashscope_api_key
+    "tts_provider" -> R.string.channels_field_tts_provider
+    "tts_voice" -> R.string.channels_field_tts_voice
+    "stt_provider" -> R.string.channels_field_stt_provider
+    "language" -> R.string.channels_field_language
+    "welcome_greeting" -> R.string.channels_field_welcome_greeting
+    "welcome_text" -> R.string.channels_field_welcome_text
+    "call_timeout" -> R.string.channels_field_call_timeout
+    "livekit_url" -> R.string.channels_field_livekit_url
+    "livekit_api_key" -> R.string.channels_field_livekit_api_key
+    "livekit_api_secret" -> R.string.channels_field_livekit_api_secret
+    "livekit_sip_trunk_id" -> R.string.channels_field_livekit_sip_trunk_id
+    "livekit_room_name" -> R.string.channels_field_livekit_room_name
+    "livekit_output_sample_rate" -> R.string.channels_field_livekit_output_sample_rate
+    "max_concurrent_calls" -> R.string.channels_field_max_concurrent_calls
+    "twilio_account_sid" -> R.string.channels_field_twilio_account_sid
+    "twilio_auth_token" -> R.string.channels_field_twilio_auth_token
+    "phone_number" -> R.string.channels_field_phone_number
+    "phone_number_sid" -> R.string.channels_field_phone_number_sid
+
+    // 企业微信、小艺、元宝、Azure Bot
+    "bot_id" -> R.string.channels_field_bot_id
+    "secret" -> R.string.channels_field_secret
+    "ak" -> R.string.channels_field_ak
+    "sk" -> R.string.channels_field_sk
+    "agent_id" -> R.string.channels_field_agent_id
+    "task_timeout_ms" -> R.string.channels_field_task_timeout_ms
+    "api_domain" -> R.string.channels_field_api_domain
+    "app_password" -> R.string.channels_field_app_password
+    "tenant_id" -> R.string.channels_field_tenant_id
+    "http_host" -> R.string.channels_field_http_host
+    "http_port" -> R.string.channels_field_http_port
+
+    // QQ、iMessage、飞书、Mattermost、Slack、Discord
+    "markdown_enabled" -> R.string.channels_field_markdown_enabled
+    "ack_message" -> R.string.channels_field_ack_message
+    "max_reconnect_attempts" -> R.string.channels_field_max_reconnect_attempts
+    "auto_collapse_thinking" -> R.string.channels_field_auto_collapse_thinking
+    "accept_bot_messages" -> R.string.channels_field_accept_bot_messages
+    "db_path" -> R.string.channels_field_db_path
+    "poll_sec" -> R.string.channels_field_poll_sec
+    "max_decoded_size" -> R.string.channels_field_max_decoded_size
+    "url" -> R.string.channels_field_url
+    "thread_follow_without_mention" -> R.string.channels_field_thread_follow_without_mention
+    "app_token" -> R.string.channels_field_app_token
+    "proxy" -> R.string.channels_field_http_proxy
+    "domain" -> R.string.channels_field_domain
+    else -> null
+}
+
+/**
+ * 已知字段名的中文说明。文案取自 Console 的 `channels.*` 提示，服务端 schema 只给英文。
+ *
+ * 同一字段名在不同频道语义不同的（如 `streaming_enabled` 的钉钉与飞书提示）不在这里映射，
+ * 避免把某一个频道的说法套到其它频道上。
+ */
+@StringRes
+fun channelFieldHelpRes(name: String): Int? = when (name) {
+    "show_tool_calls" -> R.string.channels_help_show_tool_calls
+    "show_tool_results" -> R.string.channels_help_show_tool_results
+    "tool_call_max_length" -> R.string.channels_help_tool_max_length
+    "tool_result_max_length" -> R.string.channels_help_tool_max_length
+    "show_thinking" -> R.string.channels_help_show_thinking
+    "no_text_debounce" -> R.string.channels_help_no_text_debounce
+    "auto_collapse_thinking" -> R.string.channels_help_auto_collapse_thinking
+    "access_control_dm" -> R.string.channels_help_access_control_dm
+    "access_control_group" -> R.string.channels_help_access_control_group
+    "dm_disabled" -> R.string.channels_help_dm_disabled
+    "group_disabled" -> R.string.channels_help_group_disabled
+    "require_mention" -> R.string.channels_help_require_mention
+    "share_session_in_group" -> R.string.channels_help_share_session_in_group
+    "accept_bot_messages" -> R.string.channels_help_accept_bot_messages
+    "allow_from" -> R.string.channels_help_allow_from
+    "dm_policy" -> R.string.channels_help_dm_policy
+    "group_policy" -> R.string.channels_help_group_policy
+    "deny_message" -> R.string.channels_help_deny_message
+    "message_type" -> R.string.channels_help_message_type
+    "cron_message_type" -> R.string.channels_help_cron_message_type
+    "card_template_key" -> R.string.channels_help_card_template_key
+    "card_auto_layout" -> R.string.channels_help_card_auto_layout
+    "robot_code" -> R.string.channels_help_robot_code
+    "endpoint" -> R.string.channels_help_endpoint
+    "at_sender_on_reply" -> R.string.channels_help_at_sender_on_reply
+    "domain" -> R.string.channels_help_domain
+    "ack_message" -> R.string.channels_help_ack_message
+    "proxy" -> R.string.channels_help_proxy
+    "phone_number_sid" -> R.string.channels_help_phone_number_sid
+    "sip_mode" -> R.string.channels_help_sip_mode
+    "dashscope_api_key" -> R.string.channels_help_dashscope_api_key
+    "livekit_room_name" -> R.string.channels_help_livekit_room_name
+    "welcome_text" -> R.string.channels_help_welcome_text
+    "bot_token_file" -> R.string.channels_help_bot_token_file
+    "message_merge_delay_ms" -> R.string.channels_help_message_merge_delay_ms
+    "api_domain" -> R.string.channels_help_api_domain
+    "ws_host" -> R.string.channels_help_ws_host
+    "media_download_max_mb" -> R.string.channels_help_media_download_max_mb
+    "media_base64" -> R.string.channels_help_media_base64
+    "media_base64_max_mb" -> R.string.channels_help_media_base64_max_mb
+    "user_id" -> R.string.channels_help_user_id
+    "encryption" -> R.string.channels_help_encryption
+    "device_name" -> R.string.channels_help_device_name
+    else -> null
+}
+
+/** 已知字段名的输入提示。服务端 schema 的 placeholder 多为英文示例或英文说明。 */
+@StringRes
+fun channelFieldPlaceholderRes(name: String): Int? = when (name) {
+    "bot_prefix" -> R.string.channels_placeholder_bot_prefix
+    "http_proxy" -> R.string.channels_placeholder_http_proxy
+    "http_proxy_auth" -> R.string.channels_placeholder_http_proxy_auth
+    "proxy" -> R.string.channels_placeholder_proxy
+    "db_path" -> R.string.channels_placeholder_db_path
+    "client_id" -> R.string.channels_placeholder_client_id
+    "card_template_id" -> R.string.channels_placeholder_card_template_id
+    "card_template_key" -> R.string.channels_placeholder_card_template_key
+    "endpoint" -> R.string.channels_placeholder_endpoint
+    "robot_code" -> R.string.channels_placeholder_robot_code
+    "ws_host" -> R.string.channels_placeholder_ws_host
+    "ws_port" -> R.string.channels_placeholder_ws_port
+    "homeserver" -> R.string.channels_placeholder_homeserver
+    "user_id" -> R.string.channels_placeholder_user_id
+    "tenant_id" -> R.string.channels_placeholder_tenant_id
+    "http_host" -> R.string.channels_placeholder_http_host
+    "http_port" -> R.string.channels_placeholder_http_port
+    "url" -> R.string.channels_placeholder_url
+    "host" -> R.string.channels_placeholder_host
+    "port" -> R.string.channels_placeholder_port
+    "subscribe_topic" -> R.string.channels_placeholder_subscribe_topic
+    "publish_topic" -> R.string.channels_placeholder_publish_topic
+    "tls_ca_certs" -> R.string.channels_placeholder_tls_ca_certs
+    "tls_certfile" -> R.string.channels_placeholder_tls_certfile
+    "tls_keyfile" -> R.string.channels_placeholder_tls_keyfile
+    "twilio_account_sid" -> R.string.channels_placeholder_twilio_account_sid
+    "phone_number" -> R.string.channels_placeholder_phone_number
+    "phone_number_sid" -> R.string.channels_placeholder_phone_number_sid
+    "sip_host" -> R.string.channels_placeholder_sip_host
+    "sip_port" -> R.string.channels_placeholder_sip_port
+    "sip_username" -> R.string.channels_placeholder_sip_username
+    "sip_server" -> R.string.channels_placeholder_sip_server
+    "dashscope_api_key" -> R.string.channels_placeholder_dashscope_api_key
+    "livekit_url" -> R.string.channels_placeholder_livekit_url
+    "livekit_api_key" -> R.string.channels_placeholder_livekit_api_key
+    "livekit_api_secret" -> R.string.channels_placeholder_livekit_api_secret
+    "livekit_sip_trunk_id" -> R.string.channels_placeholder_livekit_sip_trunk_id
+    "livekit_room_name" -> R.string.channels_placeholder_livekit_room_name
+    "ack_message" -> R.string.channels_placeholder_ack_message
+    "welcome_text" -> R.string.channels_placeholder_welcome_text
+    "bot_id" -> R.string.channels_placeholder_bot_id
+    "secret" -> R.string.channels_placeholder_secret
+    "ak" -> R.string.channels_placeholder_ak
+    "sk" -> R.string.channels_placeholder_sk
+    "agent_id" -> R.string.channels_placeholder_agent_id
+    "api_domain" -> R.string.channels_placeholder_api_domain
     else -> null
 }
 
@@ -325,6 +541,13 @@ fun channelOptionLabelRes(fieldName: String, option: String): Int? = when (field
         "open" -> R.string.channels_option_open
         "allowlist" -> R.string.channels_option_allowlist
         "closed", "disabled" -> R.string.channels_option_closed
+        else -> null
+    }
+
+    // 钉钉的消息类型：协议值不变，界面上补出中文含义。
+    "message_type", "cron_message_type" -> when (option) {
+        "markdown" -> R.string.channels_option_message_type_markdown
+        "card" -> R.string.channels_option_message_type_card
         else -> null
     }
 

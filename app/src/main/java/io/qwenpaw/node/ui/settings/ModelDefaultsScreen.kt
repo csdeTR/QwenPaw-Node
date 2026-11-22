@@ -84,6 +84,7 @@ fun ModelDefaultsScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = io.qwenpaw.node.ui.common.pageContentInsets(),
         topBar = {
             Column(
                 modifier = Modifier

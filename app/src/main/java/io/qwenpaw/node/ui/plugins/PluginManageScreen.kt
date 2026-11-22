@@ -44,6 +44,7 @@ import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.common.PlainTextEditor
 import io.qwenpaw.node.ui.common.WebEntryDialog
+import io.qwenpaw.node.ui.common.pageContentInsets
 import io.qwenpaw.node.ui.theme.qwenSwitchColors
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -132,6 +133,7 @@ fun PluginManageScreen(
     } else {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = pageContentInsets(),
             topBar = {
                 AdminTopBar(
                     title = state.plugin?.name?.takeIf { it.isNotBlank() }

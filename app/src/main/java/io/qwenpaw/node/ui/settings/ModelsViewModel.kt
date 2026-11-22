@@ -154,6 +154,8 @@ fun providerStatusText(provider: ProviderDto): String = when (providerStatus(pro
  */
 data class ModelsUiState(
     val providers: List<ProviderDto> = emptyList(),
+    /** 当前提供商页签。放在 ViewModel 里，离开页面再返回不会被重置。 */
+    val tab: ProviderScope = ProviderScope.CLOUD,
     val choices: List<ModelChoice> = emptyList(),
     val globalDefault: ActiveModelDto? = null,
     val agentDefault: ActiveModelDto? = null,
@@ -207,6 +209,8 @@ class ModelsViewModel(
         if (_state.value.loaded || _state.value.loading) return
         refresh()
     }
+
+    fun setTab(scope: ProviderScope) = _state.update { it.copy(tab = scope) }
 
     fun refresh() {
         val conn = connection() ?: run {

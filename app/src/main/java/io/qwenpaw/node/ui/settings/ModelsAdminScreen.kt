@@ -1,5 +1,6 @@
 package io.qwenpaw.node.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -99,6 +100,7 @@ fun ModelsAdminScreen(
     onOpenUrl: (String) -> Unit,
     onOpenConsole: (() -> Unit)? = null,
     onOpenModelDetail: (io.qwenpaw.node.data.model.PoolModelDto) -> Unit = {},
+    onOpenModelDetailById: (String) -> Unit = {},
     onCloseModelDetail: () -> Unit = {},
     onModelDetailChange: ((ModelDetailDraft) -> ModelDetailDraft) -> Unit = {},
     onSaveModelDetail: () -> Unit = {},
@@ -110,6 +112,8 @@ fun ModelsAdminScreen(
 
     WebEntryDialog(pageKey = "models_admin", onOpenConsole = onOpenConsole)
     LaunchedEffect(Unit) { if (!state.loading && state.provider == null && detail == null) onRetry() }
+    // 模型详情是页内二级页，不是独立导航页；系统返回必须先回到提供商页。
+    BackHandler(enabled = detail != null) { onCloseModelDetail() }
 
     val header: @Composable () -> Unit = {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -139,6 +143,7 @@ fun ModelsAdminScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = io.qwenpaw.node.ui.common.pageContentInsets(),
         topBar = {
             Row(
                 modifier = Modifier
@@ -243,9 +248,7 @@ fun ModelsAdminScreen(
                         onToggleVisibility = onToggleVisibility,
                         onProbe = onProbe,
                         onTestModel = onTestModel,
-                        onOpenDetail = { id ->
-                            state.pool.models.firstOrNull { it.id == id }?.let(onOpenModelDetail)
-                        },
+                        onOpenDetail = onOpenModelDetailById,
                     )
 
                     ModelsAdminTab.POOL -> PoolTab(

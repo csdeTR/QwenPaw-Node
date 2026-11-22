@@ -14,11 +14,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import io.qwenpaw.node.R
 import io.qwenpaw.node.avatar.resolveChatIcon
 import io.qwenpaw.node.data.model.ChatSpecDto
+import io.qwenpaw.node.ui.common.bottomBarInsets
 import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 
@@ -277,7 +278,7 @@ fun ChatListScreen(
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.background)
                         // 底色铺满后，再让开手势条，避免按钮被小白条压住。
-                        .navigationBarsPadding()
+                        .windowInsetsPadding(bottomBarInsets())
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                 ) {
                     Row(
@@ -822,7 +823,7 @@ private fun BatchActionBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
-            .navigationBarsPadding()
+            .windowInsetsPadding(bottomBarInsets())
             .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,

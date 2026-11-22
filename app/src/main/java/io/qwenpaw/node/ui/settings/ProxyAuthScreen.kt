@@ -22,11 +22,17 @@ import io.qwenpaw.node.ui.common.SecretVisibilityTrailingIcon
 import io.qwenpaw.node.ui.common.rememberSecretVisibility
 import io.qwenpaw.node.ui.theme.LocalCaptionColor
 
-/** 反向代理 HTTP Basic 凭据的二级页；密码留空表示保留原值。 */
+/**
+ * 反向代理 HTTP Basic 凭据的二级页；密码留空表示保留原值。
+ *
+ * [applyWindowInsets] 转给 [InstanceSubPage]：从实例表单里打开时表单外层已经让开
+ * 系统栏与键盘，这一层不再重复留白。
+ */
 @Composable
 fun ProxyAuthScreen(
     initialUser: String,
     onBack: () -> Unit,
+    applyWindowInsets: Boolean = true,
     onSave: (user: String, password: String) -> Unit,
 ) {
     var user by remember { mutableStateOf(initialUser) }
@@ -38,6 +44,7 @@ fun ProxyAuthScreen(
     InstanceSubPage(
         subtitle = stringResource(R.string.connect_proxy_title),
         onBack = onBack,
+        applyWindowInsets = applyWindowInsets,
     ) {
         Text(
             text = stringResource(R.string.connect_proxy_hint),

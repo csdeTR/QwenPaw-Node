@@ -68,6 +68,7 @@ fun ProviderAddScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = io.qwenpaw.node.ui.common.pageContentInsets(),
         topBar = {
             AdminTopBar(
                 title = stringResource(R.string.models_rework_add_title),

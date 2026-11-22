@@ -207,9 +207,6 @@ private fun QwenPawNav(
     var channelConfigKey by remember { mutableStateOf<String?>(null) }
     var skillConfigKey by remember { mutableStateOf<String?>(null) }
     var modelAdminKey by remember { mutableStateOf<String?>(null) }
-    var modelsInitialTab by remember {
-        mutableStateOf(io.qwenpaw.node.data.model.ProviderScope.CLOUD)
-    }
     // 用量统计有两个入口（对话列表顶栏、设置页）。记住是谁打开的，
     // 返回时才回到进入前那一层——固定回列表会让「设置 → 用量 → 返回」跳过设置页。
     var usageOrigin by remember { mutableStateOf(Screen.LIST) }
@@ -1464,7 +1461,7 @@ private fun QwenPawNav(
                         viewModel.modelDefaults.ensureLoaded()
                         screen = Screen.MODEL_DEFAULTS
                     },
-                    initialTab = modelsInitialTab,
+                    onSelectTab = viewModel.models::setTab,
                 )
             }
 
@@ -1472,7 +1469,7 @@ private fun QwenPawNav(
                 viewModel = viewModel,
                 onBack = { screen = Screen.MODELS },
                 onSaved = {
-                    modelsInitialTab = io.qwenpaw.node.data.model.ProviderScope.LOCAL
+                    viewModel.models.setTab(io.qwenpaw.node.data.model.ProviderScope.LOCAL)
                     viewModel.models.refresh()
                     screen = Screen.MODELS
                 },
@@ -2750,6 +2747,7 @@ private fun ModelsAdminPage(
         onOpenUrl = onOpenUrl,
         onOpenConsole = openConsole,
         onOpenModelDetail = viewModel.modelsAdmin::openModelDetail,
+        onOpenModelDetailById = viewModel.modelsAdmin::openModelDetailById,
         onCloseModelDetail = viewModel.modelsAdmin::closeModelDetail,
         onModelDetailChange = viewModel.modelsAdmin::updateModelDetail,
         onSaveModelDetail = viewModel.modelsAdmin::saveModelDetail,

@@ -12,6 +12,7 @@ import io.qwenpaw.node.data.model.PoolModelDto
 import io.qwenpaw.node.data.model.ProbeMultimodalDto
 import io.qwenpaw.node.data.model.ProviderDto
 import io.qwenpaw.node.data.model.TestConnectionDto
+import io.qwenpaw.node.data.model.resolveModelDetail
 import io.qwenpaw.node.data.model.selectedModelIds as selectedIdsOf
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
@@ -32,8 +33,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -585,6 +584,16 @@ class ModelsAdminViewModel(
         }
     }
 
+    /**
+     * 「模型」页签的行来自 provider.allModels，可能不在当前池分页/筛选里。
+     * 先查池页，再回落到 provider 条目，避免「设置」点了没反应。
+     */
+    fun openModelDetailById(modelId: String) {
+        val current = _state.value
+        resolveModelDetail(modelId, current.pool.models, current.provider)
+            ?.let(::openModelDetail)
+    }
+
     fun closeModelDetail() = _state.update { it.copy(detail = null, detailDraft = null) }
 
     fun updateModelDetail(transform: (ModelDetailDraft) -> ModelDetailDraft) = _state.update {
@@ -607,59 +616,7 @@ class ModelsAdminViewModel(
             _state.update { it.copy(error = Texts.get(R.string.models_model_max_input_invalid)) }
             return
         }
-        val maxOutput = draft.maxOutput.trim().toLongOrNull()
-        val finalKwargs = JsonObject(
-            kwargs.toMutableMap().apply {
-                if (maxOutput != null) {
-                    put("max_tokens", JsonPrimitive(maxOutput))
-                } else {
-                    remove("max_tokens")
-                }
-            },
-        )
-        val thinkingControl = buildJsonObject {
-            put("kind", draft.thinkingKind)
-            if (draft.thinkingWire.isNotBlank()) put("wire", draft.thinkingWire)
-            if (draft.thinkingKind == "effort") {
-                put("efforts", JsonArray(draft.thinkingEfforts.map { JsonPrimitive(it) }))
-            }
-            if (draft.thinkingKind == "budget") {
-                draft.thinkingBudgetMin.toLongOrNull()?.let { put("budget_min", it) }
-                draft.thinkingBudgetMax.toLongOrNull()?.let { put("budget_max", it) }
-            }
-            put("supports_off", draft.thinkingSupportsOff)
-        }
-        val body = buildJsonObject {
-            put("model_type", draft.modelType)
-            put("supports_image", draft.supportsImage?.let { JsonPrimitive(it) } ?: JsonNull)
-            put("supports_audio", draft.supportsAudio?.let { JsonPrimitive(it) } ?: JsonNull)
-            put("supports_video", draft.supportsVideo?.let { JsonPrimitive(it) } ?: JsonNull)
-            put(
-                "supports_tool_calling",
-                draft.supportsToolCalling?.let { JsonPrimitive(it) } ?: JsonNull,
-            )
-            put(
-                "max_input_length",
-                maxInput.toLongOrNull()?.let { JsonPrimitive(it) } ?: JsonNull,
-            )
-            put("generate_kwargs", finalKwargs)
-            put("relay_reasoning", draft.relayReasoning)
-            put("thinking_enabled", draft.thinkingEnabled?.let { JsonPrimitive(it) } ?: JsonNull)
-            put(
-                "thinking_budget",
-                draft.thinkingBudget.trim().toLongOrNull()?.let { JsonPrimitive(it) } ?: JsonNull,
-            )
-            put(
-                "reasoning_effort",
-                draft.reasoningEffort.takeIf { it.isNotBlank() }?.let { JsonPrimitive(it) }
-                    ?: JsonNull,
-            )
-            // 原本没有能力声明、用户也没动过时不要提交 unknown，
-            // 否则会把服务端探测到的思考能力覆盖掉。
-            if (draft.thinkingKind != "unknown" || model.thinkingControl != null) {
-                put("thinking_control", thinkingControl)
-            }
-        }
+        val body = draft.toConfigureBody(kwargs, model)
         _state.update { it.copy(busy = true, error = null, notice = null) }
         scope.launch {
             val result = runCatching {
@@ -671,7 +628,10 @@ class ModelsAdminViewModel(
                     detail = if (result.isSuccess) null else it.detail,
                     detailDraft = if (result.isSuccess) null else it.detailDraft,
                     notice = if (result.isSuccess) {
-                        Texts.get(R.string.models_model_saved)
+                        Texts.get(
+                            R.string.models_model_saved,
+                            model.name.ifBlank { model.id },
+                        )
                     } else {
                         it.notice
                     },
