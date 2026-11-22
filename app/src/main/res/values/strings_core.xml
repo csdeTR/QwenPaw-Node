@@ -52,6 +52,10 @@
     <!-- 错误文案 -->
     <string name="error_not_found_404">对话不存在或已被删除</string>
     <string name="error_busy_409">该对话已有任务在运行，请先停止或等待完成</string>
+    <string name="error_plugin_already_installed">插件已安装，请先在插件管理中卸载再重装</string>
+    <string name="error_channel_runtime_not_integrated">当前服务端没有集成频道运行时，官方频道插件无法安装；请改用带频道运行时的 QwenPaw 桌面版，或安装不依赖频道运行时的插件</string>
+    <string name="error_conflict_409">请求冲突：%1$s</string>
+    <string name="error_conflict_409_no_detail">请求冲突，请稍后重试</string>
     <string name="error_console_disabled_503">Console 频道未启用，请在服务端开启</string>
     <string name="error_host_not_found">找不到服务器，请检查地址与网络</string>
     <string name="error_connect_failed">无法连接服务器，请确认 QwenPaw 已启动且地址端口正确</string>

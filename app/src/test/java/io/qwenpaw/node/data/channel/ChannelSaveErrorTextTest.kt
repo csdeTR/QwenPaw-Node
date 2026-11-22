@@ -42,10 +42,15 @@ class ChannelSaveErrorTextTest {
     }
 
     @Test
-    fun `chat 409 wording is preserved`() {
+    fun `generic 409 is not misreported as chat task`() {
+        assertEquals("请求冲突：conflict", ErrorText.of(ApiException(409, "conflict")))
+    }
+
+    @Test
+    fun `chat task 409 wording is preserved`() {
         assertEquals(
             "该对话已有任务在运行，请先停止或等待完成",
-            ErrorText.of(ApiException(409, "conflict")),
+            ErrorText.of(ApiException(409, "A task is already running for this chat")),
         )
     }
 }

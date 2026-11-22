@@ -33,10 +33,46 @@ class ErrorTextTest {
         assertEquals("unauthorized", ErrorText.of(ApiException(401, "unauthorized", tokenSent = true)))
         assertEquals("对话不存在或已被删除", ErrorText.of(ApiException(404, "not found")))
         assertEquals(
-            "该对话已有任务在运行，请先停止或等待完成",
+            "请求冲突：conflict",
             ErrorText.of(ApiException(409, "conflict")),
         )
         assertEquals("Console 频道未启用，请在服务端开启", ErrorText.of(ApiException(503, "x")))
+    }
+
+    @Test
+    fun `409 chat task keeps the chat wording`() {
+        assertEquals(
+            "该对话已有任务在运行，请先停止或等待完成",
+            ErrorText.of(
+                ApiException(
+                    409,
+                    "A task is already running for this chat. Wait for it to finish.",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `409 already loaded plugin is not reported as a chat task`() {
+        assertEquals(
+            "插件已安装，请先在插件管理中卸载再重装",
+            ErrorText.of(
+                ApiException(
+                    409,
+                    "Plugin 'qwenpaw-node-bridge' is already loaded. " +
+                        "Uninstall it first before reinstalling.",
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `channel runtime integration error has its own wording`() {
+        assertEquals(
+            "当前服务端没有集成频道运行时，官方频道插件无法安装；" +
+                "请改用带频道运行时的 QwenPaw 桌面版，或安装不依赖频道运行时的插件",
+            ErrorText.of(ApiException(400, "channel_runtime_not_integrated")),
+        )
     }
 
     @Test

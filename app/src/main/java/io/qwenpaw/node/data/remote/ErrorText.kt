@@ -34,13 +34,18 @@ object ErrorText {
                 e.detail ?: e.message,
             )
             404 -> Texts.get(R.string.error_not_found_404)
-            409 -> Texts.get(R.string.error_busy_409)
+            409 -> conflictText(e.detail ?: e.message)
             503 -> Texts.get(R.string.error_console_disabled_503)
             // 422 的 detail 是 pydantic 的数组原文，整段贴到界面上看不出是哪个字段错了。
             // 其余状态码同样可能是 JSON 形状的 detail，一并转成可读文本。
-            else -> jsonDetailText(e.detail ?: e.message)
-                ?: jsonDetailText(e.message)
-                ?: e.message
+            else -> {
+                val raw = e.detail ?: e.message
+                if (raw.contains("channel_runtime_not_integrated")) {
+                    Texts.get(R.string.error_channel_runtime_not_integrated)
+                } else {
+                    jsonDetailText(raw) ?: jsonDetailText(e.message) ?: e.message
+                }
+            }
         }
 
         // 并行验证的汇总失败：逐地址给出原因，否则用户只知道「都连不上」，
@@ -63,6 +68,38 @@ object ErrorText {
             e.hasCause<java.net.SocketTimeoutException>() -> Texts.get(R.string.error_timeout)
             e is java.io.IOException -> Texts.get(R.string.error_network_lost)
             else -> e.message ?: Texts.get(R.string.error_unknown)
+        }
+    }
+
+    /**
+     * 409 的成因不止「对话正在跑」。
+     *
+     * 插件安装/卸载也会回 409：插件已加载、插件正在执行任务、依赖需要升级。
+     * 以前一律显示「该对话已有任务在运行」，让用户去停一个并不存在的对话任务。
+     */
+    private fun conflictText(detail: String?): String {
+        val text = detail?.trim().orEmpty()
+        val raw = jsonDetailText(text) ?: text
+        if (raw.isBlank()) return Texts.get(R.string.error_conflict_409_no_detail)
+        val lower = raw.lowercase()
+        return when {
+            lower.contains("already running") ||
+                lower.contains("already in progress") ||
+                raw.contains("\u4efb\u52a1\u5df2\u5728\u8fd0\u884c") ||
+                raw.contains("\u4efb\u52a1\u6b63\u5728\u8fdb\u884c") ||
+                raw.contains("\u63d2\u4ef6\u6b63\u5728\u6267\u884c\u4efb\u52a1") ->
+                Texts.get(R.string.error_busy_409)
+
+            lower.contains("already loaded") ||
+                lower.contains("already installed") ||
+                raw.contains("\u5df2\u52a0\u8f7d") ||
+                raw.contains("\u5df2\u5b89\u88c5") ->
+                Texts.get(R.string.error_plugin_already_installed)
+
+            raw.contains("channel_runtime_not_integrated") ->
+                Texts.get(R.string.error_channel_runtime_not_integrated)
+
+            else -> Texts.get(R.string.error_conflict_409, raw)
         }
     }
 

@@ -2429,6 +2429,10 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
   客户端隐藏启用开关并在保存时强制 `enabled=true`。
 - 未安装插件时 `GET /config/channels/{channel}` 会 404，但 schema 的 `availability` 为
   `missing_code/missing_runtime`、`repair.action=install`；客户端应显示安装面板，不能把它当作「对话不存在」。
+- `POST /api/plugins/install` 安装官方频道插件（`source=bundled:<id>`）需要服务端集成频道运行时。
+  纯 `qwenpaw app` 服务端返回 400 `channel_runtime_not_integrated`；这不是插件任务冲突，
+  客户端应显示「服务端未集成频道运行时」，不要映射成对话正在运行。插件已加载时服务端回 409
+  `Plugin 'x' is already loaded`，同样不是对话任务。
 - `GET /api/config/channels/{channel}` 返回**完整配置含密钥明文**；`PUT` 是整段替换（缺省字段回落默认），
   必须 GET 后整体回写。密钥只写不读：界面不回显，未改时回写原值。
 - `POST …/conflict-check` body 是拟保存配置，返回 `{conflict,agents:[{agent_id,agent_name}]}`，只做提示无强制覆盖。
