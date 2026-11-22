@@ -53,8 +53,10 @@ The goal is for the phone app to replace the web console wherever possible, so Q
 |---|---|---|
 | 0.7.3 | Browser diagnostics and web guidance | Browser connection diagnostics (extension and local connection state, checks and repair); advisories before web-oriented operations; MCP server management, plugin configuration and uninstall, addresses allowed without authentication, local model file management |
 | 0.7.4 | Full management and Git writes | Model and provider add/edit/remove and authorization, channel configuration, skill pool management and automation, complete access-control lists, skill configuration; Git branch switching, discarding changes and reverting commits, each with impact preview and confirmation |
-| 1.0.0 | UI rewrite | Three switchable interface styles; HyperOS Super Island |
+| 1.0.0 | UI rewrite | Single new interface; HyperOS Super Island |
 | 1.0.1 | English language support | Full English UI; Simplified Chinese or English selectable on first launch and in Settings; no layout changes |
+
+The 1.0.0 UI rewrite keeps a single new interface. The planned Classic and OpenClaw Node styles were dropped because maintaining multiple UIs in parallel has no practical use case and only adds layout and copy maintenance.
 
 The companion Bridge plugin is versioned separately and provides search, event streaming, push, SSH, device pairing and browser diagnostics; version 0.4.3 adds token issuance and revocation, and 0.7.3 adds browser diagnostic logs and repair.
 
