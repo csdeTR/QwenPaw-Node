@@ -126,6 +126,9 @@ class InstanceRepository(
     private val api: QwenPawApi,
     private val network: NetworkMonitor? = null,
 ) {
+    /** Keystore 不可用时为 false；此时凭据不会落盘，界面应提示重新输入。 */
+    val secureCredentialStorage: Boolean get() = store.secureStorage
+
     private val _instances = MutableStateFlow(store.load())
     val instances: StateFlow<List<InstanceConfig>> = _instances.asStateFlow()
 

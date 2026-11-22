@@ -2631,10 +2631,10 @@ internal fun ActionRow(text: String, onClick: () -> Unit) {
 }
 
 /**
- * 受信任的连接：提示豁免与 SSH 凭据授权两层。
+ * 受信任的连接：0.7.5 起视同私有网络，只有一层。
  *
- * [hosts] 只豁免安全提示；只有确认进 [sshHosts] 才允许经配套插件下发 SSH 凭据。
- * 新增地址走同一张确认框，同时写入两层；老地址在列表里补确认，不改提示豁免。
+ * [hosts] 与 [sshHosts] 在读取时是同一个并集；[sshHosts] 仅为兼容旧记录保留。
+ * 新增地址的确认框同时写两个键，命中后既不再提示，也不再限制 SSH 凭据。
  */
 @Composable
 private fun TrustedHostsPage(

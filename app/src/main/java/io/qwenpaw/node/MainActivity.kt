@@ -2248,7 +2248,8 @@ private suspend fun uploadAttachment(
     )
     val mime = context.contentResolver.getType(uri)
     val name = io.qwenpaw.node.ui.common.uploadFileName(context, uri)
-    val temp = File(context.cacheDir, name.take(80))
+    // 显示名来自外部应用，必须去掉路径段后才能拼进 cacheDir。
+    val temp = File(context.cacheDir, io.qwenpaw.node.ui.workspace.sanitizeUploadName(name))
     runCatching {
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(temp).use { output -> input.copyTo(output) }

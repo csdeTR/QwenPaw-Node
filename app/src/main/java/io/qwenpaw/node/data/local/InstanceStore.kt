@@ -223,6 +223,9 @@ data class InstanceConfig(
  * 而仓库的登录路径必须能断言「保存了什么」。
  */
 interface InstanceStorage {
+    /** false 表示 Keystore 不可用、已降级为普通存储；此时不得持久化任何凭据。 */
+    val secureStorage: Boolean get() = true
+
     fun load(): List<InstanceConfig>
     fun save(instances: List<InstanceConfig>)
     fun activeId(): String?
@@ -237,21 +240,27 @@ interface InstanceStorage {
  */
 class InstanceStore(context: Context) : InstanceStorage {
 
-    private val prefs: SharedPreferences = runCatching {
+    private val storage: Pair<SharedPreferences, Boolean> = runCatching {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        EncryptedSharedPreferences.create(
+        val prefs = EncryptedSharedPreferences.create(
             context,
             "qwenpaw_instances",
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         ) as SharedPreferences
+        prefs to true
     }.getOrElse {
         // 极少数机型 Keystore 异常时降级到普通存储，保证应用可用。
-        context.getSharedPreferences("qwenpaw_instances_fallback", Context.MODE_PRIVATE)
+        // 但凭据不能跟着降级：明文落盘的 token/反代密码等于把实例交出去。
+        context.getSharedPreferences("qwenpaw_instances_fallback", Context.MODE_PRIVATE) to false
     }
+
+    private val prefs: SharedPreferences = storage.first
+
+    override val secureStorage: Boolean = storage.second
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -261,14 +270,16 @@ class InstanceStore(context: Context) : InstanceStorage {
             .getOrDefault(emptyList())
         // 读出后立刻迁移旧字段，之后内存与磁盘都只有 baseUrls 一种形态。
         val migrated = parsed.map { it.migrated() }
-        if (migrated != parsed) save(migrated)
-        return migrated
+        val safe = if (secureStorage) migrated else stripSecrets(migrated)
+        if (safe != parsed) save(safe)
+        return safe
     }
 
     override fun save(instances: List<InstanceConfig>) {
         // 落盘前统一清掉旧字段：新版本只写 baseUrls。
         val clean = instances.map { it.migrated() }
-        prefs.edit().putString(KEY_INSTANCES, json.encodeToString(clean)).apply()
+        val safe = if (secureStorage) clean else stripSecrets(clean)
+        prefs.edit().putString(KEY_INSTANCES, json.encodeToString(safe)).apply()
     }
 
     override fun activeId(): String? = prefs.getString(KEY_ACTIVE, null)
@@ -277,8 +288,17 @@ class InstanceStore(context: Context) : InstanceStorage {
         prefs.edit().apply { if (id == null) remove(KEY_ACTIVE) else putString(KEY_ACTIVE, id) }.apply()
     }
 
-    private companion object {
-        const val KEY_INSTANCES = "instances_json"
-        const val KEY_ACTIVE = "active_instance"
+    companion object {
+        private const val KEY_INSTANCES = "instances_json"
+        private const val KEY_ACTIVE = "active_instance"
+
+        /**
+         * 普通存储只保留非敏感字段。
+         *
+         * `username` 与 `basicUser` 是账号名，不是口令，保留下来让用户只需重填
+         * token/密码；`token` 与 `basicPassword` 必须清掉。
+         */
+        internal fun stripSecrets(instances: List<InstanceConfig>): List<InstanceConfig> =
+            instances.map { it.copy(token = null, basicPassword = null) }
     }
 }

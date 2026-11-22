@@ -1,6 +1,7 @@
 package io.qwenpaw.node.ui.browser
 
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.assessSshCredentialGate
 import io.qwenpaw.node.data.model.BrowserChromeStatusDto
 import io.qwenpaw.node.data.model.BrowserSelfTestDto
 import io.qwenpaw.node.data.remote.ApiException
@@ -54,6 +55,8 @@ data class BrowserDiagnosticsUiState(
 class BrowserDiagnosticsViewModel(
     private val api: QwenPawApi,
     private val connection: () -> Connection?,
+    /** 受信任地址与私网一样直接放行敏感修复；未受信任的公网地址要先过闸门。 */
+    private val trustedHosts: () -> Set<String> = { emptySet() },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(BrowserDiagnosticsUiState())
@@ -201,6 +204,18 @@ class BrowserDiagnosticsViewModel(
         if (_state.value.repairing) return
         _state.update { it.copy(repairing = true, notice = null) }
         scope.launch {
+            val gate = withContext(Dispatchers.IO) {
+                val loginRequired = runCatching {
+                    io.qwenpaw.node.data.InstanceRepository.loginRequired(
+                        api.authStatus(conn.baseUrl, conn.basicAuth),
+                    )
+                }.getOrDefault(false)
+                assessSshCredentialGate(conn.baseUrl, loginRequired, trustedHosts())
+            }
+            if (!gate.allowed) {
+                _state.update { it.copy(repairing = false, notice = gate.reason) }
+                return@launch
+            }
             runCatching { withContext(Dispatchers.IO) { api.bridgeBrowserRepair(conn) } }
                 .onSuccess {
                     _state.update {

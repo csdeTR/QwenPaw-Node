@@ -123,4 +123,40 @@ class PairPayloadTest {
         )
         assertTrue(parsed is PairParse.Ok)
     }
+
+    @Test
+    fun `non http scheme is rejected`() {
+        val parsed = PairQr.parse(
+            "qwenpaw-node://pair?v=1&addr=ftp%3A%2F%2Fh%2F1&token=t",
+        )
+        parsed as PairParse.Broken
+        assertEquals(R.string.pair_qr_bad_address, parsed.reasonRes)
+    }
+
+    @Test
+    fun `userinfo is rejected`() {
+        val parsed = PairQr.parse(
+            "qwenpaw-node://pair?v=1&addr=http%3A%2F%2Fuser%3Apass%40h%3A1&token=t",
+        )
+        parsed as PairParse.Broken
+        assertEquals(R.string.pair_qr_bad_address, parsed.reasonRes)
+    }
+
+    @Test
+    fun `fragment is rejected`() {
+        val parsed = PairQr.parse(
+            "qwenpaw-node://pair?v=1&addr=http%3A%2F%2Fh%3A1%2F%23frag&token=t",
+        )
+        parsed as PairParse.Broken
+        assertEquals(R.string.pair_qr_bad_address, parsed.reasonRes)
+    }
+
+    @Test
+    fun `too many addresses are rejected`() {
+        val addresses = (0 until PairQr.MAX_ADDRESSES + 1)
+            .joinToString("&") { "addr=http%3A%2F%2Fh%3A${it + 1}" }
+        val parsed = PairQr.parse("qwenpaw-node://pair?v=1&$addresses&token=t")
+        parsed as PairParse.Broken
+        assertEquals(R.string.pair_qr_bad_address, parsed.reasonRes)
+    }
 }

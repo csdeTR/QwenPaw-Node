@@ -678,7 +678,7 @@ class TerminalViewModel(
             return
         }
         val credential = withContext(Dispatchers.IO) {
-            api.bridgeSshCredential(conn, gate.trusted)
+            api.bridgeSshCredential(conn)
         }
         val auth = when (config.auth) {
             "password" -> credential.password
@@ -697,7 +697,7 @@ class TerminalViewModel(
                 user = config.user,
                 default = true,
             ),
-            provider = RelaySocketProvider(api, conn, config.host, config.port, gate.trusted),
+            provider = RelaySocketProvider(api, conn, config.host, config.port),
         )
         val shell = shellFor(creation.shell, TerminalSource.SSH_RELAY, null)
         val transport = SshTransport(

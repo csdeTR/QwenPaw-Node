@@ -5,6 +5,7 @@ import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -92,7 +93,7 @@ class UpdateChecker(
                 } else {
                     UpdateResult.Available(
                         version = displayVersion(release.tagName),
-                        url = release.htmlUrl.ifBlank { REPO_RELEASES_URL },
+                        url = safeReleaseUrl(release.htmlUrl),
                         notes = release.body.orEmpty(),
                     )
                 }
@@ -111,6 +112,21 @@ class UpdateChecker(
 
         /** 没有正文、没有地址时的兜底入口。 */
         const val REPO_RELEASES_URL = "https://github.com/csdeTR/QwenPaw-Node/releases/latest"
+
+        /**
+         * 只接受本仓库的 Release 地址。
+         *
+         * `html_url` 来自 GitHub API 响应；即使响应被中间人篡改，也不能把用户
+         * 直接带到任意站点。解析失败、主机或路径不符时退回固定的发布页。
+         */
+        internal fun safeReleaseUrl(raw: String): String {
+            val url = raw.trim().toHttpUrlOrNull() ?: return REPO_RELEASES_URL
+            if (url.host != "github.com") return REPO_RELEASES_URL
+            if (!url.encodedPath.startsWith("/csdeTR/QwenPaw-Node/releases/")) {
+                return REPO_RELEASES_URL
+            }
+            return url.toString()
+        }
 
         /** GitHub 要求带 User-Agent，缺省会被 403 拒绝。 */
         private const val USER_AGENT = "QwenPawNode-Android"

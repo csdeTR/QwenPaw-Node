@@ -1990,35 +1990,32 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 4. **访问控制的通过 / 拒绝 / 忽略 / 备注四态分开**，不共用「关闭」。
 5. **ACP 的 `command`、`args` 属于在服务端执行任意命令**，改动要有明确说明，不按普通开关处理。
 
-### 31.6 插件提供的 SSH 通道（v0.4.0 / v0.4.1）
+### 31.6 插件提供的 SSH 通道（v0.4.0 / v0.4.1 / v0.5.1）
 
 客户端终端页有三个来源：默认（服务端本地 PTY）、Bridge 中继（配套插件）与 SSH 直连。渲染仍在客户端，三种来源共用同一套 VT 模拟。
 
-**认证要求按来源区分。** 默认 PTY 需要服务端已开启 Web 登录认证；**Bridge 中继从插件 v0.4.1 起不再要求**，只要求 Console 里配置了 SSH 目标与凭据。插件开了 Web 认证时，`/ssh/credential`、`PUT /ssh/settings` 与 `WS /ssh` 仍要求有效 token；未开时只放行私有/回环客户端，或带 `X-QwenPaw-Trusted-Host: 1` 的请求（App 在 `sshTrustedHosts` 确认后、Console 勾选「此地址仅我可访问」后发送）。WS 不走 `AuthMiddleware`，插件在 `accept()` 前自行校验。
+**认证要求按来源区分。** 默认 PTY 需要服务端已开启 Web 登录认证；**Bridge 中继从插件 v0.4.1 起不再要求**，只要求 Console 里配置了 SSH 目标与凭据。插件开了 Web 认证时，所有 `/ssh/*` 敏感端点仍要求有效 token；未开时放行来源命中私有/回环/链路本地/CGNAT/ULA 或 `QWENPAW_BRIDGE_TRUSTED_CIDRS` 的客户端，或请求 Host 命中 Bridge 受信任地址且来源 IP 命中该条目网段的客户端。v0.5.1 起不再接受 `X-QwenPaw-Trusted-Host` 头。WS 不走 `AuthMiddleware`，插件在 `accept()` 前自行校验。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | WS | `/api/plugins/qwenpaw-node-bridge/ssh` | 二进制帧中继到设置里的 host:port；并发上限 4；按上一段的访问策略校验 |
-| GET | `/ssh/config` | 脱敏目标 `{host,port,user,auth,key_configured,key_source}`；无需认证 |
+| GET | `/ssh/config` | 脱敏目标 `{host,port,user,auth,key_configured,key_source}`；v0.5.1 起按访问策略校验 |
 | GET | `/ssh/credential` | 按需下发凭据；按访问策略校验，`Cache-Control: no-store`，不写日志 |
-| GET / PUT | `/ssh/settings` | 控制台读写；GET 无需认证，PUT 按访问策略校验，空白密钥字段保留原值 |
+| GET / PUT | `/ssh/settings` | 控制台读写；v0.5.1 起 GET 也按访问策略校验，PUT 空白密钥字段保留原值 |
 
 **只连设置里的目标。** 客户端不能指定主机；默认 `127.0.0.1:22`。主机密钥 TOFU 在客户端做（JSch），首次弹指纹，变化时拒绝并提供清除入口。
 
-**HTTP 敏感端点也自己校验访问策略。** 实测在服务端热切换鉴权开关后，带空 `Authorization: Bearer` 的请求仍能到达插件路由；因此 `PUT /ssh/settings` 与 `GET /ssh/credential` 在 handler 内按「token 或私有/受信任来源」再判一次，失败回 401，不依赖核心中间件。
+**HTTP 敏感端点也自己校验访问策略。** 实测在服务端热切换鉴权开关后，带空 `Authorization: Bearer` 的请求仍能到达插件路由；因此 `GET/PUT /ssh/settings`、`GET /ssh/config`、`GET /ssh/credential` 与 `WS /ssh` 在 handler 内按「token 或受信任来源」再判一次，失败回 401，不依赖核心中间件。公网未认证来源返回 `detail.code = trusted_address_required`，App 据此提示去 Bridge 设置页配置受信任地址。
 
-**客户端安全闸门。** 经插件下发凭据的 SSH 终端受现有地址校验约束：`assessSshCredentialGate(url, loginRequired, sshTrustedHosts)` 在私有/无风险地址、或该主机已确认进 `sshTrustedHosts` 时放行；公网未受信任地址（包括未开 Web 认证时）仍拒绝。`securityHintsEnabled=false` 只关闭提示，不能绕过闸门。受信任列表分两层：
+**客户端安全闸门。** 经插件下发凭据的 SSH 终端受地址校验约束：`assessSshCredentialGate(url, loginRequired, trustedHosts)` 在私有/无风险地址、或该主机已确认进 `trustedHosts` 时放行；公网未受信任地址（包括未开 Web 认证时）仍拒绝。`securityHintsEnabled=false` 只关闭提示，不能绕过闸门。v0.7.5 起两个旧集合合并：受信任地址视同私网，提示豁免与 SSH 凭据豁免共用同一个集合；旧 `ssh_trusted_hosts` 在读取时并入。
 
-- `trustedHosts` 只豁免提示；
-- `sshTrustedHosts` 由「受信任的连接」页的「我确认该地址/域名仅我可访问」写入，才允许下发凭据。
+**两侧受信任地址（v0.5.1）。** 域名与非内网私有访问来源在 Bridge 下发敏感内容时，必须 App 与 Bridge 两侧都配置同一地址：App 侧命中后不再提示或阻断；Bridge 侧再按请求 Host 与其受信任地址条目比对，且来源 IP 必须命中条目的 `source_cidr`。未写 `source_cidr` 的条目只对私有/组网来源生效，避免仅凭可伪造的 Host 头放行。Bridge 侧列表存于 `trusted_addresses.json`，由 Console 面板「受信任地址」维护，端点为 `GET/PUT /api/plugins/qwenpaw-node-bridge/trusted-addresses`。
 
-老版本已有的受信任地址只保留提示豁免，需要再确认一次用于 SSH；新增地址一次确认同时写入两层。
+**SSH 直连是纯客户端能力。** 手机直接 `Socket` 到用户配置的 host:port，JSch 完成握手与认证，不经过插件；因此不需要 `QWENPAW_AUTH_ENABLED`，也不受 `trustedHosts` 闸门约束。主机密钥 TOFU 与中继共用 `SshHostKeys`。连接后若目标与 QwenPaw 实例同机，客户端用 `GET /api/workspace/project-directory` 的 `path` 进入智能体工作区；不同机时跳过。配置存在 `qwenpaw_ssh_profiles` 的 EncryptedSharedPreferences，私钥/口令不写日志。
 
-**SSH 直连是纯客户端能力。** 手机直接 `Socket` 到用户配置的 host:port，JSch 完成握手与认证，不经过插件；因此不需要 `QWENPAW_AUTH_ENABLED`，也不受 `sshTrustedHosts` 闸门约束。主机密钥 TOFU 与中继共用 `SshHostKeys`。连接后若目标与 QwenPaw 实例同机，客户端用 `GET /api/workspace/project-directory` 的 `path` 进入智能体工作区；不同机时跳过。配置存在 `qwenpaw_ssh_profiles` 的 EncryptedSharedPreferences，私钥/口令不写日志。
+**设置目录**：`~/.qwenpaw/plugin_data/qwenpaw-node-bridge/`，目录 `0700`；`ssh_settings.json`、内联 `ssh_key`、`pairing_tokens.json` 与 `trusted_addresses.json` 都是创建即 `0600` 并原子替换。私钥优先用服务端已有路径；粘贴方式才落盘。
 
-**设置目录**：`~/.qwenpaw/plugin_data/qwenpaw-node-bridge/`，目录 `0700`，`ssh_settings.json` 与内联 `ssh_key` 为 `0600`。私钥优先用服务端已有路径；粘贴方式才落盘。
-
-**控制台设置面板**：`ui/index.js` 通过 `window.QwenPaw.registerRoutes("qwenpaw-node-bridge", …)` 挂到 Settings →「扩展设置」→「QwenPaw Node Bridge」（「扩展设置」是宿主固定分组）；使用宿主注入的 `React` / `antd` / `getApiUrl` / `getApiToken`。**传给 `getApiUrl` 的路径不要带 `/api` 前缀**：宿主会自行补上，带前缀会变成 `/api/api/plugins/...` 并返回 404（v0.4.1 修过这个缺陷）。**菜单图标要传 React 元素**：宿主对 `icon` 先做 `isValidElement` 判断，是元素就原样渲染，否则包成 `<span style="font-size:16px">` 只显示文字（v0.4.2 起传 SVG）。**页面按功能分块**（v0.4.2）：菜单项只有一个，页内是可折叠卡片，目前只有「SSH 中继」一块，新增设置只改 `BLOCKS`、不新增路由。未开 Web 认证时可勾选「此地址仅我可访问」放行公网受信任地址；页面使用 HTTP 时显示明文传输警告。
+**控制台设置面板**：`ui/index.js` 通过 `window.QwenPaw.registerRoutes("qwenpaw-node-bridge", …)` 挂到 Settings →「扩展设置」→「QwenPaw Node Bridge」（「扩展设置」是宿主固定分组）；使用宿主注入的 `React` / `antd` / `getApiUrl` / `getApiToken`。**传给 `getApiUrl` 的路径不要带 `/api` 前缀**：宿主会自行补上，带前缀会变成 `/api/api/plugins/...` 并返回 404（v0.4.1 修过这个缺陷）。**菜单图标要传 React 元素**：宿主对 `icon` 先做 `isValidElement` 判断，是元素就原样渲染，否则包成 `<span style="font-size:16px">` 只显示文字（v0.4.2 起传 SVG）。**页面按功能分块**（v0.4.2）：菜单项只有一个，页内是可折叠卡片，v0.5.1 起包含「设备配对」「SSH 中继」「受信任地址」「插件日志」「关于」五块，新增设置只改 `BLOCKS`、不新增路由。「受信任地址」面板维护 Bridge 侧地址与来源网段，并说明必须与 App 侧同时配置；旧的「此地址仅我可访问」复选框已删除。页面使用 HTTP 时显示明文传输警告。
 
 **四条硬约束**：
 
@@ -2027,7 +2024,7 @@ stdio_buffer_limit_bytes: int   # 默认 50 MB
 3. 主机密钥不得自动接受；首次 TOFU，变化时告警。
 4. 新增 SSH 库走依赖门禁：JSch 已补 keep 规则，8 包体积见 release.md。
 
-**边界**：闸门是客户端策略，插件负责访问策略。开了 Web 认证时，持有 token 的自定义客户端仍可直接请求 `/ssh/credential`；未开时，同网段的私有客户端或显式带受信任头的客户端也可读取。该受信任头不是密码学证明，公网部署应开启认证与 HTTPS。
+**边界**：闸门是客户端策略，插件负责访问策略。开了 Web 认证时，持有 token 的自定义客户端仍可直接请求 `/ssh/credential`；未开时，来源命中私有/组网网段的客户端，或 Host 与来源网段同时命中 Bridge 受信任地址的客户端也可读取。两侧受信任地址是策略校验，不是密码学认证；公网部署仍应开启认证与 HTTPS。反向代理场景必须设置 `QWENPAW_BRIDGE_TRUST_PROXY=1` 且反代覆盖转发头，否则敏感端点按未认证处理；非标准组网网段用 `QWENPAW_BRIDGE_TRUSTED_CIDRS` 声明。
 
 ---
 
@@ -2205,7 +2202,7 @@ Bridge 不应重写安装逻辑。
 - 服务端未启用 Web 登录（`auth_status.enabled=false` 或无用户）时，签发回 **409**，列表返回空数组——
   这时令牌不会被执行链校验，签了也没有意义。
 - 三个端点都自行校验访问策略（与第 31 节的 SSH 端点同一套）：开了鉴权只认有效 token，
-  没开只放行私有/回环来源或受信任标记。不能只靠核心中间件，原因见第 31.6 节的热切换记录。
+  没开只放行私有/回环来源、组网网段，或两侧都命中受信任地址的来源。不能只靠核心中间件，原因见第 31.6 节的热切换记录。
 
 ### 按 jti 吊销
 
@@ -2353,7 +2350,7 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
 
 ---
 
-## 39、配套插件更新状态（插件 v0.5.0，客户端使用）
+## 39、配套插件更新状态（插件 v0.5.1，客户端使用）
 
 客户端只使用 `GET /api/plugins/qwenpaw-node-bridge/update/status`，capability 名 `update`。
 它返回插件自己的设置与最近一次 GitHub release 检查结果，供 QP Node 在进入对话列表/聊天页时提示更新；插件未装或低于 0.5.0 时该路径回 404，客户端按「无更新能力」跳过，不报错。
@@ -2362,13 +2359,14 @@ base64），网页优先用宿主注入的 `antd.QRCode` 直接画 `payload`。
 {"enabled":true,"check_time":"09:00","notify_console":true,"notify_client":true,
  "update_available":true,"latest_version":"0.5.1","latest_url":"https://…",
  "checked_at":1795208530,"last_check_date":"2026-11-21","error":"",
- "plugin_version":"0.5.0","protocol_version":1,"server_version":"2.3.0.post1",
+ "plugin_version":"0.5.1","protocol_version":1,"server_version":"2.3.0.post1",
  "repo_url":"https://github.com/csdeTR/QwenPaw-Node-Bridge"}
 ```
 
 - `notify_client` 由插件设置决定，客户端不得越过它自行提示；`latest_version` 为空或与当前插件版本相同则不提示。
 - `checked_at` 是 epoch 秒；客户端目前不展示时间，只做提示判断。
-- 该端点受插件访问策略保护：开了 Web 登录时需带 token，未开时只放行私有/回环或受信任标记。
+- 该端点受插件访问策略保护：开了 Web 登录时需带 token，未开时只放行私有/回环/组网网段，或两侧都命中受信任地址的来源。
+- v0.5.1 起请求带 `Accept-Language` 时，插件按 `?lang` → `Accept-Language` → Console 语言 → 中文的顺序解析错误说明；当前只提供简体中文，旧客户端不带该头时行为不变。
 - **`GET/PUT /update/settings` 与 `POST /update/check` 是 Console 专用**，不在客户端契约内；客户端不调用，也不依赖其形状。
 - 客户端本地最多每 6 小时查询一次，并记录已跳过版本；插件端每天在 `check_time` 检查一次，服务端在该时间之后启动且当天未检查时会补查。
 

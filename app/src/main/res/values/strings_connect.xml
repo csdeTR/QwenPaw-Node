@@ -54,6 +54,8 @@
     <string name="qr_scan_image_failed">读取图片失败，请换一张图片重试。</string>
     <string name="qr_scan_camera_failed">相机启动失败，请改用相册导入。</string>
     <string name="pair_qr_malformed">配对码内容不完整</string>
+    <string name="pair_qr_bad_address">配对码里的服务器地址无效</string>
+    <string name="error_bridge_trusted_address_required">请在 Bridge 设置页添加受信任地址，并配置匹配的来源网段</string>
     <string name="pair_qr_no_address">配对码里没有服务器地址</string>
     <string name="pair_qr_no_token">配对码里没有访问令牌</string>
     <string name="pair_qr_too_long">配对码过长，无法解析</string>

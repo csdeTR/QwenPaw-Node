@@ -50,7 +50,11 @@ data class SecurityNotice(
  * 一次错误的「你的服务器暴露在广域网」会让用户怀疑整个提示机制，
  * 之后的真告警也会被忽略。
  */
-internal fun assessSecurity(url: String, loginRequired: Boolean): SecurityNotice {
+internal fun assessSecurity(
+    url: String,
+    loginRequired: Boolean,
+    trustedHosts: Set<String> = emptySet(),
+): SecurityNotice {
     val parsed = runCatching { QwenPawApi.resolve(url, "/") }.getOrNull()
         ?: return SecurityNotice(
             host = "",
@@ -61,7 +65,8 @@ internal fun assessSecurity(url: String, loginRequired: Boolean): SecurityNotice
     val host = parsed.host
     return SecurityNotice(
         host = host,
-        publicHost = !InstanceRepository.isLocalHost(host),
+        // 受信任地址与私网同义：用户已确认它只能由自己访问。
+        publicHost = !isTrustedHost(host, trustedHosts) && !InstanceRepository.isLocalHost(host),
         plaintext = parsed.scheme == "http",
         authDisabled = !loginRequired,
     )
@@ -132,7 +137,7 @@ internal fun isTrustedHost(host: String, trustedHosts: Set<String>): Boolean {
 data class SshCredentialGate(
     val allowed: Boolean,
     val reason: String? = null,
-    /** 放行是因为 host 在 [sshTrustedHosts] 中显式确认过。 */
+    /** 放行是因为 host 在受信任集合中显式确认过。 */
     val trusted: Boolean = false,
 )
 
@@ -140,21 +145,21 @@ data class SshCredentialGate(
  * 判断当前地址是否允许经插件下发 SSH 私钥或登录密码。
  *
  * **不接收 `securityHintsEnabled`。** 那个开关只控制是否弹提示，不能成为绕过凭据下发限制的
- * 后门；要放行某台公网主机，只能把它显式确认进 [sshTrustedHosts]。
- *
- * 注意这里的受信任集合与旧的 [trustedHosts] 是两套：旧集合只豁免提示，不代表允许下发凭据。
+ * 后门；要放行某台公网主机，只能把它显式确认进受信任集合。0.7.5 起受信任地址
+ * 与私网同义，提示豁免与 SSH 凭据豁免共用同一个集合。
  */
 internal fun assessSshCredentialGate(
     url: String,
     loginRequired: Boolean,
     sshTrustedHosts: Set<String>,
 ): SshCredentialGate {
-    val notice = assessSecurity(url, loginRequired)
-    if (!notice.any) return SshCredentialGate(allowed = true)
-    // 受信任地址是用户的显式确认，优先于「公网未开鉴权」的默认阻断。
-    // 未受信任的公网地址仍然拒绝，避免把凭据发给任意部署。
-    if (isTrustedHost(notice.host, sshTrustedHosts)) {
-        return SshCredentialGate(allowed = true, trusted = true)
+    val notice = assessSecurity(url, loginRequired, sshTrustedHosts)
+    if (!notice.any) {
+        // 受信任地址与私网一样直接放行；区分 trusted 只为界面说明来源。
+        return SshCredentialGate(
+            allowed = true,
+            trusted = isTrustedHost(notice.host, sshTrustedHosts),
+        )
     }
     if (notice.exposed) {
         return SshCredentialGate(

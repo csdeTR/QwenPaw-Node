@@ -8,7 +8,9 @@ name: Release
 #   ANDROID_KEYSTORE_PASSWORD  storePassword
 #   ANDROID_KEY_ALIAS          keyAlias
 #   ANDROID_KEY_PASSWORD       keyPassword
-# 签名密钥不进仓库，这里只做一次性解码，随 runner 一起销毁。
+# 签名密钥不进仓库，这里只做一次性解码，构建结束后删除。
+# 另需 Repository variable EXPECTED_CERT_SHA256（正式证书 SHA-256），
+# 用于比对 apksigner 输出；发布资产附带 SHA256SUMS。
 
 on:
   push:
@@ -106,11 +108,21 @@ jobs:
             echo "::error::找不到 apksigner，无法确认签名"
             exit 1
           fi
+          EXPECTED="${{ vars.EXPECTED_CERT_SHA256 }}"
+          if [ -z "$EXPECTED" ]; then
+            echo "::error::缺少仓库变量 EXPECTED_CERT_SHA256，无法确认签名证书"
+            exit 1
+          fi
           for f in $(find app/build/outputs/apk -path "*/release/*.apk"); do
-            "$TOOL" verify --print-certs "$f" > /dev/null || {
+            OUT=$("$TOOL" verify --print-certs "$f" 2>&1) || {
               echo "::error::$f 签名校验失败，不发布未签名的包"
               exit 1
             }
+            ACTUAL=$(printf '%s\n' "$OUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr -d ' ')
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::error::$f 证书指纹 $ACTUAL 与预期不一致"
+              exit 1
+            fi
           done
 
       - name: 校验 16KB 页对齐
@@ -153,6 +165,7 @@ jobs:
             echo "::error::应有 8 个包（2 变体 × 4 架构），实际 $COUNT 个"
             exit 1
           fi
+          (cd dist && sha256sum *.apk > SHA256SUMS)
 
       # Release 正文里的「本版变化」直接取 CHANGELOG 的同版本小节，避免两处各写一份。
       # 抽不到时（版本号与 tag 不一致、CHANGELOG 缺该版）不静默通过：
@@ -207,4 +220,12 @@ jobs:
           # 重跑时会叠在上一版正文后面，安装包表格出现两次。
           append_body: false
           body: ${{ env.RELEASE_BODY }}
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS
+
+      - name: 清理签名密钥
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/keys"
+          echo "QWENPAW_KEYSTORE_PROPERTIES=" >> "$GITHUB_ENV"

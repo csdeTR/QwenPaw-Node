@@ -185,18 +185,18 @@ data class AppState(
     /** 未安装配套插件时的安装引导；null 表示不显示。 */
     val bridgeGuide: BridgeGuidePrompt? = null,
     /**
-     * 受信任的主机名集合，命中后不再弹地址安全提示。
+     * 受信任的主机名集合，命中后视同私有网络。
      *
      * 存归一化后的 host（无协议、无端口、无方括号），与
      * [io.qwenpaw.node.data.normalizeTrustedHost] 的输出同构。
-     * **它只豁免提示**；允许经插件下发 SSH 凭据的是 [sshTrustedHosts]，两者分开是
-     * 为了不把旧版本「只想关掉提示」的同意静默扩大成「允许把私钥发出去」。
+     * 0.7.5 起不再分「只豁免提示」与「允许 SSH 凭据」两层：读取时两个偏好键取并集，
+     * 提示与敏感闸门共用同一集合。
      */
     val trustedHosts: Set<String> = emptySet(),
     /**
-     * 已确认「该地址仅你可访问」并允许经配套插件下发 SSH 凭据的主机。
+     * 旧版本的第二套受信任集合，仅用于读取迁移。
      *
-     * 只由受信任页的显式确认写入；旧版本已有的 [trustedHosts] 不会自动迁移过来。
+     * 0.7.5 起与 [trustedHosts] 同义；写入时两个键一起写，界面不再区分两层。
      */
     val sshTrustedHosts: Set<String> = emptySet(),
     /**
@@ -1361,10 +1361,14 @@ class AppViewModel(
     fun addTrustedHost(raw: String): Boolean {
         val host = io.qwenpaw.node.data.normalizeTrustedHost(raw) ?: return false
         val next = _state.value.trustedHosts + host
-        prefs.edit().putStringSet(KEY_TRUSTED_HOSTS, next).apply()
+        prefs.edit()
+            .putStringSet(KEY_TRUSTED_HOSTS, next)
+            .putStringSet(KEY_SSH_TRUSTED_HOSTS, next)
+            .apply()
         _state.update { s ->
             s.copy(
                 trustedHosts = next,
+                sshTrustedHosts = next,
                 securityNotice = s.securityNotice?.takeUnless {
                     io.qwenpaw.node.data.isTrustedHost(it.host, next)
                 },
@@ -1411,15 +1415,27 @@ class AppViewModel(
     }
 
     /**
-     * 老版本留下的受信任地址只补 SSH 授权，不改提示豁免集合。
+     * 把地址加入受信任集合。
      *
-     * 这样升级本身不会扩大用户当初的同意范围。
+     * 0.7.5 起受信任地址视同私网：提示豁免与 SSH 凭据豁免共用同一个集合。
+     * 旧版本的 `ssh_trusted_hosts` 仍在读取时并入，不做自动删除。
      */
     fun confirmSshTrust(raw: String): Boolean {
         val host = io.qwenpaw.node.data.normalizeTrustedHost(raw) ?: return false
-        val next = _state.value.sshTrustedHosts + host
-        prefs.edit().putStringSet(KEY_SSH_TRUSTED_HOSTS, next).apply()
-        _state.update { it.copy(sshTrustedHosts = next) }
+        val next = _state.value.trustedHosts + host
+        prefs.edit()
+            .putStringSet(KEY_TRUSTED_HOSTS, next)
+            .putStringSet(KEY_SSH_TRUSTED_HOSTS, next)
+            .apply()
+        _state.update { s ->
+            s.copy(
+                trustedHosts = next,
+                sshTrustedHosts = next,
+                securityNotice = s.securityNotice?.takeUnless {
+                    io.qwenpaw.node.data.isTrustedHost(it.host, next)
+                },
+            )
+        }
         return true
     }
 
@@ -1769,17 +1785,17 @@ class AppViewModel(
      * 留着不归一化的值会让匹配时好时坏。首次启动没有记录，返回空集，
      * 提示行为与未引入该功能时完全一致。
      */
+    /**
+     * 读取受信任集合。两个历史键取并集：0.7.5 起「受信任地址」视同私网，
+     * 提示豁免与 SSH 凭据豁免不再分级。
+     */
     private fun readTrustedHosts(): Set<String> =
-        prefs.getStringSet(KEY_TRUSTED_HOSTS, null)
-            .orEmpty()
+        (prefs.getStringSet(KEY_TRUSTED_HOSTS, null).orEmpty() +
+            prefs.getStringSet(KEY_SSH_TRUSTED_HOSTS, null).orEmpty())
             .mapNotNull { io.qwenpaw.node.data.normalizeTrustedHost(it) }
             .toSet()
 
-    private fun readSshTrustedHosts(): Set<String> =
-        prefs.getStringSet(KEY_SSH_TRUSTED_HOSTS, null)
-            .orEmpty()
-            .mapNotNull { io.qwenpaw.node.data.normalizeTrustedHost(it) }
-            .toSet()
+    private fun readSshTrustedHosts(): Set<String> = readTrustedHosts()
 
     /** 从 prefs 读类别集合。缺失或全部无效时回退为全部类别。 */
     private fun readLogKinds(): Set<io.qwenpaw.node.log.LogKind> {
@@ -1915,6 +1931,7 @@ class AppViewModel(
         get() = browserDiagnosticsHolder ?: io.qwenpaw.node.ui.browser.BrowserDiagnosticsViewModel(
             api = api,
             connection = ::activeConnection,
+            trustedHosts = { _state.value.trustedHosts },
         ).also { browserDiagnosticsHolder = it }
 
     /** 单个插件的配置、启停与卸载。 */

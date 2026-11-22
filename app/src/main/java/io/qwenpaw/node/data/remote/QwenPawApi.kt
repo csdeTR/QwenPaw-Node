@@ -281,6 +281,13 @@ enum class UploadConflictPolicy(val param: String) {
  */
 class QwenPawApi(
     private val client: OkHttpClient = defaultClient(),
+    /**
+     * 当前应用界面语言。
+     *
+     * 只用来告诉 Bridge 插件按哪种语言返回错误说明；核心接口不依赖它。
+     * 默认简体中文，测试与旧调用点不必传。
+     */
+    private val languageTag: () -> String = { "zh-CN" },
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -3563,10 +3570,9 @@ class QwenPawApi(
      *
      * 错误分支只透传插件给的脱敏 detail；插件侧保证 detail 不带密钥内容。
      */
-    fun bridgeSshCredential(conn: Connection, trusted: Boolean = false): SshCredentialDto = decode(
+    fun bridgeSshCredential(conn: Connection): SshCredentialDto = decode(
         execute(
             baseBuilder(conn, connUrl(conn, BRIDGE_SSH_CREDENTIAL_PATH))
-                .apply { if (trusted) header(TRUSTED_HOST_HEADER, "1") }
                 .get()
                 .build(),
         ),
@@ -3577,9 +3583,8 @@ class QwenPawApi(
     fun bridgeSshUrl(conn: Connection): HttpUrl = connUrl(conn, BRIDGE_SSH_PATH)
 
     /** SSH WebSocket 的请求：带 X-Agent-Id、Bearer/Basic 或 `?token=`。 */
-    fun bridgeSshRequest(conn: Connection, trusted: Boolean = false): Request =
+    fun bridgeSshRequest(conn: Connection): Request =
         baseBuilder(conn, bridgeSshUrl(conn))
-            .apply { if (trusted) header(TRUSTED_HOST_HEADER, "1") }
             .build()
 
     private fun checkpointRestore(
@@ -4198,6 +4203,9 @@ class QwenPawApi(
 
     private fun baseBuilder(conn: Connection, url: HttpUrl): Request.Builder {
         val builder = Request.Builder().url(url).header("X-Agent-Id", conn.agentId)
+        languageTag().takeIf { it.isNotBlank() }?.let {
+            builder.header("Accept-Language", it)
+        }
         conn.basicAuth?.let { builder.header("Authorization", it.headerValue) }
             ?: conn.token?.takeIf { it.isNotBlank() }
                 ?.let { builder.header("Authorization", "Bearer $it") }
@@ -4351,8 +4359,6 @@ class QwenPawApi(
         const val BRIDGE_SSH_PATH = "/api/plugins/qwenpaw-node-bridge/ssh"
         const val BRIDGE_SSH_CONFIG_PATH = "/api/plugins/qwenpaw-node-bridge/ssh/config"
         const val BRIDGE_SSH_CREDENTIAL_PATH = "/api/plugins/qwenpaw-node-bridge/ssh/credential"
-        /** App 在用户确认过的受信任地址上带的标记头；插件在未开 Web 认证时据此放行。 */
-        const val TRUSTED_HOST_HEADER = "X-QwenPaw-Trusted-Host"
 
         /**
          * 终端长轮询专用客户端。

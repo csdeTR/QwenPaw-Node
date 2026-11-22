@@ -260,7 +260,7 @@
     <string name="settings_trusted_invalid_host">无法识别这个地址，请填写主机名或 IP</string>
     <string name="settings_security_hints_title">安全提示</string>
     <string name="settings_security_hints_subtitle">服务器地址可从公网访问，且服务端未开启「Web 登录认证」或未使用 HTTPS 时提醒</string>
-    <string name="settings_trusted_page_hint">这些地址不再弹出安全提示。只有进一步确认该地址仅你可访问后，才允许经配套插件向本机下发 SSH 私钥或口令。</string>
+    <string name="settings_trusted_page_hint">受信任地址视同私有网络：不再弹出安全提示，也不再限制 SSH 凭据等敏感功能。只添加你确认仅自己可访问的地址。若通过配套插件下发敏感内容，Bridge 设置页也需要配置同一地址。</string>
     <string name="settings_trusted_input_placeholder">例如 192.168.1.5 或 example.com</string>
     <string name="settings_section_trusted_added">已添加</string>
     <string name="settings_trusted_empty">还没有添加任何地址</string>
@@ -276,7 +276,7 @@
     <string name="settings_trusted_add_title">确认添加受信任的地址</string>
     <string name="settings_trusted_ssh_title">确认用于 SSH 凭据下发</string>
     <string name="settings_trusted_confirm_message">请确认 %1$s 仅你可访问（例如内网地址，或已配置访问控制的公网地址）。</string>
-    <string name="settings_trusted_add_body">添加后，该地址不再触发安全提示，并允许经配套插件向本机下发 SSH 私钥或登录密码。</string>
+    <string name="settings_trusted_add_body">添加后，该地址视同私有网络：不再触发安全提示，并允许经配套插件向本机下发 SSH 私钥或登录密码。若服务端装了 Bridge，还需在 Bridge 设置页添加同一受信任地址。</string>
     <string name="settings_trusted_ssh_body">该地址已在受信任列表里，本次只补充「允许经配套插件向本机下发 SSH 私钥或登录密码」。</string>
     <string name="settings_trusted_risk">若该地址实际由他人控制，凭据可能被窃取。</string>
     <string name="settings_trusted_ownership">我确认该地址/域名仅我可访问</string>

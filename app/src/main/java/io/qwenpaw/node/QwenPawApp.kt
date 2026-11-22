@@ -64,7 +64,11 @@ class QwenPawApp : Application() {
         super.onCreate()
         // 后台任务与通知取文案走 Texts，必须在任何业务代码之前安装。
         io.qwenpaw.node.ui.i18n.Texts.install(this)
-        api = QwenPawApi()
+        api = QwenPawApi(
+            languageTag = {
+                io.qwenpaw.node.ui.i18n.AppLocale.read(this)?.tag ?: "zh-CN"
+            },
+        )
         // 由变体源码决定：full 是 sherpa，_no-sherpa 是不可用桩。
         localAsr = io.qwenpaw.node.voice.LocalAsrProvider.create(this)
         pluginProbe = io.qwenpaw.node.data.plugin.PluginProbe(api)
@@ -88,6 +92,13 @@ class QwenPawApp : Application() {
             java.io.File(filesDir, "server-avatar"),
         )
         instanceRepository = InstanceRepository(InstanceStore(this), api, networkMonitor)
+        if (!instanceRepository.secureCredentialStorage) {
+            android.widget.Toast.makeText(
+                this,
+                io.qwenpaw.node.ui.i18n.Texts.get(R.string.credential_storage_insecure),
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
         fontManager = FontManager(this)
         // 进程级监听：地址选择与断网恢复都依赖它，生命周期跟应用一致。
         networkMonitor.start()

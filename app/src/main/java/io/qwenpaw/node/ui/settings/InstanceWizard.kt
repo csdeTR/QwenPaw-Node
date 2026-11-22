@@ -117,6 +117,8 @@ fun InstanceWizard(
         basicAuth: io.qwenpaw.node.data.remote.BasicAuth?,
     ) -> List<AgentDto> = { _, _, _ -> emptyList() },
 ) {
+    // 向导里会填 token/密码/反代凭据，禁止截屏与最近任务缩略图。
+    io.qwenpaw.node.ui.common.SecureScreen()
     var step by remember { mutableStateOf(1) }
 
     // 第 1 步

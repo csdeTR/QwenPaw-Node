@@ -1,5 +1,6 @@
 package io.qwenpaw.node.notify
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -36,6 +37,8 @@ object ChatNotifier {
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
                     description = Texts.get(R.string.channel_done_desc)
+                    // 锁屏上不展示助手回复正文，只留通用说明。
+                    lockscreenVisibility = Notification.VISIBILITY_SECRET
                 },
             )
         }
@@ -45,6 +48,12 @@ object ChatNotifier {
             Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val publicVersion = NotificationCompat.Builder(context, DONE_CHANNEL_ID)
+            .setContentTitle(Texts.get(R.string.channel_done_name))
+            .setContentText(Texts.get(R.string.notification_reply_done_public))
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
         val notification = NotificationCompat.Builder(context, DONE_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
@@ -53,6 +62,8 @@ object ChatNotifier {
             .setContentIntent(open)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setPublicVersion(publicVersion)
             .build()
         runCatching { manager.notify(DONE_NOTIFICATION_ID, notification) }
     }

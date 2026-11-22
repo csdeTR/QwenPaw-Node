@@ -2,6 +2,40 @@
 
 每个版本改了什么。版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)，tag 格式为 `v<versionName>`。
 
+## v0.7.5 — 2026-11-22
+
+安全加固版本：不新增上游功能，修复客户端与 Bridge 的凭据泄露、来源判定与敏感下发问题；配套插件 0.5.1 同时提供国际化基础设施（当前仅中文）与发布校验和。
+
+### 安全
+
+- **图片加载只对同源地址附带凭据。** 会话里的外链图片不再收到实例 token、`X-Agent-Id` 或 `?token=`；跨源图片无凭据加载，加载失败显示占位。此前服务端消息里的任意图片地址都能被动带走 Bearer token。
+- **Keystore 异常时不再明文保存凭据。** 降级存储只保留地址与账号名，token 与反代密码不落盘；启动时提示重新输入。
+- **配对二维码校验地址。** 只接受 http/https，拒绝控制字符、userinfo 与 fragment，地址数上限 8；确认页展示主机与明文/加密状态。旧配对码若地址未带协议，需要重新生成；Bridge 0.5.1 的配对面板会自动为未写协议的地址补 `http://`。
+- **受信任地址统一为绝对豁免。** App 侧原有的“只豁免提示”与“允许 SSH 凭据”两套集合合并；受信任地址视同私网，不再提示，也不再受敏感闸门限制。升级后原受信任地址同样适用，不需要的地址请手动移除。
+- **Bridge 设置页新增受信任地址。** 对域名与非内网私有访问来源，敏感下发（SSH 凭据、配对令牌、浏览器修复等）必须 App 与 Bridge 两侧都配置同一地址；Bridge 条目可绑定来源网段，避免仅凭 Host 头放行。仅私有/组网来源无需配置。
+- **Bridge 移除可伪造的受信头。** 删除 `X-QwenPaw-Trusted-Host` 的放行与转发；来源判定覆盖 CGNAT 100.64/10、IPv6 ULA/link-local，并支持 `QWENPAW_BRIDGE_TRUSTED_CIDRS`。反代场景新增 `QWENPAW_BRIDGE_TRUST_PROXY=1`；存在转发头但未开启时敏感端点按未认证处理。
+- **SSH 端点收紧。** `/ssh/settings` GET 与 `/ssh/config` 补访问校验；公网未认证来源返回 `trusted_address_required`，App 显示“去 Bridge 设置页添加受信任地址”。
+- **凭据文件权限。** 目录 0700，`ssh_settings.json`、`ssh_key`、`pairing_tokens.json` 创建即 0600 并原子替换。
+- **通知锁屏隐藏正文。** 聊天完成通知在锁屏只显示“回复已完成”；实例凭据、令牌、二维码与反代密码页禁止截屏。
+- **错误原文脱敏。** 422/JSON detail 中的 token/password/api_key/secret/authorization 与 Bearer 值在展示前掩码并截断。
+- **更新入口校验。** 只接受本仓库 GitHub Release 地址；附件临时文件名复用路径净化。
+- **发布校验。** Release 附带 `SHA256SUMS`，校验签名证书 SHA-256（仓库变量 `EXPECTED_CERT_SHA256`），构建后清理 runner 上的签名密钥。Bridge 新增 tag 发布工作流，产出 zip 与 `SHA256SUMS`。
+
+### 配套插件 0.5.1
+
+- 文本抽离与语言协商：后端按 `?lang` → `Accept-Language` → Console 语言 → 中文解析；面板渲染层统一翻译。当前只提供简体中文，为后续英文预留。
+- App 请求增加 `Accept-Language`，Bridge 错误说明跟随 App 语言；旧版 App 不带该头时仍回退中文。
+- 能力名、错误 `detail.code`、WebSocket 关闭原因、配对码格式与 `protocol_version=1` 均未改变。
+
+### 文档
+
+- 全量盘点剩余上游功能，排入 1.0.0 之后；修正技能刷新、模型测试、OAuth callback、浏览器 traces 等过期待办与 README/使用手册中过时的“仍留 Web”声明。
+
+### 已知边界
+
+- 受信任地址是两侧策略校验，不是密码学认证；Bridge 非私有来源必须绑定来源网段。若需要公网任意来源免认证，应开启 QwenPaw 登录认证或等待后续共享密钥方案。
+- 反代 Basic 与令牌同时存在时令牌仍走 `?token=`（协议既有做法）；请确保反代访问日志受控。
+
 ## v0.7.4 — 2026-11-22
 
 管理面补全与 Git 写操作：模型/提供商 CRUD 与 OAuth、频道完整配置表单、技能池管理与自动化、ACL 与邮件完整名单、技能配置表单，以及 Git 换分支/丢弃改动/反向提交。所有管理页保留 Web 进入提示，写操作保留危险确认。

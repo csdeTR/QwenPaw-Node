@@ -86,10 +86,16 @@ class ChatImageLoader {
                 when {
                     key.startsWith("data:") -> decodeDataUri(key)
                     else -> {
+                        // 只有图片与实例同源才带凭据。消息内容里的外链图片由服务端
+                        // 或第三方控制，跨源带 Bearer/`?token=` 等于把实例令牌交给对方。
+                        val sameOrigin = isSameOrigin(conn.baseUrl, key)
                         // 与 QwenPawApi.baseBuilder 同一套规则：反代 Basic 与
                         // QwenPaw token 争用 Authorization，有 Basic 时 token 走 query。
                         // 这里漏改的表现很具体：文字能出来、图片一直转圈。
-                        val imageUrl = if (conn.basicAuth != null && !conn.token.isNullOrBlank()) {
+                        val imageUrl = if (sameOrigin &&
+                            conn.basicAuth != null &&
+                            !conn.token.isNullOrBlank()
+                        ) {
                             (key.toHttpUrlOrNull() ?: return@runCatching null)
                                 .newBuilder()
                                 .addQueryParameter("token", conn.token)
@@ -99,10 +105,12 @@ class ChatImageLoader {
                             key
                         }
                         val builder = Request.Builder().url(imageUrl)
-                        conn.basicAuth?.let { builder.header("Authorization", it.headerValue) }
-                            ?: conn.token?.takeIf { it.isNotBlank() }
-                                ?.let { builder.header("Authorization", "Bearer $it") }
-                        builder.header("X-Agent-Id", conn.agentId)
+                        if (sameOrigin) {
+                            conn.basicAuth?.let { builder.header("Authorization", it.headerValue) }
+                                ?: conn.token?.takeIf { it.isNotBlank() }
+                                    ?.let { builder.header("Authorization", "Bearer $it") }
+                            builder.header("X-Agent-Id", conn.agentId)
+                        }
                         client.newCall(builder.build()).execute().use { response ->
                             if (!response.isSuccessful) null
                             else response.body?.bytes()
@@ -141,6 +149,18 @@ class ChatImageLoader {
         private const val TARGET_WIDTH = 1080
     }
 }
+
+/**
+ * 图片是否与实例同源。
+ *
+ * scheme、host、port 三者都相同才算同源。解析失败一律按跨源处理：
+ * 宁可图片加载不出来，也不能把实例令牌发给一个没认出来的地址。
+ */
+internal fun isSameOrigin(baseUrl: String, imageUrl: String): Boolean = runCatching {
+    val base = QwenPawApi.resolve(baseUrl, "/")
+    val target = imageUrl.toHttpUrlOrNull() ?: return false
+    base.scheme == target.scheme && base.host == target.host && base.port == target.port
+}.getOrDefault(false)
 
 /** 会话里的图片块：自适应高度，加载失败给文案。 */
 @Composable

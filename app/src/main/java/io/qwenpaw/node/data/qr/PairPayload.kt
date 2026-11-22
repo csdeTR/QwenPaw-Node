@@ -2,6 +2,7 @@ package io.qwenpaw.node.data.qr
 
 import androidx.annotation.StringRes
 import io.qwenpaw.node.R
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * 配对二维码里的一台服务器与一枚访问令牌。
@@ -45,6 +46,8 @@ sealed interface PairParse {
 object PairQr {
     const val VERSION = 1
     const val MAX_LEN = 4096
+    /** 地址列表上限：正常配对不会超过几个入口，多出来的只可能是构造的载荷。 */
+    const val MAX_ADDRESSES = 8
 
     /** 配套插件提供配对码生成能力时声明的名字（插件 ≥ 0.4.3）。 */
     const val CAPABILITY = "pairing"
@@ -86,7 +89,14 @@ object PairQr {
             when (key) {
                 "v" -> version = value.trim().toIntOrNull()
                     ?: return PairParse.Broken(R.string.pair_qr_malformed)
-                "addr" -> value.trim().takeIf { it.isNotEmpty() }?.let(addresses::add)
+                "addr" -> {
+                    val address = value.trim()
+                    if (address.isEmpty()) continue
+                    if (addresses.size >= MAX_ADDRESSES || !isValidAddress(address)) {
+                        return PairParse.Broken(R.string.pair_qr_bad_address)
+                    }
+                    addresses.add(address)
+                }
                 "token" -> token = value.trim()
             }
         }
@@ -96,6 +106,23 @@ object PairQr {
         if (addresses.isEmpty()) return PairParse.Broken(R.string.pair_qr_no_address)
         if (token.isNullOrBlank()) return PairParse.Broken(R.string.pair_qr_no_token)
         return PairParse.Ok(TokenPair(addresses = addresses, token = token!!))
+    }
+
+    /**
+     * 配对地址必须是可用的 http(s) 地址。
+     *
+     * 拒绝控制字符、内嵌空白、userinfo 与 fragment：前两者会破坏地址解析，
+     * 后两者既可能在界面上伪装主机，也容易被当成额外凭据。path/query 保留，
+     * 兼容反向代理子路径与现有样例。
+     */
+    internal fun isValidAddress(raw: String): Boolean {
+        if (raw.isEmpty()) return false
+        if (raw.any { it.isWhitespace() || it.code < 0x20 || it.code == 0x7f }) return false
+        val url = raw.toHttpUrlOrNull() ?: return false
+        if (url.scheme != "http" && url.scheme != "https") return false
+        if (url.username.isNotEmpty() || url.password.isNotEmpty()) return false
+        if (url.fragment != null) return false
+        return url.host.isNotBlank()
     }
 
     /**

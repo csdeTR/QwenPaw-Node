@@ -29,10 +29,17 @@ object ErrorText {
         is ApiException -> e.userHint?.takeIf { it.isNotBlank() } ?: when (e.code) {
             // [ApiException.detail] 只在网络层构造时才有值；其它地方直接 new 出来的
             // 异常把原文放在 message 里，两者都要看，否则分类永远落到 OTHER。
-            401 -> authFailureText(
-                classify401(e.detail ?: e.message, e.wwwAuthenticate, e.tokenSent),
-                e.detail ?: e.message,
-            )
+            401 -> {
+                val detail = e.detail ?: e.message
+                if (detail.contains("trusted_address_required")) {
+                    Texts.get(R.string.error_bridge_trusted_address_required)
+                } else {
+                    authFailureText(
+                        classify401(detail, e.wwwAuthenticate, e.tokenSent),
+                        detail,
+                    )
+                }
+            }
             404 -> Texts.get(R.string.error_not_found_404)
             409 -> conflictText(e.detail ?: e.message)
             503 -> Texts.get(R.string.error_console_disabled_503)
@@ -43,7 +50,8 @@ object ErrorText {
                 if (raw.contains("channel_runtime_not_integrated")) {
                     Texts.get(R.string.error_channel_runtime_not_integrated)
                 } else {
-                    jsonDetailText(raw) ?: jsonDetailText(e.message) ?: e.message
+                    val text = jsonDetailText(raw) ?: jsonDetailText(e.message) ?: e.message.orEmpty()
+                    maskSecrets(text)
                 }
             }
         }
@@ -99,9 +107,30 @@ object ErrorText {
             raw.contains("channel_runtime_not_integrated") ->
                 Texts.get(R.string.error_channel_runtime_not_integrated)
 
-            else -> Texts.get(R.string.error_conflict_409, raw)
+            else -> Texts.get(R.string.error_conflict_409, maskSecrets(raw))
         }
     }
+
+    /**
+     * 掩掉错误原文里可能回显的凭据。
+     *
+     * 422 的 pydantic 报文会带提交值，插件 409/500 也可能把请求体拼进 detail。
+     * 只处理常见的键名与 `Bearer`/`?token=` 形态，并对超长文本截断，避免
+     * 整段请求体占满界面。
+     */
+    fun maskSecrets(text: String): String {
+        var out = SECRET_KEY.replace(text) { "${it.groupValues[1]}\"***\"" }
+        out = BEARER.replace(out, "Bearer ***")
+        out = QUERY_TOKEN.replace(out) { "${it.groupValues[1]}***" }
+        return if (out.length > MAX_DETAIL) out.take(MAX_DETAIL) + "…" else out
+    }
+
+    private val SECRET_KEY = Regex(
+        """(?i)("?(?:token|password|passwd|api_key|apikey|secret|authorization)"?\s*[:=]\s*)("[^"]*"|(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+|[^,}\s]+)""",
+    )
+    private val BEARER = Regex("""(?i)Bearer\s+[A-Za-z0-9._~+/=-]+""")
+    private val QUERY_TOKEN = Regex("""(?i)([?&]token=)[^&\s]+""")
+    private const val MAX_DETAIL = 400
 
     /** 「服务端只接受 https」的排查建议。 */
     val HTTPS_REQUIRED: String get() = Texts.get(R.string.error_https_required)
@@ -180,7 +209,7 @@ object ErrorText {
         AuthFailure.LOGIN_REQUIRED -> Texts.get(R.string.error_auth_login_required)
         AuthFailure.BAD_CREDENTIALS -> Texts.get(R.string.error_auth_bad_credentials)
         AuthFailure.TOKEN_EXPIRED -> Texts.get(R.string.error_auth_token_expired)
-        AuthFailure.OTHER -> detail?.takeIf { it.isNotBlank() }
+        AuthFailure.OTHER -> detail?.takeIf { it.isNotBlank() }?.let(::maskSecrets)
             ?: Texts.get(R.string.error_auth_token_expired)
     }
 
