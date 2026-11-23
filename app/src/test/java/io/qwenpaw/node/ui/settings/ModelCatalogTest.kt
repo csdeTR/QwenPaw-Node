@@ -84,4 +84,46 @@ class ModelCatalogTest {
     fun `no providers yields nothing`() {
         assertTrue(modelChoicesOf(emptyList()).isEmpty())
     }
+
+    @Test
+    fun `choice carries the model type`() {
+        val choices = modelChoicesOf(
+            listOf(
+                provider(
+                    models = listOf(
+                        ModelSlotDto(id = "chat"),
+                        ModelSlotDto(id = "judge", modelType = "decision"),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(listOf("chat", "decision"), choices.map { it.modelType })
+    }
+
+    @Test
+    fun `decision picker only lists decision models`() {
+        val choices = modelChoicesOf(
+            listOf(
+                provider(
+                    models = listOf(
+                        ModelSlotDto(id = "chat", modelType = "chat"),
+                        ModelSlotDto(id = "judge", modelType = "decision"),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(listOf("judge"), decisionChoices(choices).map { it.modelId })
+        assertEquals(2, choices.size)
+    }
+
+    @Test
+    fun `decision picker is empty when no decision model exists`() {
+        val choices = modelChoicesOf(
+            listOf(provider(models = listOf(ModelSlotDto(id = "chat", modelType = "chat")))),
+        )
+
+        assertTrue(decisionChoices(choices).isEmpty())
+    }
 }

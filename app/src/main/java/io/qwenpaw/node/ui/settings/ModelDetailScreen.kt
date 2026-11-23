@@ -62,6 +62,13 @@ fun ModelDetailScreen(
             ) { onChange { it.copy(modelType = "decision") } }
         }
 
+        if (draft.modelType == "decision") {
+            Text(
+                text = stringResource(R.string.models_model_decision_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
         Text(stringResource(R.string.models_model_capability), style = MaterialTheme.typography.bodyMedium)
         CapabilityRow(
             label = stringResource(R.string.models_model_cap_image),
@@ -385,6 +392,7 @@ fun ModelDetailScreen(
             textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             modifier = Modifier.fillMaxWidth(),
         )
+        }
         Spacer(Modifier.height(24.dp))
     }
 }

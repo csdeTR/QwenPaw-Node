@@ -146,6 +146,24 @@ class ThinkingScaleTest {
         assertEquals("最高", thinkingLevelLabel("max"))
     }
 
+    /** 恢复默认后弹窗显示「跟随默认（当前有效档）」，判据与滑块停靠一致。 */
+    @Test
+    fun `inherit blank and null all count as following default`() {
+        assertTrue(thinkingFollowsDefault(null))
+        assertTrue(thinkingFollowsDefault(ThinkingValueDto(level = "")))
+        assertTrue(thinkingFollowsDefault(ThinkingValueDto(level = "inherit")))
+        assertTrue(!thinkingFollowsDefault(ThinkingValueDto(level = "high")))
+        assertTrue(!thinkingFollowsDefault(ThinkingValueDto(level = "off")))
+    }
+
+    @Test
+    fun `follow default label uses the effective level`() {
+        val scale = ThinkingScale.of(effort("low", "medium", "high"))!!
+        val effective = ThinkingValueDto(level = "medium")
+        assertEquals("中", scale.label(effective))
+        assertEquals(1, scale.indexOf(effective.level))
+    }
+
     /** 三档 effort 均分成 0 / 0.5 / 1，对应脑图的空、半满、满。 */
     @Test
     fun `fill ratio spaces effort stops evenly`() {

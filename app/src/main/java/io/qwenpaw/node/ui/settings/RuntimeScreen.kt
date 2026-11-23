@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -38,9 +40,14 @@ import io.qwenpaw.node.data.model.HarnessProviderDto
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.common.pageContentInsets
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 private const val TAB_ACP = 0
 private const val TAB_HARNESS = 1
+private const val TAB_AGENT = 2
 
 /**
  * 运行时：ACP 表单与 Harness 登录。
@@ -66,6 +73,22 @@ fun RuntimeScreen(
     onDismissHarnessDetail: () -> Unit,
     onDismissAcpNotice: () -> Unit,
     onDismissHarnessNotice: () -> Unit,
+    agentExtras: AgentExtrasUiState = AgentExtrasUiState(),
+    onLoadAgentExtras: () -> Unit = {},
+    onPromptFile: (String, Boolean) -> Unit = { _, _ -> },
+    onAgentLanguage: (String) -> Unit = {},
+    onCodingEnabled: (Boolean) -> Unit = {},
+    onAdvisorEnabled: (Boolean) -> Unit = {},
+    onAdvisorFlag: (String, Boolean) -> Unit = { _, _ -> },
+    onAdvisorNumbers: (Int?, Int?) -> Unit = { _, _ -> },
+    onDismissAgentExtrasNotice: () -> Unit = {},
+    onLoopCreate: () -> Unit = {},
+    onLoopEdit: (String) -> Unit = {},
+    onLoopDelete: (String) -> Unit = {},
+    onLoopDuplicate: (String) -> Unit = {},
+    onLoopDraft: (String) -> Unit = {},
+    onLoopSave: () -> Unit = {},
+    onLoopClose: () -> Unit = {},
 ) {
     var tab by remember { mutableStateOf(TAB_ACP) }
     var editing by remember { mutableStateOf<AcpAgentForm?>(null) }
@@ -99,17 +122,24 @@ fun RuntimeScreen(
             ) {
                 Chip("ACP", selected = tab == TAB_ACP, onClick = { tab = TAB_ACP })
                 Chip("Harness", selected = tab == TAB_HARNESS, onClick = { tab = TAB_HARNESS })
+                Chip(
+                    stringResource(R.string.runtime_tab_agent),
+                    selected = tab == TAB_AGENT,
+                    onClick = {
+                        tab = TAB_AGENT
+                        onLoadAgentExtras()
+                    },
+                )
             }
 
-            if (tab == TAB_ACP) {
-                AcpTab(
+            when (tab) {
+                TAB_ACP -> AcpTab(
                     state = acp,
                     onSaveNodePath = onSaveNodePath,
                     onEdit = { editing = it },
                     onDismissNotice = onDismissAcpNotice,
                 )
-            } else {
-                HarnessTab(
+                TAB_HARNESS -> HarnessTab(
                     state = harness,
                     onProbe = onProbeHarness,
                     onLogin = onLoginHarness,
@@ -117,6 +147,20 @@ fun RuntimeScreen(
                     onDetail = onOpenHarnessDetail,
                     onInstall = onInstallHarness,
                     onDismissNotice = onDismissHarnessNotice,
+                )
+                else -> AgentExtrasTab(
+                    state = agentExtras,
+                    onPromptFile = onPromptFile,
+                    onLanguage = onAgentLanguage,
+                    onCoding = onCodingEnabled,
+                    onAdvisor = onAdvisorEnabled,
+                    onAdvisorFlag = onAdvisorFlag,
+                    onAdvisorNumbers = onAdvisorNumbers,
+                    onLoopCreate = onLoopCreate,
+                    onLoopEdit = onLoopEdit,
+                    onLoopDelete = onLoopDelete,
+                    onLoopDuplicate = onLoopDuplicate,
+                    onDismissNotice = onDismissAgentExtrasNotice,
                 )
             }
         }
@@ -225,6 +269,68 @@ fun RuntimeScreen(
             onDismiss = { logoutTarget = null },
         )
     }
+
+    if (agentExtras.customLoopDraft != null) {
+        LoopEditorDialog(
+            draft = agentExtras.customLoopDraft,
+            saving = agentExtras.customLoopSaving,
+            error = agentExtras.customLoopError,
+            onDraft = onLoopDraft,
+            onSave = onLoopSave,
+            onDismiss = onLoopClose,
+        )
+    }
+}
+
+@Composable
+private fun LoopEditorDialog(
+    draft: String,
+    saving: Boolean,
+    error: String?,
+    onDraft: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text(stringResource(R.string.runtime_loop_editor_title)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = onDraft,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 240.dp, max = 420.dp),
+                    textStyle = MaterialTheme.typography.labelSmall,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.runtime_loop_editor_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                error?.let { message ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !saving, onClick = onSave) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = !saving, onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -659,4 +765,332 @@ private fun AcpAgentDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
+}
+
+/** 智能体附加设置：系统提示文件、MD 语言、编码模式与顾问模式。 */
+@Composable
+private fun AgentExtrasTab(
+    state: AgentExtrasUiState,
+    onPromptFile: (String, Boolean) -> Unit,
+    onLanguage: (String) -> Unit,
+    onCoding: (Boolean) -> Unit,
+    onAdvisor: (Boolean) -> Unit,
+    onAdvisorFlag: (String, Boolean) -> Unit,
+    onAdvisorNumbers: (Int?, Int?) -> Unit,
+    onLoopCreate: () -> Unit,
+    onLoopEdit: (String) -> Unit,
+    onLoopDelete: (String) -> Unit,
+    onLoopDuplicate: (String) -> Unit,
+    onDismissNotice: () -> Unit,
+) {
+    var pendingLoopDelete by remember { mutableStateOf<Pair<String, String>?>(null) }
+    if (state.loading && !state.loaded) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            CircularProgressIndicator()
+        }
+    }
+    state.error?.let { message ->
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+    }
+    state.notice?.let { message ->
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onDismissNotice)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+    }
+
+    SectionHeader(stringResource(R.string.runtime_agent_prompt_title))
+    Card {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                text = stringResource(R.string.runtime_agent_prompt_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.availableFiles.isEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.runtime_agent_files_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        state.availableFiles.take(20).forEach { file ->
+            Divider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = file,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = file in state.promptFiles,
+                    enabled = !state.saving,
+                    onCheckedChange = { onPromptFile(file, it) },
+                )
+            }
+        }
+    }
+
+    SectionHeader(stringResource(R.string.runtime_agent_language_title))
+    Card {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            var draft by remember(state.language) { mutableStateOf(state.language) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.runtime_agent_language_title)) },
+                )
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    enabled = !state.saving,
+                    onClick = { onLanguage(draft) },
+                ) {
+                    Text(stringResource(R.string.action_save))
+                }
+            }
+            Text(
+                text = stringResource(R.string.runtime_agent_language_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    SectionHeader(stringResource(R.string.runtime_agent_modes_title))
+    Card {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.runtime_agent_coding_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = stringResource(R.string.runtime_agent_coding_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = state.codingEnabled,
+                enabled = !state.saving,
+                onCheckedChange = onCoding,
+            )
+        }
+        Divider()
+        val advisorEnabled = state.advisor?.get("enabled")
+            ?.let { runCatching { it.jsonPrimitive.booleanOrNull }.getOrNull() } ?: false
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.runtime_agent_advisor_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = stringResource(R.string.runtime_agent_advisor_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = advisorEnabled,
+                enabled = !state.saving,
+                onCheckedChange = onAdvisor,
+            )
+        }
+        listOf(
+            "plan_enabled" to R.string.runtime_agent_advisor_plan,
+            "followup_enabled" to R.string.runtime_agent_advisor_followup,
+            "on_demand_enabled" to R.string.runtime_agent_advisor_on_demand,
+        ).forEach { (field, label) ->
+            Divider()
+            val checked = state.advisor?.get(field)?.jsonPrimitive?.booleanOrNull ?: false
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(label),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = checked,
+                    enabled = !state.saving,
+                    onCheckedChange = { onAdvisorFlag(field, it) },
+                )
+            }
+        }
+        Divider()
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+            var maxConsultsDraft by remember(state.advisor) {
+                mutableStateOf(
+                    state.advisor?.get("max_consults")?.jsonPrimitive?.contentOrNull.orEmpty(),
+                )
+            }
+            var recentDraft by remember(state.advisor) {
+                mutableStateOf(
+                    state.advisor?.get("recent_messages")?.jsonPrimitive?.contentOrNull.orEmpty(),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = maxConsultsDraft,
+                    onValueChange = { maxConsultsDraft = it },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    label = { Text(stringResource(R.string.runtime_agent_advisor_max_consults)) },
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedTextField(
+                    value = recentDraft,
+                    onValueChange = { recentDraft = it },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    label = { Text(stringResource(R.string.runtime_agent_advisor_recent_messages)) },
+                )
+            }
+            TextButton(
+                enabled = !state.saving,
+                onClick = {
+                    onAdvisorNumbers(
+                        maxConsultsDraft.trim().toIntOrNull(),
+                        recentDraft.trim().toIntOrNull(),
+                    )
+                },
+            ) {
+                Text(stringResource(R.string.runtime_agent_advisor_numbers_save))
+            }
+        }
+    }
+
+    SectionHeader(stringResource(R.string.runtime_agent_loops_title))
+    Card {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                text = stringResource(R.string.runtime_agent_loops_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.loops.isEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.runtime_agent_loops_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            state.loops.forEach { element ->
+                val obj = element.jsonObject
+                val name = obj["name"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["id"]?.jsonPrimitive?.contentOrNull
+                    ?: return@forEach
+                val description = obj["description"]?.jsonPrimitive?.contentOrNull
+                Spacer(Modifier.height(6.dp))
+                Text(text = name, style = MaterialTheme.typography.bodyMedium)
+                if (!description.isNullOrBlank()) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (state.customLoops.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.runtime_agent_custom_loops),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                state.customLoops.forEach { element ->
+                    val obj = element.jsonObject
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+                    val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: id
+                    Text(text = name, style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        TextButton(
+                            enabled = !state.saving,
+                            onClick = { onLoopEdit(id) },
+                        ) {
+                            Text(stringResource(R.string.runtime_loop_edit))
+                        }
+                        TextButton(
+                            enabled = !state.saving,
+                            onClick = { onLoopDuplicate(id) },
+                        ) {
+                            Text(stringResource(R.string.runtime_loop_duplicate))
+                        }
+                        TextButton(
+                            enabled = !state.saving,
+                            onClick = { pendingLoopDelete = id to name },
+                        ) {
+                            Text(
+                                text = stringResource(R.string.runtime_loop_delete),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            TextButton(
+                enabled = !state.saving,
+                onClick = onLoopCreate,
+            ) {
+                Text(stringResource(R.string.runtime_loop_create))
+            }
+        }
+    }
+    Spacer(Modifier.height(24.dp))
+
+    pendingLoopDelete?.let { (id, name) ->
+        DestructiveActionDialog(
+            title = stringResource(R.string.runtime_loop_delete_title),
+            message = stringResource(R.string.runtime_loop_delete_message, name),
+            confirmLabel = stringResource(R.string.action_delete),
+            undoable = false,
+            onConfirm = {
+                pendingLoopDelete = null
+                onLoopDelete(id)
+            },
+            onDismiss = { pendingLoopDelete = null },
+        )
+    }
 }

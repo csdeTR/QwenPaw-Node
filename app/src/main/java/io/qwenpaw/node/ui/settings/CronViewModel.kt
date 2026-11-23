@@ -36,6 +36,9 @@ data class CronUiState(
     val chatNames: Map<String, String> = emptyMap(),
     /** 服务端配置的时区；null 表示没取到，界面不显示双时区对照。 */
     val serverTimezone: String? = null,
+    /** 心跳配置；null 表示没取到。 */
+    val heartbeat: kotlinx.serialization.json.JsonObject? = null,
+    val heartbeatSaving: Boolean = false,
     /** 执行记录，按 job id 存放，打开记录页时按需拉取。 */
     val history: Map<String, List<CronExecutionRecordDto>> = emptyMap(),
     val historyLoading: Boolean = false,
@@ -84,6 +87,55 @@ class CronViewModel(
             // 时区读失败保持 null，不拦页面：对照块是补充信息，不是这一页的前提。
             runCatching { withContext(Dispatchers.IO) { api.userTimezone(conn) } }
                 .onSuccess { zone -> _state.update { it.copy(serverTimezone = zone) } }
+            runCatching { withContext(Dispatchers.IO) { api.heartbeat(conn) } }
+                .onSuccess { hb -> _state.update { it.copy(heartbeat = hb) } }
+        }
+    }
+
+    /** 心跳开关。PUT 需要整份配置，只替换 enabled。 */
+    fun setHeartbeatEnabled(enabled: Boolean) {
+        val conn = connection() ?: return
+        val raw = _state.value.heartbeat ?: return
+        _state.update { it.copy(heartbeatSaving = true, error = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.saveHeartbeat(
+                        conn,
+                        kotlinx.serialization.json.JsonObject(
+                            raw + ("enabled" to kotlinx.serialization.json.JsonPrimitive(enabled)),
+                        ),
+                    )
+                }
+            }.onSuccess { saved ->
+                _state.update { it.copy(heartbeat = saved, heartbeatSaving = false) }
+            }.onFailure { e ->
+                _state.update { it.copy(heartbeatSaving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    /** 立即执行一次心跳，不等待结果。 */
+    fun runHeartbeatNow() {
+        val conn = connection() ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.runHeartbeat(conn) } }
+                .onFailure { e -> _state.update { it.copy(error = ErrorText.of(e)) } }
+        }
+    }
+
+    /** 修改服务端用户时区。非法 IANA 名称由服务端返回 400，错误显示在页面顶部。 */
+    fun setServerTimezone(zone: String) {
+        val conn = connection() ?: return
+        _state.update { it.copy(error = null) }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.setUserTimezone(conn, zone) } }
+                .onSuccess { saved ->
+                    _state.update { it.copy(serverTimezone = saved ?: zone) }
+                }
+                .onFailure { e ->
+                    _state.update { it.copy(error = ErrorText.of(e)) }
+                }
         }
     }
 

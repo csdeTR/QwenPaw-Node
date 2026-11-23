@@ -118,18 +118,17 @@ class WorkspaceViewModelEditTest {
     }
 
     @Test
-    fun `memory root is not editable`() {
+    fun `memory root is editable without etag`() {
         val state = WorkspaceUiState(
             root = WorkspaceRoot.MEMORY,
             preview = WorkspacePreview.Text(
                 title = "MEMORY.md",
                 content = "x",
                 eof = true,
-                etag = "W/\"1\"",
             ),
         )
-        assertFalse(state.canEdit)
-        assertEquals("记忆文件不支持编辑", state.editBlockedReason)
+        assertTrue(state.canEdit)
+        assertNull(state.editBlockedReason)
     }
 
     @Test

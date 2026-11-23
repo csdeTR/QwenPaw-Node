@@ -95,6 +95,8 @@ data class SkillPoolUiState(
     val batchSelected: Set<String> = emptySet(),
     val uploading: Boolean = false,
     val zipImporting: Boolean = false,
+    /** URL 导入（bundle_url）进行中。 */
+    val urlImporting: Boolean = false,
     /** 旧的弹窗开关；导入改为独立页面后仍保留，便于宿主判断导入流程是否在进行。 */
     val uploadOpen: Boolean = false,
     val uploadWorkspace: String = "",
@@ -405,8 +407,30 @@ class SkillPoolViewModel(
     }
 
     /** 导入技能 zip 到技能池。冲突由服务端 409 原文提示，不静默覆盖。 */
-    fun importZip(source: SafZipSource) {
+    /** URL 导入：服务端从 `bundle_url` 拉取技能包。 */
+    fun importPoolSkillFromUrl(url: String) {
         val conn = connection() ?: return
+        val trimmed = url.trim()
+        if (trimmed.isEmpty() || _state.value.urlImporting) return
+        _state.update { it.copy(urlImporting = true, error = null, message = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.importPoolSkill(conn, trimmed) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        urlImporting = false,
+                        message = Texts.get(R.string.skill_pool_url_imported),
+                    )
+                }
+                refresh()
+            }.onFailure { e ->
+                _state.update { it.copy(urlImporting = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun importZip(source: SafZipSource) {        val conn = connection() ?: return
         if (_state.value.zipImporting) return
         _state.update { it.copy(zipImporting = true, error = null, message = null) }
         scope.launch {

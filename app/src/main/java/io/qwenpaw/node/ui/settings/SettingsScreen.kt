@@ -20,7 +20,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,6 +59,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,6 +134,7 @@ fun SettingsScreen(
     onOpenRuntime: () -> Unit = {},
     /** 打开 App 中心。 */
     onOpenAppCenter: () -> Unit = {},
+    onOpenCommunity: () -> Unit = {},
     /** 打开频道页（扫码授权）。 */
     onOpenChannels: () -> Unit = {},
     /** 打开本地模型页（运行时状态与下载进度）。 */
@@ -245,6 +253,14 @@ fun SettingsScreen(
     transcribeStatus: io.qwenpaw.node.data.transcription.TranscriptionStatus =
         io.qwenpaw.node.data.transcription.TranscriptionStatus.Unknown,
     onRefreshTranscribe: () -> Unit = {},
+    /** 服务端语音设置：入站音频模式、转写档位、provider 与模型。 */
+    voiceServer: VoiceServerUiState = VoiceServerUiState(),
+    onAudioMode: (String) -> Unit = {},
+    onTranscriptionProviderType: (String) -> Unit = {},
+    onTranscriptionProvider: (String) -> Unit = {},
+    onTranscriptionModel: (String) -> Unit = {},
+    /** 进入设置页时拉取一次服务端语音设置。 */
+    onLoadVoiceSettings: () -> Unit = {},
     assistantCollapse: io.qwenpaw.node.ui.chat.AssistantCollapse =
         io.qwenpaw.node.ui.chat.AssistantCollapse.RESULT_COLLAPSED,
     onAssistantCollapse: (io.qwenpaw.node.ui.chat.AssistantCollapse) -> Unit = {},
@@ -275,6 +291,10 @@ fun SettingsScreen(
     serverAvatarFile: java.io.File? = null,
     /** 进入设置页时重新核对服务端头像。 */
     onRefreshServerAvatar: () -> Unit = {},
+    /** 服务端历史头像与缩略图；空列表时不显示选择行。 */
+    serverAvatarHistory: List<io.qwenpaw.node.data.remote.AvatarHistoryEntry> = emptyList(),
+    onSelectServerAvatar: (String?) -> Unit = {},
+    onUploadServerAvatar: () -> Unit = {},
     /** 消息底部操作行样式。 */
     actionStyle: io.qwenpaw.node.ui.chat.ActionStyle = io.qwenpaw.node.ui.chat.ActionStyle.TEXT,
     onActionStyle: (io.qwenpaw.node.ui.chat.ActionStyle) -> Unit = {},
@@ -298,10 +318,15 @@ fun SettingsScreen(
     onInstallBridge: () -> Unit = {},
     /** 退出登录：吊销服务端 token 并清本地凭据。 */
     onLogout: (String) -> Unit = {},
+    /** 修改账号密码；成功后服务端换发新 token。 */
+    onUpdateProfile: (instanceId: String, currentPassword: String, newUsername: String?, newPassword: String?) -> Unit =
+        { _, _, _, _ -> },
 ) {
     var adding by remember { mutableStateOf(false) }
     // 待确认退出登录的实例。
     var logoutFor by remember { mutableStateOf<InstanceConfig?>(null) }
+    // 正在修改账号密码的实例。
+    var profileEditing by remember { mutableStateOf<InstanceConfig?>(null) }
     // 添加实例的两种方式：null 表示在方式选择页，否则是具体形态。
     var addMode by remember { mutableStateOf<AddMode?>(null) }
     var editing by remember { mutableStateOf<InstanceConfig?>(null) }
@@ -310,10 +335,12 @@ fun SettingsScreen(
     var askInstallBridge by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val confirmBrowser = io.qwenpaw.node.ui.common.rememberBrowserConfirm()
+    val activeInstance = instances.firstOrNull { it.id == activeId }
 
     // 每次进入设置页核对一次服务端头像。不做轮询：头像不是时效性数据，
     // 用户改完网页端的头像再来这里就是最常见的一次刷新时机。
     androidx.compose.runtime.LaunchedEffect(Unit) { onRefreshServerAvatar() }
+    androidx.compose.runtime.LaunchedEffect(Unit) { onLoadVoiceSettings() }
 
     // 一级页当前打开的分区。MAIN 是列表，其余是子页。
     var section by rememberSaveable { mutableStateOf(SettingsPage.MAIN) }
@@ -488,6 +515,15 @@ fun SettingsScreen(
     }
 
     // 未装配套插件时点开关：先问是否安装，确认后跳扩展市场并预填地址。
+    profileEditing?.let { instance ->
+        UpdateProfileDialog(
+            onDismiss = { profileEditing = null },
+            onConfirm = { current, username, password ->
+                profileEditing = null
+                onUpdateProfile(instance.id, current, username, password)
+            },
+        )
+    }
     if (askInstallBridge) {
         AlertDialog(
             onDismissRequest = { askInstallBridge = false },
@@ -1052,6 +1088,13 @@ fun SettingsScreen(
                                 subtitle = stringResource(R.string.settings_nav_app_center_subtitle),
                                 onClick = onOpenAppCenter,
                             )
+                            Divider()
+                            NavRow(
+                                icon = QwenIcons.users,
+                                title = stringResource(R.string.community_title),
+                                subtitle = stringResource(R.string.settings_nav_community_subtitle),
+                                onClick = onOpenCommunity,
+                            )
                         }
 
                         SectionHeader(stringResource(R.string.settings_group_access_security))
@@ -1230,7 +1273,30 @@ fun SettingsScreen(
                         if (index != instances.lastIndex) Divider()
                     }
                     if (instances.isNotEmpty()) Divider()
-                    // 受信任的连接紧挨实例清单：它记的正是这些实例的地址。
+                    ActionRow(
+                        text = stringResource(R.string.settings_add_instance),
+                        onClick = { adding = true },
+                    )
+                }
+
+                // 改密属于当前账号，不属于某个实例卡片；单独成区，多实例时不会误读。
+                if (activeInstance?.token?.isNotBlank() == true) {
+                    SectionHeader(stringResource(R.string.settings_section_account))
+                    Card {
+                        NavRow(
+                            icon = QwenIcons.user,
+                            title = stringResource(R.string.settings_update_profile_action),
+                            subtitle = stringResource(
+                                R.string.settings_update_profile_row_subtitle,
+                                activeInstance.name.ifBlank { activeInstance.id },
+                            ),
+                            onClick = { profileEditing = activeInstance },
+                        )
+                    }
+                }
+
+                SectionHeader(stringResource(R.string.settings_section_connections))
+                Card {
                     NavRow(
                         icon = QwenIcons.shieldCheck,
                         title = stringResource(R.string.settings_nav_trusted),
@@ -1240,11 +1306,6 @@ fun SettingsScreen(
                             trustedHosts.size,
                         ),
                         onClick = { section = SettingsPage.TRUSTED },
-                    )
-                    Divider()
-                    ActionRow(
-                        text = stringResource(R.string.settings_add_instance),
-                        onClick = { adding = true },
                     )
                 }
                 }
@@ -1371,7 +1432,12 @@ fun SettingsScreen(
                         onCheckedChange = onUseServerAvatar,
                     )
                     Divider()
-                    ServerAvatarRow(file = serverAvatarFile)
+                    ServerAvatarRow(
+                        file = serverAvatarFile,
+                        history = serverAvatarHistory,
+                        onSelect = onSelectServerAvatar,
+                        onUpload = onUploadServerAvatar,
+                    )
                     Divider()
                     NicknameRow(value = userName, onCommit = onUserName)
                     Divider()
@@ -1566,6 +1632,113 @@ fun SettingsScreen(
                             )
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Card {
+                        SettingLabel(
+                            stringResource(R.string.settings_audio_mode_title),
+                            stringResource(R.string.settings_audio_mode_hint),
+                        )
+                        ChipRow {
+                            listOf(
+                                "auto" to R.string.settings_audio_mode_auto,
+                                "native" to R.string.settings_audio_mode_native,
+                            ).forEach { (code, label) ->
+                                Chip(
+                                    text = stringResource(label),
+                                    selected = voiceServer.audioMode == code,
+                                    onClick = { onAudioMode(code) },
+                                )
+                            }
+                        }
+                        Divider()
+                        SettingLabel(
+                            stringResource(R.string.settings_transcription_type_title),
+                            stringResource(R.string.settings_transcription_type_hint),
+                        )
+                        ChipRow {
+                            listOf(
+                                "disabled" to R.string.settings_transcription_type_disabled,
+                                "whisper_api" to R.string.settings_transcription_type_whisper_api,
+                                "local_whisper" to R.string.settings_transcription_type_local_whisper,
+                            ).forEach { (code, label) ->
+                                Chip(
+                                    text = stringResource(label),
+                                    selected = voiceServer.providerType == code,
+                                    onClick = { onTranscriptionProviderType(code) },
+                                )
+                            }
+                        }
+                        if (voiceServer.providerType == "whisper_api") {
+                            Divider()
+                            SettingLabel(
+                                stringResource(R.string.settings_transcription_provider_title),
+                                stringResource(R.string.settings_transcription_provider_hint),
+                            )
+                            ChipRow {
+                                Chip(
+                                    text = stringResource(R.string.settings_transcription_provider_none),
+                                    selected = voiceServer.configuredProviderId.isBlank(),
+                                    onClick = { onTranscriptionProvider("") },
+                                )
+                                voiceServer.providers.forEach { provider ->
+                                    Chip(
+                                        text = provider.name.ifBlank { provider.id },
+                                        selected = voiceServer.configuredProviderId == provider.id,
+                                        onClick = { onTranscriptionProvider(provider.id) },
+                                    )
+                                }
+                            }
+                            Divider()
+                            var modelDraft by remember(voiceServer.model) {
+                                mutableStateOf(voiceServer.model)
+                            }
+                            Row(
+                                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                OutlinedTextField(
+                                    value = modelDraft,
+                                    onValueChange = { modelDraft = it },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    label = {
+                                        Text(stringResource(R.string.settings_transcription_model_title))
+                                    },
+                                    placeholder = {
+                                        Text(stringResource(R.string.settings_transcription_model_placeholder))
+                                    },
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                MiniButton(
+                                    stringResource(R.string.settings_transcription_model_save),
+                                    onClick = { onTranscriptionModel(modelDraft.trim()) },
+                                )
+                            }
+                            Text(
+                                text = stringResource(R.string.settings_transcription_model_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = io.qwenpaw.node.ui.theme.LocalCaptionColor.current,
+                                modifier = Modifier.padding(
+                                    start = 14.dp,
+                                    end = 14.dp,
+                                    top = 6.dp,
+                                    bottom = 10.dp,
+                                ),
+                            )
+                        }
+                        voiceServer.error?.takeIf { it.isNotBlank() }?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(
+                                    start = 14.dp,
+                                    end = 14.dp,
+                                    bottom = 10.dp,
+                                ),
+                            )
+                        }
+                    }
                 }
 
                 SettingsPage.LOGS -> {
@@ -1656,6 +1829,9 @@ fun SettingsScreen(
                             onLoadHistory = c.onLoadCronHistory,
                             dismissRowError = c.dismissCronRowError,
                             dismissError = c.dismissCronError,
+                            onSetTimezone = c.onSetCronTimezone,
+                            onHeartbeat = c.onHeartbeatEnabled,
+                            onRunHeartbeat = c.onRunHeartbeat,
                             onNew = {
                                 c.onEditCron(null)
                                 section = SettingsPage.CRON_EDIT
@@ -1966,6 +2142,9 @@ data class SettingsConfig(
     val onLoadCronHistory: (String) -> Unit = {},
     val dismissCronRowError: (String) -> Unit = {},
     val dismissCronError: () -> Unit = {},
+    val onSetCronTimezone: (String) -> Unit = {},
+    val onHeartbeatEnabled: (Boolean) -> Unit = {},
+    val onRunHeartbeat: () -> Unit = {},
     val onLoadCronTargets: () -> Unit = {},
     /** 打开编辑器：传 null 表示新建，传任务表示编辑。 */
     val onEditCron: (io.qwenpaw.node.data.model.CronJobSpecDto?) -> Unit = {},
@@ -2588,6 +2767,82 @@ private fun AddressChoice(
             }
         }
     }
+}
+
+@Composable
+private fun UpdateProfileDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (currentPassword: String, newUsername: String?, newPassword: String?) -> Unit,
+) {
+    var current by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_update_profile_title)) },
+        text = {
+            Column {
+                Text(
+                    text = stringResource(R.string.settings_update_profile_subtitle),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = current,
+                    onValueChange = { current = it },
+                    label = { Text(stringResource(R.string.settings_current_password)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text(stringResource(R.string.settings_new_username)) },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.settings_new_password)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                error?.let { message ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val newUser = username.trim().takeIf { it.isNotEmpty() }
+                    val newPass = password.takeIf { it.isNotBlank() }
+                    when {
+                        current.isBlank() -> error = Texts.get(R.string.settings_profile_need_password)
+                        newUser == null && newPass == null ->
+                            error = Texts.get(R.string.settings_profile_nothing)
+                        else -> onConfirm(current, newUser, newPass)
+                    }
+                },
+            ) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_profile_cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -3348,35 +3603,103 @@ private fun AvatarRow(
  * 两边各删一次。这里只如实显示当前取到的结果。
  */
 @Composable
-private fun ServerAvatarRow(file: java.io.File?) {
-    Row(
+private fun ServerAvatarRow(
+    file: java.io.File?,
+    history: List<io.qwenpaw.node.data.remote.AvatarHistoryEntry>,
+    onSelect: (String?) -> Unit,
+    onUpload: () -> Unit,
+) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        io.qwenpaw.node.ui.chat.ChatAvatar(
-            store = null,
-            kind = io.qwenpaw.node.avatar.AvatarStore.KIND_USER,
-            name = stringResource(R.string.settings_avatar_me),
-            size = 40.dp,
-            serverImage = file,
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.settings_server_avatar_title),
-                style = MaterialTheme.typography.bodyLarge,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            io.qwenpaw.node.ui.chat.ChatAvatar(
+                store = null,
+                kind = io.qwenpaw.node.avatar.AvatarStore.KIND_USER,
+                name = stringResource(R.string.settings_avatar_me),
+                size = 40.dp,
+                serverImage = file,
             )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.settings_server_avatar_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = if (file == null) {
+                        stringResource(R.string.settings_server_avatar_none)
+                    } else {
+                        stringResource(R.string.settings_server_avatar_loaded)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            MiniButton(
+                stringResource(R.string.settings_server_avatar_upload),
+                onClick = onUpload,
+            )
+            if (file != null) {
+                Spacer(Modifier.width(6.dp))
+                MiniButton(
+                    stringResource(R.string.settings_server_avatar_clear),
+                    onClick = { onSelect(null) },
+                )
+            }
+        }
+        if (history.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = if (file == null) {
-                    stringResource(R.string.settings_server_avatar_none)
-                } else {
-                    stringResource(R.string.settings_server_avatar_loaded)
-                },
+                text = stringResource(R.string.settings_server_avatar_history),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(4.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(history, key = { it.id }) { entry ->
+                    ServerAvatarThumb(entry) { onSelect(entry.id) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServerAvatarThumb(
+    entry: io.qwenpaw.node.data.remote.AvatarHistoryEntry,
+    onClick: () -> Unit,
+) {
+    val bitmap = remember(entry.file?.path) {
+        entry.file?.let { runCatching { BitmapFactory.decodeFile(it.path) }.getOrNull() }
+    }
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .border(
+                width = if (entry.selected) 2.dp else 1.dp,
+                color = if (entry.selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant
+                },
+                shape = CircleShape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Text(text = "…", style = MaterialTheme.typography.labelSmall)
         }
     }
 }

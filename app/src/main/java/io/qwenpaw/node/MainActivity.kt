@@ -189,7 +189,7 @@ private const val BRIDGE_ZIP_URL =
 
 // 枚举顺序即页面层级：聊天页是主页面，其余页面按深度排在其后，
 // 用于 AnimatedContent 判断进入方向是「深入」还是「返回」。
-private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, MODEL_ADMIN, PROVIDER_ADD, MODEL_DEFAULTS, SKILLS, SKILL_CONFIG, SKILL_POOL, SKILL_POOL_EDIT, SKILL_POOL_BUILTIN, SKILL_POOL_IMPORT, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, CHANNEL_CONFIG, LOCAL_MODELS, TERMINAL, GIT, BROWSER_DIAGNOSTICS, PLUGIN_MANAGE, DEPENDENCY_UPGRADE, ALLOW_NO_AUTH }
+private enum class Screen { CHAT, LIST, SETTINGS, ARCHIVED, TOKEN_USAGE, RUN_LOG, MESSAGE_SOURCE, INBOX, ACL, SEARCH, WORKSPACE, BACKUP, CHECKPOINT, CHECKPOINT_CHAT, MODELS, MODEL_ADMIN, PROVIDER_ADD, MODEL_DEFAULTS, SKILLS, SKILL_CONFIG, SKILL_POOL, SKILL_POOL_EDIT, SKILL_POOL_BUILTIN, SKILL_POOL_IMPORT, MCP, MARKET, RUNNING_CONFIG, SECURITY, AGENTS, RUNTIME, PORTABILITY, APP_CENTER, CHANNEL, CHANNEL_CONFIG, LOCAL_MODELS, TERMINAL, GIT, BROWSER_DIAGNOSTICS, PLUGIN_MANAGE, DEPENDENCY_UPGRADE, ALLOW_NO_AUTH, COMMUNITY }
 
 @Composable
 private fun QwenPawNav(
@@ -330,11 +330,14 @@ private fun QwenPawNav(
     val runningConfigState by viewModel.settingsConfig.runningConfig.collectAsState()
     val securityState by viewModel.settingsConfig.security.collectAsState()
     val serverSettingsState by viewModel.settingsConfig.serverSettings.collectAsState()
+    val voiceServerState by viewModel.settingsConfig.voice.collectAsState()
     val agentsState by viewModel.agents.state.collectAsState()
     val acpState by viewModel.runtime.acp.collectAsState()
     val harnessState by viewModel.runtime.harness.collectAsState()
+    val agentExtrasState by viewModel.runtime.agentExtras.collectAsState()
     val portabilityState by viewModel.portability.state.collectAsState()
     val appCenterState by viewModel.appCenter.state.collectAsState()
+    val communityState by viewModel.community.state.collectAsState()
     val cronState by viewModel.cron.state.collectAsState()
     // 工作区文件的状态单独一条流，与设置页无关。
     val workspaceState by viewModel.workspace.state.collectAsState()
@@ -349,6 +352,7 @@ private fun QwenPawNav(
     val iconVersion by app.chatIconStore.version.collectAsState()
     // 服务端头像的本地缓存文件，冷启动直接读盘，联网后再刷新。
     val serverAvatarFile by viewModel.serverAvatarFile.collectAsState()
+    val serverAvatarHistory by viewModel.serverAvatarHistory.collectAsState()
 
     val messageAppearance = io.qwenpaw.node.ui.chat.MessageAppearance(
         avatarStore = app.avatarStore,
@@ -494,6 +498,29 @@ private fun QwenPawNav(
                 bitmap = decoded,
                 bytes = bytes,
             )
+        }
+    }
+    // 服务端头像上传：与本地头像裁剪分开，直接读原图原样上传（服务端只校验格式与 2 MB 上限）。
+    val pickServerAvatar = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val bytes = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                }.getOrNull()
+            }
+            if (bytes == null) {
+                toast(context, context.getString(R.string.main_read_image_failed))
+                return@launch
+            }
+            if (bytes.size > 2 * 1024 * 1024) {
+                toast(context, context.getString(R.string.main_server_avatar_too_large))
+                return@launch
+            }
+            val mime = context.contentResolver.getType(uri) ?: "image/png"
+            viewModel.uploadServerAvatar(bytes, mime)
         }
     }
     var showVoiceIntro by remember { mutableStateOf(false) }
@@ -969,39 +996,11 @@ private fun QwenPawNav(
 
             Screen.WORKSPACE -> {
                 LaunchedEffect(Unit) { viewModel.workspace.ensureLoaded() }
-                io.qwenpaw.node.ui.workspace.WorkspaceScreen(
+                WorkspaceRoute(
+                    viewModel = viewModel,
                     state = workspaceState,
                     onBack = { screen = Screen.SETTINGS },
-                    onRefresh = viewModel.workspace::refresh,
-                    onLoadMore = viewModel.workspace::loadMore,
-                    onOpenRoot = viewModel.workspace::openRoot,
                     onOpenGit = { screen = Screen.GIT },
-                    onEnter = viewModel.workspace::enter,
-                    onUp = viewModel.workspace::up,
-                    onOpenFile = viewModel.workspace::openFile,
-                    onClosePreview = viewModel.workspace::closePreview,
-                    onLoadMoreContent = viewModel.workspace::loadMoreContent,
-                    onRequestDownload = viewModel.workspace::requestDownload,
-                    onRequestDirectoryDownload = viewModel.workspace::requestDirectoryDownload,
-                    onPlanCancel = viewModel.workspace::cancelPlan,
-                    onStartDownload = viewModel.workspace::startDownload,
-                    onStartDirectoryDownload = viewModel.workspace::startDirectoryDownload,
-                    onCancelDownload = viewModel.workspace::cancelDownload,
-                    onDismissDownload = viewModel.workspace::dismissDownload,
-                    write = io.qwenpaw.node.ui.workspace.WorkspaceWriteActions(
-                        beginEdit = viewModel.workspace::beginEdit,
-                        updateDraft = viewModel.workspace::updateDraft,
-                        saveEdit = viewModel.workspace::saveEdit,
-                        cancelEdit = viewModel.workspace::cancelEdit,
-                        reloadConflict = viewModel.workspace::reloadAfterConflict,
-                        forceOverwrite = viewModel.workspace::forceOverwrite,
-                        dismissConflict = viewModel.workspace::dismissConflict,
-                        beginUpload = viewModel.workspace::beginUpload,
-                        upload = viewModel.workspace::upload,
-                        resolveUploadConflict = viewModel.workspace::resolveUploadConflict,
-                        cancelUpload = viewModel.workspace::cancelUpload,
-                        dismissUpload = viewModel.workspace::dismissUpload,
-                    ),
                 )
             }
 
@@ -1172,6 +1171,8 @@ private fun QwenPawNav(
                         }
                     },
                     onSetProjectDir = { path -> chatVm.setProjectDir(path) },
+                    onSetSessionProjectDir = { path -> chatVm.setSessionProjectDir(path) },
+                    onCreateBrowsedDir = { parent, name -> chatVm.createBrowsedDir(parent, name) },
                     onDismissError = chatVm::clearError,
                     // 顶栏「连接中断，点击重连」走这条：重绑地址 + 重载当前对话。
                     onRefresh = { viewModel.refreshAll() },
@@ -1254,6 +1255,21 @@ private fun QwenPawNav(
                     onBack = { screen = Screen.SETTINGS },
                     onEnsureLoaded = { viewModel.appCenter.refresh() },
                     onOpenConsole = { base?.let(confirmBrowser) },
+                )
+            }
+
+            Screen.COMMUNITY -> {
+                io.qwenpaw.node.ui.community.CommunityScreen(
+                    state = communityState,
+                    onBack = { screen = Screen.SETTINGS },
+                    onEnsureLoaded = viewModel.community::ensureLoaded,
+                    onRefresh = viewModel.community::refresh,
+                    onLoadMore = viewModel.community::loadMore,
+                    onKeyword = viewModel.community::setKeyword,
+                    onPostType = viewModel.community::setPostType,
+                    onSort = viewModel.community::setSort,
+                    onOpenPost = viewModel.community::openPost,
+                    onClosePost = viewModel.community::closePost,
                 )
             }
 
@@ -1370,6 +1386,22 @@ private fun QwenPawNav(
                     onDismissHarnessDetail = viewModel.runtime::dismissDetail,
                     onDismissAcpNotice = viewModel.runtime::dismissAcpNotice,
                     onDismissHarnessNotice = viewModel.runtime::dismissHarnessNotice,
+                    agentExtras = agentExtrasState,
+                    onLoadAgentExtras = { viewModel.runtime.loadAgentExtras() },
+                    onPromptFile = viewModel.runtime::setPromptFile,
+                    onAgentLanguage = viewModel.runtime::setAgentLanguage,
+                    onCodingEnabled = viewModel.runtime::setCodingEnabled,
+                    onAdvisorEnabled = viewModel.runtime::setAdvisorEnabled,
+                    onAdvisorFlag = viewModel.runtime::setAdvisorFlag,
+                    onAdvisorNumbers = viewModel.runtime::setAdvisorNumbers,
+                    onLoopCreate = viewModel.runtime::openCreateCustomLoop,
+                    onLoopEdit = viewModel.runtime::openEditCustomLoop,
+                    onLoopDelete = viewModel.runtime::deleteCustomLoop,
+                    onLoopDuplicate = viewModel.runtime::duplicateCustomLoop,
+                    onLoopDraft = viewModel.runtime::setCustomLoopDraft,
+                    onLoopSave = viewModel.runtime::saveCustomLoop,
+                    onLoopClose = viewModel.runtime::closeCustomLoopEditor,
+                    onDismissAgentExtrasNotice = viewModel.runtime::dismissAgentExtrasNotice,
                 )
             }
 
@@ -1426,7 +1458,12 @@ private fun QwenPawNav(
                     onToolGuard = viewModel.settingsConfig::saveToolGuardEnabled,
                     onFileGuard = viewModel.settingsConfig::saveFileGuardEnabled,
                     onSandbox = viewModel.settingsConfig::saveSandboxEnabled,
+                    onDenyPaths = viewModel.settingsConfig::saveDenyPathsProtection,
                     onSkillScanner = viewModel.settingsConfig::saveSkillScannerMode,
+                    onClearBlockedHistory = viewModel.settingsConfig::clearBlockedSkillHistory,
+                    onRemoveBlockedEntry = viewModel.settingsConfig::removeBlockedSkillEntry,
+                    onAddWhitelist = viewModel.settingsConfig::addSkillWhitelist,
+                    onRemoveWhitelist = viewModel.settingsConfig::removeSkillWhitelist,
                     onDismissNotice = viewModel.settingsConfig::dismissSecurityNotice,
                     onOpenAllowNoAuthHosts = {
                         viewModel.allowNoAuthHosts.ensureLoaded()
@@ -1507,6 +1544,10 @@ private fun QwenPawNav(
                     onCloseDetail = viewModel.skills::closeDetail,
                     onSetEnabled = viewModel.skills::setEnabled,
                     onBeginEdit = viewModel.skills::beginEdit,
+                    onOptimize = {
+                        viewModel.skills.beginEdit()
+                        viewModel.skills.optimizeEdit()
+                    },
                     onUpdateDraft = viewModel.skills::updateDraft,
                     onSaveEdit = viewModel.skills::saveEdit,
                     onCancelEdit = viewModel.skills::cancelEdit,
@@ -1520,6 +1561,9 @@ private fun QwenPawNav(
                     onToggleBroadcastTarget = viewModel.skills::toggleBroadcastTarget,
                     onRunBroadcast = viewModel.skills::runBroadcast,
                     onDismissBroadcast = viewModel.skills::dismissBroadcast,
+                    onBatchEnable = viewModel.skills::batchEnable,
+                    onBatchDisable = viewModel.skills::batchDisable,
+                    onBatchDelete = viewModel.skills::batchDelete,
                     onOpenConfig = { name ->
                         skillConfigKey = name
                         viewModel.skillConfig.open(name)
@@ -1778,6 +1822,7 @@ private fun QwenPawNav(
                     onOpenAgents = { screen = Screen.AGENTS },
                     onOpenRuntime = { screen = Screen.RUNTIME },
                     onOpenAppCenter = { screen = Screen.APP_CENTER },
+                    onOpenCommunity = { screen = Screen.COMMUNITY },
                     onOpenChannels = { screen = Screen.CHANNEL },
                     onOpenLocalModels = { screen = Screen.LOCAL_MODELS },
                     onOpenBrowserDiagnostics = { screen = Screen.BROWSER_DIAGNOSTICS },
@@ -1878,6 +1923,7 @@ private fun QwenPawNav(
                         screen = Screen.MARKET
                     },
                     onLogout = viewModel::logout,
+                    onUpdateProfile = viewModel::updateProfile,
                     voiceEnabled = appState.voiceEnabled,
                     onVoiceEnabled = { on ->
                         viewModel.setVoiceEnabled(on)
@@ -1902,6 +1948,12 @@ private fun QwenPawNav(
                     onVoiceAutoStop = viewModel::setVoiceAutoStop,
                     transcribeStatus = appState.transcribeStatus,
                     onRefreshTranscribe = { viewModel.refreshTranscribeStatus() },
+                    voiceServer = voiceServerState,
+                    onAudioMode = viewModel.settingsConfig::setAudioMode,
+                    onTranscriptionProviderType = viewModel.settingsConfig::setTranscriptionProviderType,
+                    onTranscriptionProvider = viewModel.settingsConfig::setTranscriptionProvider,
+                    onTranscriptionModel = viewModel.settingsConfig::setTranscriptionModel,
+                    onLoadVoiceSettings = { viewModel.settingsConfig.loadVoiceSettings() },
                     assistantCollapse = appState.assistantCollapse,
                     onAssistantCollapse = viewModel::setAssistantCollapse,
                     fontState = fontState,
@@ -1939,6 +1991,13 @@ private fun QwenPawNav(
                     onUseServerAvatar = viewModel::setUseServerAvatar,
                     serverAvatarFile = serverAvatarFile,
                     onRefreshServerAvatar = viewModel::refreshServerAvatar,
+                    serverAvatarHistory = serverAvatarHistory,
+                    onSelectServerAvatar = viewModel::selectServerAvatar,
+                    onUploadServerAvatar = {
+                        pickServerAvatar.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
                     actionStyle = appState.actionStyle,
                     onActionStyle = viewModel::setActionStyle,
                     renderUserMarkdown = appState.renderUserMarkdown,
@@ -1976,6 +2035,9 @@ private fun QwenPawNav(
                         onLoadCronHistory = viewModel.cron::loadHistory,
                         dismissCronRowError = viewModel.cron::dismissRowError,
                         dismissCronError = viewModel.cron::dismissError,
+                        onSetCronTimezone = viewModel.cron::setServerTimezone,
+                        onHeartbeatEnabled = viewModel.cron::setHeartbeatEnabled,
+                        onRunHeartbeat = viewModel.cron::runHeartbeatNow,
                         onLoadCronTargets = { viewModel.cron.loadTargets() },
                         onEditCron = viewModel.cron::edit,
                         onSaveCron = viewModel.cron::save,
@@ -2372,6 +2434,7 @@ private fun BrowserDiagnosticsPage(
         onOpenMarket = onOpenMarket,
         onConsumeMessage = viewModel.browserDiagnostics::consumeMessage,
         onOpenConsole = onOpenConsole,
+        onReadBackendLogs = viewModel.browserDiagnostics::readBackendLogs,
     )
 }
 
@@ -2591,6 +2654,7 @@ private fun SkillPoolPage(
         onSelectAllSkills = viewModel.skillPool::selectAllSkills,
         onInvertSelection = viewModel.skillPool::invertSelection,
         onClearSelection = viewModel.skillPool::clearSelection,
+        onImportUrl = viewModel.skillPool::importPoolSkillFromUrl,
         onUploadClose = viewModel.skillPool::closeUpload,
         onUploadWorkspace = viewModel.skillPool::setUploadWorkspace,
         onUploadSkill = viewModel.skillPool::setUploadSkill,
@@ -2733,6 +2797,7 @@ private fun ModelsAdminPage(
         onEditImage = viewModel.modelsAdmin::setEditImage,
         onEditVideo = viewModel.modelsAdmin::setEditVideo,
         onEditType = viewModel.modelsAdmin::setEditType,
+        onLoadModelInfo = viewModel.modelsAdmin::loadModelInfo,
         onDeleteModel = viewModel.modelsAdmin::deleteModel,
         onToggleVisibility = viewModel.modelsAdmin::toggleModelVisibility,
         onProbe = viewModel.modelsAdmin::probeModel,
@@ -2789,6 +2854,8 @@ private fun ModelDefaultsPage(
         onRetry = viewModel.modelDefaults::refresh,
         onGlobalChat = viewModel.modelDefaults::setGlobalChat,
         onGlobalDecision = viewModel.modelDefaults::setGlobalDecision,
+        onLlmEnabled = viewModel.modelDefaults::setLlmEnabled,
+        onLlmMode = viewModel.modelDefaults::setLlmMode,
         onAgentPrimary = viewModel.modelDefaults::setAgentPrimary,
         onAgentDecision = viewModel.modelDefaults::setAgentDecision,
         onAgentSubagent = viewModel.modelDefaults::setAgentSubagent,
@@ -2811,6 +2878,7 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.CHAT -> null
     Screen.LIST -> Screen.CHAT
     Screen.SETTINGS, Screen.ARCHIVED, Screen.INBOX, Screen.SEARCH -> Screen.LIST
+    Screen.COMMUNITY -> Screen.SETTINGS
     Screen.TOKEN_USAGE -> usageOrigin
     Screen.RUN_LOG -> Screen.SETTINGS
     // 工作区文件、备份、检查点、模型与提供商、技能、MCP、扩展市场都从设置页进入，返回也回设置页。
@@ -2835,4 +2903,69 @@ private fun parentOf(screen: Screen, usageOrigin: Screen): Screen? = when (scree
     Screen.CHECKPOINT_CHAT -> Screen.CHECKPOINT
     // 原文页从聊天页的气泡进入，返回也回聊天页。
     Screen.MESSAGE_SOURCE -> Screen.CHAT
+}
+
+/** 工作区路由。单独成函数，避免导航 lambda 超过 JVM 方法大小上限。 */
+@Composable
+private fun WorkspaceRoute(
+    viewModel: AppViewModel,
+    state: io.qwenpaw.node.ui.workspace.WorkspaceUiState,
+    onBack: () -> Unit,
+    onOpenGit: () -> Unit,
+) {
+    androidx.compose.runtime.DisposableEffect(state.root) {
+        viewModel.workspace.startWatching()
+        onDispose { viewModel.workspace.stopWatching() }
+    }
+    io.qwenpaw.node.ui.workspace.WorkspaceScreen(
+        state = state,
+        onBack = onBack,
+        onRefresh = viewModel.workspace::refresh,
+        onLoadMore = viewModel.workspace::loadMore,
+        onOpenRoot = viewModel.workspace::openRoot,
+        onOpenGit = onOpenGit,
+        onLoadProjects = viewModel.workspace::loadProjectAdmin,
+        onSetDefaultProject = viewModel.workspace::setDefaultProject,
+        onResetProjectDirs = viewModel.workspace::resetProjectDirs,
+        onCreateProject = viewModel.workspace::createProject,
+        onImportLocalProject = viewModel.workspace::importLocalProject,
+        onDismissProjectMessage = viewModel.workspace::dismissProjectMessage,
+        onUploadProjectZip = viewModel.workspace::uploadProjectZip,
+        onCloneProject = viewModel.workspace::cloneProject,
+        onBinaryFile = viewModel.workspace::binaryFile,
+        onLoadMemoryStatus = viewModel.workspace::loadMemoryStatus,
+        onTestMemoryEmbedding = viewModel.workspace::testMemoryEmbedding,
+        onDismissMemoryStatusMessage = viewModel.workspace::dismissMemoryStatusMessage,
+        onReindexMemory = { viewModel.workspace.reindexMemory() },
+        onUndoMemoryReindex = viewModel.workspace::undoMemoryReindex,
+        onLoadMemoryTags = viewModel.workspace::loadMemoryTags,
+        onLoadMemoryTagFiles = viewModel.workspace::loadMemoryTagFiles,
+        onLoadMemoryGraph = viewModel.workspace::loadMemoryGraph,
+        onEnter = viewModel.workspace::enter,
+        onUp = viewModel.workspace::up,
+        onOpenFile = viewModel.workspace::openFile,
+        onClosePreview = viewModel.workspace::closePreview,
+        onLoadMoreContent = viewModel.workspace::loadMoreContent,
+        onRequestDownload = viewModel.workspace::requestDownload,
+        onRequestDirectoryDownload = viewModel.workspace::requestDirectoryDownload,
+        onPlanCancel = viewModel.workspace::cancelPlan,
+        onStartDownload = viewModel.workspace::startDownload,
+        onStartDirectoryDownload = viewModel.workspace::startDirectoryDownload,
+        onCancelDownload = viewModel.workspace::cancelDownload,
+        onDismissDownload = viewModel.workspace::dismissDownload,
+        write = io.qwenpaw.node.ui.workspace.WorkspaceWriteActions(
+            beginEdit = viewModel.workspace::beginEdit,
+            updateDraft = viewModel.workspace::updateDraft,
+            saveEdit = viewModel.workspace::saveEdit,
+            cancelEdit = viewModel.workspace::cancelEdit,
+            reloadConflict = viewModel.workspace::reloadAfterConflict,
+            forceOverwrite = viewModel.workspace::forceOverwrite,
+            dismissConflict = viewModel.workspace::dismissConflict,
+            beginUpload = viewModel.workspace::beginUpload,
+            upload = viewModel.workspace::upload,
+            resolveUploadConflict = viewModel.workspace::resolveUploadConflict,
+            cancelUpload = viewModel.workspace::cancelUpload,
+            dismissUpload = viewModel.workspace::dismissUpload,
+        ),
+    )
 }

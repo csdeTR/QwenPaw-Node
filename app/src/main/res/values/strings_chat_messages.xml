@@ -153,6 +153,7 @@
     <string name="thinking_title">思考强度</string>
     <string name="thinking_unsupported">当前模型不支持调节思考强度</string>
     <string name="thinking_reset">恢复默认设置</string>
+    <string name="thinking_follow_default_current">跟随默认（当前 %1$s）</string>
     <string name="thinking_effort_hint">仅显示当前模型支持的档位。</string>
     <string name="thinking_off">关闭思考</string>
     <string name="thinking_budget_value">%1$d tokens · %2$s</string>

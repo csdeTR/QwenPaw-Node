@@ -78,4 +78,5 @@
     <string name="models_rework_picker_follow">跟随默认</string>
     <string name="models_rework_picker_title">选择%1$s</string>
     <string name="models_rework_no_models_hint">服务端还没有可用模型，请先在提供商页添加</string>
+    <string name="models_rework_no_decision_models">还没有决策类型模型；请先在提供商页新增，或把已有模型的类型改为“决策”</string>
 </resources>

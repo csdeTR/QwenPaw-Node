@@ -37,8 +37,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
 /** 聊天页的可变状态。 */
@@ -77,8 +81,12 @@ data class ChatUiState(
     val agentBackend: String = "qwenpaw",
     /** 智能体审批模式：STRICT / SMART / AUTO / OFF。null 表示尚未拉取。 */
     val approvalLevel: String? = null,
+    /** 是否已配置决策模型；JEV 审批档依赖它。 */
+    val decisionModelConfigured: Boolean = false,
     /** 智能体的工作区目录；null 表示尚未拉取。 */
     val projectDir: ProjectDirDto? = null,
+    /** 当前对话是否设置了独立项目目录；true 时界面显示「仅本会话」。 */
+    val sessionProjectDirOverride: Boolean = false,
     /**
      * 与服务端之间的链路状态。
      *
@@ -333,6 +341,8 @@ data class ModelChoice(
     val modelName: String,
     /** harness 提供的默认模型标记；qwenpaw 的模型列表不使用。 */
     val isDefault: Boolean = false,
+    /** 服务端 model_type：chat / decision。 */
+    val modelType: String = "chat",
 ) {
     /** 稳定 key，用于菜单与去重。 */
     val key: String get() = "$providerId:$modelId"
@@ -622,6 +632,7 @@ class ChatViewModel(
                     currentModelLabel = null,
                     agentName = "",
                     approvalLevel = null,
+                    decisionModelConfigured = false,
                     projectDir = null,
                     slashCommands = emptyList(),
                     toolCalls = emptyMap(),
@@ -690,6 +701,8 @@ class ChatViewModel(
                         _state.update {
                             it.copy(loading = false, messages = emptyList(), currentChatId = null)
                         }
+                        // 没有会话时思考胶囊显示智能体默认值，而不是停在上一台实例的值上。
+                        refreshThinking()
                     }
                     loadPreviews(conn, ordered, generation)
                 }
@@ -1187,24 +1200,34 @@ class ChatViewModel(
 
     fun refreshThinking() {
         val conn = currentConnection ?: return
-        val chatId = _state.value.currentChatId ?: return
+        val chatId = _state.value.currentChatId
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { api.chatThinking(conn, chatId) } }
-                .onSuccess { view ->
-                    _state.update { s ->
-                        s.copy(
-                            thinking = view,
-                            contextMax = view.effectiveMaxInputLength ?: s.contextMax,
-                            // 第三方 backend 的模型标签由 harness 列表决定；
-                            // qwenpaw 的对话 thinking 视图不能把它覆盖回 null。
-                            currentModelLabel = if (s.agentBackend == "qwenpaw") {
-                                view.modelName ?: view.model
-                            } else {
-                                s.currentModelLabel
-                            },
-                        )
+            val view = runCatching {
+                withContext(Dispatchers.IO) {
+                    if (chatId != null) {
+                        api.chatThinking(conn, chatId)
+                    } else {
+                        // 尚未创建会话时取智能体默认，输入区的思考胶囊才有可显示的值。
+                        api.chatThinkingDefault(conn)
                     }
                 }
+            }.getOrNull() ?: return@launch
+            // 请求期间切了对话：这份视图属于上一个会话，不能写进新状态。
+            if (_state.value.currentChatId != chatId) return@launch
+            _state.update { s ->
+                s.copy(
+                    thinking = view,
+                    contextMax = view.effectiveMaxInputLength ?: s.contextMax,
+                    decisionModelConfigured = view.decisionModelConfigured,
+                    // 第三方 backend 的模型标签由 harness 列表决定；
+                    // qwenpaw 的对话 thinking 视图不能把它覆盖回 null。
+                    currentModelLabel = if (s.agentBackend == "qwenpaw") {
+                        view.modelName ?: view.model
+                    } else {
+                        s.currentModelLabel
+                    },
+                )
+            }
         }
     }
 
@@ -1301,6 +1324,7 @@ class ChatViewModel(
                     it.copy(
                         thinking = view,
                         contextMax = view.effectiveMaxInputLength ?: it.contextMax,
+                        decisionModelConfigured = view.decisionModelConfigured,
                         currentModelLabel = view.modelName ?: view.model,
                         error = null,
                     )
@@ -1350,12 +1374,66 @@ class ChatViewModel(
         }
     }
 
-    /** 读取当前工作区目录。 */
+    /**
+     * 读取当前会话生效的项目目录。
+     *
+     * 会话有覆盖时以 `project-dirs` 的首项为准，否则回落到智能体默认；
+     * `source` 是服务端给出的来源标记，界面据此显示「仅本会话」。
+     */
     fun refreshProjectDir() {
         val conn = currentConnection ?: return
+        val chatId = _state.value.currentChatId
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { api.projectDirectory(conn) } }
-                .onSuccess { dir -> _state.update { it.copy(projectDir = dir) } }
+            val session = if (!chatId.isNullOrBlank()) {
+                withContext(Dispatchers.IO) {
+                    runCatching { api.chatProjectDirs(conn, chatId) }.getOrNull()
+                }
+            } else {
+                null
+            }
+            val override = session?.get("source")?.jsonPrimitive?.contentOrNull == "session"
+            val primary = session?.get("project_dirs")?.jsonArray?.firstOrNull()
+                ?.jsonObject?.get("path")?.jsonPrimitive?.contentOrNull
+            val dir = if (override && !primary.isNullOrBlank()) {
+                ProjectDirDto(
+                    path = primary,
+                    name = primary.substringAfterLast('/'),
+                    exists = true,
+                )
+            } else {
+                withContext(Dispatchers.IO) {
+                    runCatching { api.projectDirectory(conn) }.getOrNull()
+                }
+            }
+            _state.update {
+                it.copy(projectDir = dir, sessionProjectDirOverride = override)
+            }
+        }
+    }
+
+    /** 为当前会话单独指定项目目录；传 null 恢复跟随智能体默认。 */
+    fun setSessionProjectDir(path: String?) {
+        val conn = currentConnection ?: return
+        val chatId = _state.value.currentChatId ?: return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    if (path == null) {
+                        api.clearChatProjectDirs(conn, chatId)
+                    } else {
+                        api.setChatProjectDirs(conn, chatId, listOf(path to null))
+                    }
+                }
+            }.onSuccess {
+                refreshProjectDir()
+            }.onFailure { e ->
+                val msg = if (e is ApiException && e.code == 400) {
+                    Texts.get(R.string.chatvm_project_dir_invalid)
+                } else {
+                    friendly(e)
+                }
+                _state.update { it.copy(error = msg) }
+            }
         }
     }
 
@@ -1370,6 +1448,14 @@ class ChatViewModel(
         return runCatching {
             withContext(Dispatchers.IO) { api.browseDirs(conn, path) }
         }.getOrNull()
+    }
+
+    /** 在浏览中的目录下新建子目录；成功返回 true。 */
+    suspend fun createBrowsedDir(parent: String, name: String): Boolean {
+        val conn = currentConnection ?: return false
+        return runCatching {
+            withContext(Dispatchers.IO) { api.createBrowsedDir(conn, parent, name) }
+        }.isSuccess
     }
 
     /** 切换工作区目录。`path` 为 null 时恢复工作区默认目录。 */
@@ -1713,6 +1799,7 @@ class ChatViewModel(
                 }
                 loadDraft(chatId)
             }
+            refreshProjectDir()
             refreshThinking()
             refreshModels()
             startPolling()

@@ -16,12 +16,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +44,7 @@ import io.qwenpaw.node.data.model.CronJobStateDto
 import io.qwenpaw.node.ui.i18n.Texts
 import io.qwenpaw.node.ui.theme.QwenIcons
 import io.qwenpaw.node.ui.theme.qwenSwitchColors
+import kotlinx.serialization.json.booleanOrNull
 import java.time.ZoneId
 
 /**
@@ -61,6 +65,10 @@ internal fun CronSection(
     dismissError: () -> Unit,
     onNew: () -> Unit,
     onEdit: (CronJobSpecDto) -> Unit,
+    /** 修改服务端用户时区；IA 名称由服务端校验。 */
+    onSetTimezone: (String) -> Unit = {},
+    onHeartbeat: (Boolean) -> Unit = {},
+    onRunHeartbeat: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var menuFor by remember { mutableStateOf<String?>(null) }
@@ -79,11 +87,54 @@ internal fun CronSection(
             )
         }
 
+        state.heartbeat?.let { hb ->
+            val enabled = hb["enabled"]?.let {
+                runCatching { (it as kotlinx.serialization.json.JsonPrimitive).booleanOrNull }
+                    .getOrNull()
+            } ?: false
+            Card {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.cron_heartbeat_title),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = stringResource(R.string.cron_heartbeat_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = enabled,
+                        enabled = !state.heartbeatSaving,
+                        onCheckedChange = onHeartbeat,
+                    )
+                }
+                Divider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onRunHeartbeat) {
+                        Text(stringResource(R.string.cron_heartbeat_run))
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         if (isUtcPlus8(state.serverTimezone) == false) {
             CronTimezoneHint(
                 serverTimezone = state.serverTimezone.orEmpty(),
                 jobs = state.jobs,
                 states = state.states,
+                onSetTimezone = onSetTimezone,
             )
         }
 
@@ -237,7 +288,10 @@ private fun CronTimezoneHint(
     serverTimezone: String,
     jobs: List<CronJobSpecDto>,
     states: Map<String, CronJobStateDto>,
+    onSetTimezone: (String) -> Unit,
 ) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember(serverTimezone) { mutableStateOf(serverTimezone) }
     val serverZone = remember(serverTimezone) { runCatching { ZoneId.of(serverTimezone) }.getOrNull() }
         ?: return
     val beijing = ZoneId.of(CRON_TIMEZONE)
@@ -268,7 +322,52 @@ private fun CronTimezoneHint(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(8.dp))
+            TextButton(
+                onClick = {
+                    draft = serverTimezone
+                    editing = true
+                },
+            ) {
+                Text(stringResource(R.string.cron_timezone_edit))
+            }
         }
+    }
+    if (editing) {
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text(stringResource(R.string.cron_timezone_dialog_title)) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.cron_timezone_dialog_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        editing = false
+                        onSetTimezone(draft.trim())
+                    },
+                ) {
+                    Text(stringResource(R.string.action_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = false }) {
+                    Text(stringResource(R.string.cron_timezone_cancel))
+                }
+            },
+        )
     }
     Spacer(Modifier.height(12.dp))
 }

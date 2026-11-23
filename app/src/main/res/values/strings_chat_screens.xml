@@ -131,6 +131,9 @@
     <string name="chattop_approval_strict_hint">每次工具调用和外部文件访问前均需审批</string>
     <string name="chattop_approval_smart">智能</string>
     <string name="chattop_approval_smart_hint">低风险工具调用和外部文件访问操作自动执行，中高风险需审批</string>
+    <string name="chattop_approval_jev">决策模型模式</string>
+    <string name="chattop_approval_jev_hint">由决策模型评估高风险工具调用，需先配置决策模型</string>
+    <string name="chattop_approval_need_decision">先在默认模型中配置决策模型</string>
     <string name="chattop_approval_auto">自动</string>
     <string name="chattop_approval_auto_hint">仅命中工具和文件审批规则的操作需审批（默认）</string>
     <string name="chattop_approval_off">关闭防护</string>
@@ -229,12 +232,17 @@
     <string name="chatdir_desc">智能体在这个目录下读写文件。这里填的是服务端上的绝对路径，不是手机路径。</string>
     <string name="chatdir_is_default">当前为工作区默认目录</string>
     <string name="chatdir_is_custom">当前为自定义目录</string>
+    <string name="chatdir_session_only">仅本会话使用</string>
+    <string name="chatdir_session_hint">只覆盖当前对话；其他对话仍跟随智能体默认目录。</string>
     <string name="chatdir_reset">恢复工作区默认目录</string>
     <string name="chatdir_browse">浏览目录</string>
     <string name="chatdir_parent">上级</string>
     <string name="chatdir_error">无法读取这个目录，可能不存在或没有权限</string>
     <string name="chatdir_empty">这个目录下没有子目录</string>
     <string name="chatdir_use">使用此目录</string>
+    <string name="chatdir_new_folder">新目录名</string>
+    <string name="chatdir_new_action">新建</string>
+    <string name="chatdir_create_failed">创建目录失败</string>
 
     <!-- 魔法命令 MagicCommandsDialog -->
     <string name="chatcmd_title">魔法命令</string>

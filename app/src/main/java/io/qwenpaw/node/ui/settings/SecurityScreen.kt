@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -30,6 +33,10 @@ import io.qwenpaw.node.R
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.common.DestructiveActionDialog
 import io.qwenpaw.node.ui.theme.QwenIcons
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** 安全页的四个开关。确认弹窗只关心「被关闭的是哪一组」。 */
 private enum class GuardKind { TOOL, FILE, SANDBOX }
@@ -48,13 +55,20 @@ fun SecurityScreen(
     onToolGuard: (Boolean) -> Unit,
     onFileGuard: (Boolean) -> Unit,
     onSandbox: (Boolean) -> Unit,
+    /** 拒绝路径保护；仅 Windows 服务端可切换。 */
+    onDenyPaths: (Boolean) -> Unit = {},
     onSkillScanner: (String) -> Unit,
     onDismissNotice: () -> Unit,
     /** 进入免鉴权地址页；未接线时行仍然显示，点按没有反应。 */
     onOpenAllowNoAuthHosts: () -> Unit = {},
+    onClearBlockedHistory: () -> Unit = {},
+    onRemoveBlockedEntry: (Int) -> Unit = {},
+    onAddWhitelist: (String) -> Unit = {},
+    onRemoveWhitelist: (String) -> Unit = {},
 ) {
     var pendingDisable by remember { mutableStateOf<GuardKind?>(null) }
     var showRules by remember { mutableStateOf(false) }
+    var showScannerAdmin by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { onEnsureLoaded() }
 
@@ -63,6 +77,17 @@ fun SecurityScreen(
         GuardKind.FILE -> stringResource(R.string.security_confirm_file_guard)
         GuardKind.SANDBOX -> stringResource(R.string.security_confirm_sandbox)
         null -> ""
+    }
+
+    if (showScannerAdmin) {
+        ScannerAdminDialog(
+            state = state,
+            onClearHistory = onClearBlockedHistory,
+            onRemoveEntry = onRemoveBlockedEntry,
+            onAddWhitelist = onAddWhitelist,
+            onRemoveWhitelist = onRemoveWhitelist,
+            onDismiss = { showScannerAdmin = false },
+        )
     }
 
     Scaffold(
@@ -263,6 +288,41 @@ fun SecurityScreen(
                         )
                     }
                 }
+                Divider()
+                val deny = state.denyPaths
+                if (deny?.platformSupported == true) {
+                    SwitchRow(
+                        title = stringResource(R.string.security_deny_paths_title),
+                        subtitle = if (deny.active) {
+                            stringResource(
+                                R.string.security_deny_paths_protected,
+                                deny.protectedPaths.size,
+                            )
+                        } else {
+                            stringResource(R.string.security_deny_paths_hint)
+                        },
+                        checked = deny.active,
+                        enabled = !state.saving,
+                        onCheckedChange = onDenyPaths,
+                    )
+                } else {
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        Text(
+                            text = stringResource(R.string.security_deny_paths_title),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            text = if (deny == null) {
+                                stringResource(R.string.security_deny_paths_unread)
+                            } else {
+                                deny.message?.takeIf { it.isNotBlank() }
+                                    ?: stringResource(R.string.security_deny_paths_unsupported)
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
 
             SectionHeader(stringResource(R.string.security_section_skill_scanner))
@@ -286,6 +346,13 @@ fun SecurityScreen(
                                 onClick = { onSkillScanner(code) },
                             )
                         }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        enabled = !state.saving,
+                        onClick = { showScannerAdmin = true },
+                    ) {
+                        Text(stringResource(R.string.security_scanner_admin))
                     }
                 }
             }
@@ -331,4 +398,111 @@ fun SecurityScreen(
             onDismiss = { pendingDisable = null },
         )
     }
+}
+
+@Composable
+private fun ScannerAdminDialog(
+    state: SecurityUiState,
+    onClearHistory: () -> Unit,
+    onRemoveEntry: (Int) -> Unit,
+    onAddWhitelist: (String) -> Unit,
+    onRemoveWhitelist: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var draft by remember { mutableStateOf("") }
+    val whitelist = state.skillScanner?.get("whitelist")?.jsonArray
+        ?.mapNotNull { element ->
+            element.jsonObject["skill_name"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
+        }
+        .orEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.security_scanner_admin)) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = stringResource(R.string.security_scanner_history_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.blockedHistory.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.security_scanner_history_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    TextButton(
+                        enabled = !state.saving,
+                        onClick = onClearHistory,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                    ) {
+                        Text(stringResource(R.string.security_scanner_history_clear))
+                    }
+                    state.blockedHistory.forEachIndexed { index, entry ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = entry.toString(),
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                enabled = !state.saving,
+                                onClick = { onRemoveEntry(index) },
+                            ) {
+                                Text(stringResource(R.string.security_scanner_history_remove))
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.security_scanner_whitelist_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(R.string.security_scanner_whitelist_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                whitelist.forEach { name ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            enabled = !state.saving,
+                            onClick = { onRemoveWhitelist(name) },
+                        ) {
+                            Text(stringResource(R.string.security_scanner_history_remove))
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.security_scanner_whitelist_title)) },
+                )
+                TextButton(
+                    enabled = draft.isNotBlank() && !state.saving,
+                    onClick = {
+                        onAddWhitelist(draft)
+                        draft = ""
+                    },
+                ) {
+                    Text(stringResource(R.string.security_scanner_whitelist_add))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+    )
 }

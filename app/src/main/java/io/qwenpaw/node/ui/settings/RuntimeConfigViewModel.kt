@@ -18,14 +18,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /** ACP 单张表单。保留原始对象，保存时只替换七个字段。 */
 data class AcpAgentForm(
@@ -79,6 +83,29 @@ data class HarnessUiState(
     val waitingLogin: String? = null,
 )
 
+/** 智能体附加设置：系统提示文件、MD 语言、编码模式与顾问模式。 */
+data class AgentExtrasUiState(
+    val promptFiles: List<String> = emptyList(),
+    val availableFiles: List<String> = emptyList(),
+    val language: String = "",
+    val codingEnabled: Boolean = false,
+    val advisor: JsonObject? = null,
+    val loops: kotlinx.serialization.json.JsonArray =
+        kotlinx.serialization.json.JsonArray(emptyList()),
+    val customLoops: kotlinx.serialization.json.JsonArray =
+        kotlinx.serialization.json.JsonArray(emptyList()),
+    /** 自定义循环的 JSON 编辑草稿；null 表示编辑器关闭。 */
+    val customLoopDraft: String? = null,
+    val customLoopEditingId: String? = null,
+    val customLoopSaving: Boolean = false,
+    val customLoopError: String? = null,
+    val loading: Boolean = false,
+    val saving: Boolean = false,
+    val loaded: Boolean = false,
+    val error: String? = null,
+    val notice: String? = null,
+)
+
 /**
  * 运行时：ACP 表单与 Harness 登录。
  *
@@ -96,6 +123,9 @@ class RuntimeConfigViewModel(
 
     private val _harness = MutableStateFlow(HarnessUiState())
     val harness: StateFlow<HarnessUiState> = _harness.asStateFlow()
+
+    private val _agentExtras = MutableStateFlow(AgentExtrasUiState())
+    val agentExtras: StateFlow<AgentExtrasUiState> = _agentExtras.asStateFlow()
 
     private var loginPoll: Job? = null
 
@@ -178,6 +208,298 @@ class RuntimeConfigViewModel(
 
     fun dismissAcpNotice() {
         _acp.update { it.copy(notice = null, error = null) }
+    }
+
+    // ---------------- 智能体附加设置 ----------------
+
+    fun loadAgentExtras(force: Boolean = false) {
+        if (!force && (_agentExtras.value.loaded || _agentExtras.value.loading)) return
+        val conn = connection() ?: return
+        _agentExtras.update { it.copy(loading = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val prompts = api.systemPromptFiles(conn)
+                    val files = runCatching { api.workspaceWorkingFiles(conn) }
+                        .getOrDefault(emptyList())
+                    val language = api.workspaceLanguage(conn)
+                    val coding = api.codingMode(conn)
+                    val advisor = runCatching { api.advisorMode(conn) }.getOrNull()
+                    val loops = runCatching { api.loops(conn) }
+                        .getOrDefault(kotlinx.serialization.json.JsonArray(emptyList()))
+                    val customLoops = runCatching { api.customLoops(conn) }
+                        .getOrDefault(kotlinx.serialization.json.JsonArray(emptyList()))
+                    AgentExtrasSnapshot(
+                        promptFiles = prompts,
+                        availableFiles = files.map { it.filename }.filter { it.isNotBlank() },
+                        language = language,
+                        codingEnabled = coding.enabled,
+                        advisor = advisor,
+                        loops = loops,
+                        customLoops = customLoops,
+                    )
+                }
+            }.onSuccess { snap ->
+                _agentExtras.value = AgentExtrasUiState(
+                    promptFiles = snap.promptFiles,
+                    availableFiles = snap.availableFiles,
+                    language = snap.language,
+                    codingEnabled = snap.codingEnabled,
+                    advisor = snap.advisor,
+                    loops = snap.loops,
+                    customLoops = snap.customLoops,
+                    loaded = true,
+                )
+            }.onFailure { e ->
+                _agentExtras.update {
+                    it.copy(loading = false, loaded = true, error = ErrorText.of(e))
+                }
+            }
+        }
+    }
+
+    /** 勾选/取消一个系统提示文件；整份列表回写。 */
+    fun setPromptFile(file: String, enabled: Boolean) {
+        val conn = connection() ?: return
+        val current = _agentExtras.value
+        val next = if (enabled) {
+            (current.promptFiles + file).distinct()
+        } else {
+            current.promptFiles - file
+        }
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setSystemPromptFiles(conn, next) }
+            }.onSuccess { saved ->
+                _agentExtras.update { it.copy(promptFiles = saved, saving = false) }
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun setAgentLanguage(language: String) {
+        val conn = connection() ?: return
+        val trimmed = language.trim()
+        if (trimmed.isEmpty()) return
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setWorkspaceLanguage(conn, trimmed) }
+            }.onSuccess { saved ->
+                _agentExtras.update {
+                    it.copy(
+                        language = saved,
+                        saving = false,
+                        notice = Texts.get(R.string.runtime_notice_language_saved),
+                    )
+                }
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun setCodingEnabled(enabled: Boolean) {
+        val conn = connection() ?: return
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setCodingMode(conn, enabled) }
+            }.onSuccess { saved ->
+                _agentExtras.update { it.copy(codingEnabled = saved.enabled, saving = false) }
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun setAdvisorEnabled(enabled: Boolean) {
+        val conn = connection() ?: return
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.updateAdvisorMode(conn, buildJsonObject { put("enabled", enabled) })
+                }
+            }.onSuccess { saved ->
+                _agentExtras.update { it.copy(advisor = saved, saving = false) }
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    /** 顾问模式的单项开关：plan_enabled / followup_enabled / on_demand_enabled。 */
+    fun setAdvisorFlag(field: String, enabled: Boolean) {
+        val conn = connection() ?: return
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.updateAdvisorMode(conn, buildJsonObject { put(field, enabled) })
+                }
+            }.onSuccess { saved ->
+                _agentExtras.update { it.copy(advisor = saved, saving = false) }
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    /** 顾问模式的数值项：最大咨询次数与参考最近消息数。 */
+    fun setAdvisorNumbers(maxConsults: Int?, recentMessages: Int?) {
+        val conn = connection() ?: return
+        val body = buildJsonObject {
+            maxConsults?.let { put("max_consults", it) }
+            recentMessages?.let { put("recent_messages", it) }
+        }
+        if (body.isEmpty()) return
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.updateAdvisorMode(conn, body) }
+            }.onSuccess { saved ->
+                _agentExtras.update { it.copy(advisor = saved, saving = false) }
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun dismissAgentExtrasNotice() {
+        _agentExtras.update { it.copy(notice = null, error = null) }
+    }
+
+    // ---------------- 自定义循环 ----------------
+
+    private val prettyJson = kotlinx.serialization.json.Json {
+        prettyPrint = true
+        encodeDefaults = true
+    }
+
+    fun openCreateCustomLoop() {
+        val template = buildJsonObject {
+            put("id", "")
+            put("name", "")
+            put("description", "")
+            put("slash_command", "")
+            put("enabled", false)
+            putJsonArray("gates") { }
+        }
+        _agentExtras.update {
+            it.copy(
+                customLoopDraft = prettyJson.encodeToString(
+                    JsonObject.serializer(),
+                    template,
+                ),
+                customLoopEditingId = null,
+                customLoopError = null,
+            )
+        }
+    }
+
+    fun openEditCustomLoop(id: String) {
+        val target = _agentExtras.value.customLoops.firstOrNull {
+            it.jsonObject["id"]?.jsonPrimitive?.contentOrNull == id
+        }?.jsonObject ?: return
+        _agentExtras.update {
+            it.copy(
+                customLoopDraft = prettyJson.encodeToString(JsonObject.serializer(), target),
+                customLoopEditingId = id,
+                customLoopError = null,
+            )
+        }
+    }
+
+    fun setCustomLoopDraft(value: String) {
+        _agentExtras.update { it.copy(customLoopDraft = value) }
+    }
+
+    fun closeCustomLoopEditor() {
+        _agentExtras.update {
+            it.copy(customLoopDraft = null, customLoopEditingId = null, customLoopError = null)
+        }
+    }
+
+    /** 保存自定义循环；服务端校验失败时保留草稿并在编辑器内显示原文。 */
+    fun saveCustomLoop() {
+        val conn = connection() ?: return
+        val current = _agentExtras.value
+        val draft = current.customLoopDraft ?: return
+        val body = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(draft).jsonObject
+        }.getOrNull()
+        if (body == null) {
+            _agentExtras.update { it.copy(customLoopError = Texts.get(R.string.runtime_loop_json_invalid)) }
+            return
+        }
+        _agentExtras.update { it.copy(customLoopSaving = true, customLoopError = null) }
+        scope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val editingId = current.customLoopEditingId
+                    if (editingId == null) {
+                        api.createCustomLoop(conn, body)
+                    } else {
+                        api.updateCustomLoop(conn, editingId, body)
+                    }
+                }
+            }
+            result.onSuccess {
+                _agentExtras.update {
+                    it.copy(
+                        customLoopSaving = false,
+                        customLoopDraft = null,
+                        customLoopEditingId = null,
+                        notice = Texts.get(R.string.runtime_loop_saved),
+                    )
+                }
+                loadAgentExtras(force = true)
+            }.onFailure { e ->
+                _agentExtras.update {
+                    it.copy(
+                        customLoopSaving = false,
+                        customLoopError = ErrorText.of(e),
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteCustomLoop(id: String) {
+        val conn = connection() ?: return
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.deleteCustomLoop(conn, id) }
+            }.onSuccess {
+                _agentExtras.update {
+                    it.copy(saving = false, notice = Texts.get(R.string.runtime_loop_deleted))
+                }
+                loadAgentExtras(force = true)
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun duplicateCustomLoop(id: String) {
+        val conn = connection() ?: return
+        _agentExtras.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.duplicateCustomLoop(conn, id) }
+            }.onSuccess {
+                _agentExtras.update {
+                    it.copy(saving = false, notice = Texts.get(R.string.runtime_loop_duplicated))
+                }
+                loadAgentExtras(force = true)
+            }.onFailure { e ->
+                _agentExtras.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
     }
 
     // ---------------- Harness ----------------
@@ -440,3 +762,13 @@ internal fun JsonObject.toLoginUi(providerId: String): HarnessLoginUi {
 
 private fun JsonElement.jsonPrimitiveOrNull(): JsonPrimitive? =
     runCatching { jsonPrimitive }.getOrNull()
+
+private data class AgentExtrasSnapshot(
+    val promptFiles: List<String>,
+    val availableFiles: List<String>,
+    val language: String,
+    val codingEnabled: Boolean,
+    val advisor: JsonObject?,
+    val loops: kotlinx.serialization.json.JsonArray,
+    val customLoops: kotlinx.serialization.json.JsonArray,
+)

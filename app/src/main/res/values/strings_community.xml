@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="community_title">社区</string>
+    <string name="community_search_hint">搜索标题或内容</string>
+    <string name="community_empty">暂无内容</string>
+    <string name="community_load_more">加载更多</string>
+    <string name="community_comments">评论</string>
+    <string name="community_no_comments">暂无评论</string>
+    <string name="community_type_all">全部</string>
+    <string name="community_type_question">问题</string>
+    <string name="community_type_article">文章</string>
+    <string name="community_type_discussion">讨论</string>
+    <string name="community_sort_recommended">推荐</string>
+    <string name="community_sort_latest">最新</string>
+    <string name="community_sort_waiting">待解决</string>
+    <string name="community_author">作者：%1$s</string>
+    <string name="community_stats">赞 %1$d，评论 %2$d，浏览 %3$d</string>
+    <string name="community_accepted">已采纳</string>
+</resources>

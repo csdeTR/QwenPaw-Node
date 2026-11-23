@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -27,6 +28,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -97,8 +99,12 @@ fun SkillPoolScreen(
     onSelectAllSkills: () -> Unit = {},
     onInvertSelection: () -> Unit = {},
     onClearSelection: () -> Unit = {},
+    /** 从 URL（bundle_url）导入技能池。 */
+    onImportUrl: (String) -> Unit = {},
 ) {
     var deleting by remember { mutableStateOf<PoolSkillDto?>(null) }
+    var urlDialog by remember { mutableStateOf(false) }
+    var urlDraft by remember { mutableStateOf("") }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val zipLauncher = rememberLauncherForActivityResult(
@@ -115,6 +121,44 @@ fun SkillPoolScreen(
     }
 
     WebEntryDialog(pageKey = "skill_pool", onOpenConsole = onOpenConsole)
+    if (urlDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!state.urlImporting) urlDialog = false },
+            title = { Text(stringResource(R.string.skill_pool_url_dialog_title)) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = urlDraft,
+                        onValueChange = { urlDraft = it },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.skill_pool_url_import)) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.skill_pool_url_dialog_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = urlDraft.isNotBlank() && !state.urlImporting,
+                    onClick = {
+                        onImportUrl(urlDraft)
+                        urlDialog = false
+                    },
+                ) {
+                    Text(stringResource(R.string.skill_pool_url_action))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { urlDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
     LaunchedEffect(Unit) { onRefresh() }
 
     Scaffold(
@@ -142,6 +186,9 @@ fun SkillPoolScreen(
                 )
                 TextButton(onClick = onToggleBatch) {
                     Text(stringResource(R.string.skill_pool_batch))
+                }
+                TextButton(onClick = { urlDialog = true }) {
+                    Text(stringResource(R.string.skill_pool_url_import))
                 }
                 TextButton(onClick = onBeginCreate) {
                     Text(stringResource(R.string.skill_pool_new))

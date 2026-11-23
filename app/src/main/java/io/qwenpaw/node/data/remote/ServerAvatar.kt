@@ -91,6 +91,54 @@ class ServerAvatarClient(private val api: QwenPawApi, private val dir: File) {
         dir.listFiles()?.forEach { it.delete() }
     }
 
+    /** 上传并选中一张新头像，返回新的缓存文件。服务端上传后会自动选中。 */
+    fun upload(conn: Connection, bytes: ByteArray, mime: String): File? {
+        api.uploadAvatar(conn, bytes, mime)
+        return refresh(conn)
+    }
+
+    /** 在历史头像中切换；[imageId] 为 null 表示清除选择。 */
+    fun select(conn: Connection, imageId: String?): File? {
+        api.selectAvatar(conn, imageId)
+        return refresh(conn)
+    }
+
+    /**
+     * 拉取历史头像并下载缩略图，供选择界面使用。
+     *
+     * 单独放在 `history/` 子目录：与当前头像的缓存分开，切换历史不会把
+     * 正在显示的图删掉。服务端上限 12 张、每张 2 MB，总量可控。
+     */
+    fun history(conn: Connection): List<AvatarHistoryEntry> {
+        val profile = api.avatarProfile(conn)
+        val historyDir = File(dir, "history").apply { mkdirs() }
+        val ids = profile.history.map { it.id }.toSet()
+        historyDir.listFiles()?.forEach { file ->
+            val id = file.name.substringBefore(".img")
+            if (id !in ids) file.delete()
+        }
+        return profile.history.map { item ->
+            val target = File(historyDir, "${item.id}.img")
+            if (!target.isFile) {
+                val bytes = runCatching { api.avatarImage(conn, item.id) }.getOrNull()
+                if (bytes != null) {
+                    val part = File(historyDir, "${item.id}.img.part")
+                    part.writeBytes(bytes)
+                    if (!part.renameTo(target)) {
+                        part.delete()
+                        target.writeBytes(bytes)
+                    }
+                }
+            }
+            AvatarHistoryEntry(
+                id = item.id,
+                createdAt = item.createdAt,
+                file = target.takeIf { it.isFile },
+                selected = item.id == profile.selected,
+            )
+        }
+    }
+
     private fun readIndex(): String? =
         runCatching { indexFile().readText().trim() }.getOrNull()?.takeIf { it.isNotBlank() }
 
@@ -106,3 +154,11 @@ class ServerAvatarClient(private val api: QwenPawApi, private val dir: File) {
         }
     }
 }
+
+/** 一张历史头像及其本地缩略图。 */
+data class AvatarHistoryEntry(
+    val id: String,
+    val createdAt: String?,
+    val file: File?,
+    val selected: Boolean,
+)

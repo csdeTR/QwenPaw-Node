@@ -149,6 +149,9 @@ data class ModelsAdminUiState(
     val probes: Map<String, ProbeMultimodalDto> = emptyMap(),
     val testingModels: Set<String> = emptySet(),
     val modelTestResults: Map<String, TestConnectionDto> = emptyMap(),
+    val modelInfo: kotlinx.serialization.json.JsonObject? = null,
+    val modelInfoLoading: Boolean = false,
+    val modelInfoError: String? = null,
     val loading: Boolean = false,
     val saving: Boolean = false,
     val busy: Boolean = false,
@@ -382,13 +385,35 @@ class ModelsAdminViewModel(
         }
     }
 
-    fun beginAddModel() = _state.update { it.copy(editing = ModelEditState(), adding = true) }
-
-    fun beginEditModel(modelId: String, modelName: String) = _state.update {
-        it.copy(editing = ModelEditState(id = modelId, name = modelName), adding = false)
+    fun beginAddModel() = _state.update {
+        it.copy(
+            editing = ModelEditState(),
+            adding = true,
+            modelInfo = null,
+            modelInfoError = null,
+        )
     }
 
-    fun cancelEditModel() = _state.update { it.copy(editing = null, adding = false) }
+    /** 回填全部字段：决策模型会隐藏部分输入，保存时不能把原值覆盖成默认值。 */
+    fun beginEditModel(model: PoolModelDto) = _state.update {
+        it.copy(
+            editing = ModelEditState(
+                id = model.id,
+                name = model.name,
+                isFree = model.isFree,
+                supportsImage = model.supportsImage == true,
+                supportsVideo = model.supportsVideo == true,
+                modelType = model.modelType.ifBlank { "chat" },
+            ),
+            adding = false,
+            modelInfo = null,
+            modelInfoError = null,
+        )
+    }
+
+    fun cancelEditModel() = _state.update {
+        it.copy(editing = null, adding = false, modelInfo = null, modelInfoError = null)
+    }
 
     fun setEditId(value: String) = _state.update { it.copy(editing = it.editing?.copy(id = value)) }
     fun setEditName(value: String) = _state.update { it.copy(editing = it.editing?.copy(name = value)) }
@@ -396,6 +421,28 @@ class ModelsAdminViewModel(
     fun setEditImage(value: Boolean) = _state.update { it.copy(editing = it.editing?.copy(supportsImage = value)) }
     fun setEditVideo(value: Boolean) = _state.update { it.copy(editing = it.editing?.copy(supportsVideo = value)) }
     fun setEditType(value: String) = _state.update { it.copy(editing = it.editing?.copy(modelType = value)) }
+
+    /** 按当前输入的服务商与模型 id 查询元数据，只做展示，不写入配置。 */
+    fun loadModelInfo() {
+        val conn = connection() ?: return
+        val current = _state.value
+        val modelId = current.editing?.id?.trim().orEmpty()
+        if (modelId.isEmpty()) return
+        _state.update { it.copy(modelInfoLoading = true, modelInfoError = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.modelInfo(conn, current.providerId, modelId)
+                }
+            }.onSuccess { info ->
+                _state.update { it.copy(modelInfo = info, modelInfoLoading = false) }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(modelInfoLoading = false, modelInfoError = ErrorText.of(e))
+                }
+            }
+        }
+    }
 
     fun saveModel() {
         val conn = connection() ?: return

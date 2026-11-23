@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,6 +61,11 @@ import io.qwenpaw.node.R
 import io.qwenpaw.node.data.remote.UploadConflictPolicy
 import io.qwenpaw.node.ui.common.GetMultipleContent
 import io.qwenpaw.node.ui.theme.QwenIcons
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.launch
 
 /**
@@ -101,6 +107,23 @@ fun WorkspaceScreen(
     onLoadMore: () -> Unit,
     onOpenRoot: (WorkspaceRoot) -> Unit,
     onOpenGit: () -> Unit = {},
+    onLoadProjects: () -> Unit = {},
+    onSetDefaultProject: (String) -> Unit = {},
+    onResetProjectDirs: () -> Unit = {},
+    onCreateProject: (String) -> Unit = {},
+    onImportLocalProject: (String) -> Unit = {},
+    onDismissProjectMessage: () -> Unit = {},
+    onUploadProjectZip: (io.qwenpaw.node.data.remote.SafZipSource) -> Unit = {},
+    onCloneProject: (String) -> Unit = {},
+    onBinaryFile: suspend (WorkspaceEntry) -> ByteArray? = { null },
+    onLoadMemoryStatus: () -> Unit = {},
+    onTestMemoryEmbedding: () -> Unit = {},
+    onDismissMemoryStatusMessage: () -> Unit = {},
+    onReindexMemory: () -> Unit = {},
+    onUndoMemoryReindex: () -> Unit = {},
+    onLoadMemoryTags: () -> Unit = {},
+    onLoadMemoryTagFiles: (String) -> Unit = {},
+    onLoadMemoryGraph: () -> Unit = {},
     onEnter: (WorkspaceEntry) -> Unit,
     onUp: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
@@ -119,6 +142,8 @@ fun WorkspaceScreen(
     val scope = rememberCoroutineScope()
     // 预览页需要「下载当前文件」，而预览模型只带标题与体积，因此记住打开它的条目。
     var openedEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
+    var showProjects by remember { mutableStateOf(false) }
+    var showMemoryStatus by remember { mutableStateOf(false) }
     // 选中文件到开始上传之间要复制到 cacheDir；期间用模态提示挡住重复触发。
     var staging by remember { mutableStateOf(false) }
 
@@ -140,6 +165,18 @@ fun WorkspaceScreen(
                 ).show()
             }
             if (result.staged.isNotEmpty()) write.upload(result.staged)
+        }
+    }
+
+    val projectZipLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val source = runCatching {
+                io.qwenpaw.node.data.remote.SafZipSource.prepare(context, uri)
+            }.getOrNull()
+            if (source != null) onUploadProjectZip(source)
         }
     }
 
@@ -173,6 +210,15 @@ fun WorkspaceScreen(
                 onRefresh = onRefresh,
                 onOpenRoot = onOpenRoot,
                 onOpenGit = onOpenGit,
+                onManageProjects = {
+                    showProjects = true
+                    onLoadProjects()
+                },
+                onMemoryStatus = {
+                    showMemoryStatus = true
+                    onLoadMemoryStatus()
+                    onLoadMemoryTags()
+                },
                 onRequestDirectoryDownload = onRequestDirectoryDownload,
                 onUpload = {
                     write.beginUpload()
@@ -203,6 +249,34 @@ fun WorkspaceScreen(
                     onLoadMore = onLoadMoreContent,
                     onDownload = { entry -> entry?.let(onRequestDownload) },
                     onEdit = write.beginEdit,
+                    onOpenExternal = openedEntry?.let { entry ->
+                        {
+                            scope.launch {
+                                val bytes = onBinaryFile(entry) ?: return@launch
+                                val mime = android.webkit.MimeTypeMap.getSingleton()
+                                    .getMimeTypeFromExtension(
+                                        entry.name.substringAfterLast('.', "").lowercase(),
+                                    )
+                                    ?: "application/octet-stream"
+                                val file = kotlinx.coroutines.withContext(
+                                    kotlinx.coroutines.Dispatchers.IO,
+                                ) {
+                                    val dir = java.io.File(context.cacheDir, "external")
+                                        .apply { mkdirs() }
+                                    java.io.File(dir, entry.name).also { it.writeBytes(bytes) }
+                                }
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    context.packageName + ".fileprovider",
+                                    file,
+                                )
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                    .setDataAndType(uri, mime)
+                                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                runCatching { context.startActivity(intent) }
+                            }
+                        }
+                    },
                 )
 
                 state.loading && state.entries.isEmpty() -> Box(
@@ -245,6 +319,33 @@ fun WorkspaceScreen(
             onCancel = write.cancelUpload,
             onDismiss = write.dismissUpload,
             onConflict = write.resolveUploadConflict,
+        )
+    }
+
+    if (showProjects) {
+        ProjectAdminDialog(
+            state = state,
+            onSetDefault = onSetDefaultProject,
+            onReset = onResetProjectDirs,
+            onCreate = onCreateProject,
+            onImport = onImportLocalProject,
+            onUploadZip = { projectZipLauncher.launch("application/zip") },
+            onClone = onCloneProject,
+            onDismissMessage = onDismissProjectMessage,
+            onDismiss = { showProjects = false },
+        )
+    }
+
+    if (showMemoryStatus) {
+        MemoryStatusDialog(
+            state = state,
+            onTestEmbedding = onTestMemoryEmbedding,
+            onDismissMessage = onDismissMemoryStatusMessage,
+            onReindex = onReindexMemory,
+            onUndoReindex = onUndoMemoryReindex,
+            onLoadTagFiles = onLoadMemoryTagFiles,
+            onLoadGraph = onLoadMemoryGraph,
+            onDismiss = { showMemoryStatus = false },
         )
     }
 
@@ -308,6 +409,8 @@ private fun WorkspaceTopBar(
     onRefresh: () -> Unit,
     onOpenRoot: (WorkspaceRoot) -> Unit,
     onOpenGit: () -> Unit,
+    onManageProjects: () -> Unit,
+    onMemoryStatus: () -> Unit,
     onRequestDirectoryDownload: () -> Unit,
     onUpload: () -> Unit,
 ) {
@@ -357,6 +460,20 @@ private fun WorkspaceTopBar(
                     icon = QwenIcons.workflow,
                     description = stringResource(R.string.workspace_git_commit),
                     onClick = onOpenGit,
+                )
+            }
+            if (state.root == WorkspaceRoot.PROJECT) {
+                IconCircle(
+                    icon = QwenIcons.folder,
+                    description = stringResource(R.string.workspace_project_manage),
+                    onClick = onManageProjects,
+                )
+            }
+            if (state.root == WorkspaceRoot.MEMORY) {
+                IconCircle(
+                    icon = QwenIcons.info,
+                    description = stringResource(R.string.workspace_memory_status),
+                    onClick = onMemoryStatus,
                 )
             }
             if (state.canUpload) {
@@ -551,6 +668,7 @@ private fun PreviewContent(
     onLoadMore: () -> Unit,
     onDownload: (WorkspaceEntry?) -> Unit,
     onEdit: () -> Unit,
+    onOpenExternal: (() -> Unit)? = null,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -605,6 +723,7 @@ private fun PreviewContent(
             is WorkspacePreview.Unsupported -> UnsupportedPreview(
                 preview = preview,
                 onDownload = { onDownload(entry) },
+                onOpenExternal = onOpenExternal,
             )
         }
     }
@@ -714,7 +833,11 @@ private fun ImagePreview(preview: WorkspacePreview.Image, onDownload: () -> Unit
 }
 
 @Composable
-private fun UnsupportedPreview(preview: WorkspacePreview.Unsupported, onDownload: () -> Unit) {
+private fun UnsupportedPreview(
+    preview: WorkspacePreview.Unsupported,
+    onDownload: () -> Unit,
+    onOpenExternal: (() -> Unit)? = null,
+) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
@@ -739,6 +862,11 @@ private fun UnsupportedPreview(preview: WorkspacePreview.Unsupported, onDownload
             }
             Spacer(Modifier.height(10.dp))
             TextButton(onClick = onDownload) { Text(stringResource(R.string.workspace_download)) }
+            onOpenExternal?.let { open ->
+                TextButton(onClick = open) {
+                    Text(stringResource(R.string.workspace_open_external))
+                }
+            }
         }
     }
 }
@@ -903,6 +1031,361 @@ private fun WorkspaceEntry.icon(): androidx.compose.ui.graphics.vector.ImageVect
 private fun prettyTime(raw: String): String {
     val normalized = raw.replace('T', ' ')
     return if (normalized.length >= 16) normalized.take(16) else normalized
+}
+
+@Composable
+private fun ProjectAdminDialog(
+    state: WorkspaceUiState,
+    onSetDefault: (String) -> Unit,
+    onReset: () -> Unit,
+    onCreate: (String) -> Unit,
+    onImport: (String) -> Unit,
+    onUploadZip: () -> Unit,
+    onClone: (String) -> Unit,
+    onDismissMessage: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var createDraft by remember { mutableStateOf("") }
+    var importDraft by remember { mutableStateOf("") }
+    var cloneDraft by remember { mutableStateOf("") }
+    val dirs = state.projectDirs?.get("project_dirs")?.jsonArray
+        ?.mapNotNull { element ->
+            element.jsonObject["path"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        }
+        .orEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.workspace_project_dialog_title)) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = stringResource(R.string.workspace_project_current_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (dirs.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.workspace_project_none),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    dirs.forEach { path ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = path,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                enabled = !state.projectBusy,
+                                onClick = { onSetDefault(path) },
+                            ) {
+                                Text(stringResource(R.string.workspace_project_use))
+                            }
+                        }
+                    }
+                    TextButton(
+                        enabled = !state.projectBusy,
+                        onClick = onReset,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text(stringResource(R.string.workspace_project_reset))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.workspace_project_list_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                state.projects.forEach { element ->
+                    val obj = element.jsonObject
+                    val path = obj["path"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: path
+                    val active = obj["is_active"]?.jsonPrimitive?.booleanOrNull == true
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = if (active) {
+                                stringResource(R.string.workspace_project_active, name)
+                            } else {
+                                name
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            enabled = !state.projectBusy && path.isNotBlank(),
+                            onClick = { onSetDefault(path) },
+                        ) {
+                            Text(stringResource(R.string.workspace_project_use))
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = createDraft,
+                    onValueChange = { createDraft = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.workspace_project_create_hint)) },
+                )
+                TextButton(
+                    enabled = createDraft.isNotBlank() && !state.projectBusy,
+                    onClick = {
+                        onCreate(createDraft)
+                        createDraft = ""
+                    },
+                ) {
+                    Text(stringResource(R.string.workspace_project_create_action))
+                }
+                OutlinedTextField(
+                    value = importDraft,
+                    onValueChange = { importDraft = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.workspace_project_import_hint)) },
+                )
+                TextButton(
+                    enabled = importDraft.isNotBlank() && !state.projectBusy,
+                    onClick = {
+                        onImport(importDraft)
+                        importDraft = ""
+                    },
+                ) {
+                    Text(stringResource(R.string.workspace_project_import_action))
+                }
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    enabled = !state.projectBusy,
+                    onClick = onUploadZip,
+                ) {
+                    Text(stringResource(R.string.workspace_project_upload_zip))
+                }
+                Text(
+                    text = stringResource(R.string.workspace_project_upload_zip_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = cloneDraft,
+                    onValueChange = { cloneDraft = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.workspace_project_clone_hint)) },
+                )
+                TextButton(
+                    enabled = cloneDraft.isNotBlank() && !state.projectCloning && !state.projectBusy,
+                    onClick = { onClone(cloneDraft) },
+                ) {
+                    Text(
+                        stringResource(
+                            if (state.projectCloning) {
+                                R.string.workspace_project_cloning
+                            } else {
+                                R.string.workspace_project_clone_action
+                            },
+                        ),
+                    )
+                }
+                state.projectCloneLog?.takeIf { it.isNotBlank() }?.let { log ->
+                    Text(
+                        text = log,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                state.projectError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onDismissMessage),
+                    )
+                }
+                state.projectNotice?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onDismissMessage),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+    )
+}
+
+@Composable
+private fun MemoryStatusDialog(
+    state: WorkspaceUiState,
+    onTestEmbedding: () -> Unit,
+    onDismissMessage: () -> Unit,
+    onReindex: () -> Unit,
+    onUndoReindex: () -> Unit,
+    onLoadTagFiles: (String) -> Unit,
+    onLoadGraph: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.workspace_memory_status_title)) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = stringResource(R.string.workspace_memory_status_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.memoryStatusBusy) {
+                    Spacer(Modifier.height(8.dp))
+                    CircularProgressIndicator()
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.workspace_memory_backends_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = state.memoryBackends.takeIf { it.isNotEmpty() }?.toString()
+                        ?: stringResource(R.string.workspace_memory_status_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.workspace_memory_status_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = state.memoryStatus?.toString()
+                        ?: stringResource(R.string.workspace_memory_status_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                state.memoryRuntime?.let { runtime ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = runtime.toString(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    enabled = !state.memoryStatusBusy,
+                    onClick = onTestEmbedding,
+                ) {
+                    Text(stringResource(R.string.workspace_memory_embedding_test))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        enabled = !state.memoryStatusBusy,
+                        onClick = onReindex,
+                    ) {
+                        Text(stringResource(R.string.workspace_memory_reindex))
+                    }
+                    TextButton(
+                        enabled = !state.memoryStatusBusy,
+                        onClick = onUndoReindex,
+                    ) {
+                        Text(stringResource(R.string.workspace_memory_reindex_undo_action))
+                    }
+                    TextButton(
+                        enabled = !state.memoryStatusBusy,
+                        onClick = onLoadGraph,
+                    ) {
+                        Text(stringResource(R.string.workspace_memory_graph_load))
+                    }
+                }
+                val tags = state.memoryTags?.get("items")?.jsonArray.orEmpty()
+                if (tags.isNotEmpty()) {
+                    Text(
+                        text = stringResource(R.string.workspace_memory_tags_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    tags.forEach { element ->
+                        val obj = element.jsonObject
+                        val tag = obj["tag"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        val count = obj["file_count"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        if (tag.isNotBlank()) {
+                            TextButton(onClick = { onLoadTagFiles(tag) }) {
+                                Text("$tag ($count)")
+                            }
+                        }
+                    }
+                }
+                state.memoryTagFiles?.let { files ->
+                    Text(
+                        text = stringResource(R.string.workspace_memory_tag_files_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = files.toString(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                state.memoryGraph?.let { graph ->
+                    Text(
+                        text = stringResource(R.string.workspace_memory_graph_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = graph.toString(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                state.memoryNotice?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onDismissMessage),
+                    )
+                }
+                state.embeddingTestResult?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onDismissMessage),
+                    )
+                }
+                state.memoryStatusError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onDismissMessage),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+    )
 }
 
 @Composable

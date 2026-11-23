@@ -16,6 +16,9 @@ import io.qwenpaw.node.data.remote.QwenPawApi
 import io.qwenpaw.node.data.remote.UploadConflictException
 import io.qwenpaw.node.data.remote.UploadConflictPolicy
 import io.qwenpaw.node.ui.i18n.Texts
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -158,6 +161,27 @@ data class WorkspaceUiState(
     val edit: EditState? = null,
     val upload: UploadState? = null,
     val uploadLimitMb: Long? = null,
+    /** 项目目录管理的快照；null 表示还没读过。 */
+    val projectDirs: kotlinx.serialization.json.JsonObject? = null,
+    val projects: kotlinx.serialization.json.JsonArray =
+        kotlinx.serialization.json.JsonArray(emptyList()),
+    val projectBusy: Boolean = false,
+    val projectNotice: String? = null,
+    val projectError: String? = null,
+    val projectCloning: Boolean = false,
+    val projectCloneLog: String? = null,
+    /** 记忆运行时与后端状态；null 表示还没读过。 */
+    val memoryStatus: kotlinx.serialization.json.JsonObject? = null,
+    val memoryRuntime: kotlinx.serialization.json.JsonObject? = null,
+    val memoryBackends: kotlinx.serialization.json.JsonArray =
+        kotlinx.serialization.json.JsonArray(emptyList()),
+    val memoryStatusBusy: Boolean = false,
+    val memoryStatusError: String? = null,
+    val embeddingTestResult: String? = null,
+    val memoryTags: kotlinx.serialization.json.JsonObject? = null,
+    val memoryTagFiles: kotlinx.serialization.json.JsonObject? = null,
+    val memoryGraph: kotlinx.serialization.json.JsonObject? = null,
+    val memoryNotice: String? = null,
 ) {
     /** 记忆根是平铺的 Markdown 列表，没有子目录，也没有下载。 */
     val canDownloadDirectory: Boolean
@@ -170,19 +194,19 @@ data class WorkspaceUiState(
      * 只有完整读过一遍的文本文件才能编辑。
      *
      * 服务端没有「按区间写入」，保存的是整篇内容；`eof=false` 时本地只有前几块，
-     * 写回去会把文件截断。`etag` 为空同样不放行——没有版本号就无法做乐观锁。
-     * 记忆根没有 `etag` 与写入端点，固定只读。
+     * 写回去会把文件截断。普通工作区还要 `etag` 做乐观锁；记忆根没有 etag，
+     * 走独立的写入端点，保存即覆盖。
      */
     val canEdit: Boolean
         get() {
             val text = preview as? WorkspacePreview.Text ?: return false
-            return root != WorkspaceRoot.MEMORY && text.eof && text.etag != null &&
-                text.content.length <= EDIT_MAX_CHARS
+            val memory = root == WorkspaceRoot.MEMORY
+            return text.eof && text.content.length <= EDIT_MAX_CHARS &&
+                (memory || text.etag != null)
         }
 
-    /** 上传只在列表页可用；记忆根没有写入端点。 */
-    val canUpload: Boolean
-        get() = root != WorkspaceRoot.MEMORY && preview == null && !preparing &&
+    /** 上传只在列表页可用；记忆根没有整文件上传，编辑走记忆写入端点。 */
+    val canUpload: Boolean        get() = root != WorkspaceRoot.MEMORY && preview == null && !preparing &&
             download?.phase != DownloadPhase.RUNNING &&
             upload?.phase != UploadPhase.RUNNING &&
             upload?.phase != UploadPhase.WAITING_CONFLICT
@@ -192,9 +216,9 @@ data class WorkspaceUiState(
         get() {
             val text = preview as? WorkspacePreview.Text ?: return null
             return when {
-                root == WorkspaceRoot.MEMORY -> Texts.get(R.string.workspace_edit_blocked_memory)
                 !text.eof -> Texts.get(R.string.workspace_edit_blocked_incomplete)
-                text.etag == null -> Texts.get(R.string.workspace_edit_blocked_no_version)
+                root != WorkspaceRoot.MEMORY && text.etag == null ->
+                    Texts.get(R.string.workspace_edit_blocked_no_version)
                 text.content.length > EDIT_MAX_CHARS ->
                     Texts.get(R.string.workspace_edit_blocked_too_large)
                 else -> null
@@ -284,6 +308,8 @@ class WorkspaceViewModel(
     private var editJob: Job? = null
     private var uploadJob: Job? = null
     private var limitJob: Job? = null
+    private var watchJob: Job? = null
+    private var watchRoot: String? = null
 
     /** 冲突挂起时等待用户决定的文件；重试时只发这些。 */
     private var pendingConflicts: List<StagedUpload> = emptyList()
@@ -307,12 +333,393 @@ class WorkspaceViewModel(
      * 值可能从 null 变成具体数字，因此每次进入页面都重新取；失败时保持 null
      * （不拦截上传），错误也不打扰用户——上限只是提示性护栏。
      */
+    /** 读取二进制文件原始字节，供系统应用打开；失败返回 null。 */
+    suspend fun binaryFile(entry: WorkspaceEntry): ByteArray? {
+        val conn = connection() ?: return null
+        return runCatching {
+            withContext(Dispatchers.IO) { api.workspaceBinaryFile(conn, entry.path) }
+        }.getOrNull()
+    }
+
     private fun ensureUploadLimit() {
         if (limitJob?.isActive == true) return
         val conn = connection() ?: return
         limitJob = scope.launch {
             runCatching { withContext(Dispatchers.IO) { api.workspaceUploadLimit(conn) } }
                 .onSuccess { limit -> _state.update { it.copy(uploadLimitMb = limit) } }
+        }
+    }
+
+    // ---------------- 项目目录管理 ----------------
+
+    fun loadProjectAdmin() {
+        val conn = connection() ?: return
+        _state.update { it.copy(projectBusy = true, projectError = null, projectNotice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.projectDirs(conn) to api.listProjects(conn)
+                }
+            }.onSuccess { (dirs, list) ->
+                _state.update {
+                    it.copy(projectDirs = dirs, projects = list, projectBusy = false)
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(projectBusy = false, projectError = workspaceError(e)) }
+            }
+        }
+    }
+
+    /** 把某个项目目录设为当前（智能体默认）。 */
+    fun setDefaultProject(path: String) {
+        val conn = connection() ?: return
+        _state.update { it.copy(projectBusy = true, projectError = null, projectNotice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.setProjectDirs(conn, listOf(path to null))
+                }
+            }.onSuccess { dirs ->
+                _state.update {
+                    it.copy(
+                        projectDirs = dirs,
+                        projectBusy = false,
+                        projectNotice = Texts.get(R.string.workspace_project_saved),
+                    )
+                }
+                refresh()
+            }.onFailure { e ->
+                _state.update { it.copy(projectBusy = false, projectError = workspaceError(e)) }
+            }
+        }
+    }
+
+    /** 恢复工作区默认目录。 */
+    fun resetProjectDirs() {
+        val conn = connection() ?: return
+        _state.update { it.copy(projectBusy = true, projectError = null, projectNotice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.resetProjectDirs(conn) }
+            }.onSuccess { dirs ->
+                _state.update {
+                    it.copy(
+                        projectDirs = dirs,
+                        projectBusy = false,
+                        projectNotice = Texts.get(R.string.workspace_project_reset_done),
+                    )
+                }
+                refresh()
+            }.onFailure { e ->
+                _state.update { it.copy(projectBusy = false, projectError = workspaceError(e)) }
+            }
+        }
+    }
+
+    fun createProject(name: String) {
+        val conn = connection() ?: return
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        _state.update { it.copy(projectBusy = true, projectError = null, projectNotice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.createProject(conn, trimmed) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        projectBusy = false,
+                        projectNotice = Texts.get(R.string.workspace_project_created),
+                    )
+                }
+                loadProjectAdmin()
+            }.onFailure { e ->
+                _state.update { it.copy(projectBusy = false, projectError = workspaceError(e)) }
+            }
+        }
+    }
+
+    fun importLocalProject(path: String) {
+        val conn = connection() ?: return
+        val trimmed = path.trim()
+        if (trimmed.isEmpty()) return
+        _state.update { it.copy(projectBusy = true, projectError = null, projectNotice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.importLocalProject(conn, trimmed) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        projectBusy = false,
+                        projectNotice = Texts.get(R.string.workspace_project_imported),
+                    )
+                }
+                loadProjectAdmin()
+            }.onFailure { e ->
+                _state.update { it.copy(projectBusy = false, projectError = workspaceError(e)) }
+            }
+        }
+    }
+
+    /** 上传 zip 到 coding_projects；目标目录名取压缩包文件名去掉 .zip。 */
+    fun uploadProjectZip(source: io.qwenpaw.node.data.remote.SafZipSource) {        val conn = connection() ?: return
+        val name = source.fileName.removeSuffix(".zip").removeSuffix(".ZIP").trim()
+        if (name.isEmpty()) return
+        _state.update { it.copy(projectBusy = true, projectError = null, projectNotice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.uploadProjectZip(conn, name, source) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        projectBusy = false,
+                        projectNotice = Texts.get(R.string.workspace_project_uploaded),
+                    )
+                }
+                loadProjectAdmin()
+            }.onFailure { e ->
+                _state.update { it.copy(projectBusy = false, projectError = workspaceError(e)) }
+            }
+            source.cleanup()
+        }
+    }
+
+    /** 克隆公开仓库到 coding_projects；日志流式追加。 */
+    fun cloneProject(url: String) {
+        val conn = connection() ?: return
+        val trimmed = url.trim()
+        if (trimmed.isEmpty() || _state.value.projectCloning) return
+        _state.update {
+            it.copy(
+                projectCloning = true,
+                projectCloneLog = "",
+                projectError = null,
+                projectNotice = null,
+            )
+        }
+        scope.launch {
+            try {
+                api.cloneProjectFrames(conn, trimmed).collect { frame ->
+                    val obj = runCatching {
+                        kotlinx.serialization.json.Json.parseToJsonElement(frame).jsonObject
+                    }.getOrNull() ?: return@collect
+                    when (obj["type"]?.jsonPrimitive?.contentOrNull) {
+                        "log" -> {
+                            val line = obj["line"]?.jsonPrimitive?.contentOrNull ?: return@collect
+                            _state.update { current ->
+                                current.copy(
+                                    projectCloneLog = (
+                                        (current.projectCloneLog ?: "") + line + "\n"
+                                        ).takeLast(4000),
+                                )
+                            }
+                        }
+
+                        "done" -> {
+                            val name = obj["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                            _state.update {
+                                it.copy(
+                                    projectCloning = false,
+                                    projectNotice = Texts.get(
+                                        R.string.workspace_project_cloned,
+                                        name,
+                                    ),
+                                )
+                            }
+                            loadProjectAdmin()
+                        }
+
+                        "error" -> {
+                            val detail = obj["detail"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                            _state.update {
+                                it.copy(
+                                    projectCloning = false,
+                                    projectError = Texts.get(
+                                        R.string.workspace_project_clone_failed,
+                                        detail,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            } finally {
+                _state.update { it.copy(projectCloning = false) }
+            }
+        }
+    }
+
+    fun dismissProjectMessage() {
+        _state.update { it.copy(projectError = null, projectNotice = null) }
+    }
+
+    /** 订阅工作区文件变化；只在列表页自动刷新，预览与编辑时不打断用户。 */
+    fun startWatching() {
+        val conn = connection() ?: return
+        val root = _state.value.root.param
+        if (watchJob?.isActive == true && watchRoot == root) return
+        watchJob?.cancel()
+        watchRoot = root
+        watchJob = scope.launch {
+            api.workspaceWatchFrames(conn, root).collect { frame ->
+                if (!frame.contains("\"file_change\"")) return@collect
+                if (_state.value.preview == null && _state.value.edit == null) {
+                    kotlinx.coroutines.delay(600)
+                    refresh()
+                }
+            }
+        }
+    }
+
+    fun stopWatching() {
+        watchJob?.cancel()
+        watchJob = null
+        watchRoot = null
+    }
+
+    /** 读取记忆运行时状态与后端列表；失败只影响这个面板。 */
+    fun loadMemoryStatus() {
+        val conn = connection() ?: return
+        _state.update { it.copy(memoryStatusBusy = true, memoryStatusError = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    Triple(
+                        api.memoryStatus(conn),
+                        runCatching { api.memoryRuntimeStatus(conn) }.getOrNull(),
+                        runCatching { api.memoryBackends(conn) }
+                            .getOrDefault(kotlinx.serialization.json.JsonArray(emptyList())),
+                    )
+                }
+            }.onSuccess { (status, runtime, backends) ->
+                _state.update {
+                    it.copy(
+                        memoryStatus = status,
+                        memoryRuntime = runtime,
+                        memoryBackends = backends,
+                        memoryStatusBusy = false,
+                    )
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(memoryStatusBusy = false, memoryStatusError = workspaceError(e))
+                }
+            }
+        }
+    }
+
+    /** 用运行配置里的嵌入模型配置做一次真实请求。 */
+    fun testMemoryEmbedding() {
+        val conn = connection() ?: return
+        _state.update {
+            it.copy(memoryStatusBusy = true, memoryStatusError = null, embeddingTestResult = null)
+        }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val running = api.runningConfig(conn)
+                    val embedding = running["reme_light_memory_config"]
+                        ?.let { it as? kotlinx.serialization.json.JsonObject }
+                        ?.get("embedding_model_config")
+                        ?.let { it as? kotlinx.serialization.json.JsonObject }
+                        ?: error(Texts.get(R.string.workspace_memory_embedding_missing))
+                    api.testEmbedding(conn, embedding)
+                }
+            }.onSuccess { result ->
+                val message = result["message"]
+                    ?.let { it as? kotlinx.serialization.json.JsonPrimitive }
+                    ?.content
+                    ?: result.toString()
+                _state.update {
+                    it.copy(memoryStatusBusy = false, embeddingTestResult = message)
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        memoryStatusBusy = false,
+                        memoryStatusError = if (e is IllegalStateException) {
+                            e.message
+                        } else {
+                            workspaceError(e)
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissMemoryStatusMessage() {
+        _state.update { it.copy(memoryStatusError = null, embeddingTestResult = null, memoryNotice = null) }
+    }
+
+    /** 重建记忆索引；kind 为 all/bm25/embedding。 */
+    fun reindexMemory(kind: String = "all") {
+        val conn = connection() ?: return
+        _state.update {
+            it.copy(memoryStatusBusy = true, memoryStatusError = null, memoryNotice = null)
+        }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.reindexMemory(conn, kind) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        memoryStatusBusy = false,
+                        memoryNotice = Texts.get(R.string.workspace_memory_reindex_done),
+                    )
+                }
+                loadMemoryStatus()
+            }.onFailure { e ->
+                _state.update { it.copy(memoryStatusBusy = false, memoryStatusError = workspaceError(e)) }
+            }
+        }
+    }
+
+    /** 撤销待重建的嵌入配置。 */
+    fun undoMemoryReindex() {
+        val conn = connection() ?: return
+        _state.update {
+            it.copy(memoryStatusBusy = true, memoryStatusError = null, memoryNotice = null)
+        }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.undoMemoryReindex(conn) }
+            }.onSuccess {
+                _state.update {
+                    it.copy(
+                        memoryStatusBusy = false,
+                        memoryNotice = Texts.get(R.string.workspace_memory_reindex_undo_done),
+                    )
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(memoryStatusBusy = false, memoryStatusError = workspaceError(e)) }
+            }
+        }
+    }
+
+    fun loadMemoryTags() {
+        val conn = connection() ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.memoryTags(conn) } }
+                .onSuccess { tags -> _state.update { it.copy(memoryTags = tags) } }
+                .onFailure { e -> _state.update { it.copy(memoryStatusError = workspaceError(e)) } }
+        }
+    }
+
+    fun loadMemoryTagFiles(tag: String) {
+        val conn = connection() ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.memoryTagFiles(conn, tag) } }
+                .onSuccess { files -> _state.update { it.copy(memoryTagFiles = files) } }
+                .onFailure { e -> _state.update { it.copy(memoryStatusError = workspaceError(e)) } }
+        }
+    }
+
+    fun loadMemoryGraph() {
+        val conn = connection() ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.memoryGraph(conn) } }
+                .onSuccess { graph -> _state.update { it.copy(memoryGraph = graph) } }
+                .onFailure { e -> _state.update { it.copy(memoryStatusError = workspaceError(e)) } }
         }
     }
 
@@ -671,7 +1078,7 @@ class WorkspaceViewModel(
         if (!state.canEdit) return
         val text = state.preview as? WorkspacePreview.Text ?: return
         val entry = findEntry(text.title) ?: return
-        val etag = text.etag ?: return
+        val etag = text.etag.orEmpty()
         editJob?.cancel()
         _state.update {
             it.copy(
@@ -724,6 +1131,30 @@ class WorkspaceViewModel(
         }
         editJob = scope.launch {
             try {
+                if (edit.rootParam == WorkspaceRoot.MEMORY.param) {
+                    withContext(Dispatchers.IO) {
+                        api.workspaceWriteMemory(conn, edit.path, edit.draft)
+                    }
+                    _state.update { state ->
+                        val current = state.edit ?: return@update state
+                        state.copy(
+                            edit = current.copy(
+                                savedText = edit.draft,
+                                saving = false,
+                                saved = current.draft == edit.draft,
+                                conflict = false,
+                                error = null,
+                            ),
+                            preview = savedPreview(
+                                state.preview,
+                                edit.title,
+                                edit.draft,
+                                current.etag,
+                            ),
+                        )
+                    }
+                    return@launch
+                }
                 val result = withContext(Dispatchers.IO) {
                     api.workspaceSaveFileContent(conn, edit.rootParam, edit.path, edit.draft, etag)
                 }

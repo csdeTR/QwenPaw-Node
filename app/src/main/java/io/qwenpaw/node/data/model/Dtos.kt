@@ -616,6 +616,7 @@ data class ThinkingViewDto(
     @SerialName("provider_id") val providerId: String? = null,
     @SerialName("model_key") val modelKey: String? = null,
     @SerialName("effective_max_input_length") val effectiveMaxInputLength: Long? = null,
+    @SerialName("decision_model_configured") val decisionModelConfigured: Boolean = false,
     val control: ThinkingControlDto? = null,
     val value: ThinkingValueDto? = null,
     val effective: ThinkingValueDto? = null,

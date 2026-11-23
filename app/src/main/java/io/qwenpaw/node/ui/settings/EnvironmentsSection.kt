@@ -38,6 +38,12 @@ import io.qwenpaw.node.ui.i18n.Texts
 /** 服务端 `mutability` 取值，可热改的那一类。 */
 private const val HOT_RUNTIME = "hot_runtime"
 
+/** Web 登录认证项只在未设置或显式为 false 时置顶。 */
+internal fun authPinned(vars: List<EnvVarDto>): Boolean {
+    val auth = vars.firstOrNull { it.key == "QWENPAW_AUTH_ENABLED" }
+    return auth == null || auth.value.trim().equals("false", ignoreCase = true)
+}
+
 /**
  * 环境变量。
  *
@@ -72,6 +78,7 @@ internal fun EnvironmentsSection(
     var pendingAuthValue by remember { mutableStateOf<String?>(null) }
     val authKey = "QWENPAW_AUTH_ENABLED"
     val authVar = vars.firstOrNull { it.key == authKey }
+    val pinAuth = authPinned(vars)
 
     val specByKey = remember(catalog) { catalog.associateBy { it.key } }
     val liveSpecs = remember(catalog) { catalog.filter { it.mutability == HOT_RUNTIME } }
@@ -81,42 +88,45 @@ internal fun EnvironmentsSection(
         modifier = modifier
             .fillMaxWidth(),
     ) {
-        SectionHeader(
-            stringResource(R.string.env_header_auth),
-            stringResource(R.string.env_desc_auth_enabled),
-        )
-        Card {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = !loading) {
-                        editing = EnvVarDto(key = authKey, value = authVar?.value.orEmpty())
+        if (pinAuth) {
+            SectionHeader(
+                stringResource(R.string.env_header_auth),
+                stringResource(R.string.env_desc_auth_enabled),
+            )
+            Card {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !loading) {
+                            editing = EnvVarDto(key = authKey, value = authVar?.value.orEmpty())
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(authKey, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = when {
+                                authVar == null -> stringResource(R.string.env_auth_unset)
+                                authVar.value.trim().equals("false", ignoreCase = true) ->
+                                    stringResource(R.string.env_auth_off)
+                                else -> stringResource(R.string.env_auth_set)
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(authKey, style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        text = if (authVar == null) {
-                            stringResource(R.string.env_auth_unset)
-                        } else {
-                            stringResource(R.string.env_auth_set)
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = stringResource(R.string.action_edit),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary,
                     )
                 }
-                Text(
-                    text = stringResource(R.string.action_edit),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.secondary,
-                )
             }
         }
 
-        // 鉴权开关在上方常驻显示；已配置列表里不再重复这一行。
-        val visibleVars = vars.filter { it.key != authKey }
+        // 未启用时才常驻置顶；已开启后回到普通列表，仍然可以编辑。
+        val visibleVars = if (pinAuth) vars.filter { it.key != authKey } else vars
         SectionHeader(
             stringResource(R.string.env_header_configured),
             pluralStringResource(R.plurals.env_count, visibleVars.size, visibleVars.size),

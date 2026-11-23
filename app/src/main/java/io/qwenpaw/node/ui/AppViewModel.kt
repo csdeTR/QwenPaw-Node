@@ -485,6 +485,14 @@ class AppViewModel(
     val serverAvatarFile: kotlinx.coroutines.flow.StateFlow<java.io.File?> =
         _serverAvatarFile.asStateFlow()
 
+    private val _serverAvatarHistory =
+        MutableStateFlow<List<io.qwenpaw.node.data.remote.AvatarHistoryEntry>>(emptyList())
+
+    /** 服务端历史头像与本地缩略图，供设置页选择。 */
+    val serverAvatarHistory:
+        kotlinx.coroutines.flow.StateFlow<List<io.qwenpaw.node.data.remote.AvatarHistoryEntry>> =
+        _serverAvatarHistory.asStateFlow()
+
     /**
      * 联网核对服务端头像。
      *
@@ -511,6 +519,58 @@ class AppViewModel(
             // 请求失败与「服务端确实没设头像」在这里都是 null，无法区分；
             // 因此仅在磁盘缓存也消失（refresh 内部已 clear）时才把界面置空。
             _serverAvatarFile.value = file ?: runCatching { client.cached() }.getOrNull()
+            _serverAvatarHistory.value = withContext(Dispatchers.IO) {
+                runCatching { client.history(conn) }.getOrDefault(emptyList())
+            }
+        }
+    }
+
+    /** 上传一张服务端头像；服务端上传后自动选中。 */
+    fun uploadServerAvatar(bytes: ByteArray, mime: String) {
+        val client = serverAvatarClient ?: return
+        val instance = repository.active() ?: return
+        val conn = io.qwenpaw.node.data.remote.Connection(
+            repository.resolvedBaseUrl(instance),
+            instance.token,
+            instance.agentId,
+            instance.basicAuth,
+        )
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { client.upload(conn, bytes, mime) }
+            }.onSuccess { file ->
+                _serverAvatarFile.value = file
+                _serverAvatarHistory.value = withContext(Dispatchers.IO) {
+                    runCatching { client.history(conn) }.getOrDefault(emptyList())
+                }
+                chatViewModel.notify(Texts.get(R.string.app_server_avatar_updated))
+            }.onFailure { e ->
+                chatViewModel.notify(io.qwenpaw.node.data.remote.ErrorText.of(e))
+            }
+        }
+    }
+
+    /** 在服务端历史头像中切换；传 null 清除选择。 */
+    fun selectServerAvatar(id: String?) {
+        val client = serverAvatarClient ?: return
+        val instance = repository.active() ?: return
+        val conn = io.qwenpaw.node.data.remote.Connection(
+            repository.resolvedBaseUrl(instance),
+            instance.token,
+            instance.agentId,
+            instance.basicAuth,
+        )
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { client.select(conn, id) }
+            }.onSuccess { file ->
+                _serverAvatarFile.value = file
+                _serverAvatarHistory.value = withContext(Dispatchers.IO) {
+                    runCatching { client.history(conn) }.getOrDefault(emptyList())
+                }
+            }.onFailure { e ->
+                chatViewModel.notify(io.qwenpaw.node.data.remote.ErrorText.of(e))
+            }
         }
     }
 
@@ -972,6 +1032,47 @@ class AppViewModel(
             // 否则点完没有任何反应。通知通道沿用 ChatViewModel 的轻提示，
             // Nav 层已经在订阅它并转成 Toast。
             chatViewModel.notify(note ?: Texts.get(R.string.app_logged_out))
+        }
+    }
+
+    /**
+     * 修改账号用户名/密码。
+     *
+     * 服务端返回新 token，旧 token 立即失效。必须先落盘再提示成功：
+     * 内存里继续用旧值、或写盘失败后进程被杀，都会把用户锁在实例外。
+     */
+    fun updateProfile(
+        instanceId: String,
+        currentPassword: String,
+        newUsername: String?,
+        newPassword: String?,
+    ) {
+        val instance = instances.value.firstOrNull { it.id == instanceId } ?: return
+        val conn = repository.connection(instance) ?: return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.updateProfile(conn, currentPassword, newUsername, newPassword)
+                }
+            }.onSuccess { issued ->
+                repository.update(
+                    instance.copy(
+                        token = issued.token,
+                        username = issued.username ?: instance.username,
+                    ),
+                )
+                val updated = instances.value.firstOrNull { it.id == instanceId }
+                if (updated != null && repository.activeId.value == instanceId) bind(updated)
+                chatViewModel.notify(Texts.get(R.string.app_profile_updated))
+            }.onFailure { e ->
+                chatViewModel.notify(
+                    if (e is io.qwenpaw.node.data.remote.ApiException && e.code == 403) {
+                        Texts.get(R.string.app_profile_auth_disabled)
+                    } else {
+                        io.qwenpaw.node.data.remote.ErrorText.of(e)
+                    },
+                )
+            }
         }
     }
 
@@ -1992,6 +2093,15 @@ class AppViewModel(
                 ),
             network = network,
         ).also { workspaceHolder = it }
+
+    private var communityHolder: io.qwenpaw.node.ui.community.CommunityViewModel? = null
+
+    /** 社区只读浏览。列表公开可读，不要求先连接社区账号。 */
+    val community: io.qwenpaw.node.ui.community.CommunityViewModel
+        get() = communityHolder ?: io.qwenpaw.node.ui.community.CommunityViewModel(
+            api = api,
+            connection = ::activeConnection,
+        ).also { communityHolder = it }
 
     /** 终端。分组按实例 + 智能体持久化；页面离开停轮询，不删服务端终端。 */
     private var terminalHolder: io.qwenpaw.node.ui.terminal.TerminalViewModel? = null

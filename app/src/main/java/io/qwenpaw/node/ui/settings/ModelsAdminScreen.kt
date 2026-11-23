@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -76,7 +78,7 @@ fun ModelsAdminScreen(
     onDiscover: () -> Unit,
     onDelete: () -> Unit,
     onBeginAddModel: () -> Unit,
-    onBeginEditModel: (String, String) -> Unit,
+    onBeginEditModel: (io.qwenpaw.node.data.model.PoolModelDto) -> Unit,
     onCancelEditModel: () -> Unit,
     onSaveModel: () -> Unit,
     onEditId: (String) -> Unit,
@@ -85,6 +87,7 @@ fun ModelsAdminScreen(
     onEditImage: (Boolean) -> Unit,
     onEditVideo: (Boolean) -> Unit,
     onEditType: (String) -> Unit,
+    onLoadModelInfo: () -> Unit = {},
     onDeleteModel: (String) -> Unit,
     onToggleVisibility: (String, Boolean) -> Unit,
     onProbe: (String) -> Unit,
@@ -270,12 +273,16 @@ fun ModelsAdminScreen(
     state.editing?.let { editing ->
         ModelEditDialog(
             editing = editing,
+            modelInfo = state.modelInfo,
+            modelInfoLoading = state.modelInfoLoading,
+            modelInfoError = state.modelInfoError,
             onId = onEditId,
             onName = onEditName,
             onFree = onEditFree,
             onImage = onEditImage,
             onVideo = onEditVideo,
             onType = onEditType,
+            onLoadInfo = onLoadModelInfo,
             onSave = onSaveModel,
             onCancel = onCancelEditModel,
         )
@@ -539,7 +546,7 @@ private fun ModelsTab(
     state: ModelsAdminUiState,
     header: @Composable () -> Unit,
     onAddModel: () -> Unit,
-    onEditModel: (String, String) -> Unit,
+    onEditModel: (io.qwenpaw.node.data.model.PoolModelDto) -> Unit,
     onDeleteModel: (String) -> Unit,
     onToggleVisibility: (String, Boolean) -> Unit,
     onProbe: (String) -> Unit,
@@ -828,12 +835,16 @@ private fun PoolTab(
 @Composable
 private fun ModelEditDialog(
     editing: ModelEditState,
+    modelInfo: kotlinx.serialization.json.JsonObject?,
+    modelInfoLoading: Boolean,
+    modelInfoError: String?,
     onId: (String) -> Unit,
     onName: (String) -> Unit,
     onFree: (Boolean) -> Unit,
     onImage: (Boolean) -> Unit,
     onVideo: (Boolean) -> Unit,
     onType: (String) -> Unit,
+    onLoadInfo: () -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -869,6 +880,13 @@ private fun ModelEditDialog(
                         onType(if (editing.modelType == "chat") "decision" else "chat")
                     }) { Text(editing.modelType) }
                 }
+                if (editing.modelType == "decision") {
+                    Text(
+                        text = stringResource(R.string.models_model_decision_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = editing.isFree, onCheckedChange = onFree)
                     Text(stringResource(R.string.models_admin_is_free))
@@ -880,6 +898,26 @@ private fun ModelEditDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = editing.supportsVideo, onCheckedChange = onVideo)
                     Text(stringResource(R.string.models_admin_supports_video))
+                }
+                TextButton(
+                    enabled = editing.id.isNotBlank() && !modelInfoLoading,
+                    onClick = onLoadInfo,
+                ) {
+                    Text(stringResource(R.string.models_admin_model_info))
+                }
+                if (modelInfoLoading) {
+                    CircularProgressIndicator()
+                }
+                modelInfoError?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                modelInfo?.let { info ->
+                    ModelInfoSummary(info)
+                }
                 }
             }
         },
@@ -893,6 +931,46 @@ private fun ModelEditDialog(
             TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
         },
     )
+}
+
+@Composable
+private fun ModelInfoSummary(info: kotlinx.serialization.json.JsonObject) {
+    fun value(key: String): String? = info[key]?.jsonPrimitive?.contentOrNull
+    val image = value("supports_image") == "true"
+    val video = value("supports_video") == "true"
+    val tools = value("supports_tool_calling") == "true"
+    Text(
+        text = stringResource(
+            R.string.models_admin_info_context,
+            value("max_input_length") ?: "?",
+            value("max_output_length") ?: "?",
+        ),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        text = stringResource(
+            R.string.models_admin_info_caps,
+            stringResource(
+                if (image) R.string.models_admin_supported else R.string.models_admin_unsupported,
+            ),
+            stringResource(
+                if (video) R.string.models_admin_supported else R.string.models_admin_unsupported,
+            ),
+            stringResource(
+                if (tools) R.string.models_admin_supported else R.string.models_admin_unsupported,
+            ),
+        ),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    value("billing")?.let { billing ->
+        Text(
+            text = stringResource(R.string.models_admin_info_billing, billing),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable

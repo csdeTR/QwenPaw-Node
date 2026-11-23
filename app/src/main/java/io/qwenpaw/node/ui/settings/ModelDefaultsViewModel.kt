@@ -173,6 +173,9 @@ data class ModelDefaultsUiState(
     val fallbacks: List<ActiveModelDto> = emptyList(),
     val thinkingLevel: String? = null,
     val thinkingBudget: Long? = null,
+    /** 本地/云端双槽路由；null 表示没取到。 */
+    val llmRouting: JsonObject? = null,
+    val llmSaving: Boolean = false,
 ) {
     fun labelOf(slot: ActiveModelDto?): String? {
         val providerId = slot?.providerId ?: return null
@@ -255,6 +258,7 @@ class ModelDefaultsViewModel(
                     fallbacks = settings?.fallbacks ?: current.fallbacks,
                     thinkingLevel = settings?.thinkingLevel,
                     thinkingBudget = settings?.thinkingBudget,
+                    llmRouting = fetched.llm ?: current.llmRouting,
                     error = fetched.providers.exceptionOrNull()?.let { ErrorText.of(it) },
                 )
             }
@@ -267,6 +271,38 @@ class ModelDefaultsViewModel(
     /** 全局决策模型。 */
     fun setGlobalDecision(providerId: String, model: String) =
         saveGlobal(providerId, model, decision = true)
+
+    /** 本地/云端双槽路由开与关；只改 enabled，其余字段原样回写。 */
+    fun setLlmEnabled(enabled: Boolean) = saveLlmRouting {
+        JsonObject(it + ("enabled" to JsonPrimitive(enabled)))
+    }
+
+    /** 路由模式：`local_first` 或 `cloud_first`。 */
+    fun setLlmMode(mode: String) = saveLlmRouting {
+        JsonObject(it + ("mode" to JsonPrimitive(mode)))
+    }
+
+    private fun saveLlmRouting(transform: (JsonObject) -> JsonObject) {
+        val conn = connection() ?: return
+        val current = _state.value.llmRouting ?: return
+        if (_state.value.llmSaving) return
+        _state.update { it.copy(llmSaving = true, error = null, notice = null) }
+        uiScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setLlmRouting(conn, transform(current)) }
+            }.onSuccess { saved ->
+                _state.update {
+                    it.copy(
+                        llmRouting = saved,
+                        llmSaving = false,
+                        notice = Texts.get(R.string.models_rework_saved),
+                    )
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(llmSaving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
 
     fun setAgentPrimary(providerId: String, model: String) = _state.update {
         it.copy(agentChat = ActiveModelDto(providerId, model), primaryDirty = true)
@@ -413,6 +449,7 @@ class ModelDefaultsViewModel(
         val global: Result<ModelsActiveDto>,
         val agentActive: Result<ModelsActiveDto>,
         val agentSettings: AgentModelSettings?,
+        val llm: JsonObject?,
     )
 
     private data class AgentFetched(
@@ -436,6 +473,7 @@ class ModelDefaultsViewModel(
             global = global,
             agentActive = agentActive,
             agentSettings = agentSettings,
+            llm = runCatching { api.llmRouting(conn) }.getOrNull(),
         )
     }
 

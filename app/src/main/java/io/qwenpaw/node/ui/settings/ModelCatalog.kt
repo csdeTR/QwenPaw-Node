@@ -22,7 +22,16 @@ fun modelChoicesOf(providers: List<ProviderDto>): List<ModelChoice> = providers
                 providerName = provider.name.ifBlank { provider.id },
                 modelId = slot.id,
                 modelName = slot.name.ifBlank { slot.id },
+                modelType = slot.modelType,
             )
         }
     }
     .distinctBy { it.key }
+
+/**
+ * 决策模型选择器只列 `model_type = decision` 的模型。
+ *
+ * 服务端对聊天模型返回 422；在客户端先过滤，避免让用户选到一个保存必失败的值。
+ */
+internal fun decisionChoices(choices: List<ModelChoice>): List<ModelChoice> =
+    choices.filter { it.modelType == "decision" }

@@ -35,6 +35,13 @@
     <string name="models_admin_add_model">添加模型</string>
     <string name="models_admin_model_id">模型 ID</string>
     <string name="models_admin_model_name">显示名</string>
+    <string name="models_admin_model_info">查询模型信息</string>
+    <string name="models_admin_info_context">上下文 %1$s，最大输出 %2$s</string>
+    <string name="models_admin_info_caps">图片 %1$s，视频 %2$s，工具调用 %3$s</string>
+    <string name="models_admin_info_billing">计费：%1$s</string>
+    <string name="models_admin_supported">支持</string>
+    <string name="models_admin_unsupported">不支持</string>
+    <string name="models_model_decision_hint">决策模型仅用于 JEV 审批评估；既有思考、多模态与长度设置会保留，但不再用于聊天。</string>
     <string name="models_admin_model_type">类型</string>
     <string name="models_admin_is_free">免费</string>
     <string name="models_admin_supports_image">支持图片</string>

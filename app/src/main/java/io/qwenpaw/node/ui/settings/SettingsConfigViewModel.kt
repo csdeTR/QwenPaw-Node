@@ -1,6 +1,7 @@
 package io.qwenpaw.node.ui.settings
 
 import io.qwenpaw.node.R
+import io.qwenpaw.node.data.model.DenyPathsProtectionDto
 import io.qwenpaw.node.data.model.EnvCatalogDto
 import io.qwenpaw.node.data.model.EnvVarDto
 import io.qwenpaw.node.data.model.FileGuardDto
@@ -8,6 +9,7 @@ import io.qwenpaw.node.data.model.OffloadPolicyDto
 import io.qwenpaw.node.data.model.SandboxStatusDto
 import io.qwenpaw.node.data.model.ToolDto
 import io.qwenpaw.node.data.model.ToolGuardRuleDto
+import io.qwenpaw.node.data.model.TranscriptionProviderDto
 import io.qwenpaw.node.data.remote.Connection
 import io.qwenpaw.node.data.remote.ErrorText
 import io.qwenpaw.node.data.remote.QwenPawApi
@@ -73,8 +75,12 @@ data class SecurityUiState(
     val rules: List<ToolGuardRuleDto> = emptyList(),
     val fileGuard: FileGuardDto? = null,
     val sandbox: SandboxStatusDto? = null,
+    val denyPaths: DenyPathsProtectionDto? = null,
     val skillScanner: JsonObject? = null,
     val skillScannerMode: String = SKILL_SCANNER_WARN,
+    /** 技能扫描拦截历史。 */
+    val blockedHistory: kotlinx.serialization.json.JsonArray =
+        kotlinx.serialization.json.JsonArray(emptyList()),
     val loading: Boolean = false,
     val saving: Boolean = false,
     val error: String? = null,
@@ -88,6 +94,20 @@ data class ServerSettingsUiState(
     val uploadLimitMb: Long? = null,
     val loading: Boolean = false,
     val error: String? = null,
+    val loaded: Boolean = false,
+)
+
+/** 语音服务端设置：入站音频模式、转写档位、provider 与模型名。 */
+data class VoiceServerUiState(
+    val audioMode: String = "auto",
+    val providerType: String = "disabled",
+    val configuredProviderId: String = "",
+    val providers: List<TranscriptionProviderDto> = emptyList(),
+    val model: String = "",
+    val loading: Boolean = false,
+    val saving: Boolean = false,
+    val error: String? = null,
+    val notice: String? = null,
     val loaded: Boolean = false,
 )
 
@@ -124,6 +144,9 @@ class SettingsConfigViewModel(
 
     private val _serverSettings = MutableStateFlow(ServerSettingsUiState())
     val serverSettings: StateFlow<ServerSettingsUiState> = _serverSettings.asStateFlow()
+
+    private val _voice = MutableStateFlow(VoiceServerUiState())
+    val voice: StateFlow<VoiceServerUiState> = _voice.asStateFlow()
 
     // ---------------- 工具 ----------------
 
@@ -382,7 +405,11 @@ class SettingsConfigViewModel(
                         rules = rules,
                         fileGuard = api.fileGuard(conn),
                         sandbox = api.sandboxStatus(conn),
+                        // 2.2.2 没有这个端点；取不到只影响这一行，不拖垮整页安全配置。
+                        denyPaths = runCatching { api.denyPathsProtection(conn) }.getOrNull(),
                         skillScanner = api.skillScanner(conn),
+                        blockedHistory = runCatching { api.blockedSkillHistory(conn) }
+                            .getOrDefault(kotlinx.serialization.json.JsonArray(emptyList())),
                     )
                 }
             }.onSuccess { snap ->
@@ -392,7 +419,9 @@ class SettingsConfigViewModel(
                     rules = snap.rules,
                     fileGuard = snap.fileGuard,
                     sandbox = snap.sandbox,
+                    denyPaths = snap.denyPaths,
                     skillScanner = snap.skillScanner,
+                    blockedHistory = snap.blockedHistory,
                     skillScannerMode = snap.skillScanner["mode"]?.jsonPrimitive?.contentOrNull
                         ?: SKILL_SCANNER_WARN,
                     loaded = true,
@@ -481,6 +510,33 @@ class SettingsConfigViewModel(
         }
     }
 
+    /** 拒绝路径保护依赖 Windows ACL；其他平台保存会原样返回 `platformSupported=false`。 */
+    fun saveDenyPathsProtection(enabled: Boolean) {
+        val conn = connection() ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setDenyPathsProtection(conn, enabled) }
+            }.onSuccess { status ->
+                _security.update {
+                    it.copy(
+                        denyPaths = status,
+                        saving = false,
+                        notice = Texts.get(
+                            if (enabled) {
+                                R.string.cfgvm_deny_paths_on
+                            } else {
+                                R.string.cfgvm_deny_paths_off
+                            },
+                        ),
+                    )
+                }
+            }.onFailure { e ->
+                _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
     fun saveSkillScannerMode(mode: String) {
         val conn = connection() ?: return
         val raw = _security.value.skillScanner ?: return
@@ -507,6 +563,184 @@ class SettingsConfigViewModel(
 
     fun dismissSecurityNotice() {
         _security.update { it.copy(notice = null, error = null) }
+    }
+
+    fun clearBlockedSkillHistory() {
+        val conn = connection() ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.clearBlockedSkillHistory(conn) }
+            }.onSuccess {
+                _security.update {
+                    it.copy(
+                        blockedHistory = kotlinx.serialization.json.JsonArray(emptyList()),
+                        saving = false,
+                        notice = Texts.get(R.string.security_scanner_history_cleared),
+                    )
+                }
+            }.onFailure { e ->
+                _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun removeBlockedSkillEntry(index: Int) {
+        val conn = connection() ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.removeBlockedSkillEntry(conn, index) }
+            }.onSuccess {
+                val history = _security.value.blockedHistory
+                    .filterIndexed { i, _ -> i != index }
+                _security.update {
+                    it.copy(
+                        blockedHistory = kotlinx.serialization.json.JsonArray(history),
+                        saving = false,
+                    )
+                }
+            }.onFailure { e ->
+                _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun addSkillWhitelist(name: String) {
+        val conn = connection() ?: return
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.addSkillWhitelist(conn, trimmed) }
+            }.onSuccess {
+                val scanner = runCatching {
+                    withContext(Dispatchers.IO) { api.skillScanner(conn) }
+                }.getOrDefault(_security.value.skillScanner ?: JsonObject(emptyMap()))
+                _security.update {
+                    it.copy(
+                        skillScanner = scanner,
+                        saving = false,
+                        notice = Texts.get(R.string.security_scanner_whitelist_added, trimmed),
+                    )
+                }
+            }.onFailure { e ->
+                _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun removeSkillWhitelist(name: String) {
+        val conn = connection() ?: return
+        _security.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.removeSkillWhitelist(conn, name) }
+            }.onSuccess {
+                val scanner = runCatching {
+                    withContext(Dispatchers.IO) { api.skillScanner(conn) }
+                }.getOrDefault(_security.value.skillScanner ?: JsonObject(emptyMap()))
+                _security.update {
+                    it.copy(
+                        skillScanner = scanner,
+                        saving = false,
+                        notice = Texts.get(R.string.security_scanner_whitelist_removed, name),
+                    )
+                }
+            }.onFailure { e ->
+                _security.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    // ---------------- 语音（服务端） ----------------
+
+    /**
+     * 入站音频模式、转写档位、provider 与模型名。
+     *
+     * 读取四项彼此独立；任一项失败就整块显示错误，避免用户以为另外几项保存成功。
+     */
+    fun loadVoiceSettings(force: Boolean = false) {
+        if (!force && (_voice.value.loaded || _voice.value.loading)) return
+        val conn = connection() ?: return
+        _voice.update { it.copy(loading = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val audio = api.audioMode(conn)
+                    val type = api.transcriptionProviderType(conn)
+                    val providers = api.transcriptionProviders(conn)
+                    val model = api.transcriptionModel(conn)
+                    VoiceSnapshot(audio.audioMode, type.providerType, providers, model.model)
+                }
+            }.onSuccess { snap ->
+                _voice.value = VoiceServerUiState(
+                    audioMode = snap.audioMode,
+                    providerType = snap.providerType,
+                    configuredProviderId = snap.providers.configuredProviderId,
+                    providers = snap.providers.providers,
+                    model = snap.model,
+                    loaded = true,
+                )
+            }.onFailure { e ->
+                _voice.update { it.copy(loading = false, loaded = true, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun setAudioMode(mode: String) {
+        val conn = connection() ?: return
+        _voice.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { api.setAudioMode(conn, mode) } }
+                .onSuccess { saved ->
+                    _voice.update { it.copy(audioMode = saved.audioMode, saving = false) }
+                }
+                .onFailure { e -> _voice.update { it.copy(saving = false, error = ErrorText.of(e)) } }
+        }
+    }
+
+    fun setTranscriptionProviderType(type: String) {
+        val conn = connection() ?: return
+        _voice.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setTranscriptionProviderType(conn, type) }
+            }.onSuccess { saved ->
+                _voice.update { it.copy(providerType = saved.providerType, saving = false) }
+            }.onFailure { e ->
+                _voice.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun setTranscriptionProvider(providerId: String) {
+        val conn = connection() ?: return
+        _voice.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setTranscriptionProvider(conn, providerId) }
+            }.onSuccess {
+                _voice.update { it.copy(configuredProviderId = providerId, saving = false) }
+            }.onFailure { e ->
+                _voice.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
+    }
+
+    fun setTranscriptionModel(model: String) {
+        val conn = connection() ?: return
+        _voice.update { it.copy(saving = true, error = null, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.setTranscriptionModel(conn, model) }
+            }.onSuccess { saved ->
+                _voice.update { it.copy(model = saved.model, saving = false) }
+            }.onFailure { e ->
+                _voice.update { it.copy(saving = false, error = ErrorText.of(e)) }
+            }
+        }
     }
 
     // ---------------- 服务端设置（语言 / 上传上限） ----------------
@@ -555,7 +789,16 @@ class SettingsConfigViewModel(
         val rules: List<ToolGuardRuleDto>,
         val fileGuard: FileGuardDto,
         val sandbox: SandboxStatusDto,
+        val denyPaths: DenyPathsProtectionDto?,
         val skillScanner: JsonObject,
+        val blockedHistory: kotlinx.serialization.json.JsonArray,
+    )
+
+    private data class VoiceSnapshot(
+        val audioMode: String,
+        val providerType: String,
+        val providers: io.qwenpaw.node.data.model.TranscriptionProvidersDto,
+        val model: String,
     )
 
     private fun JsonObject.with(key: String, value: JsonElement): JsonObject =
@@ -569,5 +812,6 @@ class SettingsConfigViewModel(
         _runningConfig.value = RunningConfigUiState()
         _security.value = SecurityUiState()
         _serverSettings.value = ServerSettingsUiState()
+        _voice.value = VoiceServerUiState()
     }
 }

@@ -54,13 +54,13 @@ The goal is for the phone app to replace the web console wherever possible, so Q
 | 0.7.3 | Browser diagnostics and web guidance | Browser connection diagnostics (extension and local connection state, checks and repair); advisories before web-oriented operations; MCP server management, plugin configuration and uninstall, addresses allowed without authentication, local model file management |
 | 0.7.4 | Full management and Git writes | Model and provider add/edit/remove and authorization, channel configuration, skill pool management and automation, complete access-control lists, skill configuration; Git branch switching, discarding changes and reverting commits, each with impact preview and confirmation |
 | 0.7.5 | Security hardening | Cross-origin image credentials, storage fallback, QR validation, two-sided trusted addresses and tighter Bridge endpoints; companion plugin 0.5.1 adds i18n groundwork and release checksums |
-| 0.7.6 | Feature completion | Remaining upstream capabilities: voice and workspace settings, per-skill pool configuration and URL import, avatars, memory, community, and more, batched by priority |
+| 0.7.6 | Feature completion and feedback fixes | Remaining upstream capabilities: voice and workspace settings, account and avatars, memory writing and indexing, session/agent project directories, skill batch operations and AI optimization, runtime and LLM routing, read-only community; plus the decision-model approval level, a simplified decision-model form, pinned Web auth and a reorganized server page |
 | 1.0.0 | UI rewrite | Single new interface; HyperOS Super Island |
 | 1.0.1 | English language support | Full English UI; Simplified Chinese or English selectable on first launch and in Settings; no layout changes |
 
 The 1.0.0 UI rewrite keeps a single new interface. The planned Classic and OpenClaw Node styles were dropped because maintaining multiple UIs in parallel has no practical use case and only adds layout and copy maintenance.
 
-The companion Bridge plugin is versioned separately and provides search, event streaming, push, SSH, device pairing and browser diagnostics; version 0.4.3 adds token issuance and revocation, 0.7.3 adds browser diagnostic logs and repair, and 0.5.1 adds trusted addresses, source-network hardening and i18n groundwork.
+The companion Bridge plugin is versioned separately and provides search, event streaming, push, SSH, device pairing and browser diagnostics; version 0.4.3 adds token issuance and revocation, 0.7.3 adds browser diagnostic logs and repair, and 0.5.1 adds trusted connections, tighter sensitive endpoints and i18n groundwork; 0.5.2 adds a Bridge language setting (Simplified Chinese only for now).
 
 **Browser diagnostics limitation**: the Chrome extension requires QwenPaw and Chrome on the same machine, with the service listening on a loopback address. A remote or cloud server can show diagnostic status only; it cannot install or repair the extension.
 
@@ -69,7 +69,7 @@ The companion Bridge plugin is versioned separately and provides search, event s
 The following limitations apply to the current release; later versions will move some of them into the app — see "Version roadmap" above.
 
 - **Part of server management stays in the web console**: server logs, security-rule JSON editing, MCP access-principal rules and per-skill pool configuration. Skill-pool distribution, MCP connection parameters and OAuth, and marketplace installation are available on the phone. The "Run logs" in Settings records client-side events on the phone, not server logs.
-- **Trusted addresses must be configured on both sides**: the app and the Bridge must both contain the same address before the Bridge releases SSH credentials and other sensitive content. Domains and non-private sources also need a source CIDR on the Bridge. Private and mesh networks are unaffected.
+- **Trusted connections must be configured on both sides**: the app and the Bridge must both contain the same address before the Bridge releases SSH credentials and other sensitive content. The Bridge only needs an address or hostname; legacy source CIDRs are still read but no longer used for matching. A trusted connection means you confirm the address is private; it is not cryptographic proof. Private 10/172/192 networks are unaffected.
 - **No automatic resend when offline**: drafts are kept while offline; after the network recovers, tap "Retry" manually.
 - **Approvals rely on polling**: once every 2.5 seconds; there is no push channel.
 - **Mermaid is not supported**: diagrams in code blocks are shown as source.

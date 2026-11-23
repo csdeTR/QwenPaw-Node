@@ -150,6 +150,11 @@ import io.qwenpaw.node.data.model.ToolCallOutputDto
 import io.qwenpaw.node.data.model.ToolDto
 import io.qwenpaw.node.data.model.ToolGuardRuleDto
 import io.qwenpaw.node.data.model.TranscribeResultDto
+import io.qwenpaw.node.data.model.AudioModeDto
+import io.qwenpaw.node.data.model.BatchSkillResultsDto
+import io.qwenpaw.node.data.model.CodingModeDto
+import io.qwenpaw.node.data.model.DenyPathsProtectionDto
+import io.qwenpaw.node.data.model.TranscriptionModelDto
 import io.qwenpaw.node.data.model.TranscriptionProvidersDto
 import io.qwenpaw.node.data.model.TranscriptionProviderTypeDto
 import io.qwenpaw.node.data.model.UploadLimitDto
@@ -167,6 +172,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -175,8 +181,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -472,6 +480,30 @@ class QwenPawApi(
     /** 吊销全部 token。会让**所有**设备上的登录立刻失效，属于破坏性操作。 */
     fun revokeAllTokens(conn: Connection) {
         request(conn, "POST", "/api/auth/revoke-all-tokens", buildJsonObject { })
+    }
+
+    /**
+     * 修改当前账号的用户名与密码，对应 `POST /api/auth/update-profile`。
+     *
+     * 服务端返回**新 token**，旧 token 立即失效。调用方必须先把它持久化，
+     * 再向用户报告成功；否则进程被杀或写盘失败后，用户会被锁在实例外。
+     * 未开启登录返回 403，当前密码错误返回 401，文案要分开。
+     */
+    fun updateProfile(
+        conn: Connection,
+        currentPassword: String,
+        newUsername: String? = null,
+        newPassword: String? = null,
+    ): AuthTokenDto {
+        val body = buildJsonObject {
+            put("current_password", currentPassword)
+            newUsername?.takeIf { it.isNotBlank() }?.let { put("new_username", it) }
+            newPassword?.takeIf { it.isNotBlank() }?.let { put("new_password", it) }
+        }
+        return decode(
+            request(conn, "POST", "/api/auth/update-profile", body),
+            AuthTokenDto.serializer(),
+        )
     }
 
     // ---------- 配套插件 ----------
@@ -1213,6 +1245,26 @@ class QwenPawApi(
     fun chatThinking(conn: Connection, chatId: String): ThinkingViewDto =
         decode(request(conn, "GET", "/api/chats/$chatId/thinking"), ThinkingViewDto.serializer())
 
+    /**
+     * 尚未创建会话时的默认思考强度。
+     *
+     * `provider_id` 与 `model` 必须同时给出才按该模型计算；否则返回智能体默认。
+     * 响应形状与会话级 [chatThinking] 相同。
+     */
+    fun chatThinkingDefault(
+        conn: Connection,
+        providerId: String? = null,
+        model: String? = null,
+    ): ThinkingViewDto {
+        val url = connUrl(conn, "/api/chats/thinking-default").newBuilder().apply {
+            if (!providerId.isNullOrBlank() && !model.isNullOrBlank()) {
+                addQueryParameter("provider_id", providerId)
+                addQueryParameter("model", model)
+            }
+        }.build()
+        return decode(getUrl(conn, url), ThinkingViewDto.serializer())
+    }
+
     /** 设置会话思考模式；失败（模型不支持）时服务端返回 422。 */
     fun setChatThinking(conn: Connection, chatId: String, level: String, budgetTokens: Long? = null): ThinkingViewDto {
         val body = buildJsonObject {
@@ -1499,6 +1551,29 @@ class QwenPawApi(
     /** 某张头像的图片字节。服务端对该响应设了 `private, no-store`，不做协商缓存。 */
     fun avatarImage(conn: Connection, id: String): ByteArray =
         requestBytes(conn, "GET", "/api/profile/avatars/$id")
+
+    /** 选中一张历史头像；[imageId] 为 null 表示清除当前选择。 */
+    fun selectAvatar(conn: Connection, imageId: String?): AvatarProfileDto {
+        val body = buildJsonObject {
+            if (imageId == null) put("image_id", JsonNull) else put("image_id", imageId)
+        }
+        return decode(
+            request(conn, "PUT", "/api/profile/avatars/selection", body),
+            AvatarProfileDto.serializer(),
+        )
+    }
+
+    /**
+     * 上传头像，对应 `POST /api/profile/avatars`。
+     *
+     * 服务端按**裸字节**读取请求体，不是 multipart，也不是 JSON；
+     * 上限 2 MB，只接受 PNG / JPEG / WEBP / GIF。
+     */
+    fun uploadAvatar(conn: Connection, bytes: ByteArray, mime: String): AvatarProfileDto =
+        decode(
+            postBytes(conn, "/api/profile/avatars", bytes, mime.toMediaType()),
+            AvatarProfileDto.serializer(),
+        )
 
     // ---------- 智能体与工作区 ----------
 
@@ -2582,6 +2657,30 @@ class QwenPawApi(
             UserTimezoneDto.serializer(),
         ).timezone?.takeIf { it.isNotBlank() }
 
+    /** `PUT /api/config/user-timezone`，body 为 `{timezone}`；非法 IANA 时区返回 400。 */
+    fun setUserTimezone(conn: Connection, timezone: String): String? {
+        val body = buildJsonObject { put("timezone", timezone) }
+        return decode(
+            request(conn, "PUT", "/api/config/user-timezone", body),
+            UserTimezoneDto.serializer(),
+        ).timezone?.takeIf { it.isNotBlank() }
+    }
+
+    /** `GET /api/config/heartbeat`。字段为 enabled / every / target / timeout_seconds / active_hours。 */
+    fun heartbeat(conn: Connection): JsonObject =
+        json.parseToJsonElement(request(conn, "GET", "/api/config/heartbeat")).jsonObject
+
+    /** `PUT /api/config/heartbeat`，必须整份回写。 */
+    fun saveHeartbeat(conn: Connection, config: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/config/heartbeat", config),
+        ).jsonObject
+
+    /** `POST /api/config/heartbeat/run`，立即执行一次心跳。 */
+    fun runHeartbeat(conn: Connection) {
+        request(conn, "POST", "/api/config/heartbeat/run", buildJsonObject { })
+    }
+
     private fun cronBody(spec: CronJobSpecDto): JsonObject =
         json.encodeToJsonElement(CronJobSpecDto.serializer(), spec).jsonObject
 
@@ -2881,6 +2980,12 @@ class QwenPawApi(
         ListSerializer(WorkspaceMemoryFileDto.serializer()),
     )
 
+    /** `GET /api/workspace/files`，工作区 Markdown 文件清单；只读，用于系统提示文件候选。 */
+    fun workspaceWorkingFiles(conn: Connection): List<WorkspaceMemoryFileDto> = decode(
+        request(conn, "GET", "/api/workspace/files"),
+        ListSerializer(WorkspaceMemoryFileDto.serializer()),
+    )
+
     /**
      * `GET /api/workspace/memory/{md_path}`。
      *
@@ -2891,6 +2996,20 @@ class QwenPawApi(
         execute(baseBuilder(conn, memoryUrl(conn, mdPath)).get().build()),
         WorkspaceMemoryContentDto.serializer(),
     ).content
+
+    /**
+     * `PUT /api/workspace/memory/{md_path}`。
+     *
+     * 记忆写入**没有 etag 乐观锁**，保存即覆盖；调用方负责在保存前说明这一点。
+     */
+    fun workspaceWriteMemory(conn: Connection, mdPath: String, content: String) {
+        val body = buildJsonObject { put("content", content) }
+        execute(
+            baseBuilder(conn, memoryUrl(conn, mdPath))
+                .put(body.toString().toRequestBody(JSON_MEDIA))
+                .build(),
+        )
+    }
 
     /**
      * 构造单文件下载请求（不执行）。
@@ -3015,6 +3134,52 @@ class QwenPawApi(
         request(conn, "GET", "/api/workspace/local-whisper-status"),
         LocalWhisperStatusDto.serializer(),
     )
+
+    /** `GET /api/workspace/audio-mode`，`auto` 或 `native`。 */
+    fun audioMode(conn: Connection): AudioModeDto = decode(
+        request(conn, "GET", "/api/workspace/audio-mode"),
+        AudioModeDto.serializer(),
+    )
+
+    fun setAudioMode(conn: Connection, mode: String): AudioModeDto {
+        val body = buildJsonObject { put("audio_mode", mode) }
+        return decode(
+            request(conn, "PUT", "/api/workspace/audio-mode", body),
+            AudioModeDto.serializer(),
+        )
+    }
+
+    /** `PUT /api/workspace/transcription-provider-type`，三档之一。 */
+    fun setTranscriptionProviderType(
+        conn: Connection,
+        type: String,
+    ): TranscriptionProviderTypeDto {
+        val body = buildJsonObject { put("transcription_provider_type", type) }
+        return decode(
+            request(conn, "PUT", "/api/workspace/transcription-provider-type", body),
+            TranscriptionProviderTypeDto.serializer(),
+        )
+    }
+
+    /** `PUT /api/workspace/transcription-provider`；空串表示不指定 provider。 */
+    fun setTranscriptionProvider(conn: Connection, providerId: String) {
+        val body = buildJsonObject { put("provider_id", providerId) }
+        request(conn, "PUT", "/api/workspace/transcription-provider", body)
+    }
+
+    /** `GET /api/workspace/transcription-model`，空串表示服务端默认 `whisper-1`。 */
+    fun transcriptionModel(conn: Connection): TranscriptionModelDto = decode(
+        request(conn, "GET", "/api/workspace/transcription-model"),
+        TranscriptionModelDto.serializer(),
+    )
+
+    fun setTranscriptionModel(conn: Connection, model: String): TranscriptionModelDto {
+        val body = buildJsonObject { put("transcription_model", model) }
+        return decode(
+            request(conn, "PUT", "/api/workspace/transcription-model", body),
+            TranscriptionModelDto.serializer(),
+        )
+    }
 
     // ---------- 备份 ----------
 
@@ -3288,6 +3453,25 @@ class QwenPawApi(
         )
     }
 
+    /**
+     * `GET /api/config/security/sandbox/deny-paths-protection`。
+     *
+     * 依赖 Windows ACL；其他平台返回 `platformSupported=false`，
+     * 此时 [DenyPathsProtectionDto.active] 恒为 false，不能当开关状态。
+     */
+    fun denyPathsProtection(conn: Connection): DenyPathsProtectionDto = decode(
+        request(conn, "GET", "/api/config/security/sandbox/deny-paths-protection"),
+        DenyPathsProtectionDto.serializer(),
+    )
+
+    fun setDenyPathsProtection(conn: Connection, enabled: Boolean): DenyPathsProtectionDto {
+        val body = buildJsonObject { put("enabled", enabled) }
+        return decode(
+            request(conn, "PUT", "/api/config/security/sandbox/deny-paths-protection", body),
+            DenyPathsProtectionDto.serializer(),
+        )
+    }
+
     /** `GET /api/config/security/skill-scanner`。客户端只改 `mode`。 */
     fun skillScanner(conn: Connection): JsonObject =
         json.parseToJsonElement(
@@ -3298,6 +3482,40 @@ class QwenPawApi(
         json.parseToJsonElement(
             request(conn, "PUT", "/api/config/security/skill-scanner", config),
         ).jsonObject
+
+    /** `GET /api/config/security/skill-scanner/blocked-history`。 */
+    fun blockedSkillHistory(conn: Connection): JsonArray =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/config/security/skill-scanner/blocked-history"),
+        ).jsonArray
+
+    /** `DELETE .../blocked-history`，清空全部拦截记录。 */
+    fun clearBlockedSkillHistory(conn: Connection) {
+        request(conn, "DELETE", "/api/config/security/skill-scanner/blocked-history")
+    }
+
+    /** `DELETE .../blocked-history/{index}`，删除单条。 */
+    fun removeBlockedSkillEntry(conn: Connection, index: Int) {
+        request(conn, "DELETE", "/api/config/security/skill-scanner/blocked-history/$index")
+    }
+
+    /** `POST .../skill-scanner/whitelist`。 */
+    fun addSkillWhitelist(conn: Connection, skillName: String, contentHash: String? = null) {
+        val body = buildJsonObject {
+            put("skill_name", skillName)
+            contentHash?.takeIf { it.isNotBlank() }?.let { put("content_hash", it) }
+        }
+        request(conn, "POST", "/api/config/security/skill-scanner/whitelist", body)
+    }
+
+    /** `DELETE .../skill-scanner/whitelist/{skill_name}`。 */
+    fun removeSkillWhitelist(conn: Connection, skillName: String) {
+        request(
+            conn,
+            "DELETE",
+            "/api/config/security/skill-scanner/whitelist/${encodeSegment(skillName)}",
+        )
+    }
 
     /** `GET /api/config/security/allow-no-auth-hosts`。 */
     fun allowNoAuthHosts(conn: Connection): AllowNoAuthHostsDto = decode(
@@ -4122,6 +4340,580 @@ class QwenPawApi(
         }
     }
 
+    // ---------- 0.7.6 P2：智能体附加设置 ----------
+
+    /** `GET /api/workspace/system-prompt-files`，返回启用的 MD 文件名列表。 */
+    fun systemPromptFiles(conn: Connection): List<String> = decode(
+        request(conn, "GET", "/api/workspace/system-prompt-files"),
+        ListSerializer(String.serializer()),
+    )
+
+    /** `PUT /api/workspace/system-prompt-files`，body 是裸字符串数组。 */
+    fun setSystemPromptFiles(conn: Connection, files: List<String>): List<String> {
+        val body = buildJsonArray { files.forEach { add(it) } }
+        return decode(
+            requestRaw(conn, "PUT", "/api/workspace/system-prompt-files", body.toString()),
+            ListSerializer(String.serializer()),
+        )
+    }
+
+    /**
+     * `GET /api/workspace/language`。
+     *
+     * 这是**智能体 MD 文件语言**，与 `/api/settings/language`（Web 界面语言）无关。
+     */
+    fun workspaceLanguage(conn: Connection): String =
+        json.parseToJsonElement(request(conn, "GET", "/api/workspace/language"))
+            .jsonObject["language"]?.jsonPrimitive?.contentOrNull.orEmpty()
+
+    fun setWorkspaceLanguage(conn: Connection, language: String): String {
+        val body = buildJsonObject { put("language", language) }
+        return json.parseToJsonElement(
+            request(conn, "PUT", "/api/workspace/language", body),
+        ).jsonObject["language"]?.jsonPrimitive?.contentOrNull ?: language
+    }
+
+    /** `GET/POST /api/coding-mode`。 */
+    fun codingMode(conn: Connection): CodingModeDto = decode(
+        request(conn, "GET", "/api/coding-mode"),
+        CodingModeDto.serializer(),
+    )
+
+    fun setCodingMode(conn: Connection, enabled: Boolean): CodingModeDto {
+        val body = buildJsonObject { put("enabled", enabled) }
+        return decode(
+            request(conn, "POST", "/api/coding-mode", body),
+            CodingModeDto.serializer(),
+        )
+    }
+
+    /** `GET /api/advisor-mode`。字段较多，按原始 JSON 交给界面。 */
+    fun advisorMode(conn: Connection): JsonObject =
+        json.parseToJsonElement(request(conn, "GET", "/api/advisor-mode")).jsonObject
+
+    /** `POST /api/advisor-mode`，只提交要修改的字段。 */
+    fun updateAdvisorMode(conn: Connection, body: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "POST", "/api/advisor-mode", body),
+        ).jsonObject
+
+    /** `POST /api/advisor-mode/session/exit`，只能退出空闲会话。 */
+    fun exitAdvisorSession(conn: Connection, chatId: String) {
+        request(
+            conn,
+            "POST",
+            "/api/advisor-mode/session/exit",
+            buildJsonObject { put("chat_id", chatId) },
+        )
+    }
+
+    /** `POST /api/workspace/embedding/test`，body 为完整的嵌入配置对象。 */
+    fun testEmbedding(conn: Connection, config: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "POST", "/api/workspace/embedding/test", config),
+        ).jsonObject
+
+    /** `GET/PUT /api/config/agents/llm-routing`。 */
+    fun llmRouting(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/config/agents/llm-routing"),
+        ).jsonObject
+
+    fun setLlmRouting(conn: Connection, body: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/config/agents/llm-routing", body),
+        ).jsonObject
+
+    /** `GET /api/console/debug/backend-logs?lines=`；日志文件不存在时返回空串。 */
+    fun backendLogs(conn: Connection, lines: Int = 200): String {
+        val obj = json.parseToJsonElement(
+            request(conn, "GET", "/api/console/debug/backend-logs?lines=$lines"),
+        ).jsonObject
+        val exists = (obj["exists"] as? JsonPrimitive)?.booleanOrNull ?: false
+        if (!exists) return ""
+        return (obj["content"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    }
+
+    // ---------- 0.7.6 P2：记忆状态、技能池与项目目录 ----------
+
+    /** `GET /api/agents/{id}/memory/status`。 */
+    fun memoryStatus(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/agents/${encodeSegment(conn.agentId)}/memory/status"),
+        ).jsonObject
+
+    /** `GET /api/agents/{id}/memory/runtime-status`。 */
+    fun memoryRuntimeStatus(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/agents/${encodeSegment(conn.agentId)}/memory/runtime-status"),
+        ).jsonObject
+
+    /** `GET /api/agents/memory/backends`。 */
+    fun memoryBackends(conn: Connection): JsonArray =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/agents/memory/backends"),
+        ).jsonArray
+
+    /** `POST /api/agents/{id}/memory/reindex?scope=`，scope 为 all/bm25/embedding。 */
+    fun reindexMemory(conn: Connection, scope: String = "all"): JsonObject =
+        json.parseToJsonElement(
+            request(
+                conn,
+                "POST",
+                "/api/agents/${encodeSegment(conn.agentId)}/memory/reindex?scope=$scope",
+            ),
+        ).jsonObject
+
+    /** `POST /api/agents/{id}/memory/reindex/undo`。 */
+    fun undoMemoryReindex(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(
+                conn,
+                "POST",
+                "/api/agents/${encodeSegment(conn.agentId)}/memory/reindex/undo",
+            ),
+        ).jsonObject
+
+    /** `GET /api/agents/{id}/memory/tags`。 */
+    fun memoryTags(conn: Connection, page: Int = 1, pageSize: Int = 50): JsonObject =
+        json.parseToJsonElement(
+            request(
+                conn,
+                "GET",
+                "/api/agents/${encodeSegment(conn.agentId)}/memory/tags?page=$page&page_size=$pageSize",
+            ),
+        ).jsonObject
+
+    /** `GET /api/agents/{id}/memory/tag-files?tag=`。 */
+    fun memoryTagFiles(
+        conn: Connection,
+        tag: String,
+        page: Int = 1,
+        pageSize: Int = 50,
+    ): JsonObject {
+        val url = connUrl(conn, "/api/agents/${encodeSegment(conn.agentId)}/memory/tag-files")
+            .newBuilder()
+            .addQueryParameter("tag", tag)
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("page_size", pageSize.toString())
+            .build()
+        return json.parseToJsonElement(getUrl(conn, url)).jsonObject
+    }
+
+    /** `GET /api/agents/{id}/memory/graph`。 */
+    fun memoryGraph(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/agents/${encodeSegment(conn.agentId)}/memory/graph"),
+        ).jsonObject
+
+    /** `GET /api/skills/pool/{name}/config`；只取 `config` 对象。 */
+    fun poolSkillConfig(conn: Connection, name: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/skills/pool/${encodeSegment(name)}/config"),
+        ).jsonObject["config"]?.jsonObject ?: JsonObject(emptyMap())
+
+    /** `PUT /api/skills/pool/{name}/config`，整段替换。 */
+    fun setPoolSkillConfig(conn: Connection, name: String, config: JsonObject) {
+        val body = buildJsonObject { put("config", config) }
+        request(conn, "PUT", "/api/skills/pool/${encodeSegment(name)}/config", body)
+    }
+
+    /** `DELETE /api/skills/pool/{name}/config`。 */
+    fun clearPoolSkillConfig(conn: Connection, name: String) {
+        request(conn, "DELETE", "/api/skills/pool/${encodeSegment(name)}/config")
+    }
+
+    /** `POST /api/skills/pool/import`（`bundle_url`）。 */
+    fun importPoolSkill(conn: Connection, bundleUrl: String): JsonObject {
+        val body = buildJsonObject { put("bundle_url", bundleUrl) }
+        return json.parseToJsonElement(
+            request(conn, "POST", "/api/skills/pool/import", body),
+        ).jsonObject
+    }
+
+    fun batchEnableSkills(conn: Connection, names: List<String>): BatchSkillResultsDto =
+        batchSkillAction(conn, "batch-enable", names)
+
+    fun batchDisableSkills(conn: Connection, names: List<String>): BatchSkillResultsDto =
+        batchSkillAction(conn, "batch-disable", names)
+
+    fun batchDeleteSkills(conn: Connection, names: List<String>): BatchSkillResultsDto =
+        batchSkillAction(conn, "batch-delete", names)
+
+    private fun batchSkillAction(
+        conn: Connection,
+        action: String,
+        names: List<String>,
+    ): BatchSkillResultsDto {
+        val body = buildJsonArray { names.forEach { add(it) } }
+        return decode(
+            requestRaw(conn, "POST", "/api/skills/$action", body.toString()),
+            BatchSkillResultsDto.serializer(),
+        )
+    }
+
+    /** `GET /api/chats/{id}/project-dirs`，返回 `project_dirs` 与 `source`。 */
+    fun chatProjectDirs(conn: Connection, chatId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/chats/$chatId/project-dirs"),
+        ).jsonObject
+
+    /** `PUT /api/chats/{id}/project-dirs`，整份列表，第一项为主目录。 */
+    fun setChatProjectDirs(
+        conn: Connection,
+        chatId: String,
+        dirs: List<Pair<String, String?>>,
+    ): JsonObject {
+        val body = buildJsonObject {
+            putJsonArray("project_dirs") {
+                dirs.forEach { (path, label) ->
+                    addJsonObject {
+                        put("path", path)
+                        label?.takeIf { it.isNotBlank() }?.let { put("label", it) }
+                    }
+                }
+            }
+        }
+        return json.parseToJsonElement(
+            request(conn, "PUT", "/api/chats/$chatId/project-dirs", body),
+        ).jsonObject
+    }
+
+    /** `DELETE /api/chats/{id}/project-dirs`，恢复跟随智能体默认。 */
+    fun clearChatProjectDirs(conn: Connection, chatId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "DELETE", "/api/chats/$chatId/project-dirs"),
+        ).jsonObject
+
+    /** `GET /api/workspace/project-directory/dirs`，智能体默认项目目录。 */
+    fun projectDirs(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/workspace/project-directory/dirs"),
+        ).jsonObject
+
+    /** `PUT /api/workspace/project-directory/dirs`，整份有序列表，第一项为主目录。 */
+    fun setProjectDirs(conn: Connection, dirs: List<Pair<String, String?>>): JsonObject {
+        val body = buildJsonObject {
+            putJsonArray("project_dirs") {
+                dirs.forEach { (path, label) ->
+                    addJsonObject {
+                        put("path", path)
+                        label?.takeIf { it.isNotBlank() }?.let { put("label", it) }
+                    }
+                }
+            }
+        }
+        return json.parseToJsonElement(
+            request(conn, "PUT", "/api/workspace/project-directory/dirs", body),
+        ).jsonObject
+    }
+
+    /** `DELETE /api/workspace/project-directory/dirs`，恢复工作区默认。 */
+    fun resetProjectDirs(conn: Connection): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "DELETE", "/api/workspace/project-directory/dirs"),
+        ).jsonObject
+
+    /** `GET /api/workspace/project-directory/list`，coding_projects 下的子目录。 */
+    fun listProjects(conn: Connection): JsonArray =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/workspace/project-directory/list"),
+        ).jsonArray
+
+    /** `POST /api/workspace/project-directory/create`，新建空目录并初始化 git。 */
+    fun createProject(conn: Connection, name: String): JsonObject {
+        val body = buildJsonObject { put("name", name) }
+        return json.parseToJsonElement(
+            request(conn, "POST", "/api/workspace/project-directory/create", body),
+        ).jsonObject
+    }
+
+    /** `POST /api/workspace/project-directory/import-local`，复制服务端本地目录。 */
+    fun importLocalProject(conn: Connection, path: String): JsonObject {
+        val body = buildJsonObject { put("path", path) }
+        return json.parseToJsonElement(
+            request(conn, "POST", "/api/workspace/project-directory/import-local", body),
+        ).jsonObject
+    }
+
+    /** `POST /api/workspace/project-directory/browse-dirs/create`，在浏览器当前位置建子目录。 */
+    fun createBrowsedDir(conn: Connection, parent: String, name: String): JsonObject {
+        val body = buildJsonObject {
+            put("parent", parent)
+            put("name", name)
+        }
+        return json.parseToJsonElement(
+            request(conn, "POST", "/api/workspace/project-directory/browse-dirs/create", body),
+        ).jsonObject
+    }
+
+    /** `POST /api/workspace/project-directory/upload-zip`，解压到 coding_projects/<name>/。 */
+    fun uploadProjectZip(
+        conn: Connection,
+        name: String,
+        source: SafZipSource,
+        onProgress: (read: Long, total: Long?) -> Unit = { _, _ -> },
+    ): JsonObject {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", source.fileName, source.newBody(onProgress))
+            .build()
+        val url = connUrl(conn, "/api/workspace/project-directory/upload-zip").newBuilder()
+            .addQueryParameter("name", name)
+            .build()
+        return json.parseToJsonElement(
+            execute(baseBuilder(conn, url).post(body).build()),
+        ).jsonObject
+    }
+
+    /** `GET /api/workspace/watch` 的 SSE 帧流；页面离开时取消协程即可断开。 */
+    fun workspaceWatchFrames(
+        conn: Connection,
+        root: String,
+    ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.callbackFlow {
+        val streamClient = client.newBuilder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
+        val request = baseBuilder(
+            conn,
+            workspaceUrl(conn, "/api/workspace/watch", mapOf("root" to root)),
+        ).header("Accept", "text/event-stream").build()
+        val call = streamClient.newCall(request)
+        call.enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                close()
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                response.use { res ->
+                    if (!res.isSuccessful) {
+                        close()
+                        return
+                    }
+                    val reader = res.body?.charStream()?.buffered()
+                    if (reader == null) {
+                        close()
+                        return
+                    }
+                    val sse = io.qwenpaw.node.data.stream.SseReader(reader)
+                    try {
+                        while (!call.isCanceled()) {
+                            val frame = sse.nextFrame() ?: break
+                            trySend(frame)
+                        }
+                    } catch (_: Exception) {
+                        // 断开或取消都按流结束处理。
+                    }
+                }
+                close()
+            }
+        })
+        awaitClose { call.cancel() }
+    }
+
+    /** `POST /api/skills/ai/optimize/stream` 的 SSE 帧流；帧为 `{text}` 或 `{error}`。 */
+    fun optimizeSkillFrames(
+        conn: Connection,
+        content: String,
+        language: String = "zh",
+    ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.callbackFlow {
+        val streamClient = client.newBuilder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
+        val body = buildJsonObject {
+            put("content", content)
+            put("language", language)
+        }.toString().toRequestBody(JSON_MEDIA)
+        val request = baseBuilder(conn, connUrl(conn, "/api/skills/ai/optimize/stream"))
+            .header("Accept", "text/event-stream")
+            .post(body)
+            .build()
+        val call = streamClient.newCall(request)
+        call.enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                close()
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                response.use { res ->
+                    if (!res.isSuccessful) {
+                        close()
+                        return
+                    }
+                    val reader = res.body?.charStream()?.buffered()
+                    if (reader == null) {
+                        close()
+                        return
+                    }
+                    val sse = io.qwenpaw.node.data.stream.SseReader(reader)
+                    try {
+                        while (!call.isCanceled()) {
+                            val frame = sse.nextFrame() ?: break
+                            trySend(frame)
+                        }
+                    } catch (_: Exception) {
+                        // 断开或取消都按流结束处理。
+                    }
+                }
+                close()
+            }
+        })
+        awaitClose { call.cancel() }
+    }
+
+    /** `GET /api/loops`，内置、自定义与插件提供的循环模式。 */
+    fun loops(conn: Connection): JsonArray =
+        json.parseToJsonElement(request(conn, "GET", "/api/loops")).jsonArray
+
+    /** `GET /api/loops/custom`，当前智能体保存的自定义循环模式。 */
+    fun customLoops(conn: Connection): JsonArray =
+        json.parseToJsonElement(request(conn, "GET", "/api/loops/custom")).jsonArray
+
+    /** `POST /api/loops/custom`，body 是完整的 CustomLoopModeConfig。 */
+    fun createCustomLoop(conn: Connection, body: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "POST", "/api/loops/custom", body),
+        ).jsonObject
+
+    /** `PUT /api/loops/custom/{id}`。 */
+    fun updateCustomLoop(conn: Connection, id: String, body: JsonObject): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "PUT", "/api/loops/custom/${encodeSegment(id)}", body),
+        ).jsonObject
+
+    /** `DELETE /api/loops/custom/{id}`。 */
+    fun deleteCustomLoop(conn: Connection, id: String) {
+        request(conn, "DELETE", "/api/loops/custom/${encodeSegment(id)}")
+    }
+
+    /** `POST /api/loops/custom/{id}/duplicate`。 */
+    fun duplicateCustomLoop(conn: Connection, id: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "POST", "/api/loops/custom/${encodeSegment(id)}/duplicate"),
+        ).jsonObject
+
+    /** `POST /api/workspace/project-directory/clone` 的 SSE 帧流。 */
+    fun cloneProjectFrames(
+        conn: Connection,
+        url: String,
+        name: String? = null,
+    ): kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.callbackFlow {
+        val streamClient = client.newBuilder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
+        val body = buildJsonObject {
+            put("url", url)
+            name?.takeIf { it.isNotBlank() }?.let { put("name", it) }
+        }.toString().toRequestBody(JSON_MEDIA)
+        val request = baseBuilder(
+            conn,
+            connUrl(conn, "/api/workspace/project-directory/clone"),
+        )
+            .header("Accept", "text/event-stream")
+            .post(body)
+            .build()
+        val call = streamClient.newCall(request)
+        call.enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                close()
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                response.use { res ->
+                    if (!res.isSuccessful) {
+                        close()
+                        return
+                    }
+                    val reader = res.body?.charStream()?.buffered()
+                    if (reader == null) {
+                        close()
+                        return
+                    }
+                    val sse = io.qwenpaw.node.data.stream.SseReader(reader)
+                    try {
+                        while (!call.isCanceled()) {
+                            val frame = sse.nextFrame() ?: break
+                            trySend(frame)
+                        }
+                    } catch (_: Exception) {
+                        // 断开或取消都按流结束处理。
+                    }
+                }
+                close()
+            }
+        })
+        awaitClose { call.cancel() }
+    }
+
+    /** `GET /api/models/{provider}/model-info?model_id=`，添加模型前预览元数据。 */
+    fun modelInfo(
+        conn: Connection,
+        providerId: String,
+        modelId: String,
+        templateId: String? = null,
+    ): JsonObject {
+        val builder = connUrl(conn, "/api/models/${encodeSegment(providerId)}/model-info")
+            .newBuilder()
+            .addQueryParameter("model_id", modelId)
+        templateId?.takeIf { it.isNotBlank() }?.let { builder.addQueryParameter("template_id", it) }
+        return json.parseToJsonElement(getUrl(conn, builder.build())).jsonObject
+    }
+
+    /** `GET /api/community/posts`，社区文章列表（公开可读）。 */
+    fun communityPosts(
+        conn: Connection,
+        page: Int = 1,
+        keyword: String = "",
+        postType: String = "all",
+        sort: String = "recommended",
+    ): JsonObject {
+        val url = connUrl(conn, "/api/community/posts").newBuilder()
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("keyword", keyword)
+            .addQueryParameter("post_type", postType)
+            .addQueryParameter("sort", sort)
+            .build()
+        return json.parseToJsonElement(getUrl(conn, url)).jsonObject
+    }
+
+    /** `GET /api/community/posts/{id}`。 */
+    fun communityPost(conn: Connection, postId: String): JsonObject =
+        json.parseToJsonElement(
+            request(conn, "GET", "/api/community/posts/${encodeSegment(postId)}"),
+        ).jsonObject
+
+    /** `GET /api/community/posts/{id}/comments`。 */
+    fun communityComments(
+        conn: Connection,
+        postId: String,
+        page: Int = 1,
+    ): JsonObject =
+        json.parseToJsonElement(
+            request(
+                conn,
+                "GET",
+                "/api/community/posts/${encodeSegment(postId)}/comments?page=$page",
+            ),
+        ).jsonObject
+
+    /** `GET /api/workspace/binary-files/{path}`，图片/PDF/CSV 原始字节。 */
+    fun workspaceBinaryFile(conn: Connection, path: String): ByteArray {
+        val builder = resolve(conn.baseUrl, "/api/workspace/binary-files").newBuilder()
+        path.split('/').filter { it.isNotEmpty() }.forEach { builder.addPathSegment(it) }
+        val url = applyToken(conn, builder.build())
+        return client.newCall(baseBuilder(conn, url).get().build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw failureOf(
+                    response.code,
+                    response.body?.string().orEmpty(),
+                    response.header("WWW-Authenticate"),
+                    conn.token != null,
+                )
+            }
+            response.body?.bytes() ?: ByteArray(0)
+        }
+    }
+
     private fun request(
         conn: Connection,
         method: String,
@@ -4263,6 +5055,15 @@ class QwenPawApi(
             response.body?.bytes() ?: ByteArray(0)
         }
     }
+
+    /** 发一个原始字节 POST（头像上传使用），返回响应文本。 */
+    private fun postBytes(
+        conn: Connection,
+        path: String,
+        bytes: ByteArray,
+        media: okhttp3.MediaType,
+    ): String =
+        execute(baseBuilder(conn, connUrl(conn, path)).post(bytes.toRequestBody(media)).build())
 
     /**
      * 构造一次失败。

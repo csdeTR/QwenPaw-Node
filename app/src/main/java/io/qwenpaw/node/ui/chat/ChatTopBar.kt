@@ -413,7 +413,7 @@ internal fun thinkingLevelLabel(level: String?): String = when (level) {
 }
 
 /**
- * 审批模式的四个档位。
+ * 审批模式的五个档位。
  *
  * 取值与 qwenpaw web 页一致（`approval_level`），这是**智能体级**配置，
  * 改动会影响该智能体的全部对话。
@@ -422,6 +422,8 @@ internal data class ApprovalOption(
     val code: String,
     @StringRes val labelRes: Int,
     @StringRes val hintRes: Int,
+    /** JEV 依赖决策模型；未配置时只能展示、不能选择。 */
+    val requiresDecision: Boolean = false,
 ) {
     val label: String get() = Texts.get(labelRes)
     val hint: String get() = Texts.get(hintRes)
@@ -437,6 +439,12 @@ internal val APPROVAL_OPTIONS = listOf(
         code = "SMART",
         labelRes = R.string.chattop_approval_smart,
         hintRes = R.string.chattop_approval_smart_hint,
+    ),
+    ApprovalOption(
+        code = "JEV",
+        labelRes = R.string.chattop_approval_jev,
+        hintRes = R.string.chattop_approval_jev_hint,
+        requiresDecision = true,
     ),
     ApprovalOption(
         code = "AUTO",

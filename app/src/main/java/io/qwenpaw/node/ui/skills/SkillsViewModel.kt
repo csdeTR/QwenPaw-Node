@@ -17,6 +17,7 @@ import io.qwenpaw.node.data.remote.SafZipSource
 import io.qwenpaw.node.ui.i18n.Texts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,6 +26,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * 技能编辑态。
@@ -38,6 +42,7 @@ data class SkillEditState(
     val savedText: String,
     val saving: Boolean = false,
     val saved: Boolean = false,
+    val optimizing: Boolean = false,
     val error: String? = null,
 ) {
     val dirty: Boolean get() = draft != savedText
@@ -71,6 +76,8 @@ data class SkillsUiState(
     val importConflicts: List<SkillImportConflictDto> = emptyList(),
     val broadcast: BroadcastUi? = null,
     val agentOptions: List<AgentDto> = emptyList(),
+    /** 批量操作对话框正在执行。 */
+    val batchBusy: Boolean = false,
 )
 
 /** 技能池广播的状态。冲突时保留选择，便于用户改选或覆盖重试。 */
@@ -99,6 +106,7 @@ class SkillsViewModel(
 
     private var pendingImportSource: SafZipSource? = null
     private var pendingImportToPool = false
+    private var optimizeJob: Job? = null
 
     /** 拉列表。两个请求并行，池失败不影响主体。 */
     fun refresh() {
@@ -227,7 +235,54 @@ class SkillsViewModel(
         }
     }
 
+    /** AI 优化当前草稿：结果流式追加到草稿，不自动保存。 */
+    fun optimizeEdit() {
+        val conn = connection() ?: return
+        val edit = _state.value.edit ?: return
+        if (optimizeJob?.isActive == true || edit.saving) return
+        val base = edit.draft
+        _state.update { state ->
+            state.edit?.let { state.copy(edit = it.copy(optimizing = true, error = null)) } ?: state
+        }
+        optimizeJob = scope.launch {
+            val builder = StringBuilder()
+            var failure: String? = null
+            try {
+                api.optimizeSkillFrames(conn, base).collect { frame ->
+                    val obj = runCatching {
+                        kotlinx.serialization.json.Json.parseToJsonElement(frame).jsonObject
+                    }.getOrNull() ?: return@collect
+                    val error = obj["error"]?.jsonPrimitive?.contentOrNull
+                    if (!error.isNullOrBlank()) {
+                        failure = error
+                        return@collect
+                    }
+                    val delta = obj["text"]?.jsonPrimitive?.contentOrNull ?: return@collect
+                    builder.append(delta)
+                    _state.update { state ->
+                        state.edit?.let {
+                            state.copy(edit = it.copy(draft = base + builder.toString()))
+                        } ?: state
+                    }
+                }
+            } finally {
+                _state.update { state ->
+                    state.edit?.let {
+                        val message = failure
+                            ?: if (builder.isEmpty()) {
+                                Texts.get(R.string.skills_ai_empty)
+                            } else {
+                                it.error
+                            }
+                        state.copy(edit = it.copy(optimizing = false, error = message))
+                    } ?: state
+                }
+            }
+        }
+    }
+
     fun saveEdit() {
+        optimizeJob?.cancel()
         val edit = _state.value.edit ?: return
         if (!edit.dirty || edit.saving) return
         val conn = connection() ?: return
@@ -265,6 +320,7 @@ class SkillsViewModel(
     }
 
     fun cancelEdit() {
+        optimizeJob?.cancel()
         _state.update { it.copy(edit = null) }
     }
 
@@ -318,6 +374,48 @@ class SkillsViewModel(
                     setRowError(name, deleteFailureText(e))
                     onResult(false)
                 }
+        }
+    }
+
+    fun batchEnable(names: List<String>) = batchAction(names, "batch-enable")
+
+    fun batchDisable(names: List<String>) = batchAction(names, "batch-disable")
+
+    fun batchDelete(names: List<String>) = batchAction(names, "batch-delete")
+
+    private fun batchAction(names: List<String>, action: String) {
+        val conn = connection() ?: return
+        val selected = names.filter { it.isNotBlank() }.distinct()
+        if (selected.isEmpty() || _state.value.batchBusy) return
+        _state.update { it.copy(batchBusy = true, notice = null) }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    when (action) {
+                        "batch-enable" -> api.batchEnableSkills(conn, selected)
+                        "batch-disable" -> api.batchDisableSkills(conn, selected)
+                        else -> api.batchDeleteSkills(conn, selected)
+                    }
+                }
+            }.onSuccess { result ->
+                val failed = result.results.filterValues { !it.success }
+                _state.update { current ->
+                    current.copy(
+                        batchBusy = false,
+                        notice = if (failed.isEmpty()) {
+                            Texts.get(R.string.skills_batch_done, result.results.size)
+                        } else {
+                            Texts.get(R.string.skills_batch_partial, failed.size)
+                        },
+                        rowErrors = failed.mapValues { (_, value) ->
+                            value.reason ?: Texts.get(R.string.skills_batch_failed)
+                        },
+                    )
+                }
+                refresh()
+            }.onFailure { e ->
+                _state.update { it.copy(batchBusy = false, error = ErrorText.of(e)) }
+            }
         }
     }
 

@@ -41,6 +41,10 @@ data class BrowserDiagnosticsUiState(
     val logs: List<String>? = null,
     val logsLoading: Boolean = false,
     val logsError: String? = null,
+    /** 服务端后端日志；null 表示还没读过。 */
+    val backendLogs: List<String>? = null,
+    val backendLogsLoading: Boolean = false,
+    val backendLogsError: String? = null,
     val repairing: Boolean = false,
     val notice: String? = null,
 )
@@ -166,6 +170,34 @@ class BrowserDiagnosticsViewModel(
                         }
                     }
                 }
+        }
+    }
+
+    /** 读取服务端后端日志尾部。 */
+    fun readBackendLogs() {
+        val conn = connection() ?: return
+        if (_state.value.backendLogsLoading) return
+        _state.update {
+            it.copy(backendLogsLoading = true, backendLogs = null, backendLogsError = null)
+        }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { api.backendLogs(conn, lines = 200) }
+            }.onSuccess { text ->
+                _state.update {
+                    it.copy(
+                        backendLogsLoading = false,
+                        backendLogs = text.lines().filter { line -> line.isNotBlank() },
+                    )
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        backendLogsLoading = false,
+                        backendLogsError = Texts.get(R.string.browser_backend_logs_failed, ErrorText.of(e)),
+                    )
+                }
+            }
         }
     }
 

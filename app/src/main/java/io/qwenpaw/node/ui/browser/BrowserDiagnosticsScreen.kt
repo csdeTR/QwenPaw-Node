@@ -71,9 +71,12 @@ fun BrowserDiagnosticsScreen(
     onOpenMarket: () -> Unit,
     onConsumeMessage: () -> Unit,
     onOpenConsole: (() -> Unit)? = null,
+    /** 读取服务端后端日志；核心端点，不依赖 Bridge。 */
+    onReadBackendLogs: () -> Unit = {},
 ) {
     LaunchedEffect(Unit) { onEnsureLoaded() }
     var showLogs by remember { mutableStateOf(false) }
+    var showBackendLogs by remember { mutableStateOf(false) }
     var confirmRepair by remember { mutableStateOf(false) }
 
     WebEntryDialog(pageKey = "browser-diagnostics", onOpenConsole = onOpenConsole)
@@ -101,10 +104,25 @@ fun BrowserDiagnosticsScreen(
 
     if (showLogs) {
         LogsDialog(
+            title = stringResource(R.string.browser_logs_title),
+            caption = stringResource(R.string.browser_logs_caption),
+            emptyText = stringResource(R.string.browser_logs_empty),
             lines = state.logs,
             loading = state.logsLoading,
             error = state.logsError,
             onClose = { showLogs = false },
+        )
+    }
+
+    if (showBackendLogs) {
+        LogsDialog(
+            title = stringResource(R.string.browser_backend_logs_title),
+            caption = stringResource(R.string.browser_backend_logs_caption),
+            emptyText = stringResource(R.string.browser_backend_logs_empty),
+            lines = state.backendLogs,
+            loading = state.backendLogsLoading,
+            error = state.backendLogsError,
+            onClose = { showBackendLogs = false },
         )
     }
 
@@ -183,6 +201,28 @@ fun BrowserDiagnosticsScreen(
                             onRepair = { confirmRepair = true },
                             onOpenMarket = onOpenMarket,
                         )
+
+                        SectionHeader(stringResource(R.string.browser_backend_logs_section))
+                        Card {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.browser_backend_logs_hint),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = LocalCaptionColor.current,
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        showBackendLogs = true
+                                        onReadBackendLogs()
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.browser_backend_logs_button))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -556,6 +596,9 @@ private fun InfoRow(label: String, value: String, valueColor: Color? = null) {
 /** 日志只读展示：可以选中复制，不提供编辑与搜索。 */
 @Composable
 private fun LogsDialog(
+    title: String,
+    caption: String,
+    emptyText: String,
     lines: List<String>?,
     loading: Boolean,
     error: String?,
@@ -563,11 +606,11 @@ private fun LogsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(stringResource(R.string.browser_logs_title)) },
+        title = { Text(title) },
         text = {
             Column {
                 Text(
-                    text = stringResource(R.string.browser_logs_caption),
+                    text = caption,
                     style = MaterialTheme.typography.labelSmall,
                     color = LocalCaptionColor.current,
                 )
@@ -592,7 +635,7 @@ private fun LogsDialog(
                     )
 
                     lines.isNullOrEmpty() -> Text(
-                        text = stringResource(R.string.browser_logs_empty),
+                        text = emptyText,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

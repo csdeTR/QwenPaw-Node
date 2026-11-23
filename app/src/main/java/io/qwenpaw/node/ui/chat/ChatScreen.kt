@@ -102,6 +102,8 @@ fun ChatScreen(
     onPickModel: (providerId: String?, model: String?) -> Unit = { _, _ -> },
     onPickApproval: (String) -> Unit = {},
     onSetProjectDir: (String?) -> Unit = {},
+    onSetSessionProjectDir: (String?) -> Unit = {},
+    onCreateBrowsedDir: suspend (String, String) -> Boolean = { _, _ -> false },
     onDismissError: () -> Unit = {},
     /** true 为「按住说话」，false 为「点一下」。 */
     voiceHoldMode: Boolean = false,
@@ -487,10 +489,8 @@ fun ChatScreen(
                     thinkingRatio = thinkingRatio,
                     thinkingLabel = thinkingLabel,
                     onThinkingClick = { showThinkingDialog = true },
-                    // 服务端没给审批档位时传 null，「+」菜单里不留这一项。
-                    approvalLabel = state.approvalLevel?.let { level ->
-                        APPROVAL_OPTIONS.firstOrNull { it.code == level }?.label
-                    },
+                    // 未知档也要显示入口，否则服务端新增档位后整项会消失。
+                    approvalLabel = state.approvalLevel?.let { approvalLabel(it) },
                     onApprovalClick = { showApprovalDialog = true },
                     onCommandsClick = { showCommands = true },
                     // 全屏输入、工作区与魔法命令都从「+」进入，与附件、审批放在同一处。
@@ -657,6 +657,16 @@ fun ChatScreen(
                 showProjectDir = false
                 onSetProjectDir(null)
             },
+            sessionOverride = state.sessionProjectDirOverride,
+            onSaveSession = { path ->
+                showProjectDir = false
+                onSetSessionProjectDir(path)
+            },
+            onResetSession = {
+                showProjectDir = false
+                onSetSessionProjectDir(null)
+            },
+            onCreateDir = onCreateBrowsedDir,
         )
     }
 
@@ -704,11 +714,17 @@ fun ChatScreen(
         OptionDialog(
             title = stringResource(R.string.chatscreen_approval_title),
             items = APPROVAL_OPTIONS.map { option ->
+                val enabled = !option.requiresDecision || state.decisionModelConfigured
                 OptionItem(
                     key = option.code,
                     label = option.label,
-                    sublabel = option.hint,
+                    sublabel = if (enabled) {
+                        option.hint
+                    } else {
+                        stringResource(R.string.chattop_approval_need_decision)
+                    },
                     selected = option.code == state.approvalLevel,
+                    enabled = enabled,
                 )
             },
             onPick = { code ->

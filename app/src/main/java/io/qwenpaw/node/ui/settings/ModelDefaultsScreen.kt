@@ -42,6 +42,9 @@ import io.qwenpaw.node.ui.chat.OptionDialog
 import io.qwenpaw.node.ui.chat.OptionItem
 import io.qwenpaw.node.ui.common.AdminTopBar
 import io.qwenpaw.node.ui.theme.QwenIcons
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /** 本页会弹出的选择器。用一个枚举驱动同一个对话框，避免六个状态各写一个弹窗。 */
 private enum class PickerKind {
@@ -70,6 +73,8 @@ fun ModelDefaultsScreen(
     onRetry: () -> Unit,
     onGlobalChat: (String, String) -> Unit,
     onGlobalDecision: (String, String) -> Unit,
+    onLlmEnabled: (Boolean) -> Unit = {},
+    onLlmMode: (String) -> Unit = {},
     onAgentPrimary: (String, String) -> Unit,
     onAgentDecision: (ActiveModelDto?) -> Unit,
     onAgentSubagent: (ActiveModelDto?) -> Unit,
@@ -164,6 +169,8 @@ fun ModelDefaultsScreen(
                     onPickChat = { picker = PickerKind.GLOBAL_CHAT },
                     onPickDecision = { picker = PickerKind.GLOBAL_DECISION },
                     onDismissNotice = onDismissNotice,
+                    onLlmEnabled = onLlmEnabled,
+                    onLlmMode = onLlmMode,
                 )
 
                 else -> AgentTab(
@@ -220,6 +227,8 @@ private fun GlobalTab(
     onPickChat: () -> Unit,
     onPickDecision: () -> Unit,
     onDismissNotice: () -> Unit,
+    onLlmEnabled: (Boolean) -> Unit,
+    onLlmMode: (String) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -243,6 +252,45 @@ private fun GlobalTab(
                     ?: stringResource(R.string.models_rework_defaults_decision_unset),
                 onClick = onPickDecision,
             )
+        }
+        state.llmRouting?.let { routing ->
+            val enabled = routing["enabled"]?.jsonPrimitive?.booleanOrNull ?: false
+            val mode = routing["mode"]?.jsonPrimitive?.contentOrNull ?: "local_first"
+            DefaultsCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stringResource(R.string.models_llm_title),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = enabled,
+                        enabled = !state.llmSaving,
+                        onCheckedChange = onLlmEnabled,
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.models_llm_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (enabled) {
+                    SectionDivider()
+                    SelectorRow(
+                        label = stringResource(R.string.models_llm_mode_label),
+                        value = stringResource(
+                            if (mode == "cloud_first") {
+                                R.string.models_llm_mode_cloud
+                            } else {
+                                R.string.models_llm_mode_local
+                            },
+                        ),
+                        onClick = {
+                            onLlmMode(if (mode == "cloud_first") "local_first" else "cloud_first")
+                        },
+                    )
+                }
+            }
         }
         Text(
             text = stringResource(R.string.models_default_hint),
@@ -624,8 +672,14 @@ private fun ModelPickerDialog(
         PickerKind.FALLBACK -> null
     }
     val currentKey = slotKey(current?.providerId, current?.model)
+    val decisionPicker = kind == PickerKind.GLOBAL_DECISION || kind == PickerKind.AGENT_DECISION
+    val visibleChoices = if (decisionPicker) {
+        decisionChoices(state.choices)
+    } else {
+        state.choices
+    }
     val taken = state.fallbacks.map { slotKey(it.providerId, it.model) }.toSet()
-    val items = state.choices
+    val items = visibleChoices
         .filterNot { kind == PickerKind.FALLBACK && it.key in taken }
         .map { choice ->
             OptionItem(
@@ -652,7 +706,11 @@ private fun ModelPickerDialog(
         title = title,
         items = items,
         leading = leading,
-        emptyHint = stringResource(R.string.models_rework_no_models_hint),
+        emptyHint = if (decisionPicker && visibleChoices.isEmpty()) {
+            stringResource(R.string.models_rework_no_decision_models)
+        } else {
+            stringResource(R.string.models_rework_no_models_hint)
+        },
         onPick = { key ->
             if (key == NONE_KEY) {
                 onClear()

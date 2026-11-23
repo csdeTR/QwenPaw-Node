@@ -23,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +64,12 @@ fun ProjectDirDialog(
     onSave: (String) -> Unit,
     onReset: () -> Unit,
     onBrowse: suspend (String) -> BrowseDirsDto? = { null },
+    /** 当前对话是否已有独立项目目录。 */
+    sessionOverride: Boolean = false,
+    onSaveSession: (String) -> Unit = {},
+    onResetSession: () -> Unit = {},
+    /** 在浏览中的目录下创建子目录；返回是否成功。 */
+    onCreateDir: suspend (parent: String, name: String) -> Boolean = { _, _ -> false },
 ) {
     val shownPath = current?.path?.takeIf { it.isNotBlank() }
         ?: current?.workspaceDir.orEmpty()
@@ -70,6 +77,10 @@ fun ProjectDirDialog(
     var browse by remember(current) { mutableStateOf<BrowseDirsDto?>(null) }
     var loading by remember(current) { mutableStateOf(false) }
     var failed by remember(current) { mutableStateOf(false) }
+    var sessionOnly by remember(current, sessionOverride) { mutableStateOf(sessionOverride) }
+    var newName by remember { mutableStateOf("") }
+    var creating by remember { mutableStateOf(false) }
+    var createFailed by remember { mutableStateOf(false) }
     val isDefault = current?.isWorkspaceDefault ?: true
     val scope = rememberCoroutineScope()
 
@@ -113,6 +124,24 @@ fun ProjectDirDialog(
                     color = LocalCaptionColor.current,
                 )
                 Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.chatdir_session_only),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = stringResource(R.string.chatdir_session_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = LocalCaptionColor.current,
+                        )
+                    }
+                    Switch(
+                        checked = sessionOnly,
+                        onCheckedChange = { sessionOnly = it },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
@@ -121,9 +150,11 @@ fun ProjectDirDialog(
                     placeholder = { Text("/home/user/project") },
                 )
                 // 只有已经脱离默认目录时才需要这个动作，否则它是无意义的空操作。
-                if (!isDefault) {
+                if (!isDefault || sessionOverride) {
                     TextButton(
-                        onClick = onReset,
+                        onClick = {
+                            if (sessionOnly) onResetSession() else onReset()
+                        },
                         contentPadding = PaddingValues(0.dp),
                     ) {
                         Text(stringResource(R.string.chatdir_reset))
@@ -234,11 +265,52 @@ fun ProjectDirDialog(
                         contentPadding = PaddingValues(0.dp),
                     ) { Text(stringResource(R.string.chatdir_use)) }
                 }
+                browse?.current?.takeIf { it.isNotBlank() }?.let { parent ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            label = { Text(stringResource(R.string.chatdir_new_folder)) },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(
+                            enabled = newName.isNotBlank() && !creating,
+                            onClick = {
+                                creating = true
+                                createFailed = false
+                                scope.launch {
+                                    val ok = onCreateDir(parent, newName.trim())
+                                    creating = false
+                                    if (ok) {
+                                        newName = ""
+                                        load(parent)
+                                    } else {
+                                        createFailed = true
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(stringResource(R.string.chatdir_new_action))
+                        }
+                    }
+                    if (createFailed) {
+                        Text(
+                            text = stringResource(R.string.chatdir_create_failed),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(text.trim()) },
+                onClick = {
+                    val path = text.trim()
+                    if (sessionOnly) onSaveSession(path) else onSave(path)
+                },
                 enabled = text.isNotBlank(),
             ) { Text(stringResource(R.string.action_save)) }
         },

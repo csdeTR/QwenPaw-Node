@@ -94,6 +94,39 @@ class ModelDetailDraftTest {
     }
 
     @Test
+    fun `decision switch keeps existing capability and thinking settings`() {
+        val model = PoolModelDto(
+            id = "m",
+            name = "Model",
+            modelType = "chat",
+            supportsImage = true,
+            supportsAudio = true,
+            supportsVideo = true,
+            supportsToolCalling = true,
+            maxInputLength = 128000,
+            maxInputLengthConfigured = true,
+            thinkingControl = ThinkingControlDto(kind = "effort", efforts = listOf("low", "high")),
+            thinkingEnabled = true,
+            reasoningEffort = "high",
+        )
+        val draft = ModelDetailDraft.from(model).copy(modelType = "decision")
+        val body = draft.toConfigureBody(buildJsonObject {}, model)
+
+        assertEquals("decision", body["model_type"]!!.jsonPrimitive.content)
+        assertEquals(true, body["supports_image"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(true, body["supports_audio"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(true, body["supports_video"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(true, body["supports_tool_calling"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(128000L, body["max_input_length"]!!.jsonPrimitive.content.toLong())
+        assertEquals(
+            "effort",
+            body["thinking_control"]!!.jsonObject["kind"]!!.jsonPrimitive.content,
+        )
+        assertEquals(true, body["thinking_enabled"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals("high", body["reasoning_effort"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `slot dto keeps new config fields`() {
         val slot = ModelSlotDto(
             id = "m",

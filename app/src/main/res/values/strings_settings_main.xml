@@ -75,6 +75,7 @@
     <string name="settings_nav_runtime_subtitle">ACP 命令、Node 运行时与外部智能体登录</string>
     <string name="settings_nav_app_center">App 中心</string>
     <string name="settings_nav_app_center_subtitle">查看已安装的 PawApp 并在浏览器打开</string>
+    <string name="settings_nav_community_subtitle">浏览社区问答与文章；发帖与点赞仍在 Web 控制台</string>
     <string name="settings_nav_channels">频道</string>
     <string name="settings_nav_channels_subtitle">为微信、钉钉等频道扫码授权</string>
     <string name="settings_nav_local_models">本地模型</string>
@@ -313,4 +314,46 @@
     <!-- 服务端界面语言选择框（LanguagePickerDialog.kt） -->
     <string name="serverlang_hint">只影响 QwenPaw Web 控制台的语言，不改变本应用的界面。</string>
     <string name="serverlang_current_desc">当前语言</string>
+
+    <!-- 语音页的服务端设置（0.7.6） -->
+    <string name="settings_audio_mode_title">入站音频模式</string>
+    <string name="settings_audio_mode_hint">「自动」在配置了转写时先把语音转成文字；「原生」把音频直接交给模型，服务端可能需要 ffmpeg。</string>
+    <string name="settings_audio_mode_auto">自动</string>
+    <string name="settings_audio_mode_native">原生</string>
+    <string name="settings_transcription_type_title">转写档位</string>
+    <string name="settings_transcription_type_hint">关闭后不再转写语音消息；本地 Whisper 需要服务端装齐依赖。</string>
+    <string name="settings_transcription_type_disabled">关闭</string>
+    <string name="settings_transcription_type_whisper_api">Whisper API</string>
+    <string name="settings_transcription_type_local_whisper">本地 Whisper</string>
+    <string name="settings_transcription_provider_title">转写提供商</string>
+    <string name="settings_transcription_provider_hint">只有已配置凭据的提供商才会出现在这里。</string>
+    <string name="settings_transcription_provider_none">未指定</string>
+    <string name="settings_transcription_model_title">转写模型</string>
+    <string name="settings_transcription_model_hint">留空使用服务端默认 whisper-1。</string>
+    <string name="settings_transcription_model_placeholder">whisper-1</string>
+    <string name="settings_transcription_model_save">保存</string>
+
+    <!-- 修改账号密码（0.7.6） -->
+    <string name="app_profile_updated">账号信息已更新</string>
+    <string name="app_profile_auth_disabled">服务端未开启登录认证，无法修改账号</string>
+    <string name="settings_update_profile_action">修改账号密码</string>
+    <string name="settings_update_profile_row_subtitle">当前实例：%1$s</string>
+    <string name="settings_section_account">账号与密码</string>
+    <string name="settings_section_connections">连接</string>
+    <string name="settings_update_profile_title">修改账号密码</string>
+    <string name="settings_update_profile_subtitle">修改后当前令牌立即失效并换发新令牌，其他设备上的登录不受影响。</string>
+    <string name="settings_current_password">当前密码</string>
+    <string name="settings_new_username">新用户名（可选）</string>
+    <string name="settings_new_password">新密码（可选）</string>
+    <string name="settings_profile_need_password">请填写当前密码</string>
+    <string name="settings_profile_nothing">至少填写新用户名或新密码</string>
+    <string name="settings_profile_cancel">取消</string>
+
+    <!-- 服务端头像选择与上传（0.7.6） -->
+    <string name="app_server_avatar_updated">服务端头像已更新</string>
+    <string name="settings_server_avatar_upload">上传</string>
+    <string name="settings_server_avatar_clear">清除</string>
+    <string name="settings_server_avatar_history">历史头像</string>
+    <string name="settings_server_avatar_empty">服务端还没有头像</string>
+    <string name="main_server_avatar_too_large">图片超过 2 MB，无法上传</string>
 </resources>

@@ -72,9 +72,10 @@ class ModelChoiceTest {
     // ---------------- 审批模式 ----------------
 
     @Test
-    fun `approval label maps all four levels`() {
+    fun `approval label maps all five levels`() {
         assertEquals("严格", approvalLabel("STRICT"))
         assertEquals("智能", approvalLabel("SMART"))
+        assertEquals("决策模型模式", approvalLabel("JEV"))
         assertEquals("自动", approvalLabel("AUTO"))
         assertEquals("关闭防护", approvalLabel("OFF"))
     }
@@ -86,13 +87,21 @@ class ModelChoiceTest {
         assertEquals("未知", approvalLabel("SOMETHING_NEW"))
     }
 
-    /** 四个档位与 qwenpaw web 页一致，改动会直接影响用户对风险的预期。 */
+    /** 五档与 qwenpaw web 页一致，改动会直接影响用户对风险的预期。 */
     @Test
-    fun `approval options cover the four server levels`() {
+    fun `approval options cover the five server levels`() {
         assertEquals(
-            listOf("STRICT", "SMART", "AUTO", "OFF"),
+            listOf("STRICT", "SMART", "JEV", "AUTO", "OFF"),
             APPROVAL_OPTIONS.map { it.code },
         )
         assertTrue(APPROVAL_OPTIONS.all { it.hint.isNotBlank() })
+    }
+
+    @Test
+    fun `only decision approval requires a configured decision model`() {
+        assertTrue(APPROVAL_OPTIONS.single { it.code == "JEV" }.requiresDecision)
+        assertTrue(
+            APPROVAL_OPTIONS.filterNot { it.code == "JEV" }.none { it.requiresDecision },
+        )
     }
 }

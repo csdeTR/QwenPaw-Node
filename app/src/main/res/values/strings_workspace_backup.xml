@@ -33,7 +33,7 @@
 
     <!-- 工作区：空目录 -->
     <string name="workspace_directory_empty">这个目录是空的</string>
-    <string name="workspace_memory_hint">记忆条目会在对话过程中自动写入</string>
+    <string name="workspace_memory_hint">记忆条目会在对话过程中自动写入；也可以在这里编辑后直接覆盖保存</string>
 
     <!-- 工作区：等待态 -->
     <string name="workspace_preparing_title">正在准备文件</string>
@@ -111,6 +111,50 @@
 
     <!-- 工作区：编辑判据与错误 -->
     <string name="workspace_edit_blocked_memory">记忆文件不支持编辑</string>
+    <string name="workspace_open_external">用系统应用打开</string>
+
+    <!-- 项目目录管理（0.7.6） -->
+    <string name="workspace_project_manage">项目目录</string>
+    <string name="workspace_project_dialog_title">项目目录</string>
+    <string name="workspace_project_current_title">当前项目目录</string>
+    <string name="workspace_project_none">尚未配置项目目录，使用工作区默认</string>
+    <string name="workspace_project_reset">恢复工作区默认</string>
+    <string name="workspace_project_list_title">coding_projects 下的项目</string>
+    <string name="workspace_project_use">设为当前</string>
+    <string name="workspace_project_active">%1$s（当前）</string>
+    <string name="workspace_project_create_hint">新建空目录，并初始化 git 仓库</string>
+    <string name="workspace_project_create_action">新建</string>
+    <string name="workspace_project_import_hint">从服务端已有路径复制进来</string>
+    <string name="workspace_project_import_action">导入</string>
+    <string name="workspace_project_saved">已切换项目目录</string>
+    <string name="workspace_project_reset_done">已恢复工作区默认目录</string>
+    <string name="workspace_project_created">已新建项目目录</string>
+    <string name="workspace_project_imported">已导入项目目录</string>
+    <string name="workspace_project_upload_zip">上传 zip</string>
+    <string name="workspace_project_upload_zip_hint">目标目录名取压缩包文件名去掉 .zip。</string>
+    <string name="workspace_project_uploaded">已上传并解压项目 zip</string>
+    <string name="workspace_project_clone_hint">从 GitHub 克隆公开仓库；目录名取仓库名。</string>
+    <string name="workspace_project_clone_action">克隆</string>
+    <string name="workspace_project_cloning">正在克隆…</string>
+    <string name="workspace_project_cloned">已克隆项目 %1$s</string>
+    <string name="workspace_project_clone_failed">克隆失败：%1$s</string>
+
+    <!-- 记忆状态与嵌入测试（0.7.6） -->
+    <string name="workspace_memory_status">记忆状态</string>
+    <string name="workspace_memory_status_title">记忆运行时</string>
+    <string name="workspace_memory_status_hint">来自服务端，只读；嵌入配置测试会真实请求一次模型。</string>
+    <string name="workspace_memory_embedding_test">测试嵌入配置</string>
+    <string name="workspace_memory_embedding_missing">运行配置里没有嵌入模型配置</string>
+    <string name="workspace_memory_backends_title">记忆后端</string>
+    <string name="workspace_memory_status_empty">尚未读取</string>
+    <string name="workspace_memory_reindex">重建索引</string>
+    <string name="workspace_memory_reindex_done">记忆索引已重建</string>
+    <string name="workspace_memory_reindex_undo_action">撤销重建</string>
+    <string name="workspace_memory_reindex_undo_done">已撤销待重建的嵌入配置</string>
+    <string name="workspace_memory_tags_title">标签</string>
+    <string name="workspace_memory_tag_files_title">标签文件</string>
+    <string name="workspace_memory_graph_title">图谱</string>
+    <string name="workspace_memory_graph_load">读取图谱</string>
     <string name="workspace_edit_blocked_incomplete">文件尚未完整加载，先点「继续加载」</string>
     <string name="workspace_edit_blocked_no_version">未取得版本信息，暂时无法编辑</string>
     <string name="workspace_edit_blocked_too_large">文件超过 2 MB，请在服务端编辑</string>

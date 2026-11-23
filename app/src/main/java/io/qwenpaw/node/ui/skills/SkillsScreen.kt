@@ -76,6 +76,7 @@ fun SkillsScreen(
     onCloseDetail: () -> Unit,
     onSetEnabled: (String, Boolean) -> Unit,
     onBeginEdit: () -> Unit,
+    onOptimize: () -> Unit = {},
     onUpdateDraft: (String) -> Unit,
     onSaveEdit: () -> Unit,
     onCancelEdit: () -> Unit,
@@ -92,12 +93,16 @@ fun SkillsScreen(
     onOpenConfig: (String) -> Unit = {},
     onOpenPoolAdmin: () -> Unit = {},
     onOpenConsole: (() -> Unit)? = null,
+    onBatchEnable: (List<String>) -> Unit = {},
+    onBatchDisable: (List<String>) -> Unit = {},
+    onBatchDelete: (List<String>) -> Unit = {},
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var page by remember { mutableStateOf(SkillPage.LIST) }
     var creating by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<String?>(null) }
+    var batchDialog by remember { mutableStateOf(false) }
     var importDialog by remember { mutableStateOf(false) }
     var importToPool by remember { mutableStateOf(false) }
     val importLauncher = rememberLauncherForActivityResult(
@@ -114,6 +119,17 @@ fun SkillsScreen(
     }
 
     WebEntryDialog(pageKey = "skills", onOpenConsole = onOpenConsole)
+
+    if (batchDialog) {
+        BatchSkillsDialog(
+            names = state.skills.map { it.name },
+            busy = state.batchBusy,
+            onEnable = onBatchEnable,
+            onDisable = onBatchDisable,
+            onDelete = onBatchDelete,
+            onDismiss = { batchDialog = false },
+        )
+    }
 
     // 详情被清空（例如删除后）要退回列表，否则会停在一个空白的详情页。
     // 用派生判定而不是在组合期写状态：组合期写 `page` 会额外触发一轮重组，
@@ -163,6 +179,18 @@ fun SkillsScreen(
                     },
                     onAction = { creating = true },
                 )
+                if (page == SkillPage.LIST && state.skills.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { batchDialog = true }) {
+                            Text(stringResource(R.string.skills_batch_action))
+                        }
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -192,6 +220,7 @@ fun SkillsScreen(
                 showDetail -> SkillDetail(
                     state = state,
                     onBeginEdit = onBeginEdit,
+                    onOptimize = onOptimize,
                     onOpenConfig = onOpenConfig,
                     onDelete = { name -> deleting = name },
                 )
@@ -551,6 +580,7 @@ private fun SkillList(
 private fun SkillDetail(
     state: SkillsUiState,
     onBeginEdit: () -> Unit,
+    onOptimize: () -> Unit,
     onOpenConfig: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
@@ -693,6 +723,13 @@ private fun SkillDetail(
                     onClick = { onDelete(name) },
                 )
             }
+            Spacer(Modifier.height(6.dp))
+            ActionButton(
+                text = stringResource(R.string.skills_action_ai_optimize),
+                primary = false,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onOptimize,
+            )
         } else {
             Text(
                 text = stringResource(R.string.skills_detail_readonly),
@@ -1055,4 +1092,98 @@ private fun CenterBox(content: @Composable () -> Unit) {
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) { content() }
+}
+
+@Composable
+private fun BatchSkillsDialog(
+    names: List<String>,
+    busy: Boolean,
+    onEnable: (List<String>) -> Unit,
+    onDisable: (List<String>) -> Unit,
+    onDelete: (List<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selected by remember { mutableStateOf(emptySet<String>()) }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(stringResource(R.string.skills_batch_title)) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = stringResource(R.string.skills_batch_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (names.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.skills_batch_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                names.forEach { name ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                selected = if (name in selected) {
+                                    selected - name
+                                } else {
+                                    selected + name
+                                }
+                            }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(
+                            checked = name in selected,
+                            onCheckedChange = { checked ->
+                                selected = if (checked) selected + name else selected - name
+                            },
+                        )
+                        Text(text = name, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    enabled = selected.isNotEmpty() && !busy,
+                    onClick = {
+                        onEnable(selected.toList())
+                        onDismiss()
+                    },
+                ) {
+                    Text(stringResource(R.string.skills_batch_enable))
+                }
+                TextButton(
+                    enabled = selected.isNotEmpty() && !busy,
+                    onClick = {
+                        onDisable(selected.toList())
+                        onDismiss()
+                    },
+                ) {
+                    Text(stringResource(R.string.skills_batch_disable))
+                }
+                TextButton(
+                    enabled = selected.isNotEmpty() && !busy,
+                    onClick = {
+                        onDelete(selected.toList())
+                        onDismiss()
+                    },
+                ) {
+                    Text(
+                        text = stringResource(R.string.skills_batch_delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+    )
 }

@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -123,6 +124,10 @@ internal fun ThinkingDialog(
     }
 }
 
+/** 空值、空串或 inherit 都表示跟随默认；此时滑块停在服务端给出的有效值上。 */
+internal fun thinkingFollowsDefault(value: ThinkingValueDto?): Boolean =
+    value == null || value.level.isBlank() || value.level == "inherit"
+
 @Composable
 private fun EffortSlider(
     scale: ThinkingScale,
@@ -132,23 +137,40 @@ private fun EffortSlider(
 ) {
     // 「跟随默认」时滑块停在服务端算出的实际档位，与 budget 侧同一处理；
     // 否则一打开就停在最右一格，看起来像已经设成了最高档。
-    val shown = value?.takeIf { it.level.isNotBlank() && it.level != "inherit" } ?: effective
-    var index by remember(scale, shown?.level) {
+    val followDefault = thinkingFollowsDefault(value)
+    val shown = if (followDefault) effective else value
+    var index by remember(scale, value?.level, value?.budgetTokens, effective?.level) {
         mutableIntStateOf(scale.indexOf(shown?.level))
     }
+    var dragging by remember { mutableStateOf(false) }
     val level = scale.stops.getOrElse(index) { "" }
     Text(
-        text = thinkingLevelLabel(level),
+        text = when {
+            dragging -> thinkingLevelLabel(level)
+            followDefault -> if (thinkingFollowsDefault(effective)) {
+                stringResource(R.string.chattail_thinking_follow)
+            } else {
+                stringResource(
+                    R.string.thinking_follow_default_current,
+                    scale.label(effective),
+                )
+            }
+            else -> scale.label(value)
+        },
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 6.dp),
     )
     Slider(
         value = index.toFloat(),
-        onValueChange = { index = it.roundToInt() },
+        onValueChange = {
+            dragging = true
+            index = it.roundToInt()
+        },
         valueRange = 0f..scale.stops.lastIndex.toFloat(),
         steps = (scale.stops.size - 2).coerceAtLeast(0),
         onValueChangeFinished = {
+            dragging = false
             // 必须在这里读 index，不能读组合期算好的 level：快速拖到目标档再松手时，
             // 松手回调可能早于这一帧的重组，闭包里的 level 还是上一档，
             // 请求就会按调整前的强度发出去。
@@ -176,6 +198,7 @@ private fun BudgetSlider(
     }
     val current = tokens.roundToLong()
     val off = scale.supportsOff && tokens < scale.offThreshold
+    val followDefault = thinkingFollowsDefault(value)
     Text(
         text = if (off) {
             stringResource(R.string.thinking_off)
@@ -186,6 +209,21 @@ private fun BudgetSlider(
         color = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 6.dp),
     )
+    if (followDefault && !off) {
+        Text(
+            text = if (thinkingFollowsDefault(effective)) {
+                stringResource(R.string.chattail_thinking_follow)
+            } else {
+                stringResource(
+                    R.string.thinking_follow_default_current,
+                    scale.label(effective),
+                )
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 18.dp),
+        )
+    }
     Slider(
         value = tokens,
         onValueChange = { tokens = it },

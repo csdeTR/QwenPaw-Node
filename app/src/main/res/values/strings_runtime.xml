@@ -167,4 +167,70 @@
     <string name="models_scope_agent">当前智能体默认</string>
     <string name="models_error_not_connected">尚未连接服务器</string>
     <string name="models_scope_switched">%1$s已切换</string>
+
+    <!-- LLM 双槽路由（0.7.6） -->
+    <string name="models_llm_title">本地/云端双槽路由</string>
+    <string name="models_llm_hint">开启后按选定模式在本地与云端模型间选择；槽位在提供商配置里维护。</string>
+    <string name="models_llm_mode_label">路由模式</string>
+    <string name="models_llm_mode_local">本地优先</string>
+    <string name="models_llm_mode_cloud">云端优先</string>
+
+    <!-- 沙箱拒绝路径保护（0.7.6） -->
+    <string name="security_deny_paths_title">拒绝路径保护</string>
+    <string name="security_deny_paths_hint">对敏感路径设置拒绝 ACL，仅 Windows 服务端可用。</string>
+    <string name="security_deny_paths_unread">未读取</string>
+    <string name="security_deny_paths_unsupported">当前服务端平台不支持</string>
+    <string name="security_deny_paths_protected">已保护 %1$d 条路径</string>
+    <string name="security_deny_paths_none">尚未启用</string>
+    <string name="cfgvm_deny_paths_on">已开启拒绝路径保护</string>
+    <string name="cfgvm_deny_paths_off">已关闭拒绝路径保护</string>
+
+    <!-- 运行时页「智能体」页签（0.7.6） -->
+    <string name="runtime_tab_agent">智能体</string>
+    <string name="runtime_agent_prompt_title">系统提示文件</string>
+    <string name="runtime_agent_prompt_hint">勾选会载入系统提示的 Markdown 文件；未列出的文件仍可在工作区编辑。</string>
+    <string name="runtime_agent_files_empty">服务端未返回可用的 Markdown 文件</string>
+    <string name="runtime_agent_language_title">MD 文件语言</string>
+    <string name="runtime_agent_language_hint">只影响智能体的 Markdown 文件，不改变本应用的界面语言。</string>
+    <string name="runtime_agent_modes_title">运行模式</string>
+    <string name="runtime_agent_coding_title">编码模式</string>
+    <string name="runtime_agent_coding_hint">影响文件读写工具的接口，不改变本应用的界面。</string>
+    <string name="runtime_agent_advisor_title">顾问模式</string>
+    <string name="runtime_agent_advisor_hint">让顾问模型在失败或偏离计划时介入；默认关闭。</string>
+    <string name="runtime_agent_advisor_plan">计划阶段咨询</string>
+    <string name="runtime_agent_advisor_followup">追问阶段咨询</string>
+    <string name="runtime_agent_advisor_on_demand">按需介入</string>
+    <string name="runtime_agent_advisor_max_consults">最大咨询次数</string>
+    <string name="runtime_agent_advisor_recent_messages">参考最近消息数</string>
+    <string name="runtime_agent_advisor_numbers_save">保存数值</string>
+    <string name="runtime_agent_loops_title">循环模式</string>
+    <string name="runtime_agent_loops_hint">来自服务端的内置与插件循环模式，只读清单。</string>
+    <string name="runtime_agent_loops_empty">服务端未返回循环模式</string>
+    <string name="runtime_agent_custom_loops">自定义循环</string>
+    <string name="runtime_loop_create">新建自定义循环</string>
+    <string name="runtime_loop_edit">编辑</string>
+    <string name="runtime_loop_duplicate">复制</string>
+    <string name="runtime_loop_delete">删除</string>
+    <string name="runtime_loop_delete_title">删除自定义循环</string>
+    <string name="runtime_loop_delete_message">确定删除「%1$s」？该操作不可撤销。</string>
+    <string name="runtime_loop_editor_title">编辑自定义循环</string>
+    <string name="runtime_loop_editor_hint">完整 CustomLoopModeConfig JSON；服务端会校验 id、slash_command 与 gates。</string>
+    <string name="runtime_loop_json_invalid">JSON 格式不正确</string>
+    <string name="runtime_loop_saved">循环已保存</string>
+    <string name="runtime_loop_deleted">循环已删除</string>
+    <string name="runtime_loop_duplicated">循环已复制</string>
+    <string name="runtime_notice_language_saved">智能体 MD 文件语言已更新</string>
+
+    <!-- 技能扫描拦截历史与白名单（0.7.6） -->
+    <string name="security_scanner_admin">拦截历史与白名单</string>
+    <string name="security_scanner_history_title">拦截历史</string>
+    <string name="security_scanner_history_empty">没有拦截记录</string>
+    <string name="security_scanner_history_clear">清空</string>
+    <string name="security_scanner_history_cleared">拦截历史已清空</string>
+    <string name="security_scanner_history_remove">删除</string>
+    <string name="security_scanner_whitelist_title">白名单</string>
+    <string name="security_scanner_whitelist_hint">填写技能名加入白名单；白名单中的技能不再被扫描拦截。</string>
+    <string name="security_scanner_whitelist_add">加入</string>
+    <string name="security_scanner_whitelist_added">%1$s 已加入白名单</string>
+    <string name="security_scanner_whitelist_removed">%1$s 已移出白名单</string>
 </resources>
